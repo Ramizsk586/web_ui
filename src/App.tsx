@@ -1,6 +1,9 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
+ * Lumina AI Chat UI
+ * Modern intelligence, refined interface.
+ * 
+ * A polished, dark-native AI chat prototype built with React, Lucide-react, 
+ * Motion, and Tailwind CSS v4.
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -244,49 +247,67 @@ export default function App() {
 
 const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [allCompleted, setAllCompleted] = useState(false);
+
+  useEffect(() => {
+    const active = nodes.some(n => n.status === 'active');
+    const pending = nodes.some(n => n.status === 'pending');
+    if (!active && !pending && nodes.length > 0) {
+      const timer = setTimeout(() => {
+        setAllCompleted(true);
+        setIsCollapsed(true);
+      }, 800);
+      return () => clearTimeout(timer);
+    } else {
+      setAllCompleted(false);
+    }
+  }, [nodes]);
 
   if (isCollapsed) {
+    const lastTool = nodes.filter(n => n.type === 'tool').pop();
     return (
-      <button 
+      <motion.button 
+        layoutId="node-graph"
         onClick={() => setIsCollapsed(false)}
-        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/10 rounded-lg text-[10px] font-bold text-gray-400 hover:text-white transition-all uppercase tracking-widest"
+        className="flex items-center gap-2 px-3 py-1.5 bg-[#121212] border border-white/10 rounded-full text-[11px] font-medium text-zinc-400 hover:bg-[#1a1a1a] transition-all cursor-pointer shadow-sm group"
       >
-        <Box size={12} />
-        {nodes.length} tools called
-        <ChevronRight size={10} />
-      </button>
+        <span className="text-emerald-500 font-bold">✓</span>
+        <span>{lastTool?.label || nodes.length + ' tools'} · 1.2s</span>
+        <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+      </motion.button>
     );
   }
 
   return (
     <motion.div 
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 'auto' }}
-      className="p-4 bg-gray-50 dark:bg-zinc-950/40 border border-gray-100 dark:border-white/5 rounded-2xl overflow-hidden relative group max-w-lg"
+      layoutId="node-graph"
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="p-4 bg-[#121212] border border-white/5 rounded-xl overflow-hidden relative group max-w-fit shadow-2xl animate-fade-up"
     >
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Live Tool Chain</div>
+      <div className="flex items-center justify-between mb-4 gap-8">
+        <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Tool Call Chain</div>
         <button 
           onClick={() => setIsCollapsed(true)}
-          className="text-[10px] text-gray-500 hover:text-white transition-colors uppercase tracking-widest"
+          className="text-[10px] text-zinc-500 hover:text-white transition-colors uppercase tracking-widest"
         >
           Collapse
         </button>
       </div>
 
-      <div className="relative flex items-center gap-2 py-4">
+      <div className="relative flex items-center gap-0 py-2">
         {nodes.map((node, i) => (
           <React.Fragment key={node.id}>
             {/* Edge */}
             {i > 0 && (
-              <div className="relative w-12 h-0.5 bg-gray-200 dark:bg-white/10 flex items-center">
-                <motion.div 
-                  className={`absolute h-1 w-1 rounded-full bg-blue-500 ${node.status === 'active' ? 'animate-traveling-dot' : ''}`}
-                  initial={{ left: 0 }}
-                  animate={{ left: node.status === 'complete' ? '100%' : '0%' }}
-                  transition={{ duration: 0.6, ease: "easeInOut" }}
-                  style={{ offsetPath: `path('M 0 0 L 48 0')` }}
-                />
+              <div className="relative w-10 flex items-center overflow-visible">
+                <div className={`h-[0.5px] w-full transition-colors duration-500 ${node.status === 'complete' || node.status === 'active' ? 'bg-zinc-400' : 'bg-zinc-800'}`} />
+                {node.status === 'active' && (
+                  <motion.div 
+                    className="absolute h-1.5 w-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] animate-traveling-dot"
+                    style={{ offsetPath: `path('M 0 0.25 L 40 0.25')` }}
+                  />
+                )}
               </div>
             )}
 
@@ -295,21 +316,18 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
               layout
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className={`relative flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${
+              className={`relative flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-300 ${
                 node.status === 'active' 
-                  ? 'bg-blue-600/10 border-blue-500/50 text-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.2)]' 
+                  ? 'bg-blue-600/10 border-blue-500/50 text-blue-500 animate-active-ring font-bold' 
                   : node.status === 'complete'
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
                     : node.status === 'failed'
                       ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-micro-shake'
-                      : 'bg-white/5 border-white/5 text-gray-400 opacity-40'
+                      : 'bg-white/5 border-white/5 text-zinc-600 opacity-40'
               }`}
             >
-              {node.status === 'active' && (
-                <div className="absolute inset-0 rounded-full border border-blue-500/50 animate-ping opacity-20" />
-              )}
-              {node.status === 'complete' ? <Check size={12} /> : node.icon || <Box size={12} />}
-              <span className="text-[11px] font-bold tracking-tight whitespace-nowrap overflow-hidden max-w-[80px] truncate">
+              {node.status === 'complete' ? <Check size={12} /> : (node.status === 'failed' ? <X size={12} /> : (node.icon || <Box size={12} />))}
+              <span className="text-[11.5px] whitespace-nowrap overflow-hidden max-w-[120px] truncate">
                 {node.label}
               </span>
             </motion.div>
@@ -717,10 +735,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                       {useBubbles ? (
                         /* Bubble Layout */
                         <motion.div 
-                          className={`flex flex-col max-w-[85%] ${message.role === 'user' ? 'items-end' : 'items-start'}`}
-                          initial={{ opacity: 0, y: 12, x: message.role === 'user' ? 8 : -8 }}
-                          animate={{ opacity: 1, y: 0, x: 0 }}
-                          transition={{ duration: 0.18, ease: "easeOut" }}
+                          className={`flex flex-col max-w-[85%] ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.role === 'user' ? 'animate-msg-in' : ''}`}
                         >
                           <div className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm ${
                             message.role === 'user' 
@@ -754,18 +769,20 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             <div className="space-y-6 max-w-2xl px-1">
                               {/* Node Graph Tool Visualization */}
                               {message.toolCalls && message.toolCalls.length > 0 && (
-                                <NodeGraph nodes={message.toolCalls} />
+                                <div className="mb-4">
+                                  <NodeGraph nodes={message.toolCalls} />
+                                </div>
                               )}
 
                               {/* Status Steps */}
                               {message.thinking && (
-                                <div className="space-y-3">
+                                <div className="space-y-3 mb-6">
                                   <motion.div 
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
-                                    className="flex items-center gap-2 text-gray-400 group cursor-default"
+                                    className="flex items-center gap-2 text-zinc-500 group cursor-default"
                                   >
-                                    <span className="text-sm font-sans">Reading frontend design skill</span>
+                                    <span className="text-[13px] font-medium">Researching interface patterns</span>
                                     <ChevronRight size={14} className="opacity-50" />
                                   </motion.div>
                                   <motion.div 
@@ -774,13 +791,13 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                     transition={{ delay: 0.1 }}
                                     className="flex items-center gap-2 text-white font-medium"
                                   >
-                                    <span className="text-sm">Contextualizing UI animation principles...</span>
+                                    <span className="text-[13px]">Synthesizing master prompt requirements...</span>
                                   </motion.div>
                                   {isTyping && (
-                                    <div className="flex gap-2">
-                                      <div className="w-8 h-1 bg-white/10 rounded-full overflow-hidden">
-                                        <div className="h-full bg-orange-500 animate-pulse-soft w-full" />
-                                      </div>
+                                    <div className="flex gap-1 py-1">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse" />
+                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:120ms]" />
+                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:240ms]" />
                                     </div>
                                   )}
                                 </div>
@@ -838,7 +855,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 >
                                   <button 
                                     onClick={() => setIsSourcesPanelOpen(true)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-400 transition-all uppercase tracking-tighter"
+                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-400 transition-all uppercase tracking-tighter active:scale-95 translate-y-2 opacity-0 animate-fade-up [animation-delay:300ms] [animation-fill-mode:forwards]"
                                   >
                                     <Layout size={14} />
                                     {message.sources.length} Sources
@@ -858,10 +875,10 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
               </AnimatePresence>
               
               {isTyping && (
-                <div className="flex gap-1.5 py-4">
-                  <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5 }} className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                  <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }} className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-                  <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                <div className="flex gap-1.5 py-4 px-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:120ms]" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:240ms]" />
                 </div>
               )}
             </div>
@@ -967,7 +984,9 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
               <div className="flex items-center justify-between px-3 pb-1.5 pt-3">
                 <div className="flex items-center gap-1.5">
                   <div className="relative" ref={plusMenuRef}>
-                    <button 
+                    <motion.button 
+                      whileTap={{ scale: 0.92 }}
+                      transition={{ duration: 0.08 }}
                       onClick={() => {
                         setIsPlusMenuOpen(!isPlusMenuOpen);
                         setActivePlusSubMenu('main');
@@ -975,7 +994,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                       className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-2xl transition-all"
                     >
                       <Plus size={20} className={`transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
-                    </button>
+                    </motion.button>
 
                     <AnimatePresence>
                       {isPlusMenuOpen && (
@@ -1072,13 +1091,15 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                 <div className="flex items-center gap-3">
                   {/* Model Selector Integrated */}
                   <div className="relative" ref={dropdownRef}>
-                    <button 
+                    <motion.button 
+                      whileTap={{ scale: 0.95 }}
+                      transition={{ duration: 0.08 }}
                       onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
                       className="flex items-center gap-1.5 px-3 py-2 hover:bg-white/5 rounded-2xl text-sm font-medium text-gray-400 transition-all active:scale-95"
                     >
-                      <span>Sonnet 4.6</span>
+                      <span>Sonnet 3.5</span>
                       <ChevronDown size={14} className={`transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
-                    </button>
+                    </motion.button>
 
                     <AnimatePresence>
                       {isModelDropdownOpen && (

@@ -1,6 +1,6 @@
 {
-  "name": "Lumina Chat",
-  "description": "A minimalist, beautifully animated chat interface for modern conversations.",
+  "name": "Lumina",
+  "description": "Modern intelligence, refined interface. A polished, dark-native AI chat UI with tool-call transparency.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
