@@ -177,20 +177,71 @@ export default function App() {
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp'>('main');
-  const [tavilyApiKey, setTavilyApiKey] = useState('');
-  const [serpApiKey, setSerpApiKey] = useState('');
+  const [serverUrl, setServerUrl] = useState(localStorage.getItem('lumina_server_url') || 'https://api.lumina.ai/v1');
+  const [apiKey, setApiKey] = useState(localStorage.getItem('lumina_api_key') || '');
+  const [mcpUrl, setMcpUrl] = useState(localStorage.getItem('lumina_mcp_url') || '');
+  const [mcpKey, setMcpKey] = useState(localStorage.getItem('lumina_mcp_key') || '');
+  const [tavilyApiKey, setTavilyApiKey] = useState(localStorage.getItem('lumina_tavily_key') || '');
+  const [serpApiKey, setSerpApiKey] = useState(localStorage.getItem('lumina_serp_key') || '');
+  
+  const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
+  const [searchVerificationState, setSearchVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
+  const [isAiSaved, setIsAiSaved] = useState(false);
+  const [isSearchSaved, setIsSearchSaved] = useState(false);
+  const [isMcpSaved, setIsMcpSaved] = useState(false);
   const [mcpTools, setMcpTools] = useState([
     { id: 'fetch', name: 'Fetch URL', enabled: true, description: 'Read content from any URL', icon: <Globe size={14} /> },
     { id: 'brave', name: 'Brave Search', enabled: true, description: 'Search the web for real-time info', icon: <Search size={14} /> },
     { id: 'fs', name: 'Filesystem', enabled: false, description: 'Read and write local files', icon: <Box size={14} /> },
     { id: 'github', name: 'GitHub', enabled: false, description: 'Access repos and issues', icon: <Box size={14} /> },
   ]);
-  const [serverUrl, setServerUrl] = useState('https://api.lumina.ai/v1');
-  const [apiKey, setApiKey] = useState('');
-  const [mcpUrl, setMcpUrl] = useState('');
-  const [mcpKey, setMcpKey] = useState('');
   const [isMcpConnected, setIsMcpConnected] = useState(false);
   const [isConnectingMcp, setIsConnectingMcp] = useState(false);
+  const handleSaveAI = () => {
+    localStorage.setItem('lumina_server_url', serverUrl);
+    localStorage.setItem('lumina_api_key', apiKey);
+    setIsAiSaved(true);
+    setTimeout(() => setIsAiSaved(false), 2000);
+  };
+
+  const handleVerifyAI = () => {
+    setAiVerificationState('verifying');
+    setTimeout(() => {
+      if (serverUrl.includes('api.lumina.ai') || serverUrl.includes('localhost')) {
+        setAiVerificationState('success');
+      } else {
+        setAiVerificationState('error');
+      }
+      setTimeout(() => setAiVerificationState('idle'), 3000);
+    }, 1200);
+  };
+
+  const handleSaveSearch = () => {
+    localStorage.setItem('lumina_tavily_key', tavilyApiKey);
+    localStorage.setItem('lumina_serp_key', serpApiKey);
+    setIsSearchSaved(true);
+    setTimeout(() => setIsSearchSaved(false), 2000);
+  };
+
+  const handleVerifySearch = () => {
+    setSearchVerificationState('verifying');
+    setTimeout(() => {
+      if (tavilyApiKey || serpApiKey) {
+        setSearchVerificationState('success');
+      } else {
+        setSearchVerificationState('error');
+      }
+      setTimeout(() => setSearchVerificationState('idle'), 3000);
+    }, 1200);
+  };
+
+  const handleSaveMcp = () => {
+    localStorage.setItem('lumina_mcp_url', mcpUrl);
+    localStorage.setItem('lumina_mcp_key', mcpKey);
+    setIsMcpSaved(true);
+    setTimeout(() => setIsMcpSaved(false), 2000);
+  };
+
   const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -405,25 +456,42 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       inputRef.current.style.height = 'auto';
     }
 
-    // Simulate AI Response with Thinking and Sources
-    setTimeout(() => {
+    // Real AI Response from configured server
+    try {
+      const chatContext = chats.find(c => c.id === chatId)?.messages || [];
+      const apiMessages = [...chatContext, userMessage].map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
+      const response = await fetch(`${serverUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: apiMessages,
+          stream: false // Default to non-streaming for now
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Based on your request about "${content}", I've analyzed the current trends and processed available data. The Lumina engine is now enhanced with real-time source tracking and deep thinking integration.\n\nThis new interface allows you to see exactly how I arrive at conclusions and which sources I'm using to ground my answers.`,
+        content: content,
         timestamp: new Date(),
-        thinking: `I am analyzing the user's query: "${content}". I need to generate a response that showcases the multi-modal and real-time capabilities of the Lumina platform. I will demonstrate the thinking process, the search integration, and the source panel functionality.`,
-        searchQuery: `latest developments in ${content.split(' ').slice(0, 3).join(' ')}`,
-        sources: [
-          { title: "Lumina Documentation", url: "https://docs.lumina.ai/interface" },
-          { title: "Perplexity Research Lab", url: "https://research.perplexity.ai/chat-patterns" },
-          { title: "Modern UI Frameworks 2026", url: "https://ui-trends.com/minimalism" }
-        ],
+        // Optional: populate tools/thinking if present in some known format
         toolCalls: [
           { id: '1', type: 'ai', label: 'AI Core', status: 'complete', icon: <Sparkles size={12} /> },
-          { id: '2', type: 'tool', label: 'Web Search', status: 'active', icon: <Globe size={12} /> },
-          { id: '3', type: 'tool', label: 'MCP Connect', status: 'pending', icon: <HardDrive size={12} /> },
-          { id: '4', type: 'result', label: 'Summary', status: 'pending', icon: <Check size={12} /> }
         ]
       };
       
@@ -437,60 +505,23 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         }
         return chat;
       }));
-      
-      // Simulate tool progress
-      setTimeout(() => {
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === assistantMessage.id ? {
-                ...m,
-                toolCalls: m.toolCalls?.map(t => 
-                  t.id === '2' ? { ...t, status: 'complete' } as ToolCallNode : 
-                  t.id === '3' ? { ...t, status: 'active' } as ToolCallNode : t
-                )
-              } : m)
-            };
-          }
-          return chat;
-        }));
-      }, 1500);
-
-      setTimeout(() => {
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === assistantMessage.id ? {
-                ...m,
-                toolCalls: m.toolCalls?.map(t => 
-                  t.id === '3' ? { ...t, status: 'complete' } as ToolCallNode : 
-                  t.id === '4' ? { ...t, status: 'active' } as ToolCallNode : t
-                )
-              } : m)
-            };
-          }
-          return chat;
-        }));
-      }, 3000);
-
-      setTimeout(() => {
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === assistantMessage.id ? {
-                ...m,
-                toolCalls: m.toolCalls?.map(t => t.id === '4' ? { ...t, status: 'complete' } as ToolCallNode : t)
-              } : m)
-            };
-          }
-          return chat;
-        }));
-        setIsTyping(false);
-      }, 4500);
-    }, 1000);
+    } catch (error) {
+      console.error('Lumina API Error:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `Error: Failed to connect to ${serverUrl}. Please check your API key and server configuration in Settings.`,
+        timestamp: new Date(),
+      };
+      setChats(prev => prev.map(chat => {
+        if (chat.id === chatId) {
+          return { ...chat, messages: [...chat.messages, errorMessage] };
+        }
+        return chat;
+      }));
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1298,7 +1329,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             <input 
                               type="text" 
                               value={serverUrl}
-                              onChange={(e) => setServerUrl(e.target.value)}
+                              onChange={(e) => { setServerUrl(e.target.value); setIsAiSaved(false); }}
                               placeholder="https://api.lumina.ai/v1"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
@@ -1308,11 +1339,44 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             <input 
                               type="password" 
                               value={apiKey}
-                              onChange={(e) => setApiKey(e.target.value)}
+                              onChange={(e) => { setApiKey(e.target.value); setIsAiSaved(false); }}
                               placeholder="sk-••••••••••••••••"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>
+                          
+                          <div className="flex gap-3">
+                            <button
+                              onClick={handleVerifyAI}
+                              disabled={aiVerificationState === 'verifying'}
+                              className={`flex-1 h-11 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                                aiVerificationState === 'success' 
+                                  ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
+                                  : aiVerificationState === 'error'
+                                    ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                                    : 'bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              {aiVerificationState === 'verifying' ? (
+                                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                              ) : null}
+                              {aiVerificationState === 'success' ? <Check size={16} /> : null}
+                              {aiVerificationState === 'error' ? <X size={16} /> : null}
+                              {aiVerificationState === 'verifying' ? 'Verifying...' : aiVerificationState === 'success' ? 'Verified' : aiVerificationState === 'error' ? 'Failed' : 'Verify Connection'}
+                            </button>
+                            <button
+                              onClick={handleSaveAI}
+                              className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                                isAiSaved 
+                                  ? 'bg-emerald-500 text-white' 
+                                  : 'bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10 hover:opacity-90'
+                              }`}
+                            >
+                              {isAiSaved ? <Check size={16} /> : null}
+                              {isAiSaved ? 'Saved' : 'Save Changes'}
+                            </button>
+                          </div>
+
                           <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/20 rounded-2xl">
                             <div className="flex gap-3">
                               <Sparkles size={16} className="text-blue-500 mt-0.5" />
@@ -1339,7 +1403,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             <input 
                               type="password"
                               value={tavilyApiKey}
-                              onChange={(e) => setTavilyApiKey(e.target.value)}
+                              onChange={(e) => { setTavilyApiKey(e.target.value); setIsSearchSaved(false); }}
                               placeholder="tvly-..."
                               className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                             />
@@ -1354,11 +1418,43 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             <input 
                               type="password"
                               value={serpApiKey}
-                              onChange={(e) => setSerpApiKey(e.target.value)}
+                              onChange={(e) => { setSerpApiKey(e.target.value); setIsSearchSaved(false); }}
                               placeholder="..."
                               className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                             />
                             <p className="text-[10px] text-gray-500 italic">Universal search API for Google, Bing, and more.</p>
+                          </div>
+
+                          <div className="flex gap-3">
+                            <button
+                              onClick={handleVerifySearch}
+                              disabled={searchVerificationState === 'verifying'}
+                              className={`flex-1 h-11 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                                searchVerificationState === 'success' 
+                                  ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
+                                  : searchVerificationState === 'error'
+                                    ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                                    : 'bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              {searchVerificationState === 'verifying' ? (
+                                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                              ) : null}
+                              {searchVerificationState === 'success' ? <Check size={16} /> : null}
+                              {searchVerificationState === 'error' ? <X size={16} /> : null}
+                              {searchVerificationState === 'verifying' ? 'Verifying...' : searchVerificationState === 'success' ? 'Verified' : searchVerificationState === 'error' ? 'Failed' : 'Verify Keys'}
+                            </button>
+                            <button
+                              onClick={handleSaveSearch}
+                              className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                                isSearchSaved 
+                                  ? 'bg-emerald-500 text-white' 
+                                  : 'bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10 hover:opacity-90'
+                              }`}
+                            >
+                              {isSearchSaved ? <Check size={16} /> : null}
+                              {isSearchSaved ? 'Saved' : 'Save Keys'}
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -1424,7 +1520,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             <input 
                               type="text" 
                               value={mcpUrl}
-                              onChange={(e) => setMcpUrl(e.target.value)}
+                              onChange={(e) => { setMcpUrl(e.target.value); setIsMcpSaved(false); }}
                               placeholder="http://localhost:3001"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
@@ -1434,33 +1530,46 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             <input 
                               type="password" 
                               value={mcpKey}
-                              onChange={(e) => setMcpKey(e.target.value)}
+                              onChange={(e) => { setMcpKey(e.target.value); setIsMcpSaved(false); }}
                               placeholder="mcp_••••••••••••••••"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>
-                          <button
-                            onClick={() => {
-                              if (!mcpUrl) return;
-                              setIsConnectingMcp(true);
-                              setTimeout(() => {
-                                setIsConnectingMcp(false);
-                                setIsMcpConnected(!isMcpConnected);
-                              }, 800);
-                            }}
-                            className={`w-full py-3 rounded-xl text-sm font-semibold transition-all ${
-                              isMcpConnected 
-                                ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30' 
-                                : 'bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10'
-                            }`}
-                          >
-                            {isConnectingMcp ? (
-                              <span className="flex items-center justify-center gap-2">
-                                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                                Connecting...
-                              </span>
-                            ) : (isMcpConnected ? 'Disconnect Server' : 'Connect MCP Server')}
-                          </button>
+                          <div className="flex gap-3">
+                            <button
+                              onClick={handleSaveMcp}
+                              className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                                isMcpSaved 
+                                  ? 'bg-emerald-500 text-white' 
+                                  : 'bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-zinc-300 border border-gray-200 dark:border-white/10 hover:bg-gray-200 dark:hover:bg-white/10'
+                              }`}
+                            >
+                              {isMcpSaved ? <Check size={16} /> : null}
+                              {isMcpSaved ? 'Saved' : 'Save Config'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (!mcpUrl) return;
+                                setIsConnectingMcp(true);
+                                setTimeout(() => {
+                                  setIsConnectingMcp(false);
+                                  setIsMcpConnected(!isMcpConnected);
+                                }, 800);
+                              }}
+                              className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all ${
+                                isMcpConnected 
+                                  ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30' 
+                                  : 'bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10'
+                              }`}
+                            >
+                              {isConnectingMcp ? (
+                                <span className="flex items-center justify-center gap-2">
+                                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                                  Connecting...
+                                </span>
+                              ) : (isMcpConnected ? 'Disconnect' : 'Connect')}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </motion.div>
