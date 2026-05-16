@@ -1,0 +1,8 @@
+{
+  "name": "Lumina Chat",
+  "description": "A minimalist, beautifully animated chat interface for modern conversations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
