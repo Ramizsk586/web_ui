@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Send, 
   Plus, 
-  MessageSquare, 
   Sparkles, 
   User, 
   ArrowUp,
@@ -18,14 +17,45 @@ import {
   Settings,
   Trash2,
   ChevronDown,
-  HardDrive
+  HardDrive,
+  Brain,
+  Globe,
+  ExternalLink,
+  X,
+  Languages,
+  Layout,
+  MessageSquare,
+  StopCircle,
+  FileUp,
+  Camera,
+  FolderPlus,
+  Box,
+  Link as LinkIcon,
+  Check,
+  ChevronRight,
+  ChevronLeft,
+  Palette
 } from 'lucide-react';
+import Markdown from 'react-markdown';
+
+interface ToolCallNode {
+  id: string;
+  type: 'ai' | 'tool' | 'sub-tool' | 'result' | 'error';
+  label: string;
+  status: 'pending' | 'active' | 'complete' | 'failed';
+  icon?: React.ReactNode;
+}
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  thinking?: string;
+  sources?: { title: string; url: string; icon?: string }[];
+  searchQuery?: string;
+  isSearching? : boolean;
+  toolCalls?: ToolCallNode[];
 }
 
 interface Chat {
@@ -139,7 +169,19 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp'>('general');
+  const [isCompactSidebar, setIsCompactSidebar] = useState(false);
+  const [useBubbles, setUseBubbles] = useState(true);
+  const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search'>('general');
+  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp'>('main');
+  const [tavilyApiKey, setTavilyApiKey] = useState('');
+  const [serpApiKey, setSerpApiKey] = useState('');
+  const [mcpTools, setMcpTools] = useState([
+    { id: 'fetch', name: 'Fetch URL', enabled: true, description: 'Read content from any URL', icon: <Globe size={14} /> },
+    { id: 'brave', name: 'Brave Search', enabled: true, description: 'Search the web for real-time info', icon: <Search size={14} /> },
+    { id: 'fs', name: 'Filesystem', enabled: false, description: 'Read and write local files', icon: <Box size={14} /> },
+    { id: 'github', name: 'GitHub', enabled: false, description: 'Access repos and issues', icon: <Box size={14} /> },
+  ]);
   const [serverUrl, setServerUrl] = useState('https://api.lumina.ai/v1');
   const [apiKey, setApiKey] = useState('');
   const [mcpUrl, setMcpUrl] = useState('');
@@ -151,13 +193,30 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
+
+  // Track scroll for scroll-to-bottom button
+  useEffect(() => {
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      const isScrolledUp = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight > 200;
+      setShowScrollButton(isScrolledUp);
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll);
+    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -167,6 +226,10 @@ export default function App() {
       }
       if (headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
         setIsHeaderMenuOpen(false);
+      }
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
+        setIsPlusMenuOpen(false);
+        setActivePlusSubMenu('main');
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -179,6 +242,83 @@ export default function App() {
     { id: 'lumina-mini-flash', name: 'Lumina Mini Flash', icon: <ArrowUp size={14} className="text-orange-500" /> },
   ];
 
+const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  if (isCollapsed) {
+    return (
+      <button 
+        onClick={() => setIsCollapsed(false)}
+        className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-white/10 rounded-lg text-[10px] font-bold text-gray-400 hover:text-white transition-all uppercase tracking-widest"
+      >
+        <Box size={12} />
+        {nodes.length} tools called
+        <ChevronRight size={10} />
+      </button>
+    );
+  }
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      className="p-4 bg-gray-50 dark:bg-zinc-950/40 border border-gray-100 dark:border-white/5 rounded-2xl overflow-hidden relative group max-w-lg"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.2em]">Live Tool Chain</div>
+        <button 
+          onClick={() => setIsCollapsed(true)}
+          className="text-[10px] text-gray-500 hover:text-white transition-colors uppercase tracking-widest"
+        >
+          Collapse
+        </button>
+      </div>
+
+      <div className="relative flex items-center gap-2 py-4">
+        {nodes.map((node, i) => (
+          <React.Fragment key={node.id}>
+            {/* Edge */}
+            {i > 0 && (
+              <div className="relative w-12 h-0.5 bg-gray-200 dark:bg-white/10 flex items-center">
+                <motion.div 
+                  className={`absolute h-1 w-1 rounded-full bg-blue-500 ${node.status === 'active' ? 'animate-traveling-dot' : ''}`}
+                  initial={{ left: 0 }}
+                  animate={{ left: node.status === 'complete' ? '100%' : '0%' }}
+                  transition={{ duration: 0.6, ease: "easeInOut" }}
+                  style={{ offsetPath: `path('M 0 0 L 48 0')` }}
+                />
+              </div>
+            )}
+
+            {/* Node */}
+            <motion.div
+              layout
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className={`relative flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${
+                node.status === 'active' 
+                  ? 'bg-blue-600/10 border-blue-500/50 text-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.2)]' 
+                  : node.status === 'complete'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                    : node.status === 'failed'
+                      ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-micro-shake'
+                      : 'bg-white/5 border-white/5 text-gray-400 opacity-40'
+              }`}
+            >
+              {node.status === 'active' && (
+                <div className="absolute inset-0 rounded-full border border-blue-500/50 animate-ping opacity-20" />
+              )}
+              {node.status === 'complete' ? <Check size={12} /> : node.icon || <Box size={12} />}
+              <span className="text-[11px] font-bold tracking-tight whitespace-nowrap overflow-hidden max-w-[80px] truncate">
+                {node.label}
+              </span>
+            </motion.div>
+          </React.Fragment>
+        ))}
+      </div>
+    </motion.div>
+  );
+};
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
@@ -247,13 +387,26 @@ export default function App() {
       inputRef.current.style.height = 'auto';
     }
 
-    // Simulate AI Response
+    // Simulate AI Response with Thinking and Sources
     setTimeout(() => {
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `I've received your message: "${content}". This is a beautiful interface, don't you think? How can I assist you further?`,
+        content: `Based on your request about "${content}", I've analyzed the current trends and processed available data. The Lumina engine is now enhanced with real-time source tracking and deep thinking integration.\n\nThis new interface allows you to see exactly how I arrive at conclusions and which sources I'm using to ground my answers.`,
         timestamp: new Date(),
+        thinking: `I am analyzing the user's query: "${content}". I need to generate a response that showcases the multi-modal and real-time capabilities of the Lumina platform. I will demonstrate the thinking process, the search integration, and the source panel functionality.`,
+        searchQuery: `latest developments in ${content.split(' ').slice(0, 3).join(' ')}`,
+        sources: [
+          { title: "Lumina Documentation", url: "https://docs.lumina.ai/interface" },
+          { title: "Perplexity Research Lab", url: "https://research.perplexity.ai/chat-patterns" },
+          { title: "Modern UI Frameworks 2026", url: "https://ui-trends.com/minimalism" }
+        ],
+        toolCalls: [
+          { id: '1', type: 'ai', label: 'AI Core', status: 'complete', icon: <Sparkles size={12} /> },
+          { id: '2', type: 'tool', label: 'Web Search', status: 'active', icon: <Globe size={12} /> },
+          { id: '3', type: 'tool', label: 'MCP Connect', status: 'pending', icon: <HardDrive size={12} /> },
+          { id: '4', type: 'result', label: 'Summary', status: 'pending', icon: <Check size={12} /> }
+        ]
       };
       
       setChats(prev => prev.map(chat => {
@@ -266,8 +419,60 @@ export default function App() {
         }
         return chat;
       }));
-      setIsTyping(false);
-    }, 1500);
+      
+      // Simulate tool progress
+      setTimeout(() => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === assistantMessage.id ? {
+                ...m,
+                toolCalls: m.toolCalls?.map(t => 
+                  t.id === '2' ? { ...t, status: 'complete' } as ToolCallNode : 
+                  t.id === '3' ? { ...t, status: 'active' } as ToolCallNode : t
+                )
+              } : m)
+            };
+          }
+          return chat;
+        }));
+      }, 1500);
+
+      setTimeout(() => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === assistantMessage.id ? {
+                ...m,
+                toolCalls: m.toolCalls?.map(t => 
+                  t.id === '3' ? { ...t, status: 'complete' } as ToolCallNode : 
+                  t.id === '4' ? { ...t, status: 'active' } as ToolCallNode : t
+                )
+              } : m)
+            };
+          }
+          return chat;
+        }));
+      }, 3000);
+
+      setTimeout(() => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === assistantMessage.id ? {
+                ...m,
+                toolCalls: m.toolCalls?.map(t => t.id === '4' ? { ...t, status: 'complete' } as ToolCallNode : t)
+              } : m)
+            };
+          }
+          return chat;
+        }));
+        setIsTyping(false);
+      }, 4500);
+    }, 1000);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -328,7 +533,7 @@ export default function App() {
       {/* Desktop Sidebar */}
       <motion.aside 
         animate={{ width: isSidebarOpen ? 260 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-        transition={{ type: "spring", damping: 25, stiffness: 200 }}
+        transition={{ duration: isSidebarOpen ? 0.22 : 0.18, ease: isSidebarOpen ? "easeOut" : "linear" }}
         className={`hidden md:flex flex-col border-r border-gray-100 bg-gray-50/50 relative overflow-hidden`}
       >
         <div className="w-[260px] h-full flex flex-col p-4">
@@ -454,132 +659,425 @@ export default function App() {
         </header>
 
         {/* Messages */}
-        <div 
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar"
-        >
-          <div className="max-w-2xl mx-auto space-y-8 pb-32">
-            <AnimatePresence initial={false}>
-              {messages.length === 0 ? (
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="h-[60vh] flex flex-col items-center justify-center text-center px-4"
-                >
+        <div className="flex-1 flex overflow-hidden">
+          <div 
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar scroll-smooth"
+          >
+            <div className={`mx-auto space-y-8 pb-24 transition-all duration-500 ${isSourcesPanelOpen ? 'max-w-xl md:mr-4' : 'max-w-3xl'}`}>
+              <AnimatePresence initial={false}>
+                {messages.length === 0 ? (
                   <motion.div 
-                    animate={{ scale: [1, 1.05, 1] }}
-                    transition={{ duration: 4, repeat: Infinity }}
-                    className="w-16 h-16 bg-gray-50 border border-gray-100 rounded-3xl flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="h-[60vh] flex flex-col items-center justify-center text-center px-4"
                   >
-                    <Sparkles size={32} />
-                  </motion.div>
-                  <h1 className="text-4xl font-display font-medium text-gray-900 dark:text-white mb-3 tracking-tight">
-                    Welcome to Lumina
-                  </h1>
-                  <p className="text-gray-500 max-w-sm mb-12">
-                    A beautiful, minimalist way to converse with artificial intelligence.
-                  </p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
-                    {[
-                      "Explain quantum physics in simple terms",
-                      "Write a professional email for a job application",
-                      "Give me 5 weekend trip ideas from London",
-                      "How do I build a minimalist website?"
-                    ].map((suggestion, i) => (
-                      <motion.button
-                        key={i}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => handleSend(suggestion)}
-                        className="p-4 text-sm text-left border border-gray-100 bg-gray-50 hover:bg-gray-100 transition-colors rounded-2xl text-gray-600 dark:text-gray-400"
-                      >
-                        {suggestion}
-                      </motion.button>
-                    ))}
-                  </div>
-                </motion.div>
-              ) : (
-                messages.map((message) => (
-                  <motion.div
-                    key={message.id}
-                    initial={{ opacity: 0, y: 10, scale: 0.99 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    className={`flex items-start gap-4 ${message.role === 'user' ? 'justify-end' : ''}`}
-                  >
-                    {message.role === 'assistant' && (
-                      <div className="w-8 h-8 rounded-lg bg-black dark:bg-white flex items-center justify-center text-white dark:text-black shrink-0 mt-0.5 shadow-sm">
-                        <Sparkles size={14} />
-                      </div>
-                    )}
+                    <motion.div 
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 4, repeat: Infinity }}
+                      className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-3xl flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm"
+                    >
+                      <Sparkles size={32} />
+                    </motion.div>
+                    <h1 className="text-4xl font-display font-medium text-gray-900 dark:text-white mb-3 tracking-tight">
+                      Welcome to Lumina
+                    </h1>
+                    <p className="text-gray-500 dark:text-gray-400 max-w-sm mb-12">
+                      Modern intelligence, refined interface.
+                    </p>
                     
-                    <div className={`
-                      max-w-[85%] px-5 py-3 rounded-2xl text-[15px] leading-relaxed
-                      ${message.role === 'user' 
-                        ? 'bg-black dark:bg-white text-white dark:text-black rounded-tr-none shadow-md' 
-                        : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'}
-                    `}>
-                      {message.content}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
+                      {[
+                        "Explain quantum physics in simple terms",
+                        "Write a professional email for a job application",
+                        "Give me 5 weekend trip ideas from London",
+                        "How do I build a minimalist website?"
+                      ].map((suggestion, i) => (
+                        <motion.button
+                          key={suggestion}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => handleSend(suggestion)}
+                          className="p-4 text-left bg-white dark:bg-white/5 border border-gray-100 dark:border-white/5 rounded-2xl hover:border-gray-200 dark:hover:border-white/10 hover:shadow-sm transition-all group"
+                        >
+                          <div className="text-xs font-semibold text-gray-400 dark:text-gray-500 mb-1 uppercase tracking-wider">Example</div>
+                          <div className="text-sm text-gray-600 dark:text-gray-300 group-hover:text-black dark:group-hover:text-white transition-colors">{suggestion}</div>
+                        </motion.button>
+                      ))}
                     </div>
-
-                    {message.role === 'user' && (
-                      <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center text-white shrink-0 mt-0.5 shadow-sm">
-                        <User size={14} />
-                      </div>
-                    )}
                   </motion.div>
-                ))
-              )}
-            </AnimatePresence>
+                ) : (
+                  messages.map((message) => (
+                    <motion.div
+                      key={message.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`flex flex-col ${useBubbles ? (message.role === 'user' ? 'items-end' : 'items-start') : 'items-stretch w-full'}`}
+                    >
+                      {useBubbles ? (
+                        /* Bubble Layout */
+                        <motion.div 
+                          className={`flex flex-col max-w-[85%] ${message.role === 'user' ? 'items-end' : 'items-start'}`}
+                          initial={{ opacity: 0, y: 12, x: message.role === 'user' ? 8 : -8 }}
+                          animate={{ opacity: 1, y: 0, x: 0 }}
+                          transition={{ duration: 0.18, ease: "easeOut" }}
+                        >
+                          <div className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm ${
+                            message.role === 'user' 
+                              ? 'bg-black dark:bg-white text-white dark:text-black rounded-tr-none' 
+                              : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
+                          }`}>
+                            <div className="markdown-body">
+                              <Markdown>{message.content}</Markdown>
+                            </div>
+                          </div>
+                          <div className="mt-1 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight">
+                            {message.role === 'assistant' ? 'Lumina' : 'You'} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </motion.div>
+                      ) : (
+                        /* Linear Layout */
+                        <div className="space-y-6 w-full">
+                          {message.role === 'user' ? (
+                            <motion.div 
+                              className="flex items-start gap-4 pb-4 border-b border-gray-100 dark:border-white/5 max-w-2xl"
+                              initial={{ opacity: 0, y: 12 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.18, ease: "easeOut" }}
+                            >
+                              <div className="w-6 h-6 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 text-[10px] font-bold shrink-0 mt-1">
+                                AR
+                              </div>
+                              <h3 className="text-xl font-medium text-gray-900 dark:text-white tracking-tight">{message.content}</h3>
+                            </motion.div>
+                          ) : (
+                            <div className="space-y-6 max-w-2xl px-1">
+                              {/* Node Graph Tool Visualization */}
+                              {message.toolCalls && message.toolCalls.length > 0 && (
+                                <NodeGraph nodes={message.toolCalls} />
+                              )}
 
-            {isTyping && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center gap-4 text-gray-400"
-              >
-                <div className="w-8 h-8 rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-100 flex items-center justify-center shrink-0">
-                  <Sparkles size={14} />
+                              {/* Status Steps */}
+                              {message.thinking && (
+                                <div className="space-y-3">
+                                  <motion.div 
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="flex items-center gap-2 text-gray-400 group cursor-default"
+                                  >
+                                    <span className="text-sm font-sans">Reading frontend design skill</span>
+                                    <ChevronRight size={14} className="opacity-50" />
+                                  </motion.div>
+                                  <motion.div 
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    transition={{ delay: 0.1 }}
+                                    className="flex items-center gap-2 text-white font-medium"
+                                  >
+                                    <span className="text-sm">Contextualizing UI animation principles...</span>
+                                  </motion.div>
+                                  {isTyping && (
+                                    <div className="flex gap-2">
+                                      <div className="w-8 h-1 bg-white/10 rounded-full overflow-hidden">
+                                        <div className="h-full bg-orange-500 animate-pulse-soft w-full" />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Search Progress */}
+                              {(message.isSearching || message.searchQuery) && (
+                                <div className="space-y-4">
+                                  <div className="flex items-center gap-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
+                                    <div className={`w-1.5 h-1.5 rounded-full ${message.isSearching ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
+                                    {message.isSearching ? 'Search in progress...' : `Searched: ${message.searchQuery}`}
+                                  </div>
+                                  
+                                  {message.sources && message.sources.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                      {message.sources.slice(0, 3).map((source, sIdx) => (
+                                        <div 
+                                          key={sIdx}
+                                          className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-100 dark:border-white/10 rounded-xl text-xs transition-all shadow-sm"
+                                        >
+                                          <Globe size={12} className="text-gray-400" />
+                                          <span className="max-w-[100px] truncate font-medium">{source.title}</span>
+                                        </div>
+                                      ))}
+                                      {message.sources.length > 3 && (
+                                        <button 
+                                          onClick={() => setIsSourcesPanelOpen(true)}
+                                          className="px-3 py-1.5 bg-gray-100 dark:bg-white/10 rounded-xl text-[10px] font-bold text-gray-500 hover:bg-gray-200 transition-colors"
+                                        >
+                                          +{message.sources.length - 3} MORE
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Main Response Text */}
+                              <motion.div 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ duration: 0.4, delay: 0.2 }}
+                                className="prose prose-sm dark:prose-invert max-w-none text-[16px] leading-[1.6]"
+                              >
+                                <Markdown>{message.content}</Markdown>
+                              </motion.div>
+
+                              {/* Footer Actions */}
+                              {message.sources && message.sources.length > 0 && (
+                                <motion.div 
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  transition={{ duration: 0.2, delay: 0.5 }}
+                                  className="pt-4 flex items-center gap-4"
+                                >
+                                  <button 
+                                    onClick={() => setIsSourcesPanelOpen(true)}
+                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-400 transition-all uppercase tracking-tighter"
+                                  >
+                                    <Layout size={14} />
+                                    {message.sources.length} Sources
+                                  </button>
+                                  <button className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl text-gray-400 transition-colors">
+                                    <MessageSquare size={16} />
+                                  </button>
+                                </motion.div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </motion.div>
+                  ))
+                )}
+              </AnimatePresence>
+              
+              {isTyping && (
+                <div className="flex gap-1.5 py-4">
+                  <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5 }} className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                  <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }} className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                  <motion.div animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1.5 h-1.5 rounded-full bg-gray-400" />
                 </div>
-                <div className="flex gap-1">
-                  <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0 }} className="w-1.5 h-1.5 bg-gray-300 rounded-full" />
-                  <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }} className="w-1.5 h-1.5 bg-gray-300 rounded-full" />
-                  <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1.5 h-1.5 bg-gray-300 rounded-full" />
+              )}
+            </div>
+          </div>
+
+          {/* Scroll to Bottom Button */}
+          <AnimatePresence>
+            {showScrollButton && (
+              <motion.button
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                transition={{ duration: 0.2 }}
+                onClick={() => {
+                  if (scrollRef.current) {
+                    scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+                  }
+                }}
+                className="absolute bottom-32 right-8 p-3 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/10 rounded-full shadow-2xl text-gray-500 hover:text-black dark:hover:text-white z-40"
+              >
+                <ArrowUp size={20} />
+              </motion.button>
+            )}
+          </AnimatePresence>
+
+          {/* Sources Slide Panel */}
+          <AnimatePresence>
+            {isSourcesPanelOpen && (
+              <motion.div
+                initial={{ x: 400, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: 400, opacity: 0 }}
+                transition={{ duration: isSourcesPanelOpen ? 0.22 : 0.18 }}
+                className="w-80 border-l border-gray-100 dark:border-white/5 bg-white dark:bg-zinc-950 flex flex-col shrink-0 shadow-2xl relative z-20"
+              >
+                <div className="p-6 flex items-center justify-between border-b border-gray-50 dark:border-white/5">
+                  <h3 className="font-display font-semibold tracking-tight text-gray-900 dark:text-white">Sources</h3>
+                  <button 
+                    onClick={() => setIsSourcesPanelOpen(false)}
+                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-white/5 rounded-md text-gray-400 transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                  {messages.find(m => m.sources)?.sources?.map((source, sIdx) => (
+                    <motion.div
+                      key={sIdx}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: sIdx * 0.05 }}
+                      className="group p-4 bg-gray-50 dark:bg-white/5 border border-transparent hover:border-blue-500/30 rounded-2xl transition-all"
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center shrink-0 shadow-sm">
+                          <Globe size={18} className="text-gray-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="text-xs font-bold text-gray-900 dark:text-white truncate uppercase tracking-tighter">{source.title}</h4>
+                            <Globe className="text-gray-400" size={10} />
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mb-3">{source.url}</p>
+                          <a 
+                            href={source.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-widest"
+                          >
+                            Open Link <ExternalLink size={10} />
+                          </a>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )) || (
+                    <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
+                      <Layout size={32} className="mb-4" />
+                      <p className="text-xs font-semibold uppercase tracking-widest">No Sources Available</p>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
-          </div>
+          </AnimatePresence>
         </div>
 
         {/* Input Area */}
         <div className="px-4 pb-6 bg-transparent sticky bottom-0 shrink-0">
           <div className="max-w-3xl mx-auto relative group">
-            <div className="relative border border-gray-200 dark:border-white/10 bg-white dark:bg-zinc-900/90 backdrop-blur-xl rounded-[24px] shadow-2xl focus-within:border-gray-300 dark:focus-within:border-white/20 transition-all overflow-hidden flex flex-col p-1">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={adjustTextareaHeight}
-                onKeyDown={handleKeyDown}
-                placeholder="Message Lumina..."
-                rows={1}
-                className="w-full bg-transparent border-none focus:ring-0 text-[15px] py-2.5 px-4 resize-none min-h-[40px] dark:text-white dark:placeholder-gray-500"
-              />
+            <div className="relative border border-white/5 bg-[#1a1a1a] dark:bg-[#121212]/95 backdrop-blur-3xl rounded-[28px] shadow-2xl focus-within:border-white/10 transition-all overflow-visible flex flex-col p-1.5 min-h-[110px] justify-between">
+              <div className="flex-1 px-3 pt-2">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={adjustTextareaHeight}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Write a message..."
+                  rows={1}
+                  className="w-full bg-transparent border-none focus:ring-0 text-[16px] p-0 resize-none min-h-[40px] text-white placeholder-gray-500 scroll-none"
+                />
+              </div>
               
-              <div className="flex items-center justify-between px-2 pb-1">
-                <div className="flex items-center gap-1">
-                  <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl transition-all">
-                    <Plus size={18} />
-                  </button>
+              <div className="flex items-center justify-between px-3 pb-1.5 pt-3">
+                <div className="flex items-center gap-1.5">
+                  <div className="relative" ref={plusMenuRef}>
+                    <button 
+                      onClick={() => {
+                        setIsPlusMenuOpen(!isPlusMenuOpen);
+                        setActivePlusSubMenu('main');
+                      }}
+                      className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-2xl transition-all"
+                    >
+                      <Plus size={20} className={`transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
+                    </button>
 
+                    <AnimatePresence>
+                      {isPlusMenuOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute bottom-full left-0 mb-3 w-64 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] p-1.5"
+                        >
+                          {activePlusSubMenu === 'main' ? (
+                            <>
+                              {[
+                                { id: 'files', label: 'Add files or photos', icon: <FileUp size={16} /> },
+                                { id: 'screenshot', label: 'Take a screenshot', icon: <Camera size={16} /> },
+                                { id: 'project', label: 'Add to project', icon: <FolderPlus size={16} />, hasArrow: true },
+                                { id: 'skills', label: 'Skills', icon: <Box size={16} />, hasArrow: true },
+                                { id: 'connectors', label: 'Add connectors', icon: <LinkIcon size={16} /> },
+                                { type: 'separator' },
+                                { id: 'search', label: 'Web search', icon: <Globe size={16} />, isSelected: true },
+                                { id: 'mcp_tools', label: 'MCP tools', icon: <HardDrive size={16} />, hasArrow: true },
+                              ].map((item, idx) => (
+                                item.type === 'separator' ? (
+                                  <div key={idx} className="my-1 border-t border-white/5" />
+                                ) : (
+                                  <button
+                                    key={item.id}
+                                    onClick={() => {
+                                      if (item.id === 'mcp_tools') {
+                                        setActivePlusSubMenu('mcp');
+                                      } else {
+                                        setIsPlusMenuOpen(false);
+                                      }
+                                    }}
+                                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 hover:text-white transition-colors group/item"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <span className={`transition-colors ${(item as any).isSelected ? 'text-blue-500' : 'group-hover/item:text-white'}`}>{item.icon}</span>
+                                      {item.label}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {(item as any).isSelected && <Check size={14} className="text-blue-500" />}
+                                      {(item as any).hasArrow && <ChevronRight size={14} className="text-gray-600 group-hover/item:text-gray-400" />}
+                                    </div>
+                                  </button>
+                                )
+                              ))}
+                            </>
+                          ) : (
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 mb-1">
+                                <button 
+                                  onClick={() => setActivePlusSubMenu('main')}
+                                  className="p-1 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
+                                >
+                                  <ChevronLeft size={16} />
+                                </button>
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">MCP Tools</span>
+                              </div>
+                              <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                {mcpTools.map(tool => (
+                                  <button
+                                    key={tool.id}
+                                    onClick={() => {
+                                      setMcpTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                    }}
+                                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 transition-colors group/tool"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <div className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? 'bg-blue-500/10 text-blue-500' : 'bg-white/5 text-gray-500'}`}>
+                                        {tool.icon}
+                                      </div>
+                                      <div className="text-left">
+                                        <div className={`transition-colors ${tool.enabled ? 'text-white' : 'text-gray-400'}`}>{tool.name}</div>
+                                        <div className="text-[10px] text-gray-500 truncate w-32">{tool.description}</div>
+                                      </div>
+                                    </div>
+                                    <div className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? 'bg-blue-600' : 'bg-gray-700'}`}>
+                                      <motion.div 
+                                        animate={{ x: tool.enabled ? 18 : 2 }}
+                                        className="absolute top-1 w-2 h-2 rounded-full bg-white shadow-sm"
+                                      />
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
                   {/* Model Selector Integrated */}
                   <div className="relative" ref={dropdownRef}>
                     <button 
                       onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-gray-100 dark:hover:bg-white/10 rounded-xl text-[11px] font-medium text-gray-500 dark:text-gray-400 transition-all active:scale-95"
+                      className="flex items-center gap-1.5 px-3 py-2 hover:bg-white/5 rounded-2xl text-sm font-medium text-gray-400 transition-all active:scale-95"
                     >
-                      {models.find(m => m.id === selectedModel)?.icon}
-                      <span>{models.find(m => m.id === selectedModel)?.name.split(' ').pop()}</span>
-                      <ChevronDown size={10} className={`transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
+                      <span>Sonnet 4.6</span>
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
                     </button>
 
                     <AnimatePresence>
@@ -588,7 +1086,7 @@ export default function App() {
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute bottom-full left-0 mb-3 w-52 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden z-20 p-1"
+                          className="absolute bottom-full right-0 mb-3 w-52 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] p-1.5"
                         >
                           {models.map((model) => (
                             <button
@@ -597,10 +1095,10 @@ export default function App() {
                                 setSelectedModel(model.id);
                                 setIsModelDropdownOpen(false);
                               }}
-                              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-[11px] font-medium transition-colors ${
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
                                 selectedModel === model.id 
-                                  ? 'bg-gray-100 dark:bg-white/10 text-black dark:text-white' 
-                                  : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
+                                  ? 'bg-white/10 text-white' 
+                                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
                               }`}
                             >
                               {model.icon}
@@ -612,29 +1110,34 @@ export default function App() {
                     </AnimatePresence>
                   </div>
                   
-                  {/* MCP Tool Status Icon */}
-                  <div className="flex items-center gap-2 ml-1 group cursor-help relative">
-                    <div className={`w-1 h-1 rounded-full transition-all duration-500 ${isMcpConnected ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]' : 'bg-gray-300 dark:bg-gray-700'}`} />
-                    <HardDrive 
-                      size={13} 
-                      className={`transition-colors duration-300 ${isMcpConnected ? 'text-blue-500' : 'text-gray-400 dark:text-gray-600'}`} 
-                    />
-                  </div>
+                  {isTyping ? (
+                    <motion.button
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => setIsTyping(false)}
+                      className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center text-gray-400 hover:text-white border border-white/10 transition-all active:scale-95"
+                    >
+                      <StopCircle size={20} fill="currentColor" />
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => handleSend()}
+                      disabled={!input.trim()}
+                      className={`
+                        w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-sm
+                        ${input.trim()
+                          ? 'bg-white/10 text-white hover:scale-105 active:scale-95'
+                          : 'bg-white/5 text-gray-600'}
+                      `}
+                    >
+                      <ArrowUp size={20} strokeWidth={3} />
+                    </motion.button>
+                  )}
                 </div>
-                
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim() || isTyping}
-                  className={`
-                    w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-300 shadow-sm
-                    ${input.trim() && !isTyping
-                      ? 'bg-black dark:bg-white text-white dark:text-black hover:scale-105 active:scale-95'
-                      : 'bg-gray-50 dark:bg-zinc-800 text-gray-300 dark:text-gray-600'}
-                  `}
-                >
-                  <ArrowUp size={16} strokeWidth={3} />
-                </button>
               </div>
+            </div>
+            <div className="absolute -bottom-6 left-0 right-0 text-center">
+              <span className="text-[10px] text-gray-500 font-medium tracking-tight">Claude is AI and can make mistakes. Please double-check responses.</span>
             </div>
           </div>
         </div>
@@ -665,6 +1168,8 @@ export default function App() {
                   {[
                     { id: 'general', label: 'General', icon: <Settings size={16} /> },
                     { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
+                    { id: 'search', label: 'Search', icon: <Search size={16} /> },
+                    { id: 'sources', label: 'Sources', icon: <Layout size={16} /> },
                     { id: 'mcp', label: 'MCP Server', icon: <HardDrive size={16} /> },
                   ].map((tab) => (
                     <button
@@ -729,11 +1234,32 @@ export default function App() {
                           </div>
                           <div className="flex items-center justify-between">
                             <div>
+                              <div className="font-medium text-sm">Bubble Chat</div>
+                              <div className="text-xs text-gray-400">Use classic message bubbles or linear layout</div>
+                            </div>
+                            <button 
+                              onClick={() => setUseBubbles(!useBubbles)}
+                              className={`w-12 h-6 rounded-full transition-all relative ${useBubbles ? 'bg-blue-600' : 'bg-gray-200'}`}
+                            >
+                              <motion.div 
+                                animate={{ x: useBubbles ? 24 : 4 }}
+                                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
+                              />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div>
                               <div className="font-medium text-sm">Compact Sidebar</div>
                               <div className="text-xs text-gray-400">Reduce sidebar width automatically</div>
                             </div>
-                            <button className="w-12 h-6 rounded-full bg-black/10 dark:bg-white/10 relative">
-                              <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white shadow-sm" />
+                            <button 
+                              onClick={() => setIsCompactSidebar(!isCompactSidebar)}
+                              className={`w-12 h-6 rounded-full transition-all relative ${isCompactSidebar ? 'bg-blue-600' : 'bg-gray-200'}`}
+                            >
+                              <motion.div 
+                                animate={{ x: isCompactSidebar ? 24 : 4 }}
+                                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
+                              />
                             </button>
                           </div>
                         </div>
@@ -774,6 +1300,94 @@ export default function App() {
                               </p>
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 'search' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Search API Configuration</h3>
+                        <div className="space-y-6">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-gray-500 uppercase">Tavily API Key</label>
+                              <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">Get Key</a>
+                            </div>
+                            <input 
+                              type="password"
+                              value={tavilyApiKey}
+                              onChange={(e) => setTavilyApiKey(e.target.value)}
+                              placeholder="tvly-..."
+                              className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                            />
+                            <p className="text-[10px] text-gray-500 italic">Optimized for AI researchers and real-time data retrieval.</p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-gray-500 uppercase">Serp API Key</label>
+                              <a href="https://serpapi.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">Get Key</a>
+                            </div>
+                            <input 
+                              type="password"
+                              value={serpApiKey}
+                              onChange={(e) => setSerpApiKey(e.target.value)}
+                              placeholder="..."
+                              className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                            />
+                            <p className="text-[10px] text-gray-500 italic">Universal search API for Google, Bing, and more.</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                        <div className="flex gap-3">
+                          <Globe size={18} className="text-blue-500 shrink-0" />
+                          <div>
+                            <div className="text-xs font-bold text-blue-500 uppercase mb-1">Search Integration</div>
+                            <p className="text-xs text-blue-500/70 leading-relaxed">
+                              When configured, the AI will automatically use these tools to browse the web for time-sensitive information, ensuring responses are grounded in current facts.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 'sources' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Conversation Sources</h3>
+                        <div className="space-y-3">
+                          {messages.filter(m => m.sources).length > 0 ? (
+                            Array.from(new Set(messages.filter(m => m.sources).flatMap(m => m.sources || []).map(s => s.url))).map((url: string) => {
+                              const source = messages.filter(m => m.sources).flatMap(m => m.sources || []).find(s => s.url === url);
+                              return (
+                                <div key={url} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl">
+                                  <Globe size={16} className="text-gray-400 shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-xs font-semibold truncate">{source?.title || 'Unknown Source'}</div>
+                                    <div className="text-[10px] text-gray-400 truncate">{url}</div>
+                                  </div>
+                                  <a 
+                                    href={url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="p-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-blue-500 rounded-md transition-colors"
+                                  >
+                                    <ExternalLink size={14} />
+                                  </a>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="py-12 text-center">
+                              <Layout size={32} className="mx-auto text-gray-200 mb-3" />
+                              <p className="text-xs text-gray-400">No sources collected in this session</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </motion.div>
