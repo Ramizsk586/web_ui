@@ -12,7 +12,14 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Handle JSON and CORS
   app.use(express.json());
+
+  app.use((_req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', '*');
+    next();
+  });
 
   // Vite middleware for development
   if (isDev) {
@@ -36,8 +43,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "localhost", () => {
-    console.log(`\n🚀 Server ready at http://localhost:${PORT}`);
+  const server = app.listen(PORT, "localhost", () => {
+    console.log(`\n🚀 Proxy server ready at http://localhost:${PORT}`);
     console.log(`🔗 App connects directly to llama bridge at http://127.0.0.1:8089`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
@@ -47,6 +54,18 @@ async function startServer() {
       console.error(`\n❌ Server failed to start:`, err);
     }
   });
+
+  // Graceful shutdown on Ctrl+C / SIGTERM
+  const shutdown = () => {
+    console.log('\n🛑 Shutting down server...');
+    server.close(() => {
+      console.log('✅ Server closed.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 startServer();

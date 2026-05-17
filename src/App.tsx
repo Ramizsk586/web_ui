@@ -6,6 +6,8 @@
  * Motion, and Tailwind CSS v4.
  */
 
+// Dependencies: react-syntax-highlighter @types/react-syntax-highlighter
+
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -42,9 +44,12 @@ import {
   Calendar,
   Image as ImageIcon,
   CloudMoon,
-  Video
+  Video,
+  Copy
 } from 'lucide-react';
 import Markdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface ToolCallNode {
   id: string;
@@ -170,6 +175,54 @@ const SidebarContent = ({
   </>
 );
 
+function CanvasBlock({ language, code }: { language: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="bg-[#0d0d0d] border border-white/8 rounded-2xl overflow-hidden shadow-xl my-4">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-[#161616] border-b border-white/5">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full">
+          {language || 'code'}
+        </span>
+        <button
+          onClick={handleCopy}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+            copied
+              ? 'text-emerald-400 bg-emerald-500/10'
+              : 'text-gray-500 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <div className="overflow-x-auto p-5 custom-scrollbar">
+        {typeof SyntaxHighlighter === 'function' ? (
+          <SyntaxHighlighter
+            language={language}
+            style={oneDark}
+            customStyle={{ background: 'transparent', fontSize: '13px', lineHeight: '1.6', margin: 0 }}
+            showLineNumbers
+            lineNumberStyle={{ color: '#3f3f46', minWidth: '2.5em' }}
+          >
+            {code}
+          </SyntaxHighlighter>
+        ) : (
+          <pre className="text-gray-300 text-[13px] leading-relaxed font-mono whitespace-pre">
+            <code>{code}</code>
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -181,11 +234,15 @@ export default function App() {
   const [useBubbles, setUseBubbles] = useState(true);
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search'>('general');
-  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp'>('main');
-  const [serverUrl, setServerUrl] = useState(localStorage.getItem('lumina_server_url') || '');
-  const [apiKey, setApiKey] = useState(localStorage.getItem('lumina_api_key') || '');
-  const [mcpUrl, setMcpUrl] = useState(localStorage.getItem('lumina_mcp_url') || '');
-  const [mcpKey, setMcpKey] = useState(localStorage.getItem('lumina_mcp_key') || '');
+  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'project' | 'skills'>('main');
+  const DEFAULT_SERVER_URL = 'http://127.0.0.1:8089';
+  const DEFAULT_MCP_URL = 'http://127.0.0.1:8089';
+  const DEFAULT_API_KEY = 'llama';
+
+  const [serverUrl, setServerUrl] = useState(localStorage.getItem('lumina_server_url') || DEFAULT_SERVER_URL);
+  const [apiKey, setApiKey] = useState(localStorage.getItem('lumina_api_key') || DEFAULT_API_KEY);
+  const [mcpUrl, setMcpUrl] = useState(localStorage.getItem('lumina_mcp_url') || DEFAULT_MCP_URL);
+  const [mcpKey, setMcpKey] = useState(localStorage.getItem('lumina_mcp_key') || DEFAULT_API_KEY);
   const [tavilyApiKey, setTavilyApiKey] = useState(localStorage.getItem('lumina_tavily_key') || '');
   const [serpApiKey, setSerpApiKey] = useState(localStorage.getItem('lumina_serp_key') || '');
   
@@ -359,11 +416,15 @@ export default function App() {
 
   const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+const [isTyping, setIsTyping] = useState(false);
+const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+const [isSearchOpen, setIsSearchOpen] = useState(false);
+const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
+const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(true);
+const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
+const fileInputRef = useRef<HTMLInputElement>(null);
+const [searchQuery, setSearchQuery] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -519,6 +580,21 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
     }
   }, [messages, isTyping]);
 
+  // Auto-connect to AI server and MCP on startup
+  useEffect(() => {
+    const autoConnect = async () => {
+      // Auto-verify AI connection
+      if (serverUrl && apiKey) {
+        handleVerifyAI();
+      }
+      // Auto-connect MCP
+      if (mcpUrl && mcpKey) {
+        handleConnectMcp();
+      }
+    };
+    autoConnect();
+  }, []);
+
   const createNewChat = () => {
     const newChat: Chat = {
       id: Date.now().toString(),
@@ -532,8 +608,8 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
   };
 
   const handleSend = async (contentOverride?: string) => {
-    const content = contentOverride || input.trim();
-    if (!content) return;
+    let content = contentOverride || input.trim();
+    if (!content && attachedFiles.length === 0) return;
 
     let chatId = currentChatId;
     if (!chatId) {
@@ -546,6 +622,9 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       content: content,
       timestamp: new Date(),
     };
+
+    // Clear attached files after sending
+    setAttachedFiles([]);
 
     // Update messages for current chat
     setChats(prev => prev.map(chat => {
@@ -567,6 +646,27 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
     }
+
+    // Add interim thinking animation message while waiting for API
+    const thinkingId = (Date.now() + 1).toString();
+    const thinkingMessage: Message = {
+      id: thinkingId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      thinking: isWebSearchEnabled ? 'Searching the web...' : 'Thinking...',
+      isSearching: isWebSearchEnabled,
+    };
+    setChats(prev => prev.map(chat => {
+      if (chat.id === chatId) {
+        return {
+          ...chat,
+          messages: [...chat.messages, thinkingMessage],
+          updatedAt: new Date(),
+        };
+      }
+      return chat;
+    }));
 
     // Real AI Response from configured server - direct call
     try {
@@ -630,8 +730,9 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         );
       }
 
+      // Replace the interim thinking message with the real response
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: thinkingId,
         role: 'assistant',
         content: content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : ''),
         timestamp: new Date(),
@@ -640,9 +741,10 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
+          const filtered = chat.messages.filter(m => m.id !== thinkingId);
           return {
             ...chat,
-            messages: [...chat.messages, assistantMessage],
+            messages: [...filtered, assistantMessage],
             updatedAt: new Date(),
           };
         }
@@ -656,9 +758,11 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         content: `Error: Failed to connect to ${serverUrl}. Please check your API key and server configuration in Settings.`,
         timestamp: new Date(),
       };
+      // Replace the thinking message with the error message
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
-          return { ...chat, messages: [...chat.messages, errorMessage] };
+          const filtered = chat.messages.filter(m => m.id !== thinkingId);
+          return { ...chat, messages: [...filtered, errorMessage] };
         }
         return chat;
       }));
@@ -679,6 +783,50 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     setInput(textarea.value);
+  };
+
+  const showToast = (message: string) => {
+    const id = Date.now().toString();
+    setToasts(prev => [...prev, { id, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  };
+
+  const handleScreenshot = async () => {
+    setIsPlusMenuOpen(false);
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const track = stream.getVideoTracks()[0];
+      const imageCapture = new (window as any).ImageCapture(track);
+      const bitmap = await imageCapture.grabFrame();
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+      track.stop();
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' });
+          setAttachedFiles(prev => [...prev, file]);
+          showToast('Screenshot captured!');
+        }
+      });
+    } catch {
+      showToast('Screenshot cancelled or not supported.');
+    }
+  };
+
+  const markdownComponents = {
+    code({ className, children, ...props }: any) {
+      const match = /language-(\w+)/.exec(className || '');
+      if (match) {
+        return <CanvasBlock language={match[1]} code={String(children).replace(/\n$/, '')} />;
+      }
+      return (
+        <code className="bg-white/10 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+          {children}
+        </code>
+      );
+    }
   };
 
   return (
@@ -867,7 +1015,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                     <motion.div 
                       animate={{ scale: [1, 1.05, 1] }}
                       transition={{ duration: 4, repeat: Infinity }}
-                      className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-3xl flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm"
+                      className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-3xl flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm animate-active-ring"
                     >
                       <Sparkles size={32} />
                     </motion.div>
@@ -917,7 +1065,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                               : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
                           }`}>
                             <div className="markdown-body">
-                              <Markdown>{message.content}</Markdown>
+                              <Markdown components={markdownComponents}>{message.content}</Markdown>
                             </div>
                           </div>
                           <div className="mt-1 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight">
@@ -948,37 +1096,79 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 </div>
                               )}
 
-                              {/* Status Steps */}
+                              {/* Status Steps - Thinking / Searching Animation */}
                               {message.thinking && (
-                                <div className="space-y-3 mb-6">
+                                <div className="space-y-4 mb-6">
+                                  {/* Phase 1: Initial thought */}
                                   <motion.div 
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    className="flex items-center gap-2 text-zinc-500 group cursor-default"
+                                    initial={{ opacity: 0, y: -6 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="smooth-fade-in"
                                   >
-                                    <span className="text-[13px] font-medium">Researching interface patterns</span>
-                                    <ChevronRight size={14} className="opacity-50" />
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-5 h-5 rounded-full bg-zinc-800 dark:bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                                        <motion.div 
+                                          animate={{ rotate: 360 }} 
+                                          transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                                          className="w-2 h-2 rounded-full bg-zinc-400"
+                                        />
+                                      </div>
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-[13px] font-medium text-zinc-400 shimmer-text">
+                                          {message.thinking}
+                                        </span>
+                                        <span className="text-[11px] text-zinc-600">
+                                          {isWebSearchEnabled ? 'Searching multiple sources' : 'Processing your request'}
+                                        </span>
+                                      </div>
+                                    </div>
                                   </motion.div>
-                                  <motion.div 
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    transition={{ delay: 0.1 }}
-                                    className="flex items-center gap-2 text-white font-medium"
-                                  >
-                                    <span className="text-[13px]">Synthesizing master prompt requirements...</span>
-                                  </motion.div>
+                                  
+                                  {/* Phase 2: Processing steps that animate sequentially */}
                                   {isTyping && (
-                                    <div className="flex gap-1 py-1">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse" />
-                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:120ms]" />
-                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:240ms]" />
+                                    <>
+                                      <motion.div 
+                                        initial={{ opacity: 0, y: -6 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.15 }}
+                                        className="smooth-fade-in ml-8"
+                                      >
+                                        <div className="flex items-center gap-2 text-zinc-500">
+                                          <ChevronRight size={12} className="opacity-50 shrink-0" />
+                                          <span className="text-[12px] fade-in-token">
+                                            {isWebSearchEnabled ? 'Gathering relevant information' : 'Analyzing input'}
+                                          </span>
+                                        </div>
+                                      </motion.div>
+                                      <motion.div 
+                                        initial={{ opacity: 0, y: -6 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.3 }}
+                                        className="smooth-fade-in ml-8"
+                                      >
+                                        <div className="flex items-center gap-2 text-zinc-500">
+                                          <ChevronRight size={12} className="opacity-50 shrink-0" />
+                                          <span className="text-[12px] fade-in-token">
+                                            {isWebSearchEnabled ? 'Synthesizing search results' : 'Synthesizing response'}
+                                          </span>
+                                        </div>
+                                      </motion.div>
+                                    </>
+                                  )}
+
+                                  {/* Animated dots */}
+                                  {isTyping && (
+                                    <div className="flex gap-1.5 py-2 ml-8 smooth-fade-in">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-dot-pulse" />
+                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-dot-pulse [animation-delay:180ms]" />
+                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-dot-pulse [animation-delay:360ms]" />
                                     </div>
                                   )}
                                 </div>
                               )}
 
-                              {/* Search Progress */}
-                              {(message.isSearching || message.searchQuery) && (
+                              {/* Search Progress (when searchQuery is set) */}
+                              {message.searchQuery && !message.thinking && (
                                 <div className="space-y-4">
                                   <div className="flex items-center gap-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
                                     <div className={`w-1.5 h-1.5 rounded-full ${message.isSearching ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
@@ -1016,7 +1206,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 transition={{ duration: 0.4, delay: 0.2 }}
                                 className="prose prose-sm dark:prose-invert max-w-none text-[16px] leading-[1.6]"
                               >
-                                <Markdown>{message.content}</Markdown>
+                                <Markdown components={markdownComponents}>{message.content}</Markdown>
                               </motion.div>
 
                               {/* Footer Actions */}
@@ -1029,7 +1219,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 >
                                   <button 
                                     onClick={() => setIsSourcesPanelOpen(true)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-400 transition-all uppercase tracking-tighter active:scale-95 translate-y-2 opacity-0 animate-fade-up [animation-delay:300ms] [animation-fill-mode:forwards]"
+                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-400 transition-all uppercase tracking-tighter active:scale-95 translate-y-2 animate-fade-up [animation-delay:300ms] [animation-fill-mode:forwards]"
                                   >
                                     <Layout size={14} />
                                     {message.sources.length} Sources
@@ -1048,13 +1238,6 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                 )}
               </AnimatePresence>
               
-              {isTyping && (
-                <div className="flex gap-1.5 py-4 px-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse" />
-                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:120ms]" />
-                  <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-dot-pulse [animation-delay:240ms]" />
-                </div>
-              )}
             </div>
           </div>
 
@@ -1153,6 +1336,22 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                   rows={1}
                   className="w-full bg-transparent border-none focus:ring-0 text-[16px] p-0 resize-none min-h-[40px] text-white placeholder-gray-500 scroll-none"
                 />
+                {attachedFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-3 pb-1">
+                    {attachedFiles.map((file, idx) => (
+                      <div key={idx} className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-[11px] font-medium text-gray-300">
+                        <FileUp size={12} className="text-blue-400 shrink-0" />
+                        <span className="max-w-[120px] truncate">{file.name}</span>
+                        <button
+                          onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-gray-500 hover:text-red-400 transition-colors ml-0.5"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               
               <div className="flex items-center justify-between px-3 pb-1.5 pt-3">
@@ -1165,7 +1364,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                         setIsPlusMenuOpen(!isPlusMenuOpen);
                         setActivePlusSubMenu('main');
                       }}
-                      className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-2xl transition-all"
+                      className={`p-2 rounded-2xl transition-all ${isWebSearchEnabled ? 'text-blue-500 bg-blue-500/10 hover:bg-blue-500/20' : 'text-gray-400 hover:text-white hover:bg-white/5'} ${isWebSearchEnabled ? 'animate-active-ring' : ''}`}
                     >
                       <Plus size={20} className={`transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
                     </motion.button>
@@ -1187,7 +1386,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 { id: 'skills', label: 'Skills', icon: <Box size={16} />, hasArrow: true },
                                 { id: 'connectors', label: 'Add connectors', icon: <LinkIcon size={16} /> },
                                 { type: 'separator' },
-                                { id: 'search', label: 'Web search', icon: <Globe size={16} />, isSelected: true },
+                                { id: 'search', label: 'Web search', icon: <Globe size={16} />, isSelected: isWebSearchEnabled },
                                 { id: 'mcp_tools', label: 'MCP tools', icon: <HardDrive size={16} />, hasArrow: true },
                               ].map((item, idx) => (
                                 item.type === 'separator' ? (
@@ -1196,10 +1395,31 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   <button
                                     key={item.id}
                                     onClick={() => {
-                                      if (item.id === 'mcp_tools') {
-                                        setActivePlusSubMenu('mcp');
-                                      } else {
-                                        setIsPlusMenuOpen(false);
+                                      switch (item.id) {
+                                        case 'files':
+                                          fileInputRef.current?.click();
+                                          setIsPlusMenuOpen(false);
+                                          break;
+                                        case 'screenshot':
+                                          handleScreenshot();
+                                          break;
+                                        case 'project':
+                                          setActivePlusSubMenu('project');
+                                          break;
+                                        case 'skills':
+                                          setActivePlusSubMenu('skills');
+                                          break;
+                                        case 'connectors':
+                                          setIsSettingsOpen(true);
+                                          setActiveSettingsTab('mcp');
+                                          setIsPlusMenuOpen(false);
+                                          break;
+                                        case 'search':
+                                          setIsWebSearchEnabled(prev => !prev);
+                                          break;
+                                        case 'mcp_tools':
+                                          setActivePlusSubMenu('mcp');
+                                          break;
                                       }
                                     }}
                                     className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 hover:text-white transition-colors group/item"
@@ -1216,6 +1436,64 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 )
                               ))}
                             </>
+                          ) : activePlusSubMenu === 'project' ? (
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 mb-1">
+                                <button 
+                                  onClick={() => setActivePlusSubMenu('main')}
+                                  className="p-1 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
+                                >
+                                  <ChevronLeft size={16} />
+                                </button>
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Projects</span>
+                              </div>
+                              {['Personal', 'Work', 'Research'].map(project => (
+                                <button
+                                  key={project}
+                                  onClick={() => {
+                                    showToast(`Added to ${project} project`);
+                                    setIsPlusMenuOpen(false);
+                                    setActivePlusSubMenu('main');
+                                  }}
+                                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 hover:text-white transition-colors"
+                                >
+                                  <FolderPlus size={16} />
+                                  {project}
+                                </button>
+                              ))}
+                            </div>
+                          ) : activePlusSubMenu === 'skills' ? (
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 mb-1">
+                                <button 
+                                  onClick={() => setActivePlusSubMenu('main')}
+                                  className="p-1 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
+                                >
+                                  <ChevronLeft size={16} />
+                                </button>
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Skills</span>
+                              </div>
+                              {[
+                                { id: 'summarize', label: 'Summarize', prompt: 'Please summarize the following: ' },
+                                { id: 'translate', label: 'Translate', prompt: 'Translate the following to English: ' },
+                                { id: 'explain', label: 'Explain Code', prompt: 'Explain this code step by step: ' },
+                                { id: 'brainstorm', label: 'Brainstorm', prompt: 'Brainstorm 5 creative ideas for: ' },
+                              ].map(skill => (
+                                <button
+                                  key={skill.id}
+                                  onClick={() => {
+                                    setInput(skill.prompt);
+                                    setIsPlusMenuOpen(false);
+                                    setActivePlusSubMenu('main');
+                                    setTimeout(() => inputRef.current?.focus(), 50);
+                                  }}
+                                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 hover:text-white transition-colors"
+                                >
+                                  <Box size={16} />
+                                  {skill.label}
+                                </button>
+                              ))}
+                            </div>
                           ) : (
                             <div className="flex flex-col">
                               <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 mb-1">
@@ -1332,6 +1610,17 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                   )}
                 </div>
               </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.pdf,.txt,.md,.csv"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  setAttachedFiles(prev => [...prev, ...Array.from(e.target.files || [])]);
+                  e.target.value = '';
+                }}
+              />
             </div>
             <div className="absolute -bottom-6 left-0 right-0 text-center">
               <span className="text-[10px] text-gray-500 font-medium tracking-tight">Claude is AI and can make mistakes. Please double-check responses.</span>
@@ -1626,7 +1915,8 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                           {messages.filter(m => m.sources).length > 0 ? (
                             Array.from(new Set(messages.filter(m => m.sources).flatMap(m => m.sources || []).map(s => s.url))).map((url: string) => {
                               const source = messages.filter(m => m.sources).flatMap(m => m.sources || []).find(s => s.url === url);
-                              return (
+
+  return (
                                 <div key={url} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl">
                                   <Globe size={16} className="text-gray-400 shrink-0" />
                                   <div className="flex-1 min-w-0">
@@ -1718,6 +2008,23 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Toast Notifications */}
+      <div className="fixed bottom-32 left-1/2 -translate-x-1/2 flex flex-col gap-2 items-center z-50 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map(toast => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: 16, scale: 0.92 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.92 }}
+              className="px-4 py-2.5 bg-zinc-900 border border-white/10 rounded-2xl text-xs font-medium text-white shadow-2xl backdrop-blur-sm"
+            >
+              {toast.message}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

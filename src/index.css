@@ -1,136 +1,428 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap');
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────
+   THEME TOKENS
+───────────────────────────────────────── */
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", sans-serif;
-  
-  --color-brand-primary: #101010;
-  --color-brand-secondary: #f4f4f5;
-  --color-accent: #3b82f6;
 
-  --color-dark-bg: #09090b;
+  --color-brand-primary:   #101010;
+  --color-brand-secondary: #f4f4f5;
+  --color-accent:          #3b82f6;
+  --color-accent-purple:   #8b5cf6;
+
+  --color-dark-bg:      #09090b;
   --color-dark-sidebar: #121212;
-  --color-dark-border: #1f1f23;
-  --color-dark-text: #fafafa;
+  --color-dark-border:  #1f1f23;
+  --color-dark-text:    #fafafa;
 }
 
+/* ─────────────────────────────────────────
+   DESIGN TOKENS
+───────────────────────────────────────── */
 :root {
-  --dur-micro: 80ms;
-  --dur-short: 180ms;
+  /* durations */
+  --dur-micro:  80ms;
+  --dur-short:  180ms;
   --dur-medium: 250ms;
-  --dur-long: 350ms;
-  --dur-loop: 900ms;
+  --dur-long:   350ms;
+  --dur-loop:   900ms;
 
-  --ease-out: ease-out;
-  --ease-in: ease-in;
-  --ease-io: ease-in-out;
+  /* easings */
+  --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:    ease-in;
+  --ease-io:    ease-in-out;
   --ease-shake: cubic-bezier(0.36, 0.07, 0.19, 0.97);
 
-  --color-text-primary: #ffffff;
-  --color-text-secondary: #a1a1aa;
-  --color-text-tertiary: #71717a;
-  --color-border-primary: #3f3f46;
-  --color-border-secondary: #27272a;
-  --color-border-tertiary: #18181b;
-  --color-background-primary: #09090b;
-  --color-background-secondary: #121212;
-  --color-background-info: #1e3a8a;
-  --color-background-success: #064e3b;
-  --color-background-danger: #450a0a;
+  /* semantic colors (dark-first) */
+  --color-text-primary:        #ffffff;
+  --color-text-secondary:      #a1a1aa;
+  --color-text-tertiary:       #71717a;
+  --color-border-primary:      #3f3f46;
+  --color-border-secondary:    #27272a;
+  --color-border-tertiary:     #18181b;
+  --color-background-primary:  #09090b;
+  --color-background-secondary:#121212;
+  --color-background-info:     #1e3a8a;
+  --color-background-success:  #064e3b;
+  --color-background-danger:   #450a0a;
+
+  /* accent shortcuts */
+  --accent:        #3b82f6;
+  --accent-purple: #8b5cf6;
+  --green:         #10b981;
+  --amber:         #f59e0b;
+  --red:           #ef4444;
 }
 
-@keyframes msgIn {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes dotPulse {
-  0%, 100% { opacity: 0.25; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes activeRing {
-  0%, 100% { box-shadow: 0 0 0 0px var(--color-accent); }
-  50% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5); }
-}
-
-@keyframes traveling-dot {
-  0% { offset-distance: 0%; opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { offset-distance: 100%; opacity: 0; }
-}
-
-@keyframes micro-shake {
-  10%, 90% { transform: translateX(-1px); }
-  20%, 80% { transform: translateX(2px); }
-  30%, 50%, 70% { transform: translateX(-2px); }
-  40%, 60% { transform: translateX(2px); }
-}
-
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Animations are off by default for reduced-motion users */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .animate-msg-in { animation: msgIn var(--dur-short) var(--ease-out) both; }
-  .animate-dot-pulse { animation: dotPulse var(--dur-loop) var(--ease-io) infinite; }
-  .animate-active-ring { animation: activeRing var(--dur-loop) var(--ease-io) infinite; }
-  .animate-traveling-dot { animation: traveling-dot 0.6s var(--ease-io) infinite; }
-  .animate-micro-shake { animation: micro-shake 0.3s var(--ease-shake) both; }
-  .animate-fade-up { animation: fadeUp 150ms var(--ease-out) both; }
-}
-
+/* ─────────────────────────────────────────
+   BASE
+───────────────────────────────────────── */
 @layer base {
   body {
     @apply transition-colors duration-300;
   }
-
   h1, h2, h3 {
     @apply font-display tracking-tight;
   }
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  @apply w-1;
+/* ─────────────────────────────────────────
+   REDUCED MOTION — always first
+───────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration:   0.01ms !important;
+    transition-duration:  0.01ms !important;
+  }
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  @apply bg-transparent;
+/* ═════════════════════════════════════════
+   1. MESSAGE ANIMATIONS
+═════════════════════════════════════════ */
+
+/* -- slide-in from below (new message) */
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .animate-msg-in {
+    animation: msgIn var(--dur-short) var(--ease-out) both;
+  }
+}
+
+/* ═════════════════════════════════════════
+   2. TYPING INDICATOR (three pulsing dots)
+═════════════════════════════════════════ */
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.75); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-dot-pulse {
+    animation: dotPulse var(--dur-loop) var(--ease-io) infinite;
+  }
+  /* stagger helper classes for siblings */
+  .dot-pulse-1 { animation: dotPulse var(--dur-loop) var(--ease-io) infinite 0ms; }
+  .dot-pulse-2 { animation: dotPulse var(--dur-loop) var(--ease-io) infinite 150ms; }
+  .dot-pulse-3 { animation: dotPulse var(--dur-loop) var(--ease-io) infinite 300ms; }
+}
+
+/* ═════════════════════════════════════════
+   3. TOKEN STREAMING (fade-in per word)
+═════════════════════════════════════════ */
+
+@keyframes fadeInToken {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-in-token {
+    animation: fadeInToken 120ms ease-out both;
+  }
+}
+
+/* ═════════════════════════════════════════
+   4. SHIMMER — "Generating…" loading state
+═════════════════════════════════════════ */
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    110deg,
+    var(--color-text-tertiary) 0%,
+    var(--color-text-tertiary) 30%,
+    var(--color-text-secondary) 50%,
+    var(--color-text-tertiary) 70%,
+    var(--color-text-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.8s cubic-bezier(0.7, 0, 1, 0.4) infinite;
+}
+
+/* ═════════════════════════════════════════
+   5. STATUS FADE-UP (tool rows, results)
+═════════════════════════════════════════ */
+
+@keyframes statusFadeUp {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .smooth-fade-in,
+  .status-description {
+    animation: statusFadeUp 0.25s var(--ease-out) forwards;
+  }
+}
+
+/* ═════════════════════════════════════════
+   6. FADE-UP (generic utility)
+═════════════════════════════════════════ */
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-fade-up {
+    animation: fadeUp 150ms var(--ease-out) both;
+  }
+}
+
+/* ═════════════════════════════════════════
+   7. TOOL CALLING — pulsing border + spinner
+═════════════════════════════════════════ */
+
+/* pulsing ring on the block container */
+@keyframes toolCallPulse {
+  0%, 100% { border-color: var(--color-border-secondary); }
+  50%      { border-color: var(--accent); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tool-call-running {
+    animation: toolCallPulse 1.4s ease-in-out infinite;
+  }
+}
+
+/* spinner for individual tool rows */
+@keyframes spinnerRing {
+  to { transform: rotate(360deg); }
+}
+
+.spinner-ring {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border-secondary);
+  border-top-color: var(--accent);
+  animation: spinnerRing 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* status dots: running / done / error / pending */
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.status-dot--running {
+  background: var(--accent);
+  animation: dotPulse 0.9s ease-in-out infinite;
+}
+.status-dot--done    { background: var(--green); }
+.status-dot--error   { background: var(--red); }
+.status-dot--pending { background: var(--color-border-primary); }
+
+/* ═════════════════════════════════════════
+   8. THINKING BLOCK
+═════════════════════════════════════════ */
+
+@keyframes thinkExpand {
+  from { max-height: 0; opacity: 0; }
+  to   { max-height: 400px; opacity: 1; }
+}
+
+@keyframes thinkPulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1;   }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .thinking-block {
+    animation: thinkExpand 0.35s var(--ease-out) both;
+    overflow: hidden;
+  }
+
+  .thinking-label {
+    animation: thinkPulse 1.6s ease-in-out infinite;
+  }
+
+  .thinking-dot {
+    animation: thinkPulse 1.6s ease-in-out infinite;
+  }
+}
+
+/* ═════════════════════════════════════════
+   9. WEB SEARCH — ping ring + result fade-in
+═════════════════════════════════════════ */
+
+@keyframes searchPing {
+  0%   { transform: scale(1);   opacity: 1; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .search-ping {
+    animation: searchPing 1.2s ease-out infinite;
+  }
+
+  /* stagger search results */
+  .search-result:nth-child(1) { animation: statusFadeUp 0.25s var(--ease-out) 0ms   both; }
+  .search-result:nth-child(2) { animation: statusFadeUp 0.25s var(--ease-out) 80ms  both; }
+  .search-result:nth-child(3) { animation: statusFadeUp 0.25s var(--ease-out) 160ms both; }
+  .search-result:nth-child(4) { animation: statusFadeUp 0.25s var(--ease-out) 240ms both; }
+  .search-result:nth-child(5) { animation: statusFadeUp 0.25s var(--ease-out) 320ms both; }
+}
+
+/* ═════════════════════════════════════════
+   10. ACTIVE INPUT RING
+═════════════════════════════════════════ */
+
+@keyframes activeRing {
+  0%, 100% { box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.4); }
+  50%      { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-active-ring {
+    animation: activeRing var(--dur-loop) var(--ease-io) infinite;
+  }
+}
+
+/* ═════════════════════════════════════════
+   11. TRAVELING DOT (edges / pipelines)
+═════════════════════════════════════════ */
+
+@keyframes travelingDot {
+  0%   { stroke-dashoffset: 200; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { stroke-dashoffset: 0;   opacity: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-traveling-dot {
+    animation: travelingDot 0.6s var(--ease-io) infinite;
+  }
+}
+
+/* ═════════════════════════════════════════
+   12. NODE CONNECT ANIMATIONS (SVG)
+═════════════════════════════════════════ */
+
+@keyframes nodeFadeIn {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1);   }
+}
+
+@keyframes edgeDraw {
+  from { stroke-dashoffset: 120; }
+  to   { stroke-dashoffset: 0;   }
+}
+
+@keyframes edgeTravelLoop {
+  0%   { stroke-dashoffset: 120; opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { stroke-dashoffset: 0;   opacity: 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .node-appear {
+    animation: nodeFadeIn 0.3s var(--ease-out) both;
+  }
+  .edge-draw {
+    stroke-dasharray: 120;
+    animation: edgeDraw 0.5s var(--ease-out) both;
+  }
+  .edge-travel {
+    animation: edgeTravelLoop 1.4s linear infinite;
+  }
+}
+
+/* ═════════════════════════════════════════
+   13. SUB-PROCESS / PIPELINE STEPS
+═════════════════════════════════════════ */
+
+@keyframes pipelineStepIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+
+@keyframes progressFill {
+  from { width: 0%; }
+  to   { width: var(--pct, 70%); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pipe-step {
+    animation: pipelineStepIn 0.25s var(--ease-out) both;
+  }
+  /* stagger with nth-child or custom --delay property */
+  .pipe-step:nth-child(1) { animation-delay: 0ms;   }
+  .pipe-step:nth-child(2) { animation-delay: 80ms;  }
+  .pipe-step:nth-child(3) { animation-delay: 160ms; }
+  .pipe-step:nth-child(4) { animation-delay: 240ms; }
+  .pipe-step:nth-child(5) { animation-delay: 320ms; }
+
+  .progress-fill {
+    animation: progressFill 1.2s var(--ease-out) 0.3s both;
+  }
+}
+
+/* ═════════════════════════════════════════
+   14. MICRO-SHAKE (error / validation)
+═════════════════════════════════════════ */
+
+@keyframes microShake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px);  }
+  30%, 50%, 70% { transform: translateX(-2px); }
+  40%, 60% { transform: translateX(2px);  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-micro-shake {
+    animation: microShake 0.3s var(--ease-shake) both;
+  }
+}
+
+/* ─────────────────────────────────────────
+   SCROLLBAR
+───────────────────────────────────────── */
+.custom-scrollbar::-webkit-scrollbar       { @apply w-1; }
+.custom-scrollbar::-webkit-scrollbar-track { @apply bg-transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  @apply bg-gray-200 rounded-full hover:bg-gray-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors;
+  @apply bg-gray-200 rounded-full hover:bg-gray-300
+         dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors;
 }
 
+/* ─────────────────────────────────────────
+   DARK MODE OVERRIDES
+───────────────────────────────────────── */
 .dark {
   @apply bg-dark-bg text-dark-text;
 }
 
-.dark .bg-white { @apply bg-dark-bg; }
-.dark .bg-gray-50\/50 { @apply bg-dark-sidebar; }
-.dark .border-gray-100 { @apply border-dark-border; }
-.dark .border-gray-200 { @apply border-dark-border; }
-.dark .text-gray-900 { @apply text-dark-text; }
-.dark .text-gray-800 { @apply text-gray-200; }
-.dark .text-gray-700 { @apply text-gray-300; }
-.dark .text-gray-600 { @apply text-gray-400; }
-.dark .text-gray-500 { @apply text-gray-500; }
-.dark .hover\:bg-gray-100:hover { @apply hover:bg-white/5; }
-.dark .hover\:bg-gray-200:hover { @apply hover:bg-white/10; }
-.dark .bg-gray-100 { @apply bg-white/5; }
-.dark .bg-gray-50 { @apply bg-white/5; }
-.dark .bg-gray-200\/50 { @apply bg-white/10; }
-.dark .shadow-sm { @apply shadow-none; }
-.dark .shadow-md { @apply shadow-none; }
+.dark .bg-white              { @apply bg-dark-bg; }
+.dark .bg-gray-50\/50        { @apply bg-dark-sidebar; }
+.dark .border-gray-100       { @apply border-dark-border; }
+.dark .border-gray-200       { @apply border-dark-border; }
+.dark .text-gray-900         { @apply text-dark-text; }
+.dark .text-gray-800         { @apply text-gray-200; }
+.dark .text-gray-700         { @apply text-gray-300; }
+.dark .text-gray-600         { @apply text-gray-400; }
+.dark .text-gray-500         { @apply text-gray-500; }
+.dark .hover\:bg-gray-100:hover  { @apply hover:bg-white/5; }
+.dark .hover\:bg-gray-200:hover  { @apply hover:bg-white/10; }
+.dark .bg-gray-100           { @apply bg-white/5; }
+.dark .bg-gray-50            { @apply bg-white/5; }
+.dark .bg-gray-200\/50       { @apply bg-white/10; }
+.dark .shadow-sm             { @apply shadow-none; }
+.dark .shadow-md             { @apply shadow-none; }
 .dark .shadow-\[0_8px_30px_rgb\(0\,0\,0\,0\.04\)\] { @apply shadow-none; }
