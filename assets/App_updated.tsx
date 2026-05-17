@@ -416,12 +416,7 @@ export default function App() {
 
   const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  // Track which message id is currently animating/typing. When a new message
-  // is sent, we set this to the id of the interim thinking message. This
-  // prevents older assistant messages from re-triggering their animations
-  // whenever the global `isTyping` state changes.
-  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
+const [isTyping, setIsTyping] = useState(false);
 const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 const [isSearchOpen, setIsSearchOpen] = useState(false);
 const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
@@ -665,10 +660,6 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       thinking: isWebSearchEnabled ? 'Searching the web...' : 'Thinking...',
       isSearching: isWebSearchEnabled,
     };
-
-    // Mark this message as the one currently generating a response. This will
-    // allow the UI to animate only the latest thinking bubble.
-    setTypingMessageId(thinkingId);
     setChats(prev => prev.map(chat => {
       if (chat.id === chatId) {
         return {
@@ -742,38 +733,21 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         );
       }
 
-      // Simulate real-time streaming by gradually revealing the AI's response.
-      const finalContent = content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
-      // Reveal the assistant's message character by character
-      for (let i = 1; i <= finalContent.length; i++) {
-        const partial = finalContent.slice(0, i);
-        await new Promise(resolve => setTimeout(resolve, 35));
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? { ...m, content: partial } : m),
-            };
-          }
-          return chat;
-        }));
-      }
-      // After streaming, attach tool call nodes and finalize the message
+      // Replace the interim thinking message with the real response
+      const assistantMessage: Message = {
+        id: thinkingId,
+        role: 'assistant',
+        content: content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : ''),
+        timestamp: new Date(),
+        toolCalls: toolCallNodes,
+      };
+      
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
+          const filtered = chat.messages.filter(m => m.id !== thinkingId);
           return {
             ...chat,
-            messages: chat.messages.map(m =>
-              m.id === thinkingId
-                ? {
-                    ...m,
-                    content: finalContent.trim(),
-                    thinking: undefined,
-                    toolCalls: toolCallNodes,
-                    timestamp: new Date(),
-                  }
-                : m
-            ),
+            messages: [...filtered, assistantMessage],
             updatedAt: new Date(),
           };
         }
@@ -796,11 +770,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         return chat;
       }));
     } finally {
-      // End the typing state and clear the tracking id. Without clearing
-      // typingMessageId the UI may continue to reference the previous
-      // message when future messages are sent.
       setIsTyping(false);
-      setTypingMessageId(null);
     }
   };
 
@@ -1132,7 +1102,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   </div>
                                 </motion.div>
                                 {/* Phase 2: Processing steps that animate sequentially */}
-                                {typingMessageId === message.id && (
+                                {isTyping && (
                                   <>
                                     <motion.div
                                       initial={{ opacity: 0, y: -6 }}
@@ -1163,7 +1133,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   </>
                                 )}
                                 {/* Animated dots */}
-                                {typingMessageId === message.id && (
+                                {isTyping && (
                                   <div className="flex gap-1.5 py-2 ml-8 smooth-fade-in">
                                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-1" />
                                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-2" />
@@ -1310,7 +1280,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   </motion.div>
                                   
                                   {/* Phase 2: Processing steps that animate sequentially */}
-                                  {typingMessageId === message.id && (
+                                  {isTyping && (
                                     <>
                                       <motion.div 
                                         initial={{ opacity: 0, y: -6 }}
@@ -1342,7 +1312,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   )}
 
                                   {/* Animated dots */}
-                                  {typingMessageId === message.id && (
+                                  {isTyping && (
                                     <div className="flex gap-1.5 py-2 ml-8 smooth-fade-in">
                                       <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-1" />
                                       <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-2" />

@@ -416,12 +416,7 @@ export default function App() {
 
   const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  // Track which message id is currently animating/typing. When a new message
-  // is sent, we set this to the id of the interim thinking message. This
-  // prevents older assistant messages from re-triggering their animations
-  // whenever the global `isTyping` state changes.
-  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
+const [isTyping, setIsTyping] = useState(false);
 const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 const [isSearchOpen, setIsSearchOpen] = useState(false);
 const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
@@ -665,10 +660,6 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       thinking: isWebSearchEnabled ? 'Searching the web...' : 'Thinking...',
       isSearching: isWebSearchEnabled,
     };
-
-    // Mark this message as the one currently generating a response. This will
-    // allow the UI to animate only the latest thinking bubble.
-    setTypingMessageId(thinkingId);
     setChats(prev => prev.map(chat => {
       if (chat.id === chatId) {
         return {
@@ -742,38 +733,21 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         );
       }
 
-      // Simulate real-time streaming by gradually revealing the AI's response.
-      const finalContent = content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
-      // Reveal the assistant's message character by character
-      for (let i = 1; i <= finalContent.length; i++) {
-        const partial = finalContent.slice(0, i);
-        await new Promise(resolve => setTimeout(resolve, 35));
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? { ...m, content: partial } : m),
-            };
-          }
-          return chat;
-        }));
-      }
-      // After streaming, attach tool call nodes and finalize the message
+      // Replace the interim thinking message with the real response
+      const assistantMessage: Message = {
+        id: thinkingId,
+        role: 'assistant',
+        content: content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : ''),
+        timestamp: new Date(),
+        toolCalls: toolCallNodes,
+      };
+      
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
+          const filtered = chat.messages.filter(m => m.id !== thinkingId);
           return {
             ...chat,
-            messages: chat.messages.map(m =>
-              m.id === thinkingId
-                ? {
-                    ...m,
-                    content: finalContent.trim(),
-                    thinking: undefined,
-                    toolCalls: toolCallNodes,
-                    timestamp: new Date(),
-                  }
-                : m
-            ),
+            messages: [...filtered, assistantMessage],
             updatedAt: new Date(),
           };
         }
@@ -796,11 +770,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         return chat;
       }));
     } finally {
-      // End the typing state and clear the tracking id. Without clearing
-      // typingMessageId the UI may continue to reference the previous
-      // message when future messages are sent.
       setIsTyping(false);
-      setTypingMessageId(null);
     }
   };
 
@@ -1100,156 +1070,30 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             pulsing dots reuse the `.dot-pulse-*` classes defined in the CSS.
                           */}
                           {message.role === 'assistant' && message.thinking ? (
-                            // Render the full thinking / searching animation inside the assistant bubble
-                            <div
-                              className={`px-5 py-3 rounded-2xl shadow-sm ${
-                                'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
-                              }`}
+                            <div className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm ${
+                              'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
+                            } flex gap-2 items-center`}
                             >
-                              <div className="space-y-4">
-                                {/* Phase 1: Spinner and primary label */}
-                                <motion.div
-                                  initial={{ opacity: 0, y: -6 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  className="smooth-fade-in"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-5 h-5 rounded-full bg-zinc-800 dark:bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-                                      <motion.div
-                                        animate={{ rotate: 360 }}
-                                        transition={{ repeat: Infinity, duration: 1.5, ease: 'linear' }}
-                                        className="w-2 h-2 rounded-full bg-zinc-400"
-                                      />
-                                    </div>
-                                    <div className="flex flex-col gap-0.5">
-                                      <span className="text-[13px] font-medium text-zinc-400 shimmer-text">
-                                        {message.thinking}
-                                      </span>
-                                      <span className="text-[11px] text-zinc-600">
-                                        {isWebSearchEnabled ? 'Searching multiple sources' : 'Processing your request'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </motion.div>
-                                {/* Phase 2: Processing steps that animate sequentially */}
-                                {typingMessageId === message.id && (
-                                  <>
-                                    <motion.div
-                                      initial={{ opacity: 0, y: -6 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      transition={{ delay: 0.15 }}
-                                      className="smooth-fade-in ml-8"
-                                    >
-                                      <div className="flex items-center gap-2 text-zinc-500">
-                                        <ChevronRight size={12} className="opacity-50 shrink-0" />
-                                        <span className="text-[12px] fade-in-token">
-                                          {isWebSearchEnabled ? 'Gathering relevant information' : 'Analyzing input'}
-                                        </span>
-                                      </div>
-                                    </motion.div>
-                                    <motion.div
-                                      initial={{ opacity: 0, y: -6 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      transition={{ delay: 0.3 }}
-                                      className="smooth-fade-in ml-8"
-                                    >
-                                      <div className="flex items-center gap-2 text-zinc-500">
-                                        <ChevronRight size={12} className="opacity-50 shrink-0" />
-                                        <span className="text-[12px] fade-in-token">
-                                          {isWebSearchEnabled ? 'Synthesizing search results' : 'Synthesizing response'}
-                                        </span>
-                                      </div>
-                                    </motion.div>
-                                  </>
-                                )}
-                                {/* Animated dots */}
-                                {typingMessageId === message.id && (
-                                  <div className="flex gap-1.5 py-2 ml-8 smooth-fade-in">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-1" />
-                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-2" />
-                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-3" />
-                                  </div>
-                                )}
+                              {/* Optional shimmering label for context */}
+                              <span className="text-[13px] font-medium text-zinc-500 shimmer-text mr-2">
+                                {message.thinking}
+                              </span>
+                              {/* Pulsing dots indicator */}
+                              <div className="flex gap-1.5">
+                                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-1" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-2" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-3" />
                               </div>
                             </div>
                           ) : (
-                            <div
-                              className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm ${
-                                message.role === 'user'
-                                  ? 'bg-black dark:bg-white text-white dark:text-black rounded-tr-none'
-                                  : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
-                              }`}
-                            >
-                              {/* Optional node graph for tool calls */}
-                              {message.toolCalls && message.toolCalls.length > 0 && (
-                                <div className="mb-3">
-                                  <NodeGraph nodes={message.toolCalls} />
-                                </div>
-                              )}
-                              {/* Search progress state (when searchQuery is set) */}
-                              {message.searchQuery && !message.thinking && (
-                                <div className="space-y-2 mb-3">
-                                  <div className="flex items-center gap-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
-                                    {message.isSearching ? (
-                                      <div className="relative w-4 h-4 flex items-center justify-center">
-                                        <div className="search-ping absolute inset-0 rounded-full border border-blue-500" />
-                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 relative z-10" />
-                                      </div>
-                                    ) : (
-                                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                    )}
-                                    {message.isSearching ? 'Search in progress...' : `Searched: ${message.searchQuery}`}
-                                  </div>
-                                  {message.sources && message.sources.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                      {message.sources.slice(0, 3).map((source, sIdx) => (
-                                        <div
-                                          key={sIdx}
-                                          className="search-result flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-100 dark:border-white/10 rounded-xl text-xs transition-all shadow-sm"
-                                        >
-                                          <Globe size={12} className="text-gray-400" />
-                                          <span className="max-w-[100px] truncate font-medium">{source.title}</span>
-                                        </div>
-                                      ))}
-                                      {message.sources.length > 3 && (
-                                        <button
-                                          onClick={() => setIsSourcesPanelOpen(true)}
-                                          className="px-3 py-1.5 bg-gray-100 dark:bg-white/10 rounded-xl text-[10px] font-bold text-gray-500 hover:bg-gray-200 dark:hover:bg-white/20 transition-colors"
-                                        >
-                                          +{message.sources.length - 3} MORE
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              {/* Main message content */}
+                            <div className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm ${
+                              message.role === 'user' 
+                                ? 'bg-black dark:bg-white text-white dark:text-black rounded-tr-none' 
+                                : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
+                            }`}>
                               <div className="markdown-body">
                                 <Markdown components={markdownComponents}>{message.content}</Markdown>
                               </div>
-                              {/* Sources link for messages with sources but no searchQuery (e.g., tool results) */}
-                              {message.sources && !message.searchQuery && message.sources.length > 0 && (
-                                <div className="mt-3 flex items-center gap-2 text-xs">
-                                  {message.sources.slice(0, 3).map((source, sIdx) => (
-                                    <button
-                                      key={sIdx}
-                                      onClick={() => window.open(source.url, '_blank')}
-                                      className="flex items-center gap-1 text-blue-500 hover:underline"
-                                    >
-                                      <ExternalLink size={12} />
-                                      <span className="truncate max-w-[100px]">{source.title}</span>
-                                    </button>
-                                  ))}
-                                  {message.sources.length > 3 && (
-                                    <button
-                                      onClick={() => setIsSourcesPanelOpen(true)}
-                                      className="text-[10px] font-bold text-blue-500 hover:underline"
-                                    >
-                                      +{message.sources.length - 3} more
-                                    </button>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           )}
                           {/* Timestamp and author label */}
@@ -1310,7 +1154,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   </motion.div>
                                   
                                   {/* Phase 2: Processing steps that animate sequentially */}
-                                  {typingMessageId === message.id && (
+                                  {isTyping && (
                                     <>
                                       <motion.div 
                                         initial={{ opacity: 0, y: -6 }}
@@ -1342,7 +1186,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   )}
 
                                   {/* Animated dots */}
-                                  {typingMessageId === message.id && (
+                                  {isTyping && (
                                     <div className="flex gap-1.5 py-2 ml-8 smooth-fade-in">
                                       <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-1" />
                                       <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-2" />

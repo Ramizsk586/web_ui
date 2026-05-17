@@ -742,38 +742,21 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         );
       }
 
-      // Simulate real-time streaming by gradually revealing the AI's response.
-      const finalContent = content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
-      // Reveal the assistant's message character by character
-      for (let i = 1; i <= finalContent.length; i++) {
-        const partial = finalContent.slice(0, i);
-        await new Promise(resolve => setTimeout(resolve, 35));
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? { ...m, content: partial } : m),
-            };
-          }
-          return chat;
-        }));
-      }
-      // After streaming, attach tool call nodes and finalize the message
+      // Replace the interim thinking message with the real response
+      const assistantMessage: Message = {
+        id: thinkingId,
+        role: 'assistant',
+        content: content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : ''),
+        timestamp: new Date(),
+        toolCalls: toolCallNodes,
+      };
+      
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
+          const filtered = chat.messages.filter(m => m.id !== thinkingId);
           return {
             ...chat,
-            messages: chat.messages.map(m =>
-              m.id === thinkingId
-                ? {
-                    ...m,
-                    content: finalContent.trim(),
-                    thinking: undefined,
-                    toolCalls: toolCallNodes,
-                    timestamp: new Date(),
-                  }
-                : m
-            ),
+            messages: [...filtered, assistantMessage],
             updatedAt: new Date(),
           };
         }
