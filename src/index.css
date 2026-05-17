@@ -484,4 +484,125 @@
 .vertical-line-grow {
   animation: lineGrow 0.5s ease-out forwards;
 }
+/* ═════════════════════════════════════════
+    15. TEXTING / MESSAGE BUBBLES
+═════════════════════════════════════════ */
+
+/* ── Base bubble ─────────────────────────── */
+.txt-bubble {
+  display: inline-block;
+  max-width: 80ch;
+  padding: 0.6rem 1rem;
+  border-radius: 1.25rem;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+/* ── Sent (user) bubble ──────────────────── */
+.txt-bubble--sent {
+  background-color: var(--accent);
+  color: #ffffff;
+  border-bottom-right-radius: 0.25rem;
+  align-self: flex-end;
+}
+
+/* ── Received (assistant / other) bubble ─── */
+.txt-bubble--received {
+  background-color: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  border-bottom-left-radius: 0.25rem;
+  align-self: flex-start;
+}
+
+/* ── Dark-mode override for received ─────── */
+.dark .txt-bubble--received {
+  background-color: #1e1e24;
+  color: var(--color-text-primary);
+}
+
+/* ── Light-mode override for sent ────────── */
+:root:not(.dark) .txt-bubble--sent {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+
+/* ── Double-tick / read-receipt badge ────── */
+.txt-read-receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  margin-top: 0.25rem;
+  align-self: flex-end;
+}
+.txt-read-receipt--read {
+  color: var(--accent);
+}
+
+/* ── Message row wrapper ─────────────────── */
+.txt-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  align-items: flex-end;
+}
+.txt-row--incoming {
+  align-items: flex-start;
+}
+
+/* ═════════════════════════════════════════
+    16. TEXT FORMATTING (TEXTING STYLES)
+═════════════════════════════════════════ */
+
+/* bold */
+.txt-bold { font-weight: 700; }
+.txt-bold-600 { font-weight: 600; }
+.txt-bold-500 { font-weight: 500; }
+
+/* italic */
+.txt-italic { font-style: italic; }
+
+/* underline / line-through */
+.txt-u        { text-decoration: underline; }
+.txt-lt       { text-decoration: line-through; }
+
+/* size scale */
+.txt-xs        { font-size: 0.75rem;  }
+.txt-sm        { font-size: 0.875rem; }
+.txt-base      { font-size: 1rem;    }
+.txt-lg        { font-size: 1.125rem;}
+.txt-xl        { font-size: 1.25rem; }
+.txt-2xl       { font-size: 1.5rem;  }
+.txt-3xl       { font-size: 1.875rem;}
+
+/* colour shortcuts */
+.txt-primary   { color: var(--color-text-primary);   }
+.txt-secondary { color: var(--color-text-secondary); }
+.txt-tertiary  { color: var(--color-text-tertiary);  }
+.txt-accent    { color: var(--accent);               }
+.txt-green     { color: var(--green);                }
+.txt-red       { color: var(--red);                  }
+
+/* alignment */
+.txt-left   { text-align: left;   }
+.txt-center { text-align: center; }
+.txt-right  { text-align: right;  }
+
+/* letter-spacing */
+.txt-spaced { letter-spacing: 0.05em; }
+.txt-tight  { letter-spacing: -0.015em; }
+
+/* uppercase / lowercase / capitalize */
+.txt-uppercase { text-transform: uppercase; }
+.txt-lowercase { text-transform: lowercase; }
+.txt-capitalize{ text-transform: capitalize; }
+
+/* flex row/column helpers */
+.txt-row { display: flex; }
+.txt-col { display: flex; flex-direction: column; }
+.txt-row-center { display: flex; align-items: center; }
+.txt-row-between{ display: flex; align-items: center; justify-content: space-between; }
+
 .dark .shadow-\[0_8px_30px_rgb\(0\,0\,0\,0\.04\)\] { @apply shadow-none; }

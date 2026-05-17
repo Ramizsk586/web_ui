@@ -71,6 +71,11 @@ interface ToolCallNode {
   label: string;
   status: 'pending' | 'active' | 'complete' | 'failed';
   icon?: React.ReactNode;
+  toolName?: string;       // raw function/tool name from the API
+  argsCount?: number;      // number of arguments passed to the tool
+  durationMs?: number;     // how long this step took (set after completion)
+  resultSummary?: string;  // short human-readable result e.g. "3 results found"
+  subNodes?: ToolCallNode[]; // nested child steps this node spawned
 }
 
 interface Artifact {
@@ -95,10 +100,18 @@ interface Message {
 }
 
 interface Chat {
-  id: string;
-  title: string;
-  messages: Message[];
-  updatedAt: Date;
+   id: string;
+   title: string;
+   messages: Message[];
+   updatedAt: Date;
+}
+
+interface Tool {
+   id: string;
+   name: string;
+   description: string;
+   enabled: boolean;
+   icon: React.ReactNode;
 }
 
 const WebSearchAnimation = () => (
@@ -319,7 +332,7 @@ export default function App() {
     location: ''
   });
   const [providerProfiles, setProviderProfiles] = useState<any[]>([
-    { id: 'openai-1', name: 'OpenAI Personal', type: 'openai', apiKey: '', enabled: true, models: [] },
+    { id: 'openai-1', name: 'OpenAI Personal', type: 'openai', apiKey: '', enabled: false, models: [] },
     { id: 'anthropic-1', name: 'Anthropic Work', type: 'anthropic', apiKey: '', enabled: false, models: [] },
     { id: 'gemini-1', name: 'Google Gemini', type: 'gemini', apiKey: '', enabled: false, models: [] },
     { id: 'groq-1', name: 'Groq Cloud', type: 'groq', apiKey: '', enabled: false, models: [] },
@@ -352,14 +365,9 @@ export default function App() {
   const [searchVerificationState, setSearchVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
   const [isAiSaved, setIsAiSaved] = useState(false);
   const [isSearchSaved, setIsSearchSaved] = useState(false);
-  const [isMcpSaved, setIsMcpSaved] = useState(false);
-  const [mcpTools, setMcpTools] = useState([
-    { id: 'fetch', name: 'Fetch URL', enabled: true, description: 'Read content from any URL', icon: <Globe size={14} /> },
-    { id: 'brave', name: 'Brave Search', enabled: true, description: 'Search the web for real-time info', icon: <Search size={14} /> },
-    { id: 'fs', name: 'Filesystem', enabled: false, description: 'Read and write local files', icon: <Box size={14} /> },
-    { id: 'github', name: 'GitHub', enabled: false, description: 'Access repos and issues', icon: <Box size={14} /> },
-  ]);
-  const [inbuiltTools, setInbuiltTools] = useState([
+   const [isMcpSaved, setIsMcpSaved] = useState(false);
+   const [mcpTools, setMcpTools] = useState<Tool[]>([]);
+  const [inbuiltTools, setInbuiltTools] = useState<Tool[]>([
     { id: 'wikipedia', name: 'Wikipedia', enabled: false, description: 'Search pages and get data', icon: <Book size={16} /> },
     { id: 'image', name: 'Image Search', enabled: false, description: 'Search and send images', icon: <ImageIcon size={16} /> },
     { id: 'weather', name: 'Weather', enabled: false, description: 'Real-time weather info', icon: <CloudSun size={16} /> },
@@ -702,8 +710,8 @@ const ThinkingDots = () => (
 
 const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const [hasAnimated, setHasAnimated] = useState(false);
 
+  // Auto-expand while any node is actively running
   useEffect(() => {
     if (nodes.some(n => n.status === 'active')) {
       setIsCollapsed(false);
@@ -711,59 +719,71 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
   }, [nodes]);
 
   const activeNode = nodes.find(n => n.status === 'active');
-  const lastNode = nodes[nodes.length - 1];
+  const totalSubSteps = nodes.reduce((acc, n) => acc + (n.subNodes?.length ?? 0), 0);
+
+  // Collapsed summary line: show first 2 node labels + overflow count
+  const summaryLabel = nodes.length > 2
+    ? `${nodes[0].label}, ${nodes[1].label}  +${nodes.length - 2} more`
+    : nodes.map(n => n.label).join(' → ');
 
   return (
     <div className="my-4 w-full">
-      <motion.button 
+
+      {/* ── Collapsed header row ── */}
+      <motion.button
         layout
         onClick={() => setIsCollapsed(!isCollapsed)}
         className="flex items-center gap-2 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300 transition-all group px-1 rounded-lg"
       >
         <motion.div
           animate={{ rotate: isCollapsed ? 0 : 90 }}
-          transition={{ type: "spring", stiffness: 300, damping: 20 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
         >
           <ChevronRight size={14} className="text-zinc-400" />
         </motion.div>
-        <motion.span layout className="flex items-center gap-2 whitespace-nowrap overflow-hidden">
-          {nodes.length > 2 
-            ? `${nodes[0].label}, ${nodes[1].label} +${nodes.length - 2}` 
-            : nodes.map(n => n.label).join(', ')}
+
+        <motion.span layout className="flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-[420px]">
+          {summaryLabel}
+          {totalSubSteps > 0 && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-white/5 text-zinc-400 dark:text-zinc-500">
+              {totalSubSteps} sub-step{totalSubSteps > 1 ? 's' : ''}
+            </span>
+          )}
           {activeNode && (
-            <motion.span 
-              animate={{ opacity: [0.4, 1, 0.4] }} 
+            <motion.span
+              animate={{ opacity: [0.4, 1, 0.4] }}
               transition={{ repeat: Infinity, duration: 2 }}
               className="text-[11px] font-normal italic opacity-60"
             >
-              (running...)
+              (running…)
             </motion.span>
           )}
         </motion.span>
       </motion.button>
 
+      {/* ── Expanded timeline ── */}
       <AnimatePresence>
         {!isCollapsed && (
-          <motion.div 
+          <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden mt-4 ml-3 pl-8 border-l border-zinc-100 dark:border-white/10 space-y-6 relative"
+            className="overflow-hidden mt-4 ml-3 pl-8 border-l border-zinc-100 dark:border-white/10 space-y-5 relative"
           >
             {nodes.map((node, i) => (
               <motion.div
                 key={node.id}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.1 }}
-                className="relative flex items-start gap-4"
+                transition={{ delay: i * 0.08 }}
+                className="relative flex flex-col gap-1"
               >
-                {/* Node Dot / Icon centered on the line */}
-                <div className={`absolute -left-[33.5px] top-[4px] w-3 h-3 rounded-full border-2 bg-white dark:bg-zinc-950 z-10 transition-all duration-300 ${
-                  node.status === 'active' 
-                    ? 'border-blue-500 animate-pulse bg-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.3)]' 
-                    : node.status === 'complete' 
-                      ? 'border-emerald-500 dark:border-emerald-500/50 bg-emerald-500 dark:bg-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                {/* Timeline dot */}
+                <div className={`absolute -left-[33.5px] top-[5px] w-3 h-3 rounded-full border-2 bg-white dark:bg-zinc-950 z-10 transition-all duration-300 ${
+                  node.status === 'active'
+                    ? 'border-blue-500 animate-pulse bg-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.3)]'
+                    : node.status === 'complete'
+                      ? 'border-emerald-500 dark:border-emerald-500/50 bg-emerald-500 dark:bg-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
                       : 'border-zinc-200 dark:border-zinc-800 opacity-50'
                 }`}>
                   {node.status === 'complete' && (
@@ -778,28 +798,111 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                   )}
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[13px] font-medium transition-colors ${
-                      node.status === 'active' 
-                        ? 'text-blue-500' 
-                        : 'text-zinc-600 dark:text-zinc-400'
-                    }`}>
-                      {node.label}
+                {/* Main node label row */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {node.icon && (
+                    <span className={`${node.status === 'active' ? 'text-blue-500' : 'text-zinc-400 dark:text-zinc-600'} transition-colors`}>
+                      {node.icon}
                     </span>
-                    {node.status === 'complete' && (
-                      <span className="text-[10px] text-zinc-400 font-normal">Done</span>
-                    )}
-                  </div>
-                  {node.type === 'tool' && (
-                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 bg-zinc-50 dark:bg-white/5 px-2 py-0.5 rounded-md w-fit border border-zinc-100 dark:border-white/5">
-                      {node.icon || <Terminal size={10} />}
-                      <span className="opacity-70 font-mono italic">
-                        {node.label.toLowerCase().replace(/\s+/g, '_')}.log
-                      </span>
-                    </div>
+                  )}
+                  <span className={`text-[13px] font-medium transition-colors ${
+                    node.status === 'active'
+                      ? 'text-blue-500'
+                      : node.type === 'ai'
+                        ? 'text-zinc-700 dark:text-zinc-300'
+                        : 'text-zinc-600 dark:text-zinc-400'
+                  }`}>
+                    {node.label}
+                  </span>
+
+                  {/* Status badge */}
+                  {node.status === 'complete' && (
+                    <span className="text-[10px] text-emerald-500 dark:text-emerald-600 font-semibold uppercase tracking-widest">
+                      done
+                    </span>
+                  )}
+                  {node.status === 'active' && (
+                    <motion.span
+                      animate={{ opacity: [0.5, 1, 0.5] }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                      className="text-[10px] text-blue-400 font-semibold uppercase tracking-widest"
+                    >
+                      running…
+                    </motion.span>
+                  )}
+                  {node.status === 'failed' && (
+                    <span className="text-[10px] text-red-400 font-semibold uppercase tracking-widest">
+                      failed
+                    </span>
+                  )}
+
+                  {/* Duration badge (when available) */}
+                  {node.durationMs !== undefined && (
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono bg-zinc-100 dark:bg-white/5 px-1.5 py-0.5 rounded-md">
+                      {node.durationMs < 1000
+                        ? `${node.durationMs}ms`
+                        : `${(node.durationMs / 1000).toFixed(1)}s`}
+                    </span>
                   )}
                 </div>
+
+                {/* Result summary / args badge */}
+                {(node.resultSummary || (node.type === 'tool' && node.argsCount !== undefined)) && (
+                  <div className="flex items-center gap-2 pl-0.5 flex-wrap">
+                    {node.type === 'tool' && node.argsCount !== undefined && (
+                      <span className="text-[10px] text-zinc-500 dark:text-zinc-600 font-mono italic">
+                        {node.argsCount === 0 ? 'no args' : `${node.argsCount} arg${node.argsCount > 1 ? 's' : ''}`}
+                      </span>
+                    )}
+                    {node.resultSummary && (
+                      <span className="text-[10px] text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-white/[0.04] px-2 py-0.5 rounded-full border border-zinc-200 dark:border-white/5">
+                        {node.resultSummary}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Sub-nodes (nested steps this node spawned) ── */}
+                {node.subNodes && node.subNodes.length > 0 && (
+                  <div className="mt-2 ml-2 pl-5 border-l border-dashed border-zinc-200 dark:border-white/[0.06] space-y-2.5">
+                    {node.subNodes.map((sub, si) => (
+                      <motion.div
+                        key={sub.id}
+                        initial={{ opacity: 0, x: -6 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.08 + si * 0.05 }}
+                        className="flex items-center gap-2 flex-wrap"
+                      >
+                        {/* Sub-dot */}
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          sub.status === 'complete'
+                            ? 'bg-emerald-400 dark:bg-emerald-500/60'
+                            : sub.status === 'active'
+                              ? 'bg-blue-400 animate-pulse'
+                              : 'bg-zinc-300 dark:bg-zinc-700'
+                        }`} />
+
+                        {sub.icon && (
+                          <span className="text-zinc-400 dark:text-zinc-600">{sub.icon}</span>
+                        )}
+
+                        <span className={`text-[11px] font-medium ${
+                          sub.type === 'result'
+                            ? 'text-zinc-500 dark:text-zinc-500'
+                            : 'text-zinc-500 dark:text-zinc-500'
+                        }`}>
+                          {sub.label}
+                        </span>
+
+                        {sub.resultSummary && (
+                          <span className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono bg-zinc-100 dark:bg-white/[0.03] px-1.5 py-0.5 rounded-md border border-zinc-200 dark:border-white/[0.06]">
+                            {sub.resultSummary}
+                          </span>
+                        )}
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             ))}
           </motion.div>
@@ -998,12 +1101,7 @@ const Canvas = ({
     }
   }, [isDarkMode]);
 
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isTyping]);
+  // Auto-scroll removed: users scroll manually; use the scroll-to-bottom button instead
 
   // Auto-connect to AI server and MCP on startup
   useEffect(() => {
@@ -1100,24 +1198,173 @@ const Canvas = ({
     let searchResults: any[] = [];
     let searchProvider = "";
 
+    // Advanced DuckDuckGo fallback search utility
+    const fetchDDGResults = async (query: string): Promise<any[]> => {
+      const results: any[] = [];
+      try {
+        // DDG Instant Answer API — returns JSON, no key required
+        const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`;
+        const ddgResp = await fetch(ddgUrl);
+        if (ddgResp.ok) {
+          const ddgData = await ddgResp.json();
+
+          // 1. Instant answer
+          if (ddgData.Answer) {
+            results.push({
+              title: 'DuckDuckGo Answer',
+              url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
+              snippet: ddgData.Answer,
+              isInstant: true
+            });
+          }
+
+          // 2. Abstract (Wikipedia-style summary)
+          if (ddgData.Abstract) {
+            results.push({
+              title: ddgData.Heading || ddgData.AbstractSource || 'Summary',
+              url: ddgData.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
+              snippet: ddgData.Abstract
+            });
+          }
+
+          // 3. Related topics (actual web results equivalent)
+          if (Array.isArray(ddgData.RelatedTopics)) {
+            for (const topic of ddgData.RelatedTopics) {
+              if (topic.FirstURL && topic.Text) {
+                results.push({
+                  title: topic.Text.split(' - ')[0] || topic.Text.substring(0, 60),
+                  url: topic.FirstURL,
+                  snippet: topic.Text
+                });
+              }
+              // Nested sub-topics
+              if (topic.Topics && Array.isArray(topic.Topics)) {
+                for (const sub of topic.Topics) {
+                  if (sub.FirstURL && sub.Text) {
+                    results.push({
+                      title: sub.Text.split(' - ')[0] || sub.Text.substring(0, 60),
+                      url: sub.FirstURL,
+                      snippet: sub.Text
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          // 4. Infobox entities
+          if (ddgData.Infobox?.content?.length) {
+            const infoSnippet = ddgData.Infobox.content
+              .slice(0, 5)
+              .map((item: any) => `${item.label}: ${item.value}`)
+              .join(' | ');
+            if (infoSnippet) {
+              results.push({
+                title: `${ddgData.Heading || query} — Quick Facts`,
+                url: ddgData.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
+                snippet: infoSnippet
+              });
+            }
+          }
+
+          // 5. Results (news / external links)
+          if (Array.isArray(ddgData.Results)) {
+            for (const r of ddgData.Results) {
+              if (r.FirstURL && r.Text) {
+                results.push({
+                  title: r.Text.substring(0, 80),
+                  url: r.FirstURL,
+                  snippet: r.Text
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('DDG instant answer failed:', e);
+      }
+
+      // Fallback: DDG HTML scrape via a CORS-friendly approach
+      if (results.length === 0) {
+        try {
+          const corsProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`)}`;
+          const proxyResp = await fetch(corsProxy);
+          if (proxyResp.ok) {
+            const proxyData = await proxyResp.json();
+            const html = proxyData.contents || '';
+            // Parse result snippets from HTML
+            const snippetMatches = html.match(/class="result__snippet"[^>]*>([^<]{20,300})</g) || [];
+            const titleMatches = html.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</g) || [];
+            const urlMatches = html.match(/class="result__url"[^>]*>([^<]+)</g) || [];
+
+            const minLen = Math.min(snippetMatches.length, titleMatches.length, 8);
+            for (let i = 0; i < minLen; i++) {
+              const titleMatch = titleMatches[i].match(/href="([^"]+)"[^>]*>([^<]+)/);
+              const snippetMatch = snippetMatches[i].match(/>([^<]+)/);
+              const urlMatch = urlMatches[i]?.match(/>([^<]+)/);
+
+              if (titleMatch && snippetMatch) {
+                results.push({
+                  title: titleMatch[2].trim(),
+                  url: urlMatch ? `https://${urlMatch[1].trim()}` : titleMatch[1],
+                  snippet: snippetMatch[1].trim()
+                });
+              }
+            }
+          }
+        } catch (e2) {
+          console.warn('DDG HTML scrape failed:', e2);
+        }
+      }
+
+      return results.slice(0, 10);
+    };
+
     // 1. Perform Web Search if enabled
     if (isWebSearchEnabled) {
       try {
-        const searchResp = await fetch(`${serverUrl}/search`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            query: content, 
-            tavilyKey: tavilyApiKey, 
-            serpKey: serpApiKey 
-          })
-        });
-        
-        if (searchResp.ok) {
-          const searchData = await searchResp.json();
-          searchResults = searchData.results || [];
-          searchProvider = searchData.provider || "duckduckgo";
+        let usedFallback = false;
+
+        // Try backend search first (Tavily / SerpAPI)
+        if (tavilyApiKey || serpApiKey) {
+          const searchResp = await fetch(`${serverUrl}/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              query: content, 
+              tavilyKey: tavilyApiKey, 
+              serpKey: serpApiKey 
+            })
+          });
           
+          if (searchResp.ok) {
+            const searchData = await searchResp.json();
+            searchResults = searchData.results || [];
+            searchProvider = searchData.provider || "search";
+          } else {
+            usedFallback = true;
+          }
+        } else {
+          usedFallback = true;
+        }
+
+        // Advanced DuckDuckGo fallback when no API keys are configured or backend fails
+        if (usedFallback || searchResults.length === 0) {
+          setChats(prev => prev.map(chat => {
+            if (chat.id !== chatId) return chat;
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === thinkingId
+                ? { ...m, thinking: 'Searching DuckDuckGo...' }
+                : m)
+            };
+          }));
+
+          searchResults = await fetchDDGResults(content);
+          searchProvider = "DuckDuckGo";
+        }
+
+        if (searchResults.length > 0) {
           setChats(prev => prev.map(chat => {
             if (chat.id === chatId) {
               return {
@@ -1133,7 +1380,7 @@ const Canvas = ({
             return chat;
           }));
         } else {
-          console.error("Search API returned non-ok status:", searchResp.status);
+          console.warn("Search returned no results from any provider.");
         }
       } catch (err) {
         console.error("Search step failed:", err);
@@ -1157,8 +1404,8 @@ const Canvas = ({
       let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`;
       
       if (searchResults.length > 0) {
-        const contextString = searchResults.slice(0, 5).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
-        systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate.`;
+        const contextString = searchResults.slice(0, 8).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
+        systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
       }
 
       const response = await fetch(`${serverUrl}/chat/completions`, {
@@ -1192,12 +1439,15 @@ const Canvas = ({
         toolCallsRaw.forEach((tc: any, idx: number) => {
           const fn = tc.function || {};
           const name = fn.name || 'unknown';
-          
+          const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
+
           toolCallNodes.push({
             id: tc.id || `tc-${idx}`,
             type: 'tool',
             label: name,
             status: 'complete',
+            argsCount: typeof args === 'object' && Object.keys(args).length === 0 ? 0 : Object.keys(args).length,
+            toolName: name,          // plain-string alias for the args-badge row
             icon: name.includes('search') || name.includes('research') ? <Search size={12} /> :
                   name.includes('wikipedia') ? <Globe size={12} /> :
                   name.includes('file') || name.includes('fs') ? <Box size={12} /> :
@@ -1216,17 +1466,107 @@ const Canvas = ({
         icon: s.icon || ''
       }));
 
-      // If we have tool calls or sources, we always want nodes to represent the flow
       const finalToolNodes = [...toolCallNodes];
-      
-      // Add a synthesis node at the end
+
+      // Derive display name of the active model
+      const modelForLabel = availableModels.find(m => m.id === selectedModel);
+      const aiLabel = modelForLabel?.name || selectedModel;
+
+      // ─── Dynamic synthesis node builder ───────────────────────────────────
+      // Inspects what actually happened this turn and produces a fully
+      // dynamic node label + optional sub-nodes instead of any hardcoded text.
+      //
+      // Priority order:
+      //   1. Tool calls present              → "Ran N tools → synthesised"
+      //   2. Web search results present      → "Searched web → synthesised"
+      //   3. Web search enabled but 0 hits   → "Web search returned no results"
+      //   4. Writing style applied           → "Generated [style] response"
+      //   5. Plain direct response           → "Generated response"
+      // ─────────────────────────────────────────────────────────────────────
+
+      const synthesisSubNodes: ToolCallNode[] = [];
+
+      // Sub-node: list each tool call as a child of the synthesis node
+      if (toolCallNodes.length > 0) {
+        toolCallNodes.forEach((tc, idx) => {
+          synthesisSubNodes.push({
+            id: `synth-sub-${idx}`,
+            type: 'sub-tool',
+            label: `resolved: ${tc.toolName || tc.label}`,
+            status: 'complete',
+            icon: tc.icon,
+            resultSummary: tc.argsCount !== undefined
+              ? (tc.argsCount === 0 ? 'no args' : `${tc.argsCount} arg${tc.argsCount > 1 ? 's' : ''}`)
+              : undefined
+          });
+        });
+      }
+
+      // Sub-node: search context injection
+      if (searchResults.length > 0) {
+        synthesisSubNodes.push({
+          id: 'synth-sub-search',
+          type: 'sub-tool',
+          label: 'injected search context',
+          status: 'complete',
+          icon: <Globe size={12} />,
+          resultSummary: `${searchResults.length} result${searchResults.length > 1 ? 's' : ''} grounded`
+        });
+      }
+
+      // Sub-node: writing style modifier (only when non-default)
+      if (writingStyle && writingStyle !== 'default') {
+        synthesisSubNodes.push({
+          id: 'synth-sub-style',
+          type: 'sub-tool',
+          label: `applied style: ${writingStyle}`,
+          status: 'complete',
+          icon: <Sparkles size={12} />
+        });
+      }
+
+      // Sub-node: token output (approximate from content length)
+      if (finalContent && finalContent.length > 0) {
+        const approxTokens = Math.round(finalContent.length / 4);
+        synthesisSubNodes.push({
+          id: 'synth-sub-tokens',
+          type: 'result',
+          label: `output generated`,
+          status: 'complete',
+          icon: <Sparkles size={12} />,
+          resultSummary: `~${approxTokens} tokens`
+        });
+      }
+
+      // Compose the synthesis node label dynamically
+      let synthLabel: string;
+      if (toolCallNodes.length > 1) {
+        synthLabel = `${aiLabel} — ${toolCallNodes.length} tools resolved, synthesised`;
+      } else if (toolCallNodes.length === 1) {
+        synthLabel = `${aiLabel} — tool result synthesised`;
+      } else if (searchResults.length > 0) {
+        synthLabel = `${aiLabel} — web context synthesised`;
+      } else if (isWebSearchEnabled && searchResults.length === 0) {
+        synthLabel = `${aiLabel} — direct response (no search hits)`;
+      } else if (writingStyle && writingStyle !== 'default') {
+        synthLabel = `${aiLabel} — ${writingStyle} response generated`;
+      } else {
+        synthLabel = `${aiLabel} — response generated`;
+      }
+
+      // Append the dynamic synthesis node (with its sub-nodes)
       finalToolNodes.push({
         id: 'final-ai',
         type: 'ai',
-        label: 'AI Core synthesis',
+        label: synthLabel,
         status: 'complete',
-        icon: <Sparkles size={12} />
+        icon: <Sparkles size={12} />,
+        subNodes: synthesisSubNodes.length > 0 ? synthesisSubNodes : undefined,
+        resultSummary: synthesisSubNodes.length > 0
+          ? `${synthesisSubNodes.length} sub-step${synthesisSubNodes.length > 1 ? 's' : ''} completed`
+          : undefined
       });
+
 
       // Reveal the assistant's message character by character
       for (let i = 1; i <= finalContent.length; i++) {
@@ -2154,7 +2494,7 @@ const Canvas = ({
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute bottom-full right-0 mb-3 w-52 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] p-1.5"
+                          className="absolute bottom-full right-0 mb-3 w-64 max-h-64 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-y-auto z-[70] p-1.5"
                         >
                           {availableModels.map((model) => (
                             <button
@@ -2358,17 +2698,70 @@ const Canvas = ({
                     </motion.div>
                   )}
 
-                  {activeSettingsTab === 'ai' && (
+                  {activeSettingsTab === 'ai' && (() => {
+                    const CLOUD_PROVIDERS = [
+                      { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: <Terminal size={13} /> },
+                      { id: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1', key: '', icon: <Sparkles size={13} /> },
+                      { id: 'anthropic', label: 'Anthropic', endpoint: 'https://api.anthropic.com/v1', key: '', icon: <Brain size={13} /> },
+                      { id: 'gemini', label: 'Google Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', key: '', icon: <Globe size={13} /> },
+                      { id: 'groq', label: 'Groq', endpoint: 'https://api.groq.com/openai/v1', key: '', icon: <Terminal size={13} /> },
+                      { id: 'openrouter', label: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', key: '', icon: <Box size={13} /> },
+                      { id: 'together', label: 'Together AI', endpoint: 'https://api.together.xyz/v1', key: '', icon: <Sparkles size={13} /> },
+                      { id: 'mistral', label: 'Mistral', endpoint: 'https://api.mistral.ai/v1', key: '', icon: <Sparkles size={13} /> },
+                    ];
+                    const [selectedProvider, setSelectedProvider] = React.useState('custom');
+
+                    const handleProviderSelect = (providerId: string) => {
+                      setSelectedProvider(providerId);
+                      const p = CLOUD_PROVIDERS.find(p => p.id === providerId);
+                      if (p && p.endpoint) {
+                        setServerUrl(p.endpoint);
+                        setIsAiSaved(false);
+                      }
+                      if (providerId === 'custom') {
+                        setServerUrl(DEFAULT_SERVER_URL);
+                        setApiKey(DEFAULT_API_KEY);
+                        setIsAiSaved(false);
+                      }
+                    };
+
+                    return (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">AI Service Configuration</h3>
                         <div className="space-y-5">
+                          {/* Cloud Provider Presets */}
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Provider Preset</label>
+                            <div className="grid grid-cols-4 gap-2">
+                              {CLOUD_PROVIDERS.map(p => (
+                                <button
+                                  key={p.id}
+                                  onClick={() => handleProviderSelect(p.id)}
+                                  className={`flex flex-col items-center gap-1.5 px-2 py-2.5 rounded-xl border text-[10px] font-bold uppercase tracking-widest transition-all ${
+                                    selectedProvider === p.id
+                                      ? 'bg-blue-500/10 border-blue-500/40 text-blue-500'
+                                      : 'bg-gray-50 dark:bg-zinc-950 border-gray-100 dark:border-white/5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-200 dark:hover:border-white/10'
+                                  }`}
+                                >
+                                  <span className={selectedProvider === p.id ? 'text-blue-500' : 'text-gray-400'}>{p.icon}</span>
+                                  <span className="leading-tight text-center">{p.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                            {selectedProvider !== 'custom' && (
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 pl-1">
+                                <Check size={11} /> Endpoint auto-filled — just paste your API key below
+                              </p>
+                            )}
+                          </div>
+
                           <div className="space-y-1.5">
                             <label className="text-[11px] font-medium text-gray-500">Endpoint URL</label>
                             <input 
                               type="text" 
                               value={serverUrl}
-                              onChange={(e) => { setServerUrl(e.target.value); setIsAiSaved(false); }}
+                              onChange={(e) => { setServerUrl(e.target.value); setIsAiSaved(false); setSelectedProvider('custom'); }}
                               placeholder="http://localhost:8080/v1"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
@@ -2379,7 +2772,7 @@ const Canvas = ({
                               type="password" 
                               value={apiKey}
                               onChange={(e) => { setApiKey(e.target.value); setIsAiSaved(false); }}
-                              placeholder="Enter your API key"
+                              placeholder={selectedProvider === 'custom' ? 'Enter your API key' : `Enter your ${CLOUD_PROVIDERS.find(p=>p.id===selectedProvider)?.label} API key`}
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>
@@ -2420,14 +2813,16 @@ const Canvas = ({
                             <div className="flex gap-3">
                               <Sparkles size={16} className="text-blue-500 mt-0.5" />
                               <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">
-                                Use a custom endpoint to connect your own Lumina-compatible API or proxy server.
+                                {selectedProvider === 'custom'
+                                  ? 'Use a custom endpoint to connect your own Lumina-compatible API or proxy server.'
+                                  : `Connecting to ${CLOUD_PROVIDERS.find(p=>p.id===selectedProvider)?.label}. Paste your API key above and click Verify.`}
                               </p>
                             </div>
                           </div>
                         </div>
                       </div>
                     </motion.div>
-                  )}
+                  );})()}
 
                   {activeSettingsTab === 'search' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
@@ -2828,13 +3223,13 @@ const Canvas = ({
                                       <button 
                                         onClick={() => {
                                           // Simulate fetching models
-                                          let models = [];
+                                          let models: {id: string; name: string}[] = [];
                                           if (p.type === 'openai') models = [{id: 'gpt-4o', name: 'GPT-4o'}, {id: 'gpt-4-turbo', name: 'GPT-4 Turbo'}, {id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo'}];
                                           else if (p.type === 'anthropic') models = [{id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet'}, {id: 'claude-3-opus', name: 'Claude 3 Opus'}, {id: 'claude-3-haiku', name: 'Claude 3 Haiku'}];
                                           else if (p.type === 'gemini') models = [{id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro'}, {id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash'}];
                                           else if (p.type === 'groq') models = [{id: 'llama-3-70b', name: 'Llama 3 70B'}, {id: 'llama-3-8b', name: 'Llama 3 8B'}, {id: 'mixtral-8x7b', name: 'Mixtral 8x7B'}];
                                           else if (p.type === 'openrouter') models = [{id: 'meta-llama/llama-3-70b', name: 'Llama 3 70B'}, {id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet'}, {id: 'google/gemini-pro-1.5', name: 'Gemini 1.5 Pro'}];
-                                          
+                                           
                                           setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, models, enabled: true } : pro));
                                           showToast('Models fetched successfully!');
                                         }}
@@ -3153,39 +3548,28 @@ const Canvas = ({
                                   <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full uppercase tracking-tighter">Live Connection</span>
                                 </div>
                                 <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
-                                  {[
-                                    { id: 'web-search', name: 'Web Search', desc: 'Real-time information retrieval', icon: <Search size={14} /> },
-                                    { id: 'file-writer', name: 'File System', desc: 'Secure write access to project files', icon: <FileUp size={14} /> },
-                                    { id: 'code-exec', name: 'Code Sandbox', desc: 'Isolated code execution environment', icon: <Terminal size={14} /> }
-                                  ].map(tool => {
-                                    const isEnabled = mcpTools.find(t => t.id === tool.id)?.enabled || false;
-                                    return (
-                                      <div key={tool.id} className="p-3.5 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl flex items-center justify-between group hover:border-blue-500/30 transition-all">
-                                        <div className="flex items-center gap-3">
-                                          <div className={`p-2 rounded-xl border border-gray-100 dark:border-white/5 transition-all ${isEnabled ? 'bg-blue-500 text-white border-blue-400' : 'bg-white dark:bg-zinc-900 text-gray-400 opacity-60'}`}>
-                                            {tool.icon}
-                                          </div>
-                                          <div>
-                                            <div className="text-[11px] font-bold text-gray-900 dark:text-white uppercase tracking-tight">{tool.name}</div>
-                                            <div className="text-[10px] text-gray-400 truncate max-w-[180px]">{tool.desc}</div>
-                                          </div>
+                                  {mcpTools.map(tool => (
+                                    <div key={tool.id} className="p-3.5 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl flex items-center justify-between group hover:border-blue-500/30 transition-all">
+                                      <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded-xl border border-gray-100 dark:border-white/5 transition-all ${tool.enabled ? 'bg-blue-500 text-white border-blue-400' : 'bg-white dark:bg-zinc-900 text-gray-400 opacity-60'}`}>
+                                          {tool.icon}
                                         </div>
-                                        <button 
-                                          onClick={() => {
-                                            if (mcpTools.some(t => t.id === tool.id)) {
-                                              setMcpTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
-                                            } else {
-                                              setMcpTools(prev => [...prev, { id: tool.id, name: tool.name, enabled: true, description: tool.desc, icon: tool.icon }]);
-                                            }
-                                            showToast(`${isEnabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
-                                          }}
-                                          className={`w-10 h-5 rounded-full p-1 transition-all ${isEnabled ? 'bg-blue-500' : 'bg-gray-200 dark:bg-zinc-800'}`}
-                                        >
-                                          <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${isEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                                        </button>
+                                        <div>
+                                          <div className="text-[11px] font-bold text-gray-900 dark:text-white uppercase tracking-tight">{tool.name}</div>
+                                          <div className="text-[10px] text-gray-400 truncate max-w-[180px]">{tool.description || 'No description available'}</div>
+                                        </div>
                                       </div>
-                                    );
-                                  })}
+                                      <button 
+                                        onClick={() => {
+                                          setMcpTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                          showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
+                                        }}
+                                        className={`w-10 h-5 rounded-full p-1 transition-all ${tool.enabled ? 'bg-blue-500' : 'bg-gray-200 dark:bg-zinc-800'}`}
+                                      >
+                                        <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${tool.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                                      </button>
+                                    </div>
+                                  ))}
                                 </div>
                               </motion.div>
                             )}
