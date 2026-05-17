@@ -14,9 +14,11 @@ import {
   Send, 
   Plus, 
   Sparkles, 
-  User, 
   ArrowUp,
   Sidebar as SidebarIcon,
+  Wrench,
+  Hammer,
+  User,
   Search,
   MoreVertical,
   Settings,
@@ -25,6 +27,8 @@ import {
   HardDrive,
   Brain,
   Globe,
+  Newspaper,
+  Play,
   ExternalLink,
   X,
   Languages,
@@ -35,6 +39,11 @@ import {
   Camera,
   FolderPlus,
   Box,
+  MapPin,
+  CloudSun,
+  Book,
+  Image as ImageIcon,
+  Library,
   Link as LinkIcon,
   Check,
   ChevronRight,
@@ -42,7 +51,6 @@ import {
   Palette,
   Terminal,
   Calendar,
-  Image as ImageIcon,
   CloudMoon,
   Video,
   Copy,
@@ -84,6 +92,49 @@ interface Chat {
   updatedAt: Date;
 }
 
+const WebSearchAnimation = () => (
+  <motion.div
+    animate={{ 
+      rotate: 360,
+      scale: [1, 1.1, 1],
+    }}
+    transition={{ 
+      rotate: { repeat: Infinity, duration: 8, ease: "linear" },
+      scale: { repeat: Infinity, duration: 3, ease: "easeInOut" }
+    }}
+    className="flex items-center justify-center relative"
+  >
+    <div className="absolute inset-0 bg-teal-500/20 blur-xl rounded-full" />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-teal-500 relative z-10">
+      <circle cx="12" cy="12" r="1"/>
+      <path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9c-4.54-4.52-9.87-6.54-11.9-4.5c-2.04 2.03-.02 7.36 4.5 11.9c4.54 4.52 9.87 6.54 11.9 4.5"/>
+      <path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9c-2.03-2.04-7.36-.02-11.9 4.5c-4.52 4.54-6.54 9.87-4.5 11.9c2.03 2.04 7.36.02 11.9-4.5"/>
+    </svg>
+  </motion.div>
+);
+
+const ToolCallingAnimation = () => (
+  <motion.div
+    animate={{ 
+      y: [0, -2, 0],
+      rotate: [0, 8, -8, 0],
+      scale: [1, 1.05, 1]
+    }}
+    transition={{ 
+      repeat: Infinity, 
+      duration: 2.5, 
+      ease: "easeInOut" 
+    }}
+    className="flex items-center justify-center relative"
+  >
+    <div className="absolute inset-0 bg-emerald-500/20 blur-xl rounded-full" />
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 relative z-10">
+      <path d="m14 12l-8.381 8.38a1 1 0 0 1-3.001-3L11 9"/>
+      <path d="M15 15.5a.5.5 0 0 0 .5.5A6.5 6.5 0 0 0 22 9.5a.5.5 0 0 0-.5-.5h-1.672a2 2 0 0 1-1.414-.586l-5.062-5.062a1.205 1.205 0 0 0-1.704 0L9.352 5.648a1.205 1.205 0 0 0 0 1.704l5.062 5.062A2 2 0 0 1 15 13.828z"/>
+    </svg>
+  </motion.div>
+);
+
 interface SidebarProps {
   chats: Chat[];
   currentChatId: string | null;
@@ -93,6 +144,12 @@ interface SidebarProps {
   isCollapsed: boolean;
   onToggle: () => void;
   onOpenSettings: () => void;
+  userProfile: {
+    name: string;
+    avatar: string;
+    dob: string;
+    location: string;
+  };
 }
 
 const SidebarContent = ({ 
@@ -102,7 +159,8 @@ const SidebarContent = ({
   createNewChat, 
   setChats,
   onToggle,
-  onOpenSettings
+  onOpenSettings,
+  userProfile
 }: SidebarProps) => (
   <>
     <div className="flex items-center justify-between mb-8">
@@ -169,12 +227,16 @@ const SidebarContent = ({
         Settings
       </button>
       <div className="p-2.5 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs">
-          AR
+        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs overflow-hidden">
+          {userProfile.avatar ? (
+            <img src={userProfile.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            userProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+          )}
         </div>
         <div className="flex-1 text-xs">
-          <div className="font-semibold truncate">Abdur Ramiz</div>
-          <div className="text-gray-400">Pro Plan</div>
+          <div className="font-semibold truncate">{userProfile.name}</div>
+          <div className="text-gray-400">{userProfile.location || 'Pro Plan'}</div>
         </div>
       </div>
     </div>
@@ -239,8 +301,33 @@ export default function App() {
   const [isCompactSidebar, setIsCompactSidebar] = useState(false);
   const [useBubbles, setUseBubbles] = useState(true);
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search'>('general');
-  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'project' | 'skills'>('main');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search' | 'persona' | 'profile' | 'providers'>('general');
+  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'project' | 'skills' | 'style' | 'providers'>('main');
+  const [userProfile, setUserProfile] = useState({
+    name: 'User',
+    avatar: '',
+    dob: '',
+    location: ''
+  });
+  const [providerProfiles, setProviderProfiles] = useState<any[]>([
+    { id: 'openai-1', name: 'OpenAI Personal', type: 'openai', apiKey: '', enabled: true, models: [] },
+    { id: 'anthropic-1', name: 'Anthropic Work', type: 'anthropic', apiKey: '', enabled: false, models: [] },
+    { id: 'gemini-1', name: 'Google Gemini', type: 'gemini', apiKey: '', enabled: false, models: [] },
+    { id: 'groq-1', name: 'Groq Cloud', type: 'groq', apiKey: '', enabled: false, models: [] },
+    { id: 'openrouter-1', name: 'OpenRouter', type: 'openrouter', apiKey: '', enabled: false, models: [] },
+  ]);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const [mcpMode, setMcpMode] = useState<'local' | 'remote'>('local');
+  const [remoteMcpConfig, setRemoteMcpConfig] = useState({ url: '', status: 'disconnected' as 'disconnected' | 'connecting' | 'connected', error: '' });
+  const [testToolInput, setTestToolInput] = useState({ name: '', args: '{}' });
+  const [isTestingTool, setIsTestingTool] = useState(false);
+  const [testToolResult, setTestToolResult] = useState<any>(null);
+  const [persona, setPersona] = useState({
+    name: 'Lumina',
+    role: 'Modern Intelligence',
+    avatar: '', // Base64 or URL
+    isGeneratingAvatar: false
+  });
   const DEFAULT_SERVER_URL = '/api';
   const DEFAULT_MCP_URL = '/api';
   const DEFAULT_API_KEY = 'llama';
@@ -262,6 +349,14 @@ export default function App() {
     { id: 'brave', name: 'Brave Search', enabled: true, description: 'Search the web for real-time info', icon: <Search size={14} /> },
     { id: 'fs', name: 'Filesystem', enabled: false, description: 'Read and write local files', icon: <Box size={14} /> },
     { id: 'github', name: 'GitHub', enabled: false, description: 'Access repos and issues', icon: <Box size={14} /> },
+  ]);
+  const [inbuiltTools, setInbuiltTools] = useState([
+    { id: 'wikipedia', name: 'Wikipedia', enabled: false, description: 'Search pages and get data', icon: <Book size={16} /> },
+    { id: 'image', name: 'Image Search', enabled: false, description: 'Search and send images', icon: <ImageIcon size={16} /> },
+    { id: 'weather', name: 'Weather', enabled: false, description: 'Real-time weather info', icon: <CloudSun size={16} /> },
+    { id: 'news', name: 'Global News', enabled: false, description: 'Latest headlines and stories', icon: <Newspaper size={16} /> },
+    { id: 'dictionary', name: 'Dictionary', enabled: false, description: 'Definitions and synonyms', icon: <Library size={16} /> },
+    { id: 'coderunner', name: 'Code Runner', enabled: false, description: 'Execute code snippets', icon: <Play size={16} /> },
   ]);
   const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>([
     { id: 'lumina-ultra-plus', name: 'Lumina Ultra Plus', icon: <Sparkles size={14} />, color: 'text-blue-500' },
@@ -441,7 +536,7 @@ export default function App() {
 const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 const [isSearchOpen, setIsSearchOpen] = useState(false);
 const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(true);
+const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
 const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
 const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
 const fileInputRef = useRef<HTMLInputElement>(null);
@@ -574,7 +669,17 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                         : 'bg-white/5 border-white/5 text-zinc-600 opacity-40'
                 }`}
               >
-                {node.status === 'complete' ? <Check size={12} /> : (node.status === 'failed' ? <X size={12} /> : (node.icon || <Box size={12} />))}
+                {node.status === 'active' ? (
+                  <div className="w-4 h-4 scale-75">
+                    <ToolCallingAnimation />
+                  </div>
+                ) : node.status === 'complete' ? (
+                  <Check size={12} />
+                ) : node.status === 'failed' ? (
+                  <X size={12} />
+                ) : (
+                  node.icon || <Box size={12} />
+                )}
                 <span className="text-[11.5px] whitespace-nowrap overflow-hidden max-w-[120px] truncate">
                   {node.label}
                 </span>
@@ -719,7 +824,8 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
           model: selectedModel,
           messages: apiMessages,
           stream: false,
-          writing_style: writingStyle
+          writing_style: writingStyle,
+          system_prompt: `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`
         })
       });
 
@@ -731,6 +837,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       const choice = data.choices?.[0]?.message;
       const content = choice?.content;
       const toolCallsRaw = choice?.tool_calls;
+      const responseSources = data.sources || data.citations || [];
 
       // Build tool call chain nodes from the response
       const toolCallNodes: ToolCallNode[] = [];
@@ -752,8 +859,10 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                   <Sparkles size={12} />
           });
         });
-      } else {
-        // No tool calls — just mark AI response as complete
+      }
+
+      // If we have sources, also add an AI node
+      if (toolCallNodes.length === 0) {
         toolCallNodes.push(
           { id: '1', type: 'ai', label: 'AI Core', status: 'complete', icon: <Sparkles size={12} /> }
         );
@@ -761,10 +870,18 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
 
       // Simulate real-time streaming by gradually revealing the AI's response.
       const finalContent = content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
+      const sourcesToAttach = responseSources.map((s: any) => ({
+        title: s.title || s.url || 'Source',
+        url: s.url || s.link || '#',
+        icon: s.icon || ''
+      }));
+
       // Reveal the assistant's message character by character
       for (let i = 1; i <= finalContent.length; i++) {
         const partial = finalContent.slice(0, i);
-        await new Promise(resolve => setTimeout(resolve, 35));
+        // Faster for longer content
+        const delay = finalContent.length > 500 ? 10 : 25;
+        await new Promise(resolve => setTimeout(resolve, delay));
         setChats(prev => prev.map(chat => {
           if (chat.id === chatId) {
             return {
@@ -775,6 +892,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
           return chat;
         }));
       }
+
       // After streaming, attach tool call nodes and finalize the message
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
@@ -787,6 +905,9 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                     content: finalContent.trim(),
                     thinking: undefined,
                     toolCalls: toolCallNodes,
+                    sources: sourcesToAttach.length > 0 ? sourcesToAttach : undefined,
+                    searchQuery: isWebSearchEnabled ? userMessage.content : undefined,
+                    isSearching: false,
                     timestamp: new Date(),
                   }
                 : m
@@ -914,6 +1035,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                   setIsSettingsOpen(true);
                   setIsMobileMenuOpen(false);
                 }}
+                userProfile={userProfile}
               />
             </motion.aside>
           </>
@@ -936,6 +1058,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
             isCollapsed={false}
             onToggle={() => setIsSidebarOpen(false)}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            userProfile={userProfile}
           />
         </div>
       </motion.aside>
@@ -1131,12 +1254,8 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   className="smooth-fade-in"
                                 >
                                   <div className="flex items-center gap-3">
-                                    <div className="w-5 h-5 rounded-full bg-zinc-800 dark:bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-                                      <motion.div
-                                        animate={{ rotate: 360 }}
-                                        transition={{ repeat: Infinity, duration: 1.5, ease: 'linear' }}
-                                        className="w-2 h-2 rounded-full bg-zinc-400"
-                                      />
+                                    <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                                      {isWebSearchEnabled ? <WebSearchAnimation /> : <ToolCallingAnimation />}
                                     </div>
                                     <div className="flex flex-col gap-0.5">
                                       <span className="text-[13px] font-medium text-zinc-400 shimmer-text">
@@ -1208,9 +1327,8 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 <div className="space-y-2 mb-3">
                                   <div className="flex items-center gap-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
                                     {message.isSearching ? (
-                                      <div className="relative w-4 h-4 flex items-center justify-center">
-                                        <div className="search-ping absolute inset-0 rounded-full border border-blue-500" />
-                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 relative z-10" />
+                                      <div className="w-4 h-4 scale-75">
+                                        <WebSearchAnimation />
                                       </div>
                                     ) : (
                                       <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
@@ -1270,8 +1388,14 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                             </div>
                           )}
                           {/* Timestamp and author label */}
-                          <div className="mt-1 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight">
-                            {message.role === 'assistant' ? 'Lumina' : 'You'} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <div className="mt-1 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight flex items-center gap-2">
+                            {message.role === 'assistant' && persona.avatar && (
+                              <img src={persona.avatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
+                            )}
+                            {message.role === 'user' && userProfile.avatar && (
+                              <img src={userProfile.avatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
+                            )}
+                            {message.role === 'assistant' ? persona.name : userProfile.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </motion.div>
                       ) : (
@@ -1284,8 +1408,12 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ duration: 0.18, ease: "easeOut" }}
                             >
-                              <div className="w-6 h-6 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 text-[10px] font-bold shrink-0 mt-1">
-                                AR
+                              <div className="w-6 h-6 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 text-[10px] font-bold shrink-0 mt-1 overflow-hidden">
+                                {message.role === 'user' ? (
+                                  userProfile.avatar ? <img src={userProfile.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : userProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+                                ) : (
+                                  persona.avatar ? <img src={persona.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : <Sparkles size={12} />
+                                )}
                               </div>
                               <h3 className="text-xl font-medium text-gray-900 dark:text-white tracking-tight">{message.content}</h3>
                             </motion.div>
@@ -1308,12 +1436,8 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                     className="smooth-fade-in"
                                   >
                                     <div className="flex items-center gap-3">
-                                      <div className="w-5 h-5 rounded-full bg-zinc-800 dark:bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-                                        <motion.div 
-                                          animate={{ rotate: 360 }} 
-                                          transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
-                                          className="w-2 h-2 rounded-full bg-zinc-400"
-                                        />
+                                      <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                                        {isWebSearchEnabled ? <WebSearchAnimation /> : <ToolCallingAnimation />}
                                       </div>
                                       <div className="flex flex-col gap-0.5">
                                         <span className="text-[13px] font-medium text-zinc-400 shimmer-text">
@@ -1374,9 +1498,8 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 <div className="space-y-4">
                                   <div className="flex items-center gap-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
                                     {message.isSearching ? (
-                                      <div className="relative w-4 h-4 flex items-center justify-center">
-                                        <div className="search-ping absolute inset-0 rounded-full border border-blue-500" />
-                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 relative z-10" />
+                                      <div className="w-4 h-4 scale-75">
+                                        <WebSearchAnimation />
                                       </div>
                                     ) : (
                                       <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
@@ -1534,23 +1657,6 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         {/* Input Area */}
         <div className="px-4 pb-6 bg-transparent sticky bottom-0 shrink-0">
           <div className="max-w-3xl mx-auto relative group">
-            {/* Style Selector */}
-            <div className="flex items-center gap-2 mb-3 overflow-x-auto pb-2 no-scrollbar px-1">
-              {WRITING_STYLES.map((style) => (
-                <button
-                  key={style.id}
-                  onClick={() => setWritingStyle(style.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all shrink-0 border ${
-                    writingStyle === style.id
-                      ? 'bg-black dark:bg-white text-white dark:text-black border-transparent shadow-lg scale-105'
-                      : 'bg-white/50 dark:bg-zinc-900/50 text-gray-500 dark:text-gray-400 border-gray-100 dark:border-white/5 hover:bg-gray-100 dark:hover:bg-white/10'
-                  }`}
-                >
-                  {style.icon}
-                  {style.label}
-                </button>
-              ))}
-            </div>
 
             <div className="relative border border-white/5 bg-[#1a1a1a] dark:bg-[#121212]/95 backdrop-blur-3xl rounded-[28px] shadow-2xl focus-within:border-white/10 transition-all overflow-visible flex flex-col p-1.5 min-h-[110px] justify-between">
               <div className="flex-1 px-3 pt-2">
@@ -1561,7 +1667,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                   onKeyDown={handleKeyDown}
                   placeholder="Write a message..."
                   rows={1}
-                  className="w-full bg-transparent border-none focus:ring-0 text-[16px] p-0 resize-none min-h-[40px] text-white placeholder-gray-500 scroll-none"
+                  className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[16px] p-0 resize-none min-h-[40px] text-white placeholder-gray-500 scroll-none"
                 />
                 {attachedFiles.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-3 pb-1">
@@ -1581,7 +1687,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                 )}
               </div>
               
-              <div className="flex items-center justify-between px-3 pb-1.5 pt-3">
+              <div className="flex items-center justify-between px-3 pb-1.5 pt-0">
                 <div className="flex items-center gap-1.5">
                   <div className="relative" ref={plusMenuRef}>
                     <motion.button 
@@ -1591,7 +1697,15 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                         setIsPlusMenuOpen(!isPlusMenuOpen);
                         setActivePlusSubMenu('main');
                       }}
-                      className={`p-2 rounded-2xl transition-all ${isWebSearchEnabled ? 'text-blue-500 bg-blue-500/10 hover:bg-blue-500/20' : 'text-gray-400 hover:text-white hover:bg-white/5'} ${isWebSearchEnabled ? 'animate-active-ring' : ''}`}
+                      className={`p-2 rounded-2xl transition-all ${
+                        isWebSearchEnabled 
+                          ? 'text-blue-500 bg-blue-500/10 hover:bg-blue-500/20 animate-active-ring' 
+                          : mcpTools.some(t => t.enabled)
+                            ? 'text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 animate-active-ring-green' 
+                            : inbuiltTools.some(t => t.enabled)
+                              ? 'text-purple-500 bg-purple-500/10 hover:bg-purple-500/20 animate-active-ring-purple'
+                              : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
                     >
                       <Plus size={20} className={`transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
                     </motion.button>
@@ -1609,10 +1723,10 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                               {[
                                 { id: 'files', label: 'Add files or photos', icon: <FileUp size={16} /> },
                                 { id: 'screenshot', label: 'Take a screenshot', icon: <Camera size={16} /> },
-                                { id: 'project', label: 'Add to project', icon: <FolderPlus size={16} />, hasArrow: true },
                                 { id: 'skills', label: 'Skills', icon: <Box size={16} />, hasArrow: true },
-                                { id: 'connectors', label: 'Add connectors', icon: <LinkIcon size={16} /> },
+                                { id: 'style', label: 'Writing Style', icon: <Palette size={16} />, hasArrow: true },
                                 { type: 'separator' },
+                                { id: 'tools', label: 'Tools', icon: <Wrench size={16} />, hasArrow: true },
                                 { id: 'search', label: 'Web search', icon: <Globe size={16} />, isSelected: isWebSearchEnabled },
                                 { id: 'mcp_tools', label: 'MCP tools', icon: <HardDrive size={16} />, hasArrow: true },
                               ].map((item, idx) => (
@@ -1630,22 +1744,20 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                         case 'screenshot':
                                           handleScreenshot();
                                           break;
-                                        case 'project':
-                                          setActivePlusSubMenu('project');
-                                          break;
                                         case 'skills':
                                           setActivePlusSubMenu('skills');
                                           break;
-                                        case 'connectors':
-                                          setIsSettingsOpen(true);
-                                          setActiveSettingsTab('mcp');
-                                          setIsPlusMenuOpen(false);
+                                        case 'style':
+                                          setActivePlusSubMenu('style');
                                           break;
                                         case 'search':
                                           setIsWebSearchEnabled(prev => !prev);
                                           break;
                                         case 'mcp_tools':
                                           setActivePlusSubMenu('mcp');
+                                          break;
+                                        case 'tools':
+                                          setActivePlusSubMenu('tools');
                                           break;
                                       }
                                     }}
@@ -1663,7 +1775,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 )
                               ))}
                             </>
-                          ) : activePlusSubMenu === 'project' ? (
+                          ) : activePlusSubMenu === 'tools' ? (
                             <div className="flex flex-col">
                               <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 mb-1">
                                 <button 
@@ -1672,22 +1784,33 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                 >
                                   <ChevronLeft size={16} />
                                 </button>
-                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Projects</span>
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Built-in Tools</span>
                               </div>
-                              {['Personal', 'Work', 'Research'].map(project => (
-                                <button
-                                  key={project}
-                                  onClick={() => {
-                                    showToast(`Added to ${project} project`);
-                                    setIsPlusMenuOpen(false);
-                                    setActivePlusSubMenu('main');
-                                  }}
-                                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 hover:text-white transition-colors"
-                                >
-                                  <FolderPlus size={16} />
-                                  {project}
-                                </button>
-                              ))}
+                              <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                {inbuiltTools.map(tool => (
+                                  <button
+                                    key={tool.id}
+                                    onClick={() => {
+                                      setInbuiltTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                      showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
+                                    }}
+                                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 transition-colors group/tool"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <div className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? 'bg-blue-500/10 text-blue-500' : 'bg-white/5 text-gray-500'}`}>
+                                        {tool.icon}
+                                      </div>
+                                      <div className="text-left">
+                                        <div className={`transition-colors ${tool.enabled ? 'text-white' : 'text-gray-400'}`}>{tool.name}</div>
+                                        <div className="text-[10px] text-gray-500 truncate w-32">{tool.description}</div>
+                                      </div>
+                                    </div>
+                                    <div className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? 'bg-blue-500' : 'bg-white/10'}`}>
+                                      <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? 'right-0.5' : 'left-0.5'}`} />
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
                             </div>
                           ) : activePlusSubMenu === 'skills' ? (
                             <div className="flex flex-col">
@@ -1720,6 +1843,43 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                                   {skill.label}
                                 </button>
                               ))}
+                            </div>
+                          ) : activePlusSubMenu === 'style' ? (
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 mb-1">
+                                <button 
+                                  onClick={() => setActivePlusSubMenu('main')}
+                                  className="p-1 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
+                                >
+                                  <ChevronLeft size={16} />
+                                </button>
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Writing Style</span>
+                              </div>
+                              <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                {WRITING_STYLES.map((style) => (
+                                  <button
+                                    key={style.id}
+                                    onClick={() => {
+                                      setWritingStyle(style.id);
+                                      setIsPlusMenuOpen(false);
+                                      setActivePlusSubMenu('main');
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                                      writingStyle === style.id 
+                                        ? 'bg-white/10 text-white' 
+                                        : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <div className={`p-1.5 rounded-lg transition-colors ${writingStyle === style.id ? 'bg-blue-500/10 text-blue-500' : 'bg-white/5 text-gray-500'}`}>
+                                        {style.icon}
+                                      </div>
+                                      {style.label}
+                                    </div>
+                                    {writingStyle === style.id && <Check size={14} className="text-blue-500" />}
+                                  </button>
+                                ))}
+                              </div>
                             </div>
                           ) : (
                             <div className="flex flex-col">
@@ -1765,6 +1925,43 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                       )}
                     </AnimatePresence>
                   </div>
+
+                  {/* Status Indicators */}
+                  <AnimatePresence>
+                    {isWebSearchEnabled && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.8, x: -5 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, x: -5 }}
+                        className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20 shadow-[0_2px_10px_rgba(59,130,246,0.1)]"
+                        title="Web Search Enabled"
+                      >
+                        <Globe size={18} />
+                      </motion.div>
+                    )}
+                    {mcpTools.some(t => t.enabled) && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.8, x: -5 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, x: -5 }}
+                        className="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-[0_2px_10px_rgba(16,185,129,0.1)]"
+                        title="MCP Tools Active"
+                      >
+                        <Hammer size={18} />
+                      </motion.div>
+                    )}
+                    {inbuiltTools.some(t => t.enabled) && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.8, x: -5 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, x: -5 }}
+                        className="flex items-center justify-center w-9 h-9 rounded-xl bg-purple-500/10 text-purple-500 border border-purple-500/20 shadow-[0_2px_10px_rgba(168,85,247,0.1)]"
+                        title="Inbuilt Tools Active"
+                      >
+                        <Wrench size={18} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -1880,9 +2077,19 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                 <nav className="space-y-1 flex-1">
                   {[
                     { id: 'general', label: 'General', icon: <Settings size={16} /> },
+                    { id: 'profile', label: 'My Profile', icon: <User size={16} /> },
                     { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
+                    { id: 'providers', label: 'Providers', icon: <Box size={16} /> },
                     { id: 'search', label: 'Search', icon: <Search size={16} /> },
-                    { id: 'sources', label: 'Sources', icon: <Layout size={16} /> },
+                    {id: 'sources', label: 'Sources', icon: 
+                      <div className="relative">
+                        <Layout size={16} />
+                        {messages.filter(m => m.sources).flatMap(m => m.sources || []).length > 0 && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full border border-white dark:border-zinc-900" />
+                        )}
+                      </div>
+                    },
+                    { id: 'persona', label: 'Persona', icon: <User size={16} /> },
                     { id: 'mcp', label: 'MCP Server', icon: <HardDrive size={16} /> },
                   ].map((tab) => (
                     <button
@@ -2137,34 +2344,50 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                   {activeSettingsTab === 'sources' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
                       <div>
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Conversation Sources</h3>
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Conversation Sources</h3>
+                          <span className="text-[10px] font-bold bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full">
+                            {messages.filter(m => m.sources).flatMap(m => m.sources || []).length} Total
+                          </span>
+                        </div>
                         <div className="space-y-3">
                           {messages.filter(m => m.sources).length > 0 ? (
-                            Array.from(new Set(messages.filter(m => m.sources).flatMap(m => m.sources || []).map(s => s.url))).map((url: string) => {
-                              const source = messages.filter(m => m.sources).flatMap(m => m.sources || []).find(s => s.url === url);
-
-  return (
-                                <div key={url} className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl">
-                                  <Globe size={16} className="text-gray-400 shrink-0" />
+                            (() => {
+                              const uniqueSources = new Map();
+                              messages.filter(m => m.sources).flatMap(m => m.sources || []).forEach(s => {
+                                uniqueSources.set(s.url, s);
+                              });
+                              
+                              return Array.from(uniqueSources.values()).map((source: any) => (
+                                <motion.div 
+                                  key={source.url}
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl group hover:border-blue-500/30 transition-all"
+                                >
+                                  <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center text-gray-400 group-hover:text-blue-500 transition-colors shadow-sm shrink-0">
+                                    <Globe size={18} />
+                                  </div>
                                   <div className="flex-1 min-w-0">
-                                    <div className="text-xs font-semibold truncate">{source?.title || 'Unknown Source'}</div>
-                                    <div className="text-[10px] text-gray-400 truncate">{url}</div>
+                                    <div className="text-sm font-semibold truncate text-gray-900 dark:text-white">{source.title || 'Unknown Source'}</div>
+                                    <div className="text-[11px] text-gray-400 truncate">{source.url}</div>
                                   </div>
                                   <a 
-                                    href={url} 
+                                    href={source.url} 
                                     target="_blank" 
                                     rel="noopener noreferrer"
-                                    className="p-1.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-blue-500 rounded-md transition-colors"
+                                    className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-blue-500 rounded-xl transition-all"
                                   >
-                                    <ExternalLink size={14} />
+                                    <ExternalLink size={16} />
                                   </a>
-                                </div>
-                              );
-                            })
+                                </motion.div>
+                              ));
+                            })()
                           ) : (
-                            <div className="py-12 text-center">
-                              <Layout size={32} className="mx-auto text-gray-200 mb-3" />
-                              <p className="text-xs text-gray-400">No sources collected in this session</p>
+                            <div className="py-16 text-center bg-gray-50 dark:bg-zinc-950 border border-dashed border-gray-200 dark:border-white/5 rounded-3xl">
+                              <Layout size={40} className="mx-auto text-gray-200 dark:text-zinc-800 mb-4" />
+                              <p className="text-sm text-gray-500 font-medium">No sources collected yet</p>
+                              <p className="text-[11px] text-gray-400 mt-1">AI search results will appear here</p>
                             </div>
                           )}
                         </div>
@@ -2172,60 +2395,631 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                     </motion.div>
                   )}
 
+                  {activeSettingsTab === 'profile' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
+                      <div className="relative">
+                        {/* Profile Header Pattern */}
+                        <div className="h-28 w-full bg-linear-to-br from-blue-500/10 via-indigo-500/5 to-transparent dark:from-blue-500/10 dark:via-transparent dark:to-transparent rounded-3xl overflow-hidden border border-gray-100 dark:border-white/5 relative">
+                          <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.05]" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, currentColor 1px, transparent 0)', backgroundSize: '16px 16px' }}></div>
+                          <div className="absolute top-4 right-4 p-2 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md rounded-xl border border-white/20 dark:border-white/5">
+                            <User size={14} className="text-blue-500" />
+                          </div>
+                        </div>
+                        
+                        <div className="px-6 -mt-12 flex flex-col md:flex-row gap-6 items-end relative z-10">
+                          <div className="relative group">
+                            <div className="w-32 h-32 rounded-[2rem] bg-white dark:bg-zinc-900 p-1.5 shadow-2xl shadow-blue-500/10 transition-all group-hover:scale-[1.02]">
+                              <div className="w-full h-full rounded-[1.6rem] bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 flex items-center justify-center overflow-hidden relative">
+                                {userProfile.avatar ? (
+                                  <img 
+                                    src={userProfile.avatar} 
+                                    alt="Avatar" 
+                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="flex flex-col items-center gap-2 opacity-30">
+                                    <User size={40} />
+                                  </div>
+                                )}
+                                
+                                <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center text-white backdrop-blur-sm">
+                                  <Camera size={20} className="mb-2 translate-y-2 group-hover:translate-y-0 transition-transform" />
+                                  <span className="text-[10px] font-bold uppercase tracking-widest translate-y-2 group-hover:translate-y-0 transition-transform delay-75">Update Photo</span>
+                                  <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => {
+                                          setUserProfile(prev => ({ ...prev, avatar: reader.result as string }));
+                                          showToast('Profile photo updated!');
+                                        };
+                                        reader.readAsDataURL(file);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                            <div className="absolute bottom-2 right-2 w-5 h-5 rounded-full bg-emerald-500 border-[3px] border-white dark:border-zinc-900 shadow-lg" />
+                          </div>
+                          
+                          <div className="flex-1 pb-2">
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">{userProfile.name || 'Anonymous User'}</h2>
+                            <div className="flex items-center gap-3 mt-1">
+                              <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest bg-blue-500/10 px-2 py-0.5 rounded-md">Pro Member</span>
+                              <div className="flex items-center gap-1.5 text-gray-400">
+                                <MapPin size={12} />
+                                <span className="text-[11px] font-medium">{userProfile.location || 'Earth'}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
+                        <div className="space-y-6">
+                          <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                              <div className="w-1 h-1 rounded-full bg-blue-500" />
+                              Identity Information
+                            </h4>
+                            
+                            <div className="space-y-4 bg-gray-50/50 dark:bg-zinc-900/30 p-5 rounded-3xl border border-gray-100 dark:border-white/5">
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Display Name</label>
+                                <div className="relative">
+                                  <User size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                  <input 
+                                    type="text" 
+                                    value={userProfile.name}
+                                    onChange={(e) => setUserProfile(prev => ({ ...prev, name: e.target.value }))}
+                                    placeholder="Your name"
+                                    className="w-full h-11 pl-11 pr-4 bg-white dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none font-medium transition-all"
+                                  />
+                                </div>
+                              </div>
+                              
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Date of Birth</label>
+                                <div className="relative">
+                                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                                    <Calendar size={14} />
+                                  </div>
+                                  <input 
+                                    type="date" 
+                                    value={userProfile.dob}
+                                    onChange={(e) => setUserProfile(prev => ({ ...prev, dob: e.target.value }))}
+                                    className="w-full h-11 pl-11 pr-4 bg-white dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none font-medium transition-all"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-6">
+                           <div className="space-y-4">
+                            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                              <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                              Regional Settings
+                            </h4>
+                            
+                            <div className="space-y-4 bg-gray-50/50 dark:bg-zinc-900/30 p-5 rounded-3xl border border-gray-100 dark:border-white/5">
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Current Location</label>
+                                <div className="relative">
+                                  <MapPin size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                  <input 
+                                    type="text" 
+                                    value={userProfile.location}
+                                    onChange={(e) => setUserProfile(prev => ({ ...prev, location: e.target.value }))}
+                                    placeholder="e.g. London, UK"
+                                    className="w-full h-11 pl-11 pr-4 bg-white dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none font-medium transition-all"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="p-4 bg-blue-50 dark:bg-blue-500/5 rounded-2xl border border-blue-100 dark:border-blue-500/20">
+                                <div className="flex gap-3">
+                                  <Sparkles size={16} className="text-blue-500 shrink-0 mt-0.5" />
+                                  <p className="text-[10px] leading-relaxed text-blue-600 dark:text-blue-400 font-medium">
+                                    Your regional info helps AI provide more localized and relevant results for weather, time, and services.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 'providers' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                      <div className="flex flex-col h-full">
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">AI Providers</h3>
+                          <button 
+                            className="text-[10px] font-bold text-blue-500 hover:underline uppercase tracking-widest"
+                            onClick={() => {
+                              const newProvider = {
+                                id: `custom-${Date.now()}`,
+                                name: 'New Provider',
+                                type: 'openai',
+                                apiKey: '',
+                                enabled: true,
+                                models: []
+                              };
+                              setProviderProfiles(prev => [...prev, newProvider]);
+                            }}
+                          >
+                            + Add Profile
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3 mb-8">
+                          {providerProfiles.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => {
+                                setProviderProfiles(prev => prev.map(pro => ({ ...pro, active: pro.id === p.id })));
+                              }}
+                              className={`p-3.5 rounded-2xl border transition-all text-left group relative overflow-hidden ${
+                                p.active || (!providerProfiles.some(px => px.active) && p.id === providerProfiles[0].id)
+                                  ? 'bg-blue-500/5 border-blue-500/40' 
+                                  : 'bg-white dark:bg-zinc-900/50 border-gray-100 dark:border-white/5 hover:border-gray-200 dark:hover:border-white/10'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-2.5 relative z-10">
+                                <div className={`p-2 rounded-xl transition-colors ${p.enabled ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-zinc-800 text-gray-400'}`}>
+                                  {p.type === 'openai' && <Sparkles size={14} />}
+                                  {p.type === 'anthropic' && <Brain size={14} />}
+                                  {p.type === 'gemini' && <Sparkles size={14} />}
+                                  {p.type === 'groq' && <Terminal size={14} />}
+                                  {p.type === 'openrouter' && <Globe size={14} />}
+                                </div>
+                                <div className={`w-1.5 h-1.5 rounded-full ${p.enabled ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-gray-300 dark:bg-zinc-700'}`} />
+                              </div>
+                              <div className="text-[11px] font-bold truncate uppercase tracking-widest text-gray-900 dark:text-white relative z-10">{p.name}</div>
+                              <div className="text-[10px] text-gray-400 capitalize font-medium relative z-10">{p.type}</div>
+                              
+                              {(p.active || (!providerProfiles.some(px => px.active) && p.id === providerProfiles[0].id)) && (
+                                <motion.div 
+                                  layoutId="provider-active-bg"
+                                  className="absolute inset-0 bg-blue-500/5 dark:bg-blue-500/[0.02]"
+                                  initial={false}
+                                />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+
+                        {providerProfiles.find(p => p.active || (!providerProfiles.some(px => px.active) && p.id === providerProfiles[0].id)) && (
+                          <div className="space-y-6">
+                            {(() => {
+                              const p = providerProfiles.find(px => px.active || (!providerProfiles.some(py => py.active) && px.id === providerProfiles[0].id));
+                              return (
+                                <>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                      <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Profile Name</label>
+                                      <input 
+                                        type="text" 
+                                        value={p.name}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, name: val } : pro));
+                                        }}
+                                        className="w-full h-10 px-4 text-xs bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 transition-all font-medium"
+                                      />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                      <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Provider Type</label>
+                                      <div className="relative">
+                                        <select 
+                                          value={p.type}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, type: val } : pro));
+                                          }}
+                                          className="w-full h-10 px-4 text-xs bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl outline-none appearance-none font-medium text-gray-900 dark:text-white"
+                                        >
+                                          <option value="openai" className="bg-white dark:bg-zinc-900">OpenAI</option>
+                                          <option value="anthropic" className="bg-white dark:bg-zinc-900">Anthropic</option>
+                                          <option value="gemini" className="bg-white dark:bg-zinc-900">Google Gemini</option>
+                                          <option value="groq" className="bg-white dark:bg-zinc-900">Groq</option>
+                                          <option value="openrouter" className="bg-white dark:bg-zinc-900">OpenRouter</option>
+                                        </select>
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                                          <ChevronDown size={14} />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">API Key</label>
+                                    <div className="relative group">
+                                      <input 
+                                        type="password" 
+                                        value={p.apiKey}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, apiKey: val } : pro));
+                                        }}
+                                        placeholder={`Enter your ${p.type} API key`}
+                                        className="w-full h-10 pl-4 pr-20 text-xs bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                                      />
+                                      <button 
+                                        onClick={() => {
+                                          // Simulate fetching models
+                                          let models = [];
+                                          if (p.type === 'openai') models = [{id: 'gpt-4o', name: 'GPT-4o'}, {id: 'gpt-4-turbo', name: 'GPT-4 Turbo'}, {id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo'}];
+                                          else if (p.type === 'anthropic') models = [{id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet'}, {id: 'claude-3-opus', name: 'Claude 3 Opus'}, {id: 'claude-3-haiku', name: 'Claude 3 Haiku'}];
+                                          else if (p.type === 'gemini') models = [{id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro'}, {id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash'}];
+                                          else if (p.type === 'groq') models = [{id: 'llama-3-70b', name: 'Llama 3 70B'}, {id: 'llama-3-8b', name: 'Llama 3 8B'}, {id: 'mixtral-8x7b', name: 'Mixtral 8x7B'}];
+                                          else if (p.type === 'openrouter') models = [{id: 'meta-llama/llama-3-70b', name: 'Llama 3 70B'}, {id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet'}, {id: 'google/gemini-pro-1.5', name: 'Gemini 1.5 Pro'}];
+                                          
+                                          setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, models, enabled: true } : pro));
+                                          showToast('Models fetched successfully!');
+                                        }}
+                                        className="absolute right-1 top-1 h-8 px-4 bg-gray-900 dark:bg-white text-white dark:text-black text-[10px] font-bold rounded-lg hover:opacity-90 transition-all uppercase tracking-widest active:scale-95"
+                                      >
+                                        Fetch
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="pt-6 border-t border-gray-100 dark:border-white/5 space-y-4">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Available Models</h4>
+                                        <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-500/10 text-blue-500 rounded-md">
+                                          {(p.models || []).length}
+                                        </span>
+                                      </div>
+                                      <div className="relative group">
+                                        <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                                        <input 
+                                          type="text"
+                                          placeholder="Search models..."
+                                          value={modelSearchQuery}
+                                          onChange={(e) => setModelSearchQuery(e.target.value)}
+                                          className="h-9 pl-9 pr-4 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl text-[10px] outline-none w-48 focus:w-64 transition-all focus:ring-1 focus:ring-blue-500/30"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2.5 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                                      {(p.models || []).filter((m: any) => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase())).map((model: any) => (
+                                        <div 
+                                          key={model.id}
+                                          className="flex items-center justify-between p-3 bg-white dark:bg-zinc-900 border border-gray-50 dark:border-white/5 rounded-2xl group hover:border-blue-500/30 hover:bg-blue-50/10 dark:hover:bg-blue-900/10 transition-all cursor-pointer"
+                                          onClick={() => {
+                                            const newModel = { 
+                                              id: model.id, 
+                                              name: model.name, 
+                                              icon: <Sparkles size={14} />, 
+                                              color: 'text-blue-500' 
+                                            };
+                                            if (!availableModels.some(m => m.id === model.id)) {
+                                              setAvailableModels(prev => [...prev, newModel]);
+                                            }
+                                            setSelectedModel(model.id);
+                                            showToast(`Switched to ${model.name}`);
+                                          }}
+                                        >
+                                          <div className="flex items-center gap-3 overflow-hidden">
+                                            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500 transition-colors group-hover:bg-blue-500 group-hover:text-white">
+                                              <Sparkles size={12} />
+                                            </div>
+                                            <div className="flex flex-col min-w-0">
+                                              <span className="text-[11px] font-bold text-gray-900 dark:text-white truncate uppercase tracking-tight">{model.name}</span>
+                                              <span className="text-[10px] text-gray-400 truncate font-mono">{model.id}</span>
+                                            </div>
+                                          </div>
+                                          <div className="text-[10px] font-bold text-blue-500 opacity-0 group-hover:opacity-100 transition-all uppercase tracking-widest translate-x-2 group-hover:translate-x-0">
+                                            Select
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {(!p.models || p.models.length === 0) && (
+                                        <div className="col-span-2 py-12 text-center text-gray-400 text-[10px] font-bold uppercase tracking-widest italic bg-gray-50/50 dark:bg-zinc-900/20 rounded-3xl border border-dashed border-gray-100 dark:border-white/5 flex flex-col items-center gap-3">
+                                          <Box size={24} className="opacity-20" />
+                                          <span>Enter API Key and click Fetch</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 'persona' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">AI Character Persona</h3>
+                        
+                        <div className="flex flex-col md:flex-row gap-8">
+                          <div className="flex flex-col items-center gap-4">
+                            <div className="w-32 h-32 rounded-3xl bg-gray-100 dark:bg-zinc-950 border-2 border-dashed border-gray-200 dark:border-white/5 flex items-center justify-center overflow-hidden relative group">
+                              {persona.avatar ? (
+                                <img 
+                                  src={persona.avatar} 
+                                  alt="Avatar" 
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <div className="text-gray-400 flex flex-col items-center gap-2">
+                                  <User size={32} />
+                                  <span className="text-[10px] font-bold uppercase tracking-widest">No Avatar</span>
+                                </div>
+                              )}
+                              {persona.isGeneratingAvatar && (
+                                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+                                  <div className="w-8 h-8 scale-75">
+                                    <Sparkles className="text-blue-500 animate-pulse" size={24} />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-2 w-full">
+                              <label className="w-full px-4 py-2 bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-2">
+                                <FileUp size={14} />
+                                Upload Custom Image
+                                <input 
+                                  type="file" 
+                                  className="hidden" 
+                                  accept="image/*"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const reader = new FileReader();
+                                      reader.onloadend = () => {
+                                        setPersona(prev => ({ ...prev, avatar: reader.result as string }));
+                                        showToast('Avatar uploaded successfully!');
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="flex-1 space-y-4">
+                            <div className="space-y-2">
+                              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest ml-1">AI Name</label>
+                              <input 
+                                type="text" 
+                                value={persona.name}
+                                onChange={(e) => setPersona(prev => ({ ...prev, name: e.target.value }))}
+                                placeholder="e.g. Lumina, JARVIS, Samantha"
+                                className="w-full h-11 px-4 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl text-sm focus:ring-1 focus:ring-blue-500 outline-none"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-widest ml-1">System Prompt / Personality</label>
+                              <textarea 
+                                value={persona.role}
+                                onChange={(e) => setPersona(prev => ({ ...prev, role: e.target.value }))}
+                                placeholder="Define the AI's hidden personality, behavior rules, and core identity..."
+                                className="w-full h-32 px-4 py-3 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl text-sm focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+                              />
+                            </div>
+                            <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                              <div className="flex gap-3 text-blue-500">
+                                <Sparkles size={16} className="shrink-0 mt-0.5" />
+                                <p className="text-[11px] leading-relaxed">
+                                  Define the AI's system prompt here. This will be sent as a permanent instruction to guide every response.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
                   {activeSettingsTab === 'mcp' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                       <div>
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">MCP Server (Tools)</h3>
-                        <div className="space-y-5">
-                          <div className="space-y-1.5">
-                            <label className="text-[11px] font-medium text-gray-500">Server URL</label>
-                            <input 
-                              type="text" 
-                              value={mcpUrl}
-                              onChange={(e) => { setMcpUrl(e.target.value); setIsMcpSaved(false); }}
-                              placeholder="http://localhost:8080"
-                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-[11px] font-medium text-gray-500">Server API Key</label>
-                            <input 
-                              type="password" 
-                              value={mcpKey}
-                              onChange={(e) => { setMcpKey(e.target.value); setIsMcpSaved(false); }}
-                              placeholder="Enter your API key"
-                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                            />
-                          </div>
-                          <div className="flex gap-3">
-                            <button
-                              onClick={handleSaveMcp}
-                              className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-                                isMcpSaved 
-                                  ? 'bg-emerald-500 text-white' 
-                                  : 'bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-zinc-300 border border-gray-200 dark:border-white/10 hover:bg-gray-200 dark:hover:bg-white/10'
-                              }`}
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">MCP Protocol Configuration</h3>
+                          <div className="flex bg-gray-100 dark:bg-zinc-950 p-1 rounded-xl">
+                            <button 
+                              onClick={() => setMcpMode('local')}
+                              className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${mcpMode === 'local' ? 'bg-white dark:bg-zinc-800 text-blue-500 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
                             >
-                              {isMcpSaved ? <Check size={16} /> : null}
-                              {isMcpSaved ? 'Saved' : 'Save Config'}
+                              Local MCP
                             </button>
-                            <button
-                              onClick={handleConnectMcp}
-                              className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all ${
-                                isMcpConnected 
-                                  ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30' 
-                                  : 'bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10'
-                              }`}
+                            <button 
+                              onClick={() => setMcpMode('remote')}
+                              className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${mcpMode === 'remote' ? 'bg-white dark:bg-zinc-800 text-blue-500 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
                             >
-                              {isConnectingMcp ? (
-                                <span className="flex items-center justify-center gap-2">
-                                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                                  Connecting...
-                                </span>
-                              ) : (isMcpConnected ? 'Disconnect' : 'Connect')}
+                              Remote Server
                             </button>
                           </div>
                         </div>
+
+                        {mcpMode === 'local' ? (
+                          <div className="space-y-5">
+                            <div className="space-y-1.5">
+                              <label className="text-[11px] font-medium text-gray-500">Server URL</label>
+                              <input 
+                                type="text" 
+                                value={mcpUrl}
+                                onChange={(e) => { setMcpUrl(e.target.value); setIsMcpSaved(false); }}
+                                placeholder="http://localhost:8080"
+                                className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="text-[11px] font-medium text-gray-500">Server API Key</label>
+                              <input 
+                                type="password" 
+                                value={mcpKey}
+                                onChange={(e) => { setMcpKey(e.target.value); setIsMcpSaved(false); }}
+                                placeholder="Enter your API key"
+                                className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                              />
+                            </div>
+                            <div className="flex gap-3">
+                              <button
+                                onClick={handleSaveMcp}
+                                className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                                  isMcpSaved 
+                                    ? 'bg-emerald-500 text-white' 
+                                    : 'bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-zinc-300 border border-gray-200 dark:border-white/10 hover:bg-gray-200 dark:hover:bg-white/10'
+                                }`}
+                              >
+                                {isMcpSaved ? <Check size={16} /> : null}
+                                {isMcpSaved ? 'Saved' : 'Save Config'}
+                              </button>
+                              <button
+                                onClick={handleConnectMcp}
+                                className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all ${
+                                  isMcpConnected 
+                                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30' 
+                                    : 'bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10'
+                                }`}
+                              >
+                                {isConnectingMcp ? (
+                                  <span className="flex items-center justify-center gap-2">
+                                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                                    Connecting...
+                                  </span>
+                                ) : (isMcpConnected ? 'Disconnect' : 'Connect')}
+                              </button>
+                            </div>
+
+                            {isMcpConnected && mcpTools.length > 0 && (
+                              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="pt-4 space-y-4">
+                                <div className="flex items-center justify-between px-1">
+                                  <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    Discovered Local Tools
+                                  </h4>
+                                  <span className="text-[10px] font-bold text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-full">
+                                    {mcpTools.length} Total
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2.5 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                                  {mcpTools.map(tool => (
+                                    <div key={tool.id} className="p-3 bg-white dark:bg-zinc-900 border border-gray-50 dark:border-white/5 rounded-2xl flex items-center justify-between group hover:border-blue-500/30 transition-all">
+                                      <div className="flex items-center gap-3">
+                                        <div className={`p-2 rounded-xl transition-all ${tool.enabled ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-zinc-800 text-gray-400'}`}>
+                                          <Wrench size={14} />
+                                        </div>
+                                        <div className="min-w-0">
+                                          <div className="text-[11px] font-bold text-gray-900 dark:text-white uppercase tracking-tight truncate">{tool.name}</div>
+                                          <div className="text-[10px] text-gray-400 truncate max-w-[200px]">{tool.description || 'No description available'}</div>
+                                        </div>
+                                      </div>
+                                      <button 
+                                        onClick={() => {
+                                          setMcpTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                          showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
+                                        }}
+                                        className={`w-10 h-5 rounded-full p-1 transition-all ${tool.enabled ? 'bg-blue-500' : 'bg-gray-200 dark:bg-zinc-800'}`}
+                                      >
+                                        <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${tool.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            <div className="p-6 bg-blue-500/[0.03] dark:bg-blue-500/[0.02] border border-blue-500/10 rounded-3xl space-y-4">
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Remote Server URL</label>
+                                <div className="relative">
+                                  <Globe size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                  <input 
+                                    type="text" 
+                                    value={remoteMcpConfig.url}
+                                    onChange={(e) => setRemoteMcpConfig(prev => ({ ...prev, url: e.target.value, status: 'disconnected', error: '' }))}
+                                    placeholder="https://mcp-server.example.com"
+                                    className="w-full h-11 pl-11 pr-4 bg-white dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none font-medium transition-all"
+                                  />
+                                </div>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  if (!remoteMcpConfig.url) return;
+                                  setRemoteMcpConfig(prev => ({ ...prev, status: 'connecting', error: '' }));
+                                  // Simulate connection
+                                  await new Promise(r => setTimeout(r, 1500));
+                                  setRemoteMcpConfig(prev => ({ ...prev, status: 'connected' }));
+                                  showToast('Connected to remote MCP server!');
+                                }}
+                                disabled={remoteMcpConfig.status === 'connecting' || !remoteMcpConfig.url}
+                                className="w-full h-11 bg-black dark:bg-white text-white dark:text-black rounded-2xl text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                              >
+                                {remoteMcpConfig.status === 'connecting' ? (
+                                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                                ) : <LinkIcon size={14} />}
+                                {remoteMcpConfig.status === 'connecting' ? 'Establishing Connection...' : remoteMcpConfig.status === 'connected' ? 'Connected' : 'Connect to Server'}
+                              </button>
+                            </div>
+
+                            {remoteMcpConfig.status === 'connected' && (
+                              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                                <div className="flex items-center justify-between px-1">
+                                  <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Discovered Tools</h4>
+                                  <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full uppercase tracking-tighter">Live Connection</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                                  {[
+                                    { id: 'web-search', name: 'Web Search', desc: 'Real-time information retrieval', icon: <Search size={14} /> },
+                                    { id: 'file-writer', name: 'File System', desc: 'Secure write access to project files', icon: <FileUp size={14} /> },
+                                    { id: 'code-exec', name: 'Code Sandbox', desc: 'Isolated code execution environment', icon: <Terminal size={14} /> }
+                                  ].map(tool => {
+                                    const isEnabled = mcpTools.find(t => t.id === tool.id)?.enabled || false;
+                                    return (
+                                      <div key={tool.id} className="p-3.5 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl flex items-center justify-between group hover:border-blue-500/30 transition-all">
+                                        <div className="flex items-center gap-3">
+                                          <div className={`p-2 rounded-xl border border-gray-100 dark:border-white/5 transition-all ${isEnabled ? 'bg-blue-500 text-white border-blue-400' : 'bg-white dark:bg-zinc-900 text-gray-400 opacity-60'}`}>
+                                            {tool.icon}
+                                          </div>
+                                          <div>
+                                            <div className="text-[11px] font-bold text-gray-900 dark:text-white uppercase tracking-tight">{tool.name}</div>
+                                            <div className="text-[10px] text-gray-400 truncate max-w-[180px]">{tool.desc}</div>
+                                          </div>
+                                        </div>
+                                        <button 
+                                          onClick={() => {
+                                            if (mcpTools.some(t => t.id === tool.id)) {
+                                              setMcpTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                            } else {
+                                              setMcpTools(prev => [...prev, { id: tool.id, name: tool.name, enabled: true, description: tool.desc, icon: tool.icon }]);
+                                            }
+                                            showToast(`${isEnabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
+                                          }}
+                                          className={`w-10 h-5 rounded-full p-1 transition-all ${isEnabled ? 'bg-blue-500' : 'bg-gray-200 dark:bg-zinc-800'}`}
+                                        >
+                                          <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${isEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </motion.div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}

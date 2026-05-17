@@ -288,9 +288,25 @@
   50%      { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15); }
 }
 
+@keyframes activeRingGreen {
+  0%, 100% { box-shadow: 0 0 0 0px rgba(16, 185, 129, 0.4); }
+  50%      { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
+}
+
+@keyframes activeRingPurple {
+  0%, 100% { box-shadow: 0 0 0 0px rgba(168, 85, 247, 0.4); }
+  50%      { box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.15); }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .animate-active-ring {
     animation: activeRing var(--dur-loop) var(--ease-io) infinite;
+  }
+  .animate-active-ring-green {
+    animation: activeRingGreen var(--dur-loop) var(--ease-io) infinite;
+  }
+  .animate-active-ring-purple {
+    animation: activeRingPurple var(--dur-loop) var(--ease-io) infinite;
   }
 }
 

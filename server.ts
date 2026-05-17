@@ -37,8 +37,8 @@ async function startServer() {
 
   app.post("/api/chat/completions", async (req, res) => {
     try {
-      const { model: requestedModel, messages, writing_style = 'default' } = req.body;
-      const modelId = (requestedModel && requestedModel.includes("ultra")) ? "gemini-1.5-pro" : "gemini-1.5-flash";
+      const { model: requestedModel, messages, writing_style = 'default', system_prompt } = req.body;
+      const modelId = (requestedModel && requestedModel.includes("ultra")) ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
       
       const stylePrompts: Record<string, string> = {
         poem: "You are a poet. Write in a poetic style with stanzas and rhythmic line breaks. Use evocative language.",
@@ -49,21 +49,21 @@ async function startServer() {
         default: "You are a helpful and intelligent assistant. Be concise and use Markdown for formatting."
       };
 
-      const generativeModel = (genAI as any).getGenerativeModel({ 
+      const baseInstruction = system_prompt || stylePrompts[writing_style] || stylePrompts.default;
+
+      // Use modern SDK method
+      const response = await (genAI as any).models.generateContent({
         model: modelId,
-        systemInstruction: stylePrompts[writing_style] || stylePrompts.default
+        contents: messages.map((m: any) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        })),
+        config: {
+          systemInstruction: baseInstruction
+        }
       });
 
-      const lastMessage = messages[messages.length - 1];
-      const history = messages.slice(0, -1).map((m: any) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }]
-      }));
-
-      const chat = generativeModel.startChat({ history });
-      const result = await chat.sendMessage(lastMessage.content);
-      const response = await result.response;
-      const text = response.text();
+      const text = response.text;
 
       res.json({
         choices: [{
@@ -75,6 +75,42 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error("Gemini Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/generate-avatar", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      
+      // Use gemini-2.5-flash-image for standard image generation
+      const response = await (genAI as any).models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: {
+          parts: [{ text: `A clean, minimalist profile avatar image for a digital assistant persona. Description: ${prompt}. Cinematic lighting, flat design aesthetic, centered composition, high quality, square format.` }]
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: "1:1"
+          }
+        }
+      });
+
+      let base64Image = "";
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          base64Image = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          break;
+        }
+      }
+
+      if (!base64Image) {
+        throw new Error("No image data returned from model");
+      }
+
+      res.json({ imageUrl: base64Image });
+    } catch (error: any) {
+      console.error("Avatar Gen Error:", error);
       res.status(500).json({ error: error.message });
     }
   });
