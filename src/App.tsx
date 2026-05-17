@@ -1039,6 +1039,11 @@ export default function App() {
     const content = override || input.trim();
     if (!content && attachedFiles.length === 0) return;
 
+    // Warn if files are attached but will be ignored (model doesn't support them)
+    if (attachedFiles.length > 0) {
+      showToast('Note: File attachments are currently ignored by this model');
+    }
+
     let chatId = currentChatId;
     if (!chatId) chatId = createNewChat();
 
@@ -1057,8 +1062,8 @@ export default function App() {
     const thinkId = (Date.now() + 1).toString();
     const thinkMsg: Message = {
       id: thinkId, role: 'assistant', content: '', timestamp: new Date(),
-      thinking: isWebSearch ? 'Searching the web…' : 'Thinking…',
-      isSearching: isWebSearch,
+      thinking: 'Thinking…',
+      isSearching: false,
     };
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, thinkMsg] } : c));
 
@@ -1071,7 +1076,12 @@ export default function App() {
       const res = await fetch(`${serverUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: selectedModel, messages: apiMessages, stream: false }),
+        body: JSON.stringify({ 
+          model: selectedModel, 
+          messages: apiMessages, 
+          stream: false,
+          tool_choice: isWebSearch ? 'auto' : 'none'
+        }),
       });
 
       if (!res.ok) throw new Error(`API ${res.status}`);
@@ -1350,20 +1360,20 @@ export default function App() {
                           ) : (
                             <div className="space-y-4 max-w-2xl px-1">
 
-{/* Tool call chain */}
-                                {msg.toolCalls && msg.toolCalls.length > 0 && (
-                                  <div className="mb-2">
-                                    {msg.toolCalls.some(tc => tc.type === 'tool' && !isWebSearchTool(tc.label)) && (
-                                      <>
-                                        <LlamaBridgeIndicator toolName={msg.toolCalls.find(tc => tc.type === 'tool' && !isWebSearchTool(tc.label))?.label} />
-                                        <NodeGraph nodes={msg.toolCalls} />
-                                      </>
-                                    )}
-                                    {!msg.toolCalls.some(tc => tc.type === 'tool' && !isWebSearchTool(tc.label)) && (
+                              {/* Tool call chain */}
+                              {msg.toolCalls && msg.toolCalls.length > 0 && (
+                                <div className="mb-2">
+                                  {msg.toolCalls.some(tc => tc.type === 'tool' && !isWebSearchTool(tc.label)) && (
+                                    <>
+                                      <LlamaBridgeIndicator toolName={msg.toolCalls.find(tc => tc.type === 'tool' && !isWebSearchTool(tc.label))?.label} />
                                       <NodeGraph nodes={msg.toolCalls} />
-                                    )}
-                                  </div>
-                                )}
+                                    </>
+                                  )}
+                                  {!msg.toolCalls.some(tc => tc.type === 'tool' && !isWebSearchTool(tc.label)) && (
+                                    <NodeGraph nodes={msg.toolCalls} />
+                                  )}
+                                </div>
+                              )}
 
                               {/* Thinking / searching animation */}
                               {msg.thinking && (
@@ -1395,6 +1405,11 @@ export default function App() {
                                   <PipelineStep icon="✍️" label="Composing answer" status="pending" />
                                   <PipelineStep icon="✅" label="Verify output" status="pending" />
                                 </div>
+                              )}
+
+                              {/* Web search animation during search */}
+                              {msg.isSearching && isTyping && !msg.content && (
+                                <WebSearchAnimation query={msg.searchQuery || '...'} />
                               )}
 
                               {/* Web search block */}

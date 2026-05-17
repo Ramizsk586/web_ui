@@ -6,7 +6,7 @@
   "main": "electron-main.js",
   "scripts": {
     "dev": "tsx server.ts",
-    "dev:electron": "concurrently \"npm run dev\" \"wait-on http://127.0.0.1:5173 && NODE_ENV=development electron .\" --kill-others-on-fail",
+    "dev:electron": "concurrently \"npm run dev\" \"wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development electron .\" --kill-others-on-fail",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "build:electron": "vite build && electron-builder --dir",
@@ -42,6 +42,7 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "wait-on": "^9.0.10"
+    "wait-on": "^9.0.10",
+    "cross-env": "^7.0.3"
   }
 }

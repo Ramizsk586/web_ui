@@ -63,7 +63,7 @@ async function createMainWindow() {
     frame: true,
     titleBarStyle: 'default',
     backgroundColor: '#0f0f0f',
-    icon: path.join(__dirname, 'assets/icon.png'),
+    icon: path.join(__dirname, 'assets/sparkles.ico'),
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -136,6 +136,14 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  if (loadingWindow) loadingWindow.close();
-  if (mainWindow) mainWindow.close();
+  try {
+    if (loadingWindow) loadingWindow.close();
+  } catch (e) {
+    // ignore
+  }
+  try {
+    if (mainWindow) mainWindow.close();
+  } catch (e) {
+    // ignore
+  }
 });
