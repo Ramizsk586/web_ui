@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite --port=3000 --host=0.0.0.0",
-    "dev:electron": "wait-on http://127.0.0.1:3000 && cross-env NODE_ENV=development electron . || echo 'Electron failed to start (likely due to missing display in server environment)'",
+    "dev:electron": "wait-on http://127.0.0.1:3000 && (node -e \"if(process.platform==='linux' && !process.env.DISPLAY) process.exit(1)\" && cross-env NODE_ENV=development electron . || echo '--- Headless Cloud Env: Electron launch skipped. This script will work when run locally on your desktop. ---')",
     "build": "vite build",
-    "build:electron": "vite build && electron-builder",
+    "build:electron": "vite build && electron-builder --dir",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
