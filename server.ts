@@ -10,9 +10,9 @@ const isDev = process.env.NODE_ENV !== "production";
 
 async function startServer() {
   const app = express();
-  const PORT = 5173;
-  const LLAMA_BRIDGE_URL = "http://localhost:8089";
+  const PORT = 3000;
 
+  // Handle JSON and CORS
   app.use(express.json());
 
   app.use((_req, res, next) => {
@@ -21,58 +21,74 @@ async function startServer() {
     next();
   });
 
+  // Gemini API Implementation
+  const genaiModule = await import("@google/genai");
+  const GoogleGenAI = genaiModule.GoogleGenAI;
+  const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+
   app.get("/api/models", async (req, res) => {
-    try {
-      const response = await fetch(`${LLAMA_BRIDGE_URL}/v1/models`);
-      const data = await response.json();
-      res.json(data);
-    } catch (error: any) {
-      console.error("Llama Bridge Error:", error);
-      res.status(500).json({ error: error.message });
-    }
+    res.json({
+      data: [
+        { id: "gemini-1.5-pro", display_name: "Lumina Ultra Plus" },
+        { id: "gemini-1.5-flash", display_name: "Lumina Mini Flash" }
+      ]
+    });
   });
 
   app.post("/api/chat/completions", async (req, res) => {
     try {
-      const response = await fetch(`${LLAMA_BRIDGE_URL}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req.body)
+      const { model: requestedModel, messages, writing_style = 'default' } = req.body;
+      const modelId = (requestedModel && requestedModel.includes("ultra")) ? "gemini-1.5-pro" : "gemini-1.5-flash";
+      
+      const stylePrompts: Record<string, string> = {
+        poem: "You are a poet. Write in a poetic style with stanzas and rhythmic line breaks. Use evocative language.",
+        letter: "You are a correspondent. Format your response as a formal or informal letter, including a date, salutation, body, and closing.",
+        story: "You are a storyteller. Use narrative techniques, descriptive imagery, and character-driven prose. Structure your response as a story.",
+        essay: "You are an academic writer. Use a formal tone, clear structure (introduction, body, conclusion), and logical flow.",
+        script: "You are a screenwriter. Use standard screenplay formatting for dialogues, scene headings, and action lines.",
+        default: "You are a helpful and intelligent assistant. Be concise and use Markdown for formatting."
+      };
+
+      const generativeModel = (genAI as any).getGenerativeModel({ 
+        model: modelId,
+        systemInstruction: stylePrompts[writing_style] || stylePrompts.default
       });
-      const data = await response.json();
-      res.json(data);
+
+      const lastMessage = messages[messages.length - 1];
+      const history = messages.slice(0, -1).map((m: any) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      }));
+
+      const chat = generativeModel.startChat({ history });
+      const result = await chat.sendMessage(lastMessage.content);
+      const response = await result.response;
+      const text = response.text();
+
+      res.json({
+        choices: [{
+          message: {
+            content: text,
+            role: "assistant"
+          }
+        }]
+      });
     } catch (error: any) {
-      console.error("Llama Bridge Error:", error);
+      console.error("Gemini Error:", error);
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.get("/api/v1/tools", async (req, res) => {
-    try {
-      const response = await fetch(`${LLAMA_BRIDGE_URL}/v1/tools`);
-      const data = await response.json();
-      res.json(data);
-    } catch (error: any) {
-      console.error("MCP Error:", error);
-      res.json({ tools: [] });
-    }
+  // MCP Mock Routes for Verification
+  app.get("/api/v1/tools", (req, res) => {
+    res.json({ tools: [] });
   });
 
-  app.post("/api/list_tools", async (req, res) => {
-    try {
-      const response = await fetch(`${LLAMA_BRIDGE_URL}/v1/tools`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req.body)
-      });
-      const data = await response.json();
-      res.json(data);
-    } catch (error: any) {
-      console.error("MCP Error:", error);
-      res.json({ tools: [] });
-    }
+  app.post("/api/list_tools", (req, res) => {
+    res.json({ tools: [] });
   });
 
+  // Vite middleware for development
   if (isDev) {
     try {
       console.log('⚡ Starting Vite middleware...');
@@ -95,8 +111,8 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n🚀 Server ready at http://localhost:${PORT}`);
-    console.log(`🔗 Connected to Llama Bridge at ${LLAMA_BRIDGE_URL}`);
+    console.log(`\n🚀 Proxy server ready at http://0.0.0.0:${PORT}`);
+    console.log(`🔗 App connects via internal API proxy`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);
@@ -106,6 +122,7 @@ async function startServer() {
     }
   });
 
+  // Graceful shutdown on Ctrl+C / SIGTERM
   const shutdown = () => {
     console.log('\n🛑 Shutting down server...');
     server.close(() => {
