@@ -173,71 +173,36 @@ async function startServer() {
       // 3. Fallback to DDG (DuckDuckGo) - Advanced
       if (results.length === 0) {
         try {
-          // Get related topics for broader context
-          let relatedTopics: any[] = [];
-          try {
-            const related = await search(query, {
-              region: 'wt-wt',
-              safeSearch: 'moderate',
-              timeLimit: 'y',
-              maxResults: 5,
-              relatedTopics: true
-            });
-            if (related.relatedTopics && related.relatedTopics.length > 0) {
-              relatedTopics = related.relatedTopics.map((t: any) => ({
-                title: t.text,
-                url: t.url,
-                snippet: t.text
-              }));
-            }
-          } catch {
-            // Related topics not available
-          }
-
-          // Perform main search with enhanced parameters
+          // Perform main search
           const ddgResults = await search(query, {
             region: 'wt-wt',
-            safeSearch: 'moderate',
-            timeLimit: 'y',
-            maxResults: 20,
-            instantAnswer: true
+            safeSearch: -1,
+            time: 'y',
+            offset: 0
           });
 
-          if (ddgResults.results && ddgResults.results.length > 0) {
-            // Get instant answer if available
-            let answer: any = null;
-            if (ddgResults.abstractText) {
-              answer = {
-                type: 'answer',
-                title: ddgResults.heading || query,
-                snippet: ddgResults.abstractText,
-                url: ddgResults.abstractURL || ''
-              };
-            }
-
-            // Also try to get more detailed content from top results
-            let enrichedResults: any[] = [];
-            for (const result of ddgResults.results.slice(0, 10)) {
-              enrichedResults.push({
-                title: result.title,
-                url: result.url,
-                snippet: result.description || result.snippet || result.abstractText || ''
-              });
-            }
-
-            // Prepend instant answer as first result if available
-            if (answer) {
-              enrichedResults.unshift(answer);
-            }
-
-            // Add related topics at the end for additional context
-            if (relatedTopics.length > 0) {
-              enrichedResults = [...enrichedResults, ...relatedTopics];
-            }
-
-            results = enrichedResults;
-            provider = "duckduckgo";
+          // Map results with description as snippet
+          let enrichedResults: any[] = [];
+          for (const result of ddgResults.results.slice(0, 10)) {
+            enrichedResults.push({
+              title: result.title,
+              url: result.url,
+              snippet: result.description
+            });
           }
+
+          // Add related searches for additional context
+          if (ddgResults.related && ddgResults.related.length > 0) {
+            const relatedTopics = ddgResults.related.map((t) => ({
+              title: t.text,
+              url: '',
+              snippet: t.text
+            }));
+            enrichedResults = [...enrichedResults, ...relatedTopics];
+          }
+
+          results = enrichedResults;
+          provider = "duckduckgo";
         } catch (e) {
           console.error("DuckDuckGo search failed:", e);
         }
