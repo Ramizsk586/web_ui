@@ -47,7 +47,18 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`\n🚀 Server ready at http://localhost:${PORT}`);
+    console.log(`📁 Proxy endpoint: http://localhost:${PORT}/api/proxy`);
+  }).on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n❌ Error: Port ${PORT} is already in use.`);
+      console.error(`💡 Tips:`);
+      console.error(`   1. Stop any other instances of this app (running as "npm run dev")`);
+      console.error(`   2. If you are running locally, use 'netstat -ano | findstr :${PORT}' (Windows) or 'lsof -i :${PORT}' (Mac/Linux) to find the process ID and kill it.`);
+      process.exit(1);
+    } else {
+      console.error(`\n❌ Server failed to start:`, err);
+    }
   });
 }
 
