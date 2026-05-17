@@ -182,7 +182,7 @@ export default function App() {
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp'>('main');
-  const [serverUrl, setServerUrl] = useState(localStorage.getItem('lumina_server_url') || 'https://api.lumina.ai/v1');
+  const [serverUrl, setServerUrl] = useState(localStorage.getItem('lumina_server_url') || '');
   const [apiKey, setApiKey] = useState(localStorage.getItem('lumina_api_key') || '');
   const [mcpUrl, setMcpUrl] = useState(localStorage.getItem('lumina_mcp_url') || '');
   const [mcpKey, setMcpKey] = useState(localStorage.getItem('lumina_mcp_key') || '');
@@ -219,19 +219,12 @@ export default function App() {
   const handleVerifyAI = async () => {
     setAiVerificationState('verifying');
     try {
-      // llama-bridge supports /v1/models
-      const response = await fetch('/api/proxy', {
-        method: 'POST',
+      // Direct call to llama-bridge /models endpoint
+      const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          url: `${serverUrl}/v1/models`,
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`
-          }
-        })
+          'Authorization': `Bearer ${apiKey}`
+        }
       });
       
       if (response.ok) {
@@ -291,19 +284,12 @@ export default function App() {
     if (!mcpUrl) return;
     setIsConnectingMcp(true);
     try {
-      // llama-bridge exposes tools at /v1/tools or /api/tools
-      const response = await fetch('/api/proxy', {
-        method: 'POST',
+      // Direct call to llama-bridge /v1/tools endpoint
+      const response = await fetch(`${mcpUrl}/v1/tools`, {
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          url: `${mcpUrl}/v1/tools`,
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${mcpKey}`
-          }
-        })
+          'Authorization': `Bearer ${mcpKey}`
+        }
       });
 
       if (response.ok) {
@@ -337,16 +323,14 @@ export default function App() {
         }
         setIsMcpConnected(true);
       } else {
-        // Try fallback MCP list_tools if /v1/tools failed
-        const mcpResp = await fetch('/api/proxy', {
+        // Try fallback MCP list_tools if /v1/tools failed - direct call
+        const mcpResp = await fetch(`${mcpUrl}/list_tools`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: `${mcpUrl}/list_tools`,
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${mcpKey}` },
-            body: {}
-          })
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${mcpKey}` 
+          },
+          body: JSON.stringify({})
         });
         
         if (mcpResp.ok) {
@@ -421,98 +405,101 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [allCompleted, setAllCompleted] = useState(false);
+const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
+    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [allCompleted, setAllCompleted] = useState(false);
+    const [startTime] = useState(() => Date.now());
 
-  useEffect(() => {
-    const active = nodes.some(n => n.status === 'active');
-    const pending = nodes.some(n => n.status === 'pending');
-    if (!active && !pending && nodes.length > 0) {
-      const timer = setTimeout(() => {
-        setAllCompleted(true);
-        setIsCollapsed(true);
-      }, 800);
-      return () => clearTimeout(timer);
-    } else {
-      setAllCompleted(false);
+    useEffect(() => {
+      const active = nodes.some(n => n.status === 'active');
+      const pending = nodes.some(n => n.status === 'pending');
+      if (!active && !pending && nodes.length > 0) {
+        const timer = setTimeout(() => {
+          setAllCompleted(true);
+          setIsCollapsed(true);
+        }, 800);
+        return () => clearTimeout(timer);
+      } else {
+        setAllCompleted(false);
+      }
+    }, [nodes]);
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    if (isCollapsed) {
+      const lastTool = nodes.filter(n => n.type === 'tool').pop();
+      return (
+        <motion.button 
+          layoutId="node-graph"
+          onClick={() => setIsCollapsed(false)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-background-secondary)] border border-[var(--color-border-tertiary)] rounded-full text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-background-primary)] transition-all cursor-pointer shadow-sm group"
+        >
+          <span className="text-[var(--color-background-success)] font-bold">✓</span>
+          <span>{lastTool?.label || nodes.length + ' tools'} · {elapsed}s</span>
+          <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+        </motion.button>
+      );
     }
-  }, [nodes]);
 
-  if (isCollapsed) {
-    const lastTool = nodes.filter(n => n.type === 'tool').pop();
     return (
-      <motion.button 
+      <motion.div 
         layoutId="node-graph"
-        onClick={() => setIsCollapsed(false)}
-        className="flex items-center gap-2 px-3 py-1.5 bg-[#121212] border border-white/10 rounded-full text-[11px] font-medium text-zinc-400 hover:bg-[#1a1a1a] transition-all cursor-pointer shadow-sm group"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="p-4 bg-[var(--color-background-secondary)] border border-[var(--color-border-tertiary)] rounded-xl overflow-hidden relative group max-w-fit shadow-2xl animate-fade-up"
       >
-        <span className="text-emerald-500 font-bold">✓</span>
-        <span>{lastTool?.label || nodes.length + ' tools'} · 1.2s</span>
-        <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-      </motion.button>
+        <div className="flex items-center justify-between mb-4 gap-8">
+          <div className="text-[10px] font-bold text-[var(--color-text-tertiary)] uppercase tracking-widest">Tool Call Chain</div>
+          <button 
+            onClick={() => setIsCollapsed(true)}
+            className="text-[10px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors uppercase tracking-widest"
+          >
+            Collapse
+          </button>
+        </div>
+
+        <div className="relative flex items-center gap-0 py-2">
+          {nodes.map((node, i) => (
+            <React.Fragment key={node.id}>
+              {/* Edge */}
+              {i > 0 && (
+                <div className="relative w-10 flex items-center overflow-visible">
+                  <div className={`h-[0.5px] w-full transition-colors duration-500 ${node.status === 'complete' || node.status === 'active' ? 'bg-[var(--color-border-primary)]' : 'bg-[var(--color-border-secondary)]'}`} />
+                  {node.status === 'active' && (
+                    <motion.div 
+                      className="absolute h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(59,130,246,0.8)] animate-traveling-dot"
+                      style={{ offsetPath: `path('M 0 0.25 L 40 0.25')` }}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* Node */}
+              <motion.div
+                layout
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className={`relative flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-300 ${
+                  node.status === 'active' 
+                    ? 'bg-blue-600/10 border-blue-500/50 text-blue-500 animate-active-ring font-bold' 
+                    : node.status === 'complete'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                      : node.status === 'failed'
+                        ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-micro-shake'
+                        : 'bg-white/5 border-white/5 text-zinc-600 opacity-40'
+                }`}
+              >
+                {node.status === 'complete' ? <Check size={12} /> : (node.status === 'failed' ? <X size={12} /> : (node.icon || <Box size={12} />))}
+                <span className="text-[11.5px] whitespace-nowrap overflow-hidden max-w-[120px] truncate">
+                  {node.label}
+                </span>
+              </motion.div>
+            </React.Fragment>
+          ))}
+        </div>
+      </motion.div>
     );
   }
-
-  return (
-    <motion.div 
-      layoutId="node-graph"
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="p-4 bg-[#121212] border border-white/5 rounded-xl overflow-hidden relative group max-w-fit shadow-2xl animate-fade-up"
-    >
-      <div className="flex items-center justify-between mb-4 gap-8">
-        <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Tool Call Chain</div>
-        <button 
-          onClick={() => setIsCollapsed(true)}
-          className="text-[10px] text-zinc-500 hover:text-white transition-colors uppercase tracking-widest"
-        >
-          Collapse
-        </button>
-      </div>
-
-      <div className="relative flex items-center gap-0 py-2">
-        {nodes.map((node, i) => (
-          <React.Fragment key={node.id}>
-            {/* Edge */}
-            {i > 0 && (
-              <div className="relative w-10 flex items-center overflow-visible">
-                <div className={`h-[0.5px] w-full transition-colors duration-500 ${node.status === 'complete' || node.status === 'active' ? 'bg-zinc-400' : 'bg-zinc-800'}`} />
-                {node.status === 'active' && (
-                  <motion.div 
-                    className="absolute h-1.5 w-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)] animate-traveling-dot"
-                    style={{ offsetPath: `path('M 0 0.25 L 40 0.25')` }}
-                  />
-                )}
-              </div>
-            )}
-
-            {/* Node */}
-            <motion.div
-              layout
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className={`relative flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-300 ${
-                node.status === 'active' 
-                  ? 'bg-blue-600/10 border-blue-500/50 text-blue-500 animate-active-ring font-bold' 
-                  : node.status === 'complete'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                    : node.status === 'failed'
-                      ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-micro-shake'
-                      : 'bg-white/5 border-white/5 text-zinc-600 opacity-40'
-              }`}
-            >
-              {node.status === 'complete' ? <Check size={12} /> : (node.status === 'failed' ? <X size={12} /> : (node.icon || <Box size={12} />))}
-              <span className="text-[11.5px] whitespace-nowrap overflow-hidden max-w-[120px] truncate">
-                {node.label}
-              </span>
-            </motion.div>
-          </React.Fragment>
-        ))}
-      </div>
-    </motion.div>
-  );
-};
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
@@ -581,31 +568,29 @@ export default function App() {
       inputRef.current.style.height = 'auto';
     }
 
-    // Real AI Response from configured server through local proxy
+    // Real AI Response from configured server - direct call
     try {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
-      const apiMessages = [...chatContext, userMessage].map(m => ({
-        role: m.role,
-        content: m.content
-      }));
+      
+      // Build API messages, filtering out entries with null/empty content 
+      // (these are tool_call-only responses from the bridge)
+      const apiMessages = [...chatContext, userMessage]
+        .filter(m => m.content && m.content.trim().length > 0)
+        .map(m => ({
+          role: m.role,
+          content: m.content
+        }));
 
-      const response = await fetch('/api/proxy', {
+      const response = await fetch(`${serverUrl}/chat/completions`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          url: `${serverUrl}/chat/completions`,
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: {
-            model: selectedModel,
-            messages: apiMessages,
-            stream: false
-          }
+          model: selectedModel,
+          messages: apiMessages,
+          stream: false
         })
       });
 
@@ -614,17 +599,43 @@ export default function App() {
       }
 
       const data = await response.json();
-      const content = data.choices[0].message.content;
+      const choice = data.choices?.[0]?.message;
+      const content = choice?.content;
+      const toolCallsRaw = choice?.tool_calls;
+
+      // Build tool call chain nodes from the response
+      const toolCallNodes: ToolCallNode[] = [];
+      if (Array.isArray(toolCallsRaw) && toolCallsRaw.length > 0) {
+        toolCallsRaw.forEach((tc: any, idx: number) => {
+          const fn = tc.function || {};
+          const name = fn.name || 'unknown';
+          
+          toolCallNodes.push({
+            id: tc.id || `tc-${idx}`,
+            type: 'tool',
+            label: name,
+            status: 'complete',
+            icon: name.includes('search') || name.includes('research') ? <Search size={12} /> :
+                  name.includes('wikipedia') ? <Globe size={12} /> :
+                  name.includes('file') || name.includes('fs') ? <Box size={12} /> :
+                  name.includes('github') ? <Box size={12} /> :
+                  name.includes('weather') ? <CloudMoon size={12} /> :
+                  <Sparkles size={12} />
+          });
+        });
+      } else {
+        // No tool calls — just mark AI response as complete
+        toolCallNodes.push(
+          { id: '1', type: 'ai', label: 'AI Core', status: 'complete', icon: <Sparkles size={12} /> }
+        );
+      }
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: content,
+        content: content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : ''),
         timestamp: new Date(),
-        // Optional: populate tools/thinking if present in some known format
-        toolCalls: [
-          { id: '1', type: 'ai', label: 'AI Core', status: 'complete', icon: <Sparkles size={12} /> },
-        ]
+        toolCalls: toolCallNodes,
       };
       
       setChats(prev => prev.map(chat => {
@@ -1464,7 +1475,7 @@ export default function App() {
                               type="text" 
                               value={serverUrl}
                               onChange={(e) => { setServerUrl(e.target.value); setIsAiSaved(false); }}
-                              placeholder="https://api.lumina.ai/v1"
+                              placeholder="http://localhost:8080/v1"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>
@@ -1474,7 +1485,7 @@ export default function App() {
                               type="password" 
                               value={apiKey}
                               onChange={(e) => { setApiKey(e.target.value); setIsAiSaved(false); }}
-                              placeholder="sk-••••••••••••••••"
+                              placeholder="Enter your API key"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>
@@ -1538,7 +1549,7 @@ export default function App() {
                               type="password"
                               value={tavilyApiKey}
                               onChange={(e) => { setTavilyApiKey(e.target.value); setIsSearchSaved(false); }}
-                              placeholder="tvly-..."
+                              placeholder="Enter your Tavily API key"
                               className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                             />
                             <p className="text-[10px] text-gray-500 italic">Optimized for AI researchers and real-time data retrieval.</p>
@@ -1553,7 +1564,7 @@ export default function App() {
                               type="password"
                               value={serpApiKey}
                               onChange={(e) => { setSerpApiKey(e.target.value); setIsSearchSaved(false); }}
-                              placeholder="..."
+                              placeholder="Enter your SerpAPI key"
                               className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
                             />
                             <p className="text-[10px] text-gray-500 italic">Universal search API for Google, Bing, and more.</p>
@@ -1655,7 +1666,7 @@ export default function App() {
                               type="text" 
                               value={mcpUrl}
                               onChange={(e) => { setMcpUrl(e.target.value); setIsMcpSaved(false); }}
-                              placeholder="http://localhost:3001"
+                              placeholder="http://localhost:8080"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>
@@ -1665,7 +1676,7 @@ export default function App() {
                               type="password" 
                               value={mcpKey}
                               onChange={(e) => { setMcpKey(e.target.value); setIsMcpSaved(false); }}
-                              placeholder="mcp_••••••••••••••••"
+                              placeholder="Enter your API key"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>

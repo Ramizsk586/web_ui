@@ -2,9 +2,11 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from 'url';
+import 'dotenv/config';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const isDev = process.env.NODE_ENV !== "production";
 
 async function startServer() {
   const app = express();
@@ -12,32 +14,20 @@ async function startServer() {
 
   app.use(express.json());
 
-  // CORS Proxy Endpoint
-  app.post("/api/proxy", async (req, res) => {
-    const { url, method, headers, body } = req.body;
-
-    try {
-      const response = await fetch(url, {
-        method: method || 'POST',
-        headers: headers || {},
-        body: body ? JSON.stringify(body) : undefined
-      });
-
-      const data = await response.json();
-      res.status(response.status).json(data);
-    } catch (error: any) {
-      console.error("Proxy Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+  if (isDev) {
+    try {
+      console.log('⚡ Starting Vite middleware...');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log('✅ Vite middleware ready');
+    } catch (e) {
+      console.error("⚠️ Vite server failed to start:", e);
+      process.exit(1);
+    }
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -46,15 +36,12 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "localhost", () => {
     console.log(`\n🚀 Server ready at http://localhost:${PORT}`);
-    console.log(`📁 Proxy endpoint: http://localhost:${PORT}/api/proxy`);
+    console.log(`🔗 App connects directly to llama bridge at http://127.0.0.1:8089`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);
-      console.error(`💡 Tips:`);
-      console.error(`   1. Stop any other instances of this app (running as "npm run dev")`);
-      console.error(`   2. If you are running locally, use 'netstat -ano | findstr :${PORT}' (Windows) or 'lsof -i :${PORT}' (Mac/Linux) to find the process ID and kill it.`);
       process.exit(1);
     } else {
       console.error(`\n❌ Server failed to start:`, err);
