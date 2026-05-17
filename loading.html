@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumina - Loading</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .spinner {
+      width: 60px;
+      height: 60px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 30px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .logo svg { width: 40px; height: 40px; color: white; }
+    h1 { color: white; font-size: 24px; margin-bottom: 10px; }
+    .status { color: #888; font-size: 14px; margin-bottom: 20px; }
+    .progress { width: 200px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+    .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); transition: width 0.3s ease; }
+    .log { margin-top: 20px; text-align: left; max-width: 300px; }
+    .log-item { color: #666; font-size: 11px; font-family: monospace; margin: 2px 0; }
+    .log-item.success { color: #10b981; }
+    .log-item.error { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 2L2 7v10c0 5.55 3.84 9.74 9 11 5.16-1.26 9-5.45 9-11V7l-10-5z"/>
+    </svg>
+  </div>
+  <div class="spinner"></div>
+  <h1>Lumina</h1>
+  <div class="status" id="status">Initializing...</div>
+  <div class="progress"><div class="progress-bar" id="progress"></div></div>
+  <div class="log" id="log"></div>
+  <script>
+    const statusEl = document.getElementById('status');
+    const progressEl = document.getElementById('progress');
+    const logEl = document.getElementById('log');
+    let progress = 0;
+    const steps = [
+      { text: 'Starting server...', delay: 500, progress: 20 },
+      { text: 'Loading modules...', delay: 800, progress: 40 },
+      { text: 'Connecting to services...', delay: 1200, progress: 60 },
+      { text: 'Preparing interface...', delay: 1000, progress: 80 },
+      { text: 'Almost ready...', delay: 500, progress: 100 }
+    ];
+    async function runSteps() {
+      for (const step of steps) {
+        await new Promise(r => setTimeout(r, step.delay));
+        logEl.innerHTML += `<div class="log-item">${step.text}</div>`;
+        progress = step.progress;
+        progressEl.style.width = progress + '%';
+        statusEl.textContent = step.text;
+      }
+    }
+    runSteps();
+    window.addEventListener('message', (e) => {
+      if (e.data.type === 'status') {
+        logEl.innerHTML += `<div class="log-item ${e.data.status}">${e.data.text}</div>`;
+        statusEl.textContent = e.data.text;
+        if (e.data.progress) progressEl.style.width = e.data.progress + '%';
+      }
+    });
+  </script>
+</body>
+</html>
