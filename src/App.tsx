@@ -73,6 +73,14 @@ interface ToolCallNode {
   icon?: React.ReactNode;
 }
 
+interface Artifact {
+  id: string;
+  title: string;
+  language: string;
+  content: string;
+  type: 'code' | 'markdown' | 'html';
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -83,6 +91,7 @@ interface Message {
   searchQuery?: string;
   isSearching? : boolean;
   toolCalls?: ToolCallNode[];
+  artifacts?: Artifact[];
 }
 
 interface Chat {
@@ -528,6 +537,9 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
+  const [isCanvasOpen, setIsCanvasOpen] = useState(false);
+  const [canvasView, setCanvasView] = useState<'code' | 'preview'>('code');
   // Track which message id is currently animating/typing. When a new message
   // is sent, we set this to the id of the interim thinking message. This
   // prevents older assistant messages from re-triggering their animations
@@ -582,114 +594,398 @@ const [searchQuery, setSearchQuery] = useState('');
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
-    const [isCollapsed, setIsCollapsed] = useState(false);
-    const [allCompleted, setAllCompleted] = useState(false);
-    const [startTime] = useState(() => Date.now());
+const getDomain = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+};
 
-    useEffect(() => {
-      const active = nodes.some(n => n.status === 'active');
-      const pending = nodes.some(n => n.status === 'pending');
-      if (!active && !pending && nodes.length > 0) {
-        const timer = setTimeout(() => {
-          setAllCompleted(true);
-          setIsCollapsed(true);
-        }, 800);
-        return () => clearTimeout(timer);
-      } else {
-        setAllCompleted(false);
-      }
-    }, [nodes]);
+const getFavicon = (url: string) => {
+  try {
+    const domain = new URL(url).hostname;
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+  } catch {
+    return null;
+  }
+};
 
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const isRunning = nodes.some(n => n.status === 'active' || n.status === 'pending');
-
-    if (isCollapsed) {
-      const lastTool = nodes.filter(n => n.type === 'tool').pop();
-      return (
-        <motion.button 
-          layoutId="node-graph"
-          onClick={() => setIsCollapsed(false)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-background-secondary)] border border-[var(--color-border-tertiary)] rounded-full text-[11px] font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-background-primary)] transition-all cursor-pointer shadow-sm group"
-        >
-          <span className="text-[var(--color-background-success)] font-bold">✓</span>
-          <span>{lastTool?.label || nodes.length + ' tools'} · {elapsed}s</span>
-          <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
-        </motion.button>
-      );
-    }
-
-    return (
-      <motion.div 
-        layoutId="node-graph"
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className={`p-4 bg-[var(--color-background-secondary)] border border-[var(--color-border-tertiary)] rounded-xl overflow-hidden relative group max-w-fit shadow-2xl animate-fade-up ${
-          isRunning ? 'tool-call-running' : ''
-        }`}
-      >
-        <div className="flex items-center justify-between mb-4 gap-8">
-          <div className="text-[10px] font-bold text-[var(--color-text-tertiary)] uppercase tracking-widest">Tool Call Chain</div>
-          <button 
-            onClick={() => setIsCollapsed(true)}
-            className="text-[10px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors uppercase tracking-widest"
-          >
-            Collapse
-          </button>
+const SearchResultsUI = ({ query, sources, isSearching }: { query: string; sources: any[]; isSearching: boolean }) => {
+  return (
+    <div className="my-6 space-y-4">
+      <div className="flex items-center gap-3 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 pl-1">
+        <div className={`p-1.5 rounded-lg border shadow-sm ${isSearching ? 'bg-blue-50 border-blue-100 dark:bg-blue-500/10 dark:border-blue-500/20 text-blue-500' : 'bg-zinc-50 border-zinc-100 dark:bg-white/5 dark:border-white/10'}`}>
+          <Globe size={14} className={isSearching ? 'animate-spin-slow' : ''} />
         </div>
+        <div className="flex flex-col">
+          <span className="text-zinc-800 dark:text-zinc-200">{query}</span>
+          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{sources.length} sources found</span>
+        </div>
+      </div>
 
-        <div className="relative flex items-center gap-0 py-2">
-          {nodes.map((node, i) => (
-            <React.Fragment key={node.id}>
-              {/* Edge */}
-              {i > 0 && (
-                <div className="relative w-10 flex items-center overflow-visible">
-                  <div className={`h-[0.5px] w-full transition-colors duration-500 ${node.status === 'complete' || node.status === 'active' ? 'bg-[var(--color-border-primary)]' : 'bg-[var(--color-border-secondary)]'}`} />
-                  {node.status === 'active' && (
-                    <motion.div 
-                      className="absolute h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(59,130,246,0.8)] animate-traveling-dot"
-                      style={{ offsetPath: `path('M 0 0.25 L 40 0.25')` }}
-                    />
+      <div className="bg-zinc-50/50 dark:bg-white/[0.02] border border-zinc-100 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm">
+        <div className="p-1 space-y-0.5">
+          {sources.map((source, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -5 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className="flex items-center justify-between p-3 hover:bg-white dark:hover:bg-white/5 rounded-xl transition-all group"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-6 h-6 rounded-md bg-white dark:bg-zinc-800 border border-zinc-100 dark:border-white/10 flex items-center justify-center p-1 shrink-0 bg-white/50 backdrop-blur-sm">
+                  {getFavicon(source.url) ? (
+                    <img src={getFavicon(source.url)!} alt="" className="w-full h-full object-contain filter dark:brightness-90 truncate" />
+                  ) : (
+                    <Globe size={12} className="text-zinc-400" />
                   )}
                 </div>
-              )}
-
-              {/* Node */}
-              <motion.div
-                layout
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className={`node-appear relative flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-300 ${
-                  node.status === 'active' 
-                    ? 'bg-blue-600/10 border-blue-500/50 text-blue-500 animate-active-ring font-bold' 
-                    : node.status === 'complete'
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                      : node.status === 'failed'
-                        ? 'bg-red-500/10 border-red-500/30 text-red-500 animate-micro-shake'
-                        : 'bg-white/5 border-white/5 text-zinc-600 opacity-40'
-                }`}
-              >
-                {node.status === 'active' ? (
-                  <div className="w-4 h-4 scale-75">
-                    <ToolCallingAnimation />
-                  </div>
-                ) : node.status === 'complete' ? (
-                  <Check size={12} />
-                ) : node.status === 'failed' ? (
-                  <X size={12} />
-                ) : (
-                  node.icon || <Box size={12} />
-                )}
-                <span className="text-[11.5px] whitespace-nowrap overflow-hidden max-w-[120px] truncate">
-                  {node.label}
+                <span className="text-[13px] font-medium text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 truncate transition-colors">
+                  {source.title}
                 </span>
-              </motion.div>
-            </React.Fragment>
+              </div>
+              <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono tracking-tight shrink-0 pl-4 opacity-60 group-hover:opacity-100 transition-opacity">
+                {getDomain(source.url)}
+              </span>
+            </motion.div>
           ))}
+          {isSearching && (
+             <div className="p-3 flex items-center gap-3 animate-pulse">
+                <div className="w-6 h-6 rounded-md bg-zinc-200 dark:bg-zinc-800 shrink-0" />
+                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded-full w-2/3" />
+             </div>
+          )}
         </div>
-      </motion.div>
-    );
-  }
+      </div>
+
+      {isSearching && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center gap-2 pl-3"
+        >
+          <div className="relative">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping opacity-25" />
+            <div className="absolute inset-0 w-2 h-2 rounded-full bg-blue-500" />
+          </div>
+          <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 italic">
+            Fetching information from {sources.length > 0 ? getDomain(sources[sources.length-1].url) : 'the web'}...
+          </span>
+        </motion.div>
+      )}
+    </div>
+  );
+};
+
+const ThinkingDots = () => (
+  <div className="flex gap-1.5 px-1 py-1.5 items-center h-4">
+    {[0, 1, 2].map((i) => (
+      <motion.div
+        key={i}
+        animate={{ 
+          opacity: [0.3, 0.8, 0.3],
+          scale: [1, 1.1, 1],
+        }}
+        transition={{ 
+          repeat: Infinity, 
+          duration: 1.5, 
+          ease: "easeInOut", 
+          delay: i * 0.25 
+        }}
+        className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600"
+      />
+    ))}
+  </div>
+);
+
+const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
+  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [hasAnimated, setHasAnimated] = useState(false);
+
+  useEffect(() => {
+    if (nodes.some(n => n.status === 'active')) {
+      setIsCollapsed(false);
+    }
+  }, [nodes]);
+
+  const activeNode = nodes.find(n => n.status === 'active');
+  const lastNode = nodes[nodes.length - 1];
+
+  return (
+    <div className="my-4 w-full">
+      <motion.button 
+        layout
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        className="flex items-center gap-2 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300 transition-all group px-1 rounded-lg"
+      >
+        <motion.div
+          animate={{ rotate: isCollapsed ? 0 : 90 }}
+          transition={{ type: "spring", stiffness: 300, damping: 20 }}
+        >
+          <ChevronRight size={14} className="text-zinc-400" />
+        </motion.div>
+        <motion.span layout className="flex items-center gap-2 whitespace-nowrap overflow-hidden">
+          {nodes.length > 2 
+            ? `${nodes[0].label}, ${nodes[1].label} +${nodes.length - 2}` 
+            : nodes.map(n => n.label).join(', ')}
+          {activeNode && (
+            <motion.span 
+              animate={{ opacity: [0.4, 1, 0.4] }} 
+              transition={{ repeat: Infinity, duration: 2 }}
+              className="text-[11px] font-normal italic opacity-60"
+            >
+              (running...)
+            </motion.span>
+          )}
+        </motion.span>
+      </motion.button>
+
+      <AnimatePresence>
+        {!isCollapsed && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden mt-4 ml-3 pl-8 border-l border-zinc-100 dark:border-white/10 space-y-6 relative"
+          >
+            {nodes.map((node, i) => (
+              <motion.div
+                key={node.id}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.1 }}
+                className="relative flex items-start gap-4"
+              >
+                {/* Node Dot / Icon centered on the line */}
+                <div className={`absolute -left-[33.5px] top-[4px] w-3 h-3 rounded-full border-2 bg-white dark:bg-zinc-950 z-10 transition-all duration-300 ${
+                  node.status === 'active' 
+                    ? 'border-blue-500 animate-pulse bg-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.3)]' 
+                    : node.status === 'complete' 
+                      ? 'border-emerald-500 dark:border-emerald-500/50 bg-emerald-500 dark:bg-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.3)]' 
+                      : 'border-zinc-200 dark:border-zinc-800 opacity-50'
+                }`}>
+                  {node.status === 'complete' && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Check size={8} className="text-white" strokeWidth={3} />
+                    </div>
+                  )}
+                  {node.status === 'active' && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-1 h-1 rounded-full bg-blue-500" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[13px] font-medium transition-colors ${
+                      node.status === 'active' 
+                        ? 'text-blue-500' 
+                        : 'text-zinc-600 dark:text-zinc-400'
+                    }`}>
+                      {node.label}
+                    </span>
+                    {node.status === 'complete' && (
+                      <span className="text-[10px] text-zinc-400 font-normal">Done</span>
+                    )}
+                  </div>
+                  {node.type === 'tool' && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 bg-zinc-50 dark:bg-white/5 px-2 py-0.5 rounded-md w-fit border border-zinc-100 dark:border-white/5">
+                      {node.icon || <Terminal size={10} />}
+                      <span className="opacity-70 font-mono italic">
+                        {node.label.toLowerCase().replace(/\s+/g, '_')}.log
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+const ArtifactCard = ({ artifact, onOpen }: { artifact: Artifact; onOpen: (a: Artifact) => void }) => {
+  const downloadFile = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const typeMap = {
+      code: 'text/plain',
+      markdown: 'text/markdown',
+      html: 'text/html'
+    };
+    const blob = new Blob([artifact.content], { type: typeMap[artifact.type] || 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${artifact.title}.${artifact.language === 'javascript' ? 'js' : artifact.language === 'typescript' ? 'ts' : artifact.language === 'markdown' ? 'md' : artifact.language}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      onClick={() => onOpen(artifact)}
+      className="flex items-center gap-4 p-4 bg-zinc-50 dark:bg-white/5 border border-zinc-100 dark:border-white/10 rounded-2xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-white/10 transition-all group my-4 shadow-sm"
+    >
+      <div className="w-12 h-12 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-white/5 flex items-center justify-center text-zinc-400 group-hover:text-blue-500 transition-colors shadow-sm">
+        {artifact.type === 'html' ? <Layout size={24} /> : 
+         artifact.type === 'markdown' ? <FileText size={24} /> : 
+         <Terminal size={24} />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <h4 className="text-[14px] font-semibold text-zinc-800 dark:text-zinc-200 truncate">{artifact.title}</h4>
+        <p className="text-[11px] text-zinc-400 font-medium uppercase tracking-wider">
+          {artifact.language} • {artifact.type}
+        </p>
+      </div>
+      <button
+        onClick={downloadFile}
+        className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-xl text-xs font-bold transition-all hover:scale-105 active:scale-95 shadow-lg"
+      >
+        Download
+      </button>
+    </motion.div>
+  );
+};
+
+const Canvas = ({ 
+  artifact, 
+  isOpen, 
+  onClose, 
+  view, 
+  onSetView 
+}: { 
+  artifact: Artifact | null; 
+  isOpen: boolean; 
+  onClose: () => void;
+  view: 'code' | 'preview';
+  onSetView: (v: 'code' | 'preview') => void;
+}) => {
+  if (!artifact) return null;
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ x: '100%' }}
+          animate={{ x: 0 }}
+          exit={{ x: '100%' }}
+          transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+          className="fixed inset-y-0 right-0 w-full lg:w-[45vw] bg-white dark:bg-[#0a0a0a] border-l border-zinc-100 dark:border-white/5 z-[200] flex flex-col shadow-2xl"
+        >
+          {/* Canvas Header */}
+          <div className="h-16 border-b border-zinc-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0 bg-white/80 dark:bg-black/80 backdrop-blur-xl sticky top-0 z-10">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-zinc-100 dark:bg-white/5 rounded-lg text-zinc-500">
+                  {artifact.type === 'html' ? <Layout size={18} /> : 
+                   artifact.type === 'markdown' ? <FileText size={18} /> : 
+                   <Terminal size={18} />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 uppercase tracking-tighter">
+                    {artifact.title}
+                  </h3>
+                  <p className="text-[10px] text-zinc-400 font-medium uppercase tracking-widest">{artifact.language}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {(artifact.type === 'html' || artifact.type === 'markdown') && (
+                <div className="flex items-center p-1 bg-zinc-100 dark:bg-white/5 rounded-xl border border-zinc-200 dark:border-white/5">
+                  <button
+                    onClick={() => onSetView('code')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      view === 'code' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm' : 'text-zinc-500'
+                    }`}
+                  >
+                    Code
+                  </button>
+                  <button
+                    onClick={() => onSetView('preview')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      view === 'preview' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm' : 'text-zinc-500'
+                    }`}
+                  >
+                    Preview
+                  </button>
+                </div>
+              )}
+              <div className="w-px h-4 bg-zinc-200 dark:bg-white/10 mx-1" />
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-zinc-100 dark:hover:bg-white/5 rounded-xl text-zinc-500 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Canvas Content */}
+          <div className="flex-1 overflow-hidden relative">
+            <AnimatePresence mode="wait">
+              {view === 'code' ? (
+                <motion.div
+                  key="code"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="h-full overflow-y-auto custom-scrollbar bg-[#0d0d0d]"
+                >
+                  <SyntaxHighlighter
+                    language={artifact.language}
+                    style={oneDark}
+                    customStyle={{ 
+                      background: 'transparent', 
+                      fontSize: '14px', 
+                      lineHeight: '1.7', 
+                      margin: 0,
+                      padding: '24px'
+                    }}
+                    showLineNumbers
+                    lineNumberStyle={{ color: '#3f3f46', minWidth: '3.5em' }}
+                  >
+                    {artifact.content}
+                  </SyntaxHighlighter>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="preview"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="h-full overflow-y-auto bg-white dark:bg-zinc-900 p-8"
+                >
+                  {artifact.type === 'markdown' ? (
+                    <div className="markdown-body prose dark:prose-invert max-w-none">
+                      <Markdown>{artifact.content}</Markdown>
+                    </div>
+                  ) : (
+                    <iframe
+                      title="Preview"
+                      srcDoc={artifact.content}
+                      className="w-full h-full border-none bg-white"
+                      sandbox="allow-scripts"
+                    />
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
@@ -801,6 +1097,49 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       return chat;
     }));
 
+    let searchResults: any[] = [];
+    let searchProvider = "";
+
+    // 1. Perform Web Search if enabled
+    if (isWebSearchEnabled) {
+      try {
+        const searchResp = await fetch(`${serverUrl}/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            query: content, 
+            tavilyKey: tavilyApiKey, 
+            serpKey: serpApiKey 
+          })
+        });
+        
+        if (searchResp.ok) {
+          const searchData = await searchResp.json();
+          searchResults = searchData.results || [];
+          searchProvider = searchData.provider || "duckduckgo";
+          
+          setChats(prev => prev.map(chat => {
+            if (chat.id === chatId) {
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? { 
+                  ...m, 
+                  isSearching: true, 
+                  thinking: `Synthesizing info from ${searchProvider}...`,
+                  sources: searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) 
+                } : m),
+              };
+            }
+            return chat;
+          }));
+        } else {
+          console.error("Search API returned non-ok status:", searchResp.status);
+        }
+      } catch (err) {
+        console.error("Search step failed:", err);
+      }
+    }
+
     // Real AI Response from configured server - direct call
     try {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
@@ -814,6 +1153,14 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
           content: m.content
         }));
 
+      // Inject search results into the prompt if available
+      let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`;
+      
+      if (searchResults.length > 0) {
+        const contextString = searchResults.slice(0, 5).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
+        systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate.`;
+      }
+
       const response = await fetch(`${serverUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -825,7 +1172,7 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
           messages: apiMessages,
           stream: false,
           writing_style: writingStyle,
-          system_prompt: `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`
+          system_prompt: systemPrompt
         })
       });
 
@@ -861,20 +1208,25 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
         });
       }
 
-      // If we have sources, also add an AI node
-      if (toolCallNodes.length === 0) {
-        toolCallNodes.push(
-          { id: '1', type: 'ai', label: 'AI Core', status: 'complete', icon: <Sparkles size={12} /> }
-        );
-      }
-
-      // Simulate real-time streaming by gradually revealing the AI's response.
+      // Simulation of real-time streaming
       const finalContent = content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
       const sourcesToAttach = responseSources.map((s: any) => ({
         title: s.title || s.url || 'Source',
         url: s.url || s.link || '#',
         icon: s.icon || ''
       }));
+
+      // If we have tool calls or sources, we always want nodes to represent the flow
+      const finalToolNodes = [...toolCallNodes];
+      
+      // Add a synthesis node at the end
+      finalToolNodes.push({
+        id: 'final-ai',
+        type: 'ai',
+        label: 'AI Core synthesis',
+        status: 'complete',
+        icon: <Sparkles size={12} />
+      });
 
       // Reveal the assistant's message character by character
       for (let i = 1; i <= finalContent.length; i++) {
@@ -886,14 +1238,16 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
           if (chat.id === chatId) {
             return {
               ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? { ...m, content: partial } : m),
+              messages: chat.messages.map(m => m.id === thinkingId ? { ...m, content: partial, toolCalls: finalToolNodes.map(n => ({...n, status: 'active'})) } : m),
             };
           }
           return chat;
         }));
       }
 
-      // After streaming, attach tool call nodes and finalize the message
+      // After streaming, finalize the message with the correct nodes
+      const finalArtifacts = extractArtifacts(finalContent);
+
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
           return {
@@ -904,11 +1258,12 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                     ...m,
                     content: finalContent.trim(),
                     thinking: undefined,
-                    toolCalls: toolCallNodes,
+                    toolCalls: finalToolNodes,
                     sources: sourcesToAttach.length > 0 ? sourcesToAttach : undefined,
                     searchQuery: isWebSearchEnabled ? userMessage.content : undefined,
                     isSearching: false,
                     timestamp: new Date(),
+                    artifacts: finalArtifacts.length > 0 ? finalArtifacts : undefined
                   }
                 : m
             ),
@@ -954,6 +1309,45 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     setInput(textarea.value);
+  };
+
+  const extractArtifacts = (content: string): Artifact[] => {
+    const artifacts: Artifact[] = [];
+    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    let match;
+    
+    while ((match = codeBlockRegex.exec(content)) !== null) {
+      const lang = match[1] || 'text';
+      const code = match[2].trim();
+      
+      let type: 'code' | 'markdown' | 'html' = 'code';
+      let title = 'Code Snippet';
+
+      if (lang === 'html') {
+        type = 'html';
+        title = 'Web Preview';
+      } else if (lang === 'markdown' || lang === 'md') {
+        type = 'markdown';
+        title = 'Document';
+      } else if (['javascript', 'typescript', 'tsx', 'jsx'].includes(lang)) {
+        title = 'React Component';
+      } else if (lang === 'python') {
+        title = 'Python Script';
+      } else if (lang === 'css') {
+        title = 'Styles';
+      }
+      
+      if (code.length > 50) {
+        artifacts.push({
+          id: Math.random().toString(36).substring(7),
+          title,
+          language: lang,
+          content: code,
+          type
+        });
+      }
+    }
+    return artifacts;
   };
 
   const showToast = (message: string) => {
@@ -1225,343 +1619,120 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
                       key={message.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className={`flex flex-col ${useBubbles ? (message.role === 'user' ? 'items-end' : 'items-start') : 'items-stretch w-full'}`}
+                      className={`flex flex-col w-full ${message.role === 'user' ? 'items-end mb-8' : 'items-start mb-12'}`}
                     >
-                      {useBubbles ? (
-                        /* Bubble Layout */
+                      {message.role === 'user' ? (
+                        /* User Message - Remains in a polished bubble */
                         <motion.div 
-                          /* Always apply the slide‑in animation on new messages regardless of role */
-                          className={`flex flex-col max-w-[85%] ${message.role === 'user' ? 'items-end' : 'items-start'} animate-msg-in`}
+                          className="flex flex-col max-w-[85%] items-end animate-msg-in"
                         >
-                          {/*
-                            For assistant placeholder messages (those with a `thinking` flag), render a
-                            simple animated indicator instead of an empty bubble. Without this,
-                            the bubble would appear blank until the real content arrives. The three
-                            pulsing dots reuse the `.dot-pulse-*` classes defined in the CSS.
-                          */}
-                          {message.role === 'assistant' && message.thinking ? (
-                            // Render the full thinking / searching animation inside the assistant bubble
-                            <div
-                              className={`px-5 py-3 rounded-2xl shadow-sm ${
-                                'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
-                              }`}
-                            >
-                              <div className="space-y-4">
-                                {/* Phase 1: Spinner and primary label */}
-                                <motion.div
-                                  initial={{ opacity: 0, y: -6 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  className="smooth-fade-in"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                                      {isWebSearchEnabled ? <WebSearchAnimation /> : <ToolCallingAnimation />}
-                                    </div>
-                                    <div className="flex flex-col gap-0.5">
-                                      <span className="text-[13px] font-medium text-zinc-400 shimmer-text">
-                                        {message.thinking}
-                                      </span>
-                                      <span className="text-[11px] text-zinc-600">
-                                        {isWebSearchEnabled ? 'Searching multiple sources' : 'Processing your request'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </motion.div>
-                                {/* Phase 2: Processing steps that animate sequentially */}
-                                {typingMessageId === message.id && (
-                                  <>
-                                    <motion.div
-                                      initial={{ opacity: 0, y: -6 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      transition={{ delay: 0.15 }}
-                                      className="smooth-fade-in ml-8"
-                                    >
-                                      <div className="flex items-center gap-2 text-zinc-500">
-                                        <ChevronRight size={12} className="opacity-50 shrink-0" />
-                                        <span className="text-[12px] fade-in-token">
-                                          {isWebSearchEnabled ? 'Gathering relevant information' : 'Analyzing input'}
-                                        </span>
-                                      </div>
-                                    </motion.div>
-                                    <motion.div
-                                      initial={{ opacity: 0, y: -6 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      transition={{ delay: 0.3 }}
-                                      className="smooth-fade-in ml-8"
-                                    >
-                                      <div className="flex items-center gap-2 text-zinc-500">
-                                        <ChevronRight size={12} className="opacity-50 shrink-0" />
-                                        <span className="text-[12px] fade-in-token">
-                                          {isWebSearchEnabled ? 'Synthesizing search results' : 'Synthesizing response'}
-                                        </span>
-                                      </div>
-                                    </motion.div>
-                                  </>
-                                )}
-                                {/* Animated dots */}
-                                {typingMessageId === message.id && (
-                                  <div className="flex gap-1.5 py-2 ml-8 smooth-fade-in">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-1" />
-                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-2" />
-                                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-3" />
-                                  </div>
-                                )}
-                              </div>
+                          <div
+                            className="px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm bg-black dark:bg-white text-white dark:text-black rounded-tr-none border border-black/5 dark:border-white/10"
+                          >
+                            <div className="markdown-body">
+                              <Markdown components={markdownComponents}>{message.content}</Markdown>
                             </div>
-                          ) : (
-                            <div
-                              className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm ${
-                                message.role === 'user'
-                                  ? 'bg-black dark:bg-white text-white dark:text-black rounded-tr-none'
-                                  : 'bg-gray-100 dark:bg-zinc-800 text-gray-800 dark:text-gray-200 rounded-tl-none'
-                              }`}
-                            >
-                              {/* Optional node graph for tool calls */}
-                              {message.toolCalls && message.toolCalls.length > 0 && (
-                                <div className="mb-3">
-                                  <NodeGraph nodes={message.toolCalls} />
-                                </div>
-                              )}
-                              {/* Search progress state (when searchQuery is set) */}
-                              {message.searchQuery && !message.thinking && (
-                                <div className="space-y-2 mb-3">
-                                  <div className="flex items-center gap-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
-                                    {message.isSearching ? (
-                                      <div className="w-4 h-4 scale-75">
-                                        <WebSearchAnimation />
-                                      </div>
-                                    ) : (
-                                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                    )}
-                                    {message.isSearching ? 'Search in progress...' : `Searched: ${message.searchQuery}`}
-                                  </div>
-                                  {message.sources && message.sources.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                      {message.sources.slice(0, 3).map((source, sIdx) => (
-                                        <div
-                                          key={sIdx}
-                                          className="search-result flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-100 dark:border-white/10 rounded-xl text-xs transition-all shadow-sm"
-                                        >
-                                          <Globe size={12} className="text-gray-400" />
-                                          <span className="max-w-[100px] truncate font-medium">{source.title}</span>
-                                        </div>
-                                      ))}
-                                      {message.sources.length > 3 && (
-                                        <button
-                                          onClick={() => setIsSourcesPanelOpen(true)}
-                                          className="px-3 py-1.5 bg-gray-100 dark:bg-white/10 rounded-xl text-[10px] font-bold text-gray-500 hover:bg-gray-200 dark:hover:bg-white/20 transition-colors"
-                                        >
-                                          +{message.sources.length - 3} MORE
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              {/* Main message content */}
-                              <div className="markdown-body">
-                                <Markdown components={markdownComponents}>{message.content}</Markdown>
-                              </div>
-                              {/* Sources link for messages with sources but no searchQuery (e.g., tool results) */}
-                              {message.sources && !message.searchQuery && message.sources.length > 0 && (
-                                <div className="mt-3 flex items-center gap-2 text-xs">
-                                  {message.sources.slice(0, 3).map((source, sIdx) => (
-                                    <button
-                                      key={sIdx}
-                                      onClick={() => window.open(source.url, '_blank')}
-                                      className="flex items-center gap-1 text-blue-500 hover:underline"
-                                    >
-                                      <ExternalLink size={12} />
-                                      <span className="truncate max-w-[100px]">{source.title}</span>
-                                    </button>
-                                  ))}
-                                  {message.sources.length > 3 && (
-                                    <button
-                                      onClick={() => setIsSourcesPanelOpen(true)}
-                                      className="text-[10px] font-bold text-blue-500 hover:underline"
-                                    >
-                                      +{message.sources.length - 3} more
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
+                          </div>
                           {/* Timestamp and author label */}
-                          <div className="mt-1 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight flex items-center gap-2">
-                            {message.role === 'assistant' && persona.avatar && (
-                              <img src={persona.avatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
-                            )}
-                            {message.role === 'user' && userProfile.avatar && (
+                          <div className="mt-2 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight flex items-center gap-2">
+                             {userProfile.avatar && (
                               <img src={userProfile.avatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
                             )}
-                            {message.role === 'assistant' ? persona.name : userProfile.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {userProfile.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </motion.div>
                       ) : (
-                        /* Linear Layout */
-                        <div className="space-y-6 w-full">
-                          {message.role === 'user' ? (
+                        /* Assistant Message - "Free" same as Claude */
+                        <div className="w-full space-y-4 max-w-3xl animate-msg-in">
+                          {/* Optional node graph for tool calls */}
+                          {message.toolCalls && message.toolCalls.length > 0 && (
+                            <NodeGraph nodes={message.toolCalls} />
+                          )}
+
+                          {/* Thinking Indicator */}
+                          {message.thinking && (
                             <motion.div 
-                              className="flex items-start gap-4 pb-4 border-b border-gray-100 dark:border-white/5 max-w-2xl"
-                              initial={{ opacity: 0, y: 12 }}
+                              layout
+                              initial={{ opacity: 0, y: 5 }} 
                               animate={{ opacity: 1, y: 0 }}
-                              transition={{ duration: 0.18, ease: "easeOut" }}
+                              className="flex items-center gap-3 py-1 mb-2 h-10 overflow-hidden"
                             >
-                              <div className="w-6 h-6 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 text-[10px] font-bold shrink-0 mt-1 overflow-hidden">
-                                {message.role === 'user' ? (
-                                  userProfile.avatar ? <img src={userProfile.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : userProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
-                                ) : (
-                                  persona.avatar ? <img src={persona.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : <Sparkles size={12} />
+                              <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                                {isWebSearchEnabled ? <WebSearchAnimation /> : (
+                                  (mcpTools.some(t => t.enabled) || inbuiltTools.some(t => t.enabled)) ? <ToolCallingAnimation /> : <ThinkingDots />
                                 )}
                               </div>
-                              <h3 className="text-xl font-medium text-gray-900 dark:text-white tracking-tight">{message.content}</h3>
+                              <span className="text-[13px] font-medium text-zinc-400 shimmer-text truncate">
+                                {message.thinking}
+                              </span>
                             </motion.div>
-                          ) : (
-                            <div className="space-y-6 max-w-2xl px-1">
-                              {/* Node Graph Tool Visualization */}
-                              {message.toolCalls && message.toolCalls.length > 0 && (
-                                <div className="mb-4">
-                                  <NodeGraph nodes={message.toolCalls} />
-                                </div>
-                              )}
+                          )}
 
-                              {/* Status Steps - Thinking / Searching Animation */}
-                              {message.thinking && (
-                                <div className="space-y-4 mb-6">
-                                  {/* Phase 1: Initial thought */}
-                                  <motion.div 
-                                    initial={{ opacity: 0, y: -6 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="smooth-fade-in"
-                                  >
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                                        {isWebSearchEnabled ? <WebSearchAnimation /> : <ToolCallingAnimation />}
-                                      </div>
-                                      <div className="flex flex-col gap-0.5">
-                                        <span className="text-[13px] font-medium text-zinc-400 shimmer-text">
-                                          {message.thinking}
-                                        </span>
-                                        <span className="text-[11px] text-zinc-600">
-                                          {isWebSearchEnabled ? 'Searching multiple sources' : 'Processing your request'}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </motion.div>
-                                  
-                                  {/* Phase 2: Processing steps that animate sequentially */}
-                                  {typingMessageId === message.id && (
-                                    <>
-                                      <motion.div 
-                                        initial={{ opacity: 0, y: -6 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: 0.15 }}
-                                        className="smooth-fade-in ml-8"
-                                      >
-                                        <div className="flex items-center gap-2 text-zinc-500">
-                                          <ChevronRight size={12} className="opacity-50 shrink-0" />
-                                          <span className="text-[12px] fade-in-token">
-                                            {isWebSearchEnabled ? 'Gathering relevant information' : 'Analyzing input'}
-                                          </span>
-                                        </div>
-                                      </motion.div>
-                                      <motion.div 
-                                        initial={{ opacity: 0, y: -6 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: 0.3 }}
-                                        className="smooth-fade-in ml-8"
-                                      >
-                                        <div className="flex items-center gap-2 text-zinc-500">
-                                          <ChevronRight size={12} className="opacity-50 shrink-0" />
-                                          <span className="text-[12px] fade-in-token">
-                                            {isWebSearchEnabled ? 'Synthesizing search results' : 'Synthesizing response'}
-                                          </span>
-                                        </div>
-                                      </motion.div>
-                                    </>
-                                  )}
+                          {/* Search details */}
+                          {message.searchQuery && (
+                            <SearchResultsUI 
+                              query={message.searchQuery} 
+                              sources={message.sources || []} 
+                              isSearching={!!message.isSearching} 
+                            />
+                          )}
 
-                                  {/* Animated dots */}
-                                  {typingMessageId === message.id && (
-                                    <div className="flex gap-1.5 py-2 ml-8 smooth-fade-in">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-1" />
-                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-2" />
-                                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 dot-pulse-3" />
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                          {/* Free-form content */}
+                          <div className="markdown-body prose-lg max-w-none px-1">
+                             <Markdown components={markdownComponents}>{message.content}</Markdown>
+                          </div>
 
-                              {/* Search Progress (when searchQuery is set) */}
-                              {message.searchQuery && !message.thinking && (
-                                <div className="space-y-4">
-                                  <div className="flex items-center gap-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
-                                    {message.isSearching ? (
-                                      <div className="w-4 h-4 scale-75">
-                                        <WebSearchAnimation />
-                                      </div>
-                                    ) : (
-                                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                    )}
-                                    {message.isSearching ? 'Search in progress...' : `Searched: ${message.searchQuery}`}
-                                  </div>
-                                  
-                                  {message.sources && message.sources.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                      {message.sources.slice(0, 3).map((source, sIdx) => (
-                                        <div 
-                                          key={sIdx}
-                                          className="search-result flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-white/5 border border-gray-100 dark:border-white/10 rounded-xl text-xs transition-all shadow-sm"
-                                        >
-                                          <Globe size={12} className="text-gray-400" />
-                                          <span className="max-w-[100px] truncate font-medium">{source.title}</span>
-                                        </div>
-                                      ))}
-                                      {message.sources.length > 3 && (
-                                        <button 
-                                          onClick={() => setIsSourcesPanelOpen(true)}
-                                          className="px-3 py-1.5 bg-gray-100 dark:bg-white/10 rounded-xl text-[10px] font-bold text-gray-500 hover:bg-gray-200 transition-colors"
-                                        >
-                                          +{message.sources.length - 3} MORE
-                                        </button>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                          {/* Artifacts */}
+                          {message.artifacts && message.artifacts.length > 0 && (
+                            <div className="w-full space-y-2 mt-4">
+                              {message.artifacts.map(art => (
+                                <ArtifactCard 
+                                  key={art.id} 
+                                  artifact={art} 
+                                  onOpen={(a) => {
+                                    setActiveArtifact(a);
+                                    setIsCanvasOpen(true);
+                                    setCanvasView(a.type === 'html' ? 'preview' : 'code');
+                                  }} 
+                                />
+                              ))}
+                            </div>
+                          )}
 
-                              {/* Main Response Text */}
-                              <motion.div 
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                transition={{ duration: 0.4, delay: 0.2 }}
-                                className="prose prose-sm dark:prose-invert max-w-none text-[16px] leading-[1.6]"
-                              >
-                                <Markdown components={markdownComponents}>{message.content}</Markdown>
-                              </motion.div>
-
-                              {/* Footer Actions */}
-                              {message.sources && message.sources.length > 0 && (
-                                <motion.div 
-                                  initial={{ opacity: 0 }}
-                                  animate={{ opacity: 1 }}
-                                  transition={{ duration: 0.2, delay: 0.5 }}
-                                  className="pt-4 flex items-center gap-4"
-                                >
+                          {/* Footer Actions / Metadata */}
+                          {!message.thinking && (
+                            <motion.div 
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              className="mt-6 flex flex-col gap-4 border-t border-zinc-100 dark:border-white/5 pt-4 pl-1"
+                            >
+                              <div className="flex items-center gap-4">
+                                {message.sources && message.sources.length > 0 && (
                                   <button 
                                     onClick={() => setIsSourcesPanelOpen(true)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl text-xs font-bold text-gray-500 dark:text-gray-400 transition-all uppercase tracking-tighter active:scale-95 translate-y-2 animate-fade-up [animation-delay:300ms] [animation-fill-mode:forwards]"
+                                    className="flex items-center gap-2 text-[11px] font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors uppercase tracking-wider"
                                   >
                                     <Layout size={14} />
                                     {message.sources.length} Sources
                                   </button>
-                                  <button className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl text-gray-400 transition-colors">
-                                    <MessageSquare size={16} />
-                                  </button>
-                                </motion.div>
-                              )}
-                            </div>
+                                )}
+                                <div className="text-[10px] text-zinc-400 font-medium uppercase tracking-tight flex items-center gap-2">
+                                  {persona.avatar && (
+                                    <img src={persona.avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
+                                  )}
+                                  {persona.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-2">
+                                <button className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
+                                  <Copy size={16} />
+                                </button>
+                                <button className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
+                                  <History size={16} />
+                                </button>
+                              </div>
+                            </motion.div>
                           )}
                         </div>
                       )}
@@ -3046,6 +3217,14 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
           ))}
         </AnimatePresence>
       </div>
+
+      <Canvas 
+        artifact={activeArtifact} 
+        isOpen={isCanvasOpen} 
+        onClose={() => setIsCanvasOpen(false)} 
+        view={canvasView}
+        onSetView={setCanvasView}
+      />
     </div>
   );
 }

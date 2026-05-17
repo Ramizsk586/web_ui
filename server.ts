@@ -3,6 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
+import axios from 'axios';
+import { search } from 'duck-duck-scrape';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -112,6 +114,77 @@ async function startServer() {
     } catch (error: any) {
       console.error("Avatar Gen Error:", error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/search", async (req, res) => {
+    const { query, tavilyKey, serpKey } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ error: "Query is required" });
+    }
+
+    let results: any[] = [];
+    let provider = "duckduckgo";
+
+    try {
+      // 1. Try Serper if key provided
+      if (serpKey) {
+        try {
+          const response = await axios.post('https://google.serper.dev/search', { q: query }, {
+            headers: { 'X-API-KEY': serpKey, 'Content-Type': 'application/json' }
+          });
+          if (response.data && response.data.organic) {
+            results = response.data.organic.map((r: any) => ({
+              title: r.title,
+              url: r.link,
+              snippet: r.snippet
+            }));
+            provider = "serper";
+          }
+        } catch (e) {
+          console.log("Serper failed, falling back...");
+        }
+      }
+
+      // 2. Try Tavily if Serper failed/not used and key provided
+      if (results.length === 0 && tavilyKey) {
+        try {
+          const response = await axios.post('https://api.tavily.com/search', {
+            api_key: tavilyKey,
+            query: query,
+            search_depth: "basic"
+          });
+          if (response.data && response.data.results) {
+            results = response.data.results.map((r: any) => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.content
+            }));
+            provider = "tavily";
+          }
+        } catch (e) {
+          console.log("Tavily failed, falling back...");
+        }
+      }
+
+      // 3. Fallback to DDG (DuckDuckGo)
+      if (results.length === 0) {
+        const ddgResults = await search(query);
+        if (ddgResults.results && ddgResults.results.length > 0) {
+          results = ddgResults.results.map((r: any) => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.description
+          }));
+          provider = "duckduckgo";
+        }
+      }
+
+      res.json({ results, provider });
+    } catch (error: any) {
+      console.error("Search API Error:", error);
+      res.status(500).json({ error: "Search failed" });
     }
   });
 
