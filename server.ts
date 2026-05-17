@@ -21,6 +21,60 @@ async function startServer() {
     next();
   });
 
+  // Gemini API Implementation
+  const genaiModule = await import("@google/genai");
+  const GoogleGenAI = genaiModule.GoogleGenAI;
+  const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+
+  app.get("/api/models", async (req, res) => {
+    res.json({
+      data: [
+        { id: "gemini-1.5-pro", display_name: "Lumina Ultra Plus" },
+        { id: "gemini-1.5-flash", display_name: "Lumina Mini Flash" }
+      ]
+    });
+  });
+
+  app.post("/api/chat/completions", async (req, res) => {
+    try {
+      const { model: requestedModel, messages } = req.body;
+      const modelId = (requestedModel && requestedModel.includes("ultra")) ? "gemini-1.5-pro" : "gemini-1.5-flash";
+      const generativeModel = (genAI as any).getGenerativeModel({ model: modelId });
+
+      const lastMessage = messages[messages.length - 1];
+      const history = messages.slice(0, -1).map((m: any) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      }));
+
+      const chat = generativeModel.startChat({ history });
+      const result = await chat.sendMessage(lastMessage.content);
+      const response = await result.response;
+      const text = response.text();
+
+      res.json({
+        choices: [{
+          message: {
+            content: text,
+            role: "assistant"
+          }
+        }]
+      });
+    } catch (error: any) {
+      console.error("Gemini Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // MCP Mock Routes for Verification
+  app.get("/api/v1/tools", (req, res) => {
+    res.json({ tools: [] });
+  });
+
+  app.post("/api/list_tools", (req, res) => {
+    res.json({ tools: [] });
+  });
+
   // Vite middleware for development
   if (isDev) {
     try {
@@ -43,9 +97,9 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "localhost", () => {
-    console.log(`\n🚀 Proxy server ready at http://localhost:${PORT}`);
-    console.log(`🔗 App connects directly to llama bridge at http://127.0.0.1:8089`);
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`\n🚀 Proxy server ready at http://0.0.0.0:${PORT}`);
+    console.log(`🔗 App connects via internal API proxy`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);

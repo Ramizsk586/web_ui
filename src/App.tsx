@@ -235,8 +235,8 @@ export default function App() {
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'project' | 'skills'>('main');
-  const DEFAULT_SERVER_URL = 'http://127.0.0.1:8089';
-  const DEFAULT_MCP_URL = 'http://127.0.0.1:8089';
+  const DEFAULT_SERVER_URL = '/api';
+  const DEFAULT_MCP_URL = '/api';
   const DEFAULT_API_KEY = 'llama';
 
   const [serverUrl, setServerUrl] = useState(localStorage.getItem('lumina_server_url') || DEFAULT_SERVER_URL);
@@ -276,7 +276,7 @@ export default function App() {
   const handleVerifyAI = async () => {
     setAiVerificationState('verifying');
     try {
-      // Direct call to llama-bridge /models endpoint
+      // Direct call to proxy /api/models endpoint
       const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, {
         method: 'GET',
         headers: {
