@@ -37,7 +37,12 @@ import {
   Check,
   ChevronRight,
   ChevronLeft,
-  Palette
+  Palette,
+  Terminal,
+  Calendar,
+  Image as ImageIcon,
+  CloudMoon,
+  Video
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 
@@ -214,19 +219,28 @@ export default function App() {
   const handleVerifyAI = async () => {
     setAiVerificationState('verifying');
     try {
-      // Attempt to fetch models from the server
-      const response = await fetch(`${serverUrl}/models`, {
+      // llama-bridge supports /v1/models
+      const response = await fetch('/api/proxy', {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: `${serverUrl}/v1/models`,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`
+          }
+        })
       });
       
       if (response.ok) {
         const data = await response.json();
-        if (data.data && Array.isArray(data.data)) {
-          const fetchedModels = data.data.map((m: any) => ({
+        const modelsArr = data.data || data.models || [];
+        if (Array.isArray(modelsArr)) {
+          const fetchedModels = modelsArr.map((m: any) => ({
             id: m.id,
-            name: m.id, // Usually the ID is the display name in proxies
+            name: m.display_name || m.id,
             icon: <Sparkles size={14} />,
             color: 'text-blue-500'
           }));
@@ -237,8 +251,7 @@ export default function App() {
         }
         setAiVerificationState('success');
       } else {
-        // Fallback for verification if /models isn't standard but server is active
-        setAiVerificationState('success');
+        setAiVerificationState('error');
       }
     } catch (error) {
       console.error('Verification failed:', error);
@@ -278,36 +291,83 @@ export default function App() {
     if (!mcpUrl) return;
     setIsConnectingMcp(true);
     try {
-      // In a real MCP scenario, we'd list tools
-      const response = await fetch(`${mcpUrl}/list_tools`, {
+      // llama-bridge exposes tools at /v1/tools or /api/tools
+      const response = await fetch('/api/proxy', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${mcpKey}`
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({})
+        body: JSON.stringify({
+          url: `${mcpUrl}/v1/tools`,
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${mcpKey}`
+          }
+        })
       });
 
       if (response.ok) {
         const data = await response.json();
-        if (data.tools && Array.isArray(data.tools)) {
-          setMcpTools(data.tools.map((t: any) => ({
-            id: t.name,
-            name: t.name,
-            description: t.description || 'MCP Tool',
-            enabled: true,
-            icon: <Box size={14} />
-          })));
+        const toolsList = data.tools || data.openai_tools || [];
+        
+        if (Array.isArray(toolsList)) {
+          setMcpTools(toolsList.map((t: any) => {
+            const name = t.name || (t.function?.name);
+            const desc = t.description || (t.function?.description) || 'Bridge Tool';
+            
+            // Map icons based on tool names
+            let icon = <Box size={14} />;
+            if (name.includes('search') || name.includes('research')) icon = <Search size={14} />;
+            if (name.includes('shell') || name.includes('terminal')) icon = <Terminal size={14} />;
+            if (name.includes('weather')) icon = <CloudMoon size={14} />;
+            if (name.includes('wikipedia') || name.includes('globe')) icon = <Globe size={14} />;
+            if (name.includes('image')) icon = <ImageIcon size={14} />;
+            if (name.includes('date') || name.includes('time')) icon = <Calendar size={14} />;
+            if (name.includes('verify')) icon = <Check size={14} />;
+            if (name.includes('render') || name.includes('video')) icon = <Video size={14} />;
+
+            return {
+              id: name,
+              name: name,
+              description: desc,
+              enabled: true,
+              icon: icon
+            };
+          }));
         }
         setIsMcpConnected(true);
       } else {
-        // Mock success if endpoint doesn't exist but we want to simulate connection for the UI
-        setIsMcpConnected(true);
+        // Try fallback MCP list_tools if /v1/tools failed
+        const mcpResp = await fetch('/api/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: `${mcpUrl}/list_tools`,
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${mcpKey}` },
+            body: {}
+          })
+        });
+        
+        if (mcpResp.ok) {
+          const mcpData = await mcpResp.json();
+          if (mcpData.tools) {
+            setMcpTools(mcpData.tools.map((t: any) => ({
+              id: t.name,
+              name: t.name,
+              description: t.description || 'MCP Tool',
+              enabled: true,
+              icon: <Box size={14} />
+            })));
+          }
+          setIsMcpConnected(true);
+        } else {
+          setIsMcpConnected(false);
+        }
       }
     } catch (error) {
       console.error('MCP connection failed:', error);
-      // Fallback for prototype mode
-      setIsMcpConnected(true);
+      setIsMcpConnected(false);
     } finally {
       setIsConnectingMcp(false);
     }
@@ -521,7 +581,7 @@ export default function App() {
       inputRef.current.style.height = 'auto';
     }
 
-    // Real AI Response from configured server
+    // Real AI Response from configured server through local proxy
     try {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       const apiMessages = [...chatContext, userMessage].map(m => ({
@@ -529,16 +589,23 @@ export default function App() {
         content: m.content
       }));
 
-      const response = await fetch(`${serverUrl}/chat/completions`, {
+      const response = await fetch('/api/proxy', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: selectedModel,
-          messages: apiMessages,
-          stream: false // Default to non-streaming for now
+          url: `${serverUrl}/chat/completions`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: {
+            model: selectedModel,
+            messages: apiMessages,
+            stream: false
+          }
         })
       });
 
