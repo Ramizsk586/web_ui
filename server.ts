@@ -39,8 +39,8 @@ async function startServer() {
 
   app.post("/api/chat/completions", async (req, res) => {
     try {
-      const { model: requestedModel, messages, writing_style = 'default', system_prompt } = req.body;
-      const modelId = (requestedModel && requestedModel.includes("ultra")) ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
+      const { model: requestedModel, messages, writing_style = 'default', system_prompt, use_tools } = req.body;
+      const modelId = (requestedModel && requestedModel.includes("ultra")) ? "gemini-1.5-pro" : "gemini-1.5-flash";
       
       const stylePrompts: Record<string, string> = {
         poem: "You are a poet. Write in a poetic style with stanzas and rhythmic line breaks. Use evocative language.",
@@ -53,27 +53,100 @@ async function startServer() {
 
       const baseInstruction = system_prompt || stylePrompts[writing_style] || stylePrompts.default;
 
-      // Use modern SDK method
-      const response = await (genAI as any).models.generateContent({
-        model: modelId,
-        contents: messages.map((m: any) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }]
-        })),
-        config: {
-          systemInstruction: baseInstruction
+      // Define tools for image search
+      const toolConfigs = use_tools ? [
+        {
+          functionDeclarations: [
+            {
+              name: "image_search",
+              description: "Search for images using DuckDuckGo. Use this tool when the user asks for pictures, images, or photos of something.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  query: {
+                    type: "STRING",
+                    description: "The search query for images."
+                  }
+                },
+                required: ["query"]
+              }
+            }
+          ]
         }
+      ] : [];
+
+      const model = genAI.getGenerativeModel({ 
+        model: modelId,
+        systemInstruction: baseInstruction,
+        tools: toolConfigs
       });
 
-      const text = response.text;
+      const chat = model.startChat({
+        history: messages.slice(0, -1).map((m: any) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }]
+        }))
+      });
+
+      const lastMessage = messages[messages.length - 1];
+      let result = await chat.sendMessage(lastMessage.content);
+      let response = result.response;
+      
+      let toolCalls = [];
+      let imagesResponse = [];
+
+      // Inspect parts for function calls
+      const parts = response.candidates[0].content.parts;
+      const functionCalls = parts.filter((p: any) => p.functionCall);
+
+      if (functionCalls.length > 0) {
+        for (const fc of functionCalls) {
+          const call = fc.functionCall;
+          if (call.name === "image_search") {
+            try {
+              const { images: ddgImages } = await import('duck-duck-scrape');
+              const searchResults = await ddgImages(call.args.query);
+              const results = searchResults.results.slice(0, 6).map(img => ({
+                title: img.title,
+                url: img.image,
+                source: img.source,
+                thumbnail: img.thumbnail
+              }));
+              
+              imagesResponse = results;
+              
+              // Provide results back to the model
+              result = await chat.sendMessage([{
+                functionResponse: {
+                  name: "image_search",
+                  response: { results }
+                }
+              }]);
+              response = result.response;
+              
+              toolCalls.push({
+                id: Math.random().toString(36).substring(7),
+                function: {
+                  name: "image_search",
+                  arguments: JSON.stringify(call.args)
+                }
+              });
+            } catch (err) {
+              console.error("Tool execution failed:", err);
+            }
+          }
+        }
+      }
 
       res.json({
         choices: [{
           message: {
-            content: text,
-            role: "assistant"
+            content: response.text(),
+            role: "assistant",
+            tool_calls: toolCalls.length > 0 ? toolCalls : undefined
           }
-        }]
+        }],
+        images: imagesResponse.length > 0 ? imagesResponse : undefined
       });
     } catch (error: any) {
       console.error("Gemini Error:", error);
@@ -212,6 +285,30 @@ async function startServer() {
     } catch (error: any) {
       console.error("Search API Error:", error);
       res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  app.post("/api/image-search", async (req, res) => {
+    const { query } = req.body;
+    if (!query) {
+      return res.status(400).json({ error: "Query is required" });
+    }
+
+    try {
+      const { images } = await import('duck-duck-scrape');
+      const results = await images(query);
+      
+      const formattedResults = results.results.slice(0, 10).map(img => ({
+        title: img.title,
+        url: img.image,
+        source: img.source,
+        thumbnail: img.thumbnail
+      }));
+
+      res.json({ results: formattedResults });
+    } catch (error: any) {
+      console.error("Image Search API Error:", error);
+      res.status(500).json({ error: "Image search failed" });
     }
   });
 

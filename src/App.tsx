@@ -8,7 +8,7 @@
 
 // Dependencies: react-syntax-highlighter @types/react-syntax-highlighter
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Send, 
@@ -35,6 +35,7 @@ import {
   Layout,
   MessageSquare,
   StopCircle,
+  Download,
   FileUp,
   Camera,
   FolderPlus,
@@ -48,6 +49,7 @@ import {
   Check,
   ChevronRight,
   ChevronLeft,
+  ArrowRight,
   Palette,
   Terminal,
   Calendar,
@@ -57,6 +59,8 @@ import {
   PenTool,
   History,
   FileText,
+  FileCode,
+  Code,
   Type as TypeIcon,
   Music,
   Mail
@@ -92,9 +96,11 @@ interface Message {
   content: string;
   timestamp: Date;
   thinking?: string;
-  sources?: { title: string; url: string; icon?: string }[];
+  sources?: { title: string; url: string; icon?: string; snippet?: string }[];
+  images?: { title: string; url: string; thumbnail?: string; source?: string }[];
   searchQuery?: string;
   isSearching? : boolean;
+  isStreaming?: boolean;
   toolCalls?: ToolCallNode[];
   artifacts?: Artifact[];
 }
@@ -112,6 +118,13 @@ interface Tool {
    description: string;
    enabled: boolean;
    icon: React.ReactNode;
+}
+
+interface Skill {
+  id: string;
+  label: string;
+  prompt: string;
+  icon: React.ReactNode;
 }
 
 const WebSearchAnimation = () => (
@@ -265,7 +278,7 @@ const SidebarContent = ({
   </>
 );
 
-function CanvasBlock({ language, code }: { language: string; code: string }) {
+const CanvasBlock = React.memo(({ language, code }: { language: string; code: string }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -297,9 +310,38 @@ function CanvasBlock({ language, code }: { language: string; code: string }) {
           <SyntaxHighlighter
             language={language}
             style={oneDark}
-            customStyle={{ background: 'transparent', fontSize: '13px', lineHeight: '1.6', margin: 0 }}
+            customStyle={{ 
+              background: 'transparent', 
+              backgroundColor: 'transparent',
+              fontSize: '13px', 
+              lineHeight: '1.6', 
+              margin: 0,
+              padding: 0,
+              border: 'none',
+              boxShadow: 'none',
+              textDecoration: 'none'
+            }}
+            codeTagProps={{
+              style: {
+                background: 'transparent',
+                backgroundColor: 'transparent',
+                border: 'none',
+                textDecoration: 'none',
+                boxShadow: 'none'
+              }
+            }}
             showLineNumbers
-            lineNumberStyle={{ color: '#3f3f46', minWidth: '2.5em' }}
+            lineNumberStyle={{ 
+              color: '#3f3f46', 
+              minWidth: '2.5em',
+              background: 'transparent',
+              backgroundColor: 'transparent',
+              paddingRight: '1em',
+              textAlign: 'right',
+              userSelect: 'none',
+              borderRight: 'none',
+              textDecoration: 'none'
+            }}
           >
             {code}
           </SyntaxHighlighter>
@@ -311,7 +353,7 @@ function CanvasBlock({ language, code }: { language: string; code: string }) {
       </div>
     </div>
   );
-}
+});
 
 const CLOUD_PROVIDERS = [
   { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: <Terminal size={13} /> },
@@ -323,310 +365,6 @@ const CLOUD_PROVIDERS = [
   { id: 'together', label: 'Together AI', endpoint: 'https://api.together.xyz/v1', key: '', icon: <Sparkles size={13} /> },
   { id: 'mistral', label: 'Mistral', endpoint: 'https://api.mistral.ai/v1', key: '', icon: <Sparkles size={13} /> },
 ];
-
-export default function App() {
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isCompactSidebar, setIsCompactSidebar] = useState(false);
-  const [useBubbles, setUseBubbles] = useState(true);
-  const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search' | 'persona' | 'profile' | 'providers'>('general');
-  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'project' | 'skills' | 'style' | 'providers'>('main');
-  const [userProfile, setUserProfile] = useState({
-    name: 'User',
-    avatar: '',
-    dob: '',
-    location: ''
-  });
-  const [providerProfiles, setProviderProfiles] = useState<any[]>([
-    { id: 'openai-1', name: 'OpenAI Personal', type: 'openai', apiKey: '', enabled: false, models: [] },
-    { id: 'anthropic-1', name: 'Anthropic Work', type: 'anthropic', apiKey: '', enabled: false, models: [] },
-    { id: 'gemini-1', name: 'Google Gemini', type: 'gemini', apiKey: '', enabled: false, models: [] },
-    { id: 'groq-1', name: 'Groq Cloud', type: 'groq', apiKey: '', enabled: false, models: [] },
-    { id: 'openrouter-1', name: 'OpenRouter', type: 'openrouter', apiKey: '', enabled: false, models: [] },
-  ]);
-  const [modelSearchQuery, setModelSearchQuery] = useState('');
-  const [mcpMode, setMcpMode] = useState<'local' | 'remote'>('local');
-  const [remoteMcpConfig, setRemoteMcpConfig] = useState({ url: '', status: 'disconnected' as 'disconnected' | 'connecting' | 'connected', error: '' });
-  const [testToolInput, setTestToolInput] = useState({ name: '', args: '{}' });
-  const [isTestingTool, setIsTestingTool] = useState(false);
-  const [testToolResult, setTestToolResult] = useState<any>(null);
-  const [persona, setPersona] = useState({
-    name: 'Lumina',
-    role: 'Modern Intelligence',
-    avatar: '', // Base64 or URL
-    isGeneratingAvatar: false
-  });
-  const DEFAULT_SERVER_URL = '/api';
-  const DEFAULT_MCP_URL = '/api';
-  const DEFAULT_API_KEY = 'llama';
-
-  const [serverUrl, setServerUrl] = useState(localStorage.getItem('lumina_server_url') || DEFAULT_SERVER_URL);
-  const [apiKey, setApiKey] = useState(localStorage.getItem('lumina_api_key') || DEFAULT_API_KEY);
-  const [mcpUrl, setMcpUrl] = useState(localStorage.getItem('lumina_mcp_url') || DEFAULT_MCP_URL);
-  const [mcpKey, setMcpKey] = useState(localStorage.getItem('lumina_mcp_key') || DEFAULT_API_KEY);
-  const [tavilyApiKey, setTavilyApiKey] = useState(localStorage.getItem('lumina_tavily_key') || '');
-  const [serpApiKey, setSerpApiKey] = useState(localStorage.getItem('lumina_serp_key') || '');
-  
-  const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
-  const [searchVerificationState, setSearchVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
-  const [isAiSaved, setIsAiSaved] = useState(false);
-  const [isSearchSaved, setIsSearchSaved] = useState(false);
-   const [isMcpSaved, setIsMcpSaved] = useState(false);
-   const [mcpTools, setMcpTools] = useState<Tool[]>([]);
-  const [inbuiltTools, setInbuiltTools] = useState<Tool[]>([
-    { id: 'wikipedia', name: 'Wikipedia', enabled: false, description: 'Search pages and get data', icon: <Book size={16} /> },
-    { id: 'image', name: 'Image Search', enabled: false, description: 'Search and send images', icon: <ImageIcon size={16} /> },
-    { id: 'weather', name: 'Weather', enabled: false, description: 'Real-time weather info', icon: <CloudSun size={16} /> },
-    { id: 'news', name: 'Global News', enabled: false, description: 'Latest headlines and stories', icon: <Newspaper size={16} /> },
-    { id: 'dictionary', name: 'Dictionary', enabled: false, description: 'Definitions and synonyms', icon: <Library size={16} /> },
-    { id: 'coderunner', name: 'Code Runner', enabled: false, description: 'Execute code snippets', icon: <Play size={16} /> },
-  ]);
-  const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>([
-    { id: 'lumina-ultra-plus', name: 'Lumina Ultra Plus', icon: <Sparkles size={14} />, color: 'text-blue-500' },
-    { id: 'lumina-pro-max', name: 'Lumina Pro Max', icon: <Plus size={14} />, color: 'text-purple-500' },
-    { id: 'lumina-mini-flash', name: 'Lumina Mini Flash', icon: <ArrowUp size={14} />, color: 'text-orange-500' },
-  ]);
-
-  const [isMcpConnected, setIsMcpConnected] = useState(false);
-  const [isConnectingMcp, setIsConnectingMcp] = useState(false);
-  const [writingStyle, setWritingStyle] = useState('default');
-  const [selectedProvider, setSelectedProvider] = useState('custom');
-
-  const handleProviderSelect = (providerId: string) => {
-    setSelectedProvider(providerId);
-    const p = CLOUD_PROVIDERS.find(p => p.id === providerId);
-    if (p && p.endpoint) {
-      setServerUrl(p.endpoint);
-      setIsAiSaved(false);
-    }
-    if (providerId === 'custom') {
-      setServerUrl(DEFAULT_SERVER_URL);
-      setApiKey(DEFAULT_API_KEY);
-      setIsAiSaved(false);
-    }
-  };
-
-  const WRITING_STYLES = [
-    { id: 'default', label: 'Default', icon: <PenTool size={14} /> },
-    { id: 'poem', label: 'Poem', icon: <Music size={14} /> },
-    { id: 'story', label: 'Story', icon: <History size={14} /> },
-    { id: 'letter', label: 'Letter', icon: <Mail size={14} /> },
-    { id: 'essay', label: 'Essay', icon: <FileText size={14} /> },
-    { id: 'script', label: 'Script', icon: <TypeIcon size={14} /> },
-  ];
-
-  const handleSaveAI = () => {
-    localStorage.setItem('lumina_server_url', serverUrl);
-    localStorage.setItem('lumina_api_key', apiKey);
-    setIsAiSaved(true);
-    setTimeout(() => setIsAiSaved(false), 2000);
-  };
-
-  const handleVerifyAI = async () => {
-    setAiVerificationState('verifying');
-    try {
-      // Direct call to proxy /api/models endpoint
-      const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const modelsArr = data.data || data.models || [];
-        if (Array.isArray(modelsArr)) {
-          const fetchedModels = modelsArr.map((m: any) => ({
-            id: m.id,
-            name: m.display_name || m.id,
-            icon: <Sparkles size={14} />,
-            color: 'text-blue-500'
-          }));
-          if (fetchedModels.length > 0) {
-            setAvailableModels(fetchedModels);
-            setSelectedModel(fetchedModels[0].id);
-          }
-        }
-        setAiVerificationState('success');
-      } else {
-        setAiVerificationState('error');
-      }
-    } catch (error) {
-      console.error('Verification failed:', error);
-      setAiVerificationState('error');
-    } finally {
-      setTimeout(() => setAiVerificationState('idle'), 3000);
-    }
-  };
-
-  const handleSaveSearch = () => {
-    localStorage.setItem('lumina_tavily_key', tavilyApiKey);
-    localStorage.setItem('lumina_serp_key', serpApiKey);
-    setIsSearchSaved(true);
-    setTimeout(() => setIsSearchSaved(false), 2000);
-  };
-
-  const handleVerifySearch = () => {
-    setSearchVerificationState('verifying');
-    setTimeout(() => {
-      if (tavilyApiKey || serpApiKey) {
-        setSearchVerificationState('success');
-      } else {
-        setSearchVerificationState('error');
-      }
-      setTimeout(() => setSearchVerificationState('idle'), 3000);
-    }, 1200);
-  };
-
-  const handleSaveMcp = () => {
-    localStorage.setItem('lumina_mcp_url', mcpUrl);
-    localStorage.setItem('lumina_mcp_key', mcpKey);
-    setIsMcpSaved(true);
-    setTimeout(() => setIsMcpSaved(false), 2000);
-  };
-
-  const handleConnectMcp = async () => {
-    if (!mcpUrl) return;
-    setIsConnectingMcp(true);
-    try {
-      // Direct call to llama-bridge /v1/tools endpoint
-      const response = await fetch(`${mcpUrl}/v1/tools`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${mcpKey}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const toolsList = data.tools || data.openai_tools || [];
-        
-        if (Array.isArray(toolsList)) {
-          setMcpTools(toolsList.map((t: any) => {
-            const name = t.name || (t.function?.name);
-            const desc = t.description || (t.function?.description) || 'Bridge Tool';
-            
-            // Map icons based on tool names
-            let icon = <Box size={14} />;
-            if (name.includes('search') || name.includes('research')) icon = <Search size={14} />;
-            if (name.includes('shell') || name.includes('terminal')) icon = <Terminal size={14} />;
-            if (name.includes('weather')) icon = <CloudMoon size={14} />;
-            if (name.includes('wikipedia') || name.includes('globe')) icon = <Globe size={14} />;
-            if (name.includes('image')) icon = <ImageIcon size={14} />;
-            if (name.includes('date') || name.includes('time')) icon = <Calendar size={14} />;
-            if (name.includes('verify')) icon = <Check size={14} />;
-            if (name.includes('render') || name.includes('video')) icon = <Video size={14} />;
-
-            return {
-              id: name,
-              name: name,
-              description: desc,
-              enabled: true,
-              icon: icon
-            };
-          }));
-        }
-        setIsMcpConnected(true);
-      } else {
-        // Try fallback MCP list_tools if /v1/tools failed - direct call
-        const mcpResp = await fetch(`${mcpUrl}/list_tools`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${mcpKey}` 
-          },
-          body: JSON.stringify({})
-        });
-        
-        if (mcpResp.ok) {
-          const mcpData = await mcpResp.json();
-          if (mcpData.tools) {
-            setMcpTools(mcpData.tools.map((t: any) => ({
-              id: t.name,
-              name: t.name,
-              description: t.description || 'MCP Tool',
-              enabled: true,
-              icon: <Box size={14} />
-            })));
-          }
-          setIsMcpConnected(true);
-        } else {
-          setIsMcpConnected(false);
-        }
-      }
-    } catch (error) {
-      console.error('MCP connection failed:', error);
-      setIsMcpConnected(false);
-    } finally {
-      setIsConnectingMcp(false);
-    }
-  };
-
-  const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
-  const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
-  const [isCanvasOpen, setIsCanvasOpen] = useState(false);
-  const [canvasView, setCanvasView] = useState<'code' | 'preview'>('code');
-  // Track which message id is currently animating/typing. When a new message
-  // is sent, we set this to the id of the interim thinking message. This
-  // prevents older assistant messages from re-triggering their animations
-  // whenever the global `isTyping` state changes.
-  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
-const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
-const [isSearchOpen, setIsSearchOpen] = useState(false);
-const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
-const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
-const fileInputRef = useRef<HTMLInputElement>(null);
-const [searchQuery, setSearchQuery] = useState('');
-  const [showScrollButton, setShowScrollButton] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const headerMenuRef = useRef<HTMLDivElement>(null);
-  const plusMenuRef = useRef<HTMLDivElement>(null);
-
-  // Track scroll for scroll-to-bottom button
-  useEffect(() => {
-    const scrollContainer = scrollRef.current;
-    if (!scrollContainer) return;
-
-    const handleScroll = () => {
-      const isScrolledUp = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight > 200;
-      setShowScrollButton(isScrolledUp);
-    };
-
-    scrollContainer.addEventListener('scroll', handleScroll);
-    return () => scrollContainer.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsModelDropdownOpen(false);
-      }
-      if (headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
-        setIsHeaderMenuOpen(false);
-      }
-      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
-        setIsPlusMenuOpen(false);
-        setActivePlusSubMenu('main');
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
 const getDomain = (url: string) => {
   try {
@@ -645,13 +383,16 @@ const getFavicon = (url: string) => {
   }
 };
 
-const SearchResultsUI = ({ query, sources, isSearching }: { query: string; sources: any[]; isSearching: boolean }) => {
+const SearchResultsUI = React.memo(({ query, sources, isSearching, onToggleSources }: { query: string; sources: any[]; isSearching: boolean; onToggleSources?: () => void }) => {
   return (
     <div className="my-6 space-y-4">
       <div className="flex items-center gap-3 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 pl-1">
-        <div className={`p-1.5 rounded-lg border shadow-sm ${isSearching ? 'bg-blue-50 border-blue-100 dark:bg-blue-500/10 dark:border-blue-500/20 text-blue-500' : 'bg-zinc-50 border-zinc-100 dark:bg-white/5 dark:border-white/10'}`}>
+        <button 
+          onClick={onToggleSources}
+          className={`p-1.5 rounded-lg border shadow-sm transition-all hover:scale-105 active:scale-95 ${isSearching ? 'bg-blue-50 border-blue-100 dark:bg-blue-500/10 dark:border-blue-500/20 text-blue-500' : 'bg-zinc-50 border-zinc-100 dark:bg-white/5 dark:border-white/10 hover:bg-zinc-100 dark:hover:bg-white/10'}`}
+        >
           <Globe size={14} className={isSearching ? 'animate-spin-slow' : ''} />
-        </div>
+        </button>
         <div className="flex flex-col">
           <span className="text-zinc-800 dark:text-zinc-200">{query}</span>
           <span className="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{sources.length} sources found</span>
@@ -711,234 +452,119 @@ const SearchResultsUI = ({ query, sources, isSearching }: { query: string; sourc
       )}
     </div>
   );
-};
+});
 
-const ThinkingDots = () => (
-  <div className="flex gap-1.5 px-1 py-1.5 items-center h-4">
-    {[0, 1, 2].map((i) => (
-      <motion.div
-        key={i}
-        animate={{ 
-          opacity: [0.3, 0.8, 0.3],
-          scale: [1, 1.1, 1],
-        }}
-        transition={{ 
-          repeat: Infinity, 
-          duration: 1.5, 
-          ease: "easeInOut", 
-          delay: i * 0.25 
-        }}
-        className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600"
-      />
-    ))}
-  </div>
-);
+const NodeGraph = React.memo(({ nodes, isStreaming }: { nodes: ToolCallNode[]; isStreaming?: boolean }) => {
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    // If streaming or active nodes exist, start uncollapsed to avoid "shaking" gap
+    return !(isStreaming || nodes.some(n => n.status === 'active'));
+  });
 
-const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
-  const [isCollapsed, setIsCollapsed] = useState(true);
-
-  // Auto-expand while any node is actively running
+  // Auto-expand while any node is actively running OR while content is still streaming
   useEffect(() => {
-    if (nodes.some(n => n.status === 'active')) {
+    if (isStreaming || nodes.some(n => n.status === 'active')) {
       setIsCollapsed(false);
     }
-  }, [nodes]);
+  }, [nodes, isStreaming]);
 
-  const activeNode = nodes.find(n => n.status === 'active');
-  const totalSubSteps = nodes.reduce((acc, n) => acc + (n.subNodes?.length ?? 0), 0);
-
-  // Collapsed summary line: show first 2 node labels + overflow count
-  const summaryLabel = nodes.length > 2
-    ? `${nodes[0].label}, ${nodes[1].label}  +${nodes.length - 2} more`
-    : nodes.map(n => n.label).join(' → ');
+  const allComplete = nodes.every(n => n.status === 'complete');
+  
+  // Custom header based on node content - looking like Image 2 "Viewed X files"
+  const headerText = nodes.length > 0 
+    ? `Viewed ${nodes.length} files`
+    : 'System actions';
 
   return (
-    <div className="my-4 w-full">
+    <div className="my-5 w-full pl-2">
 
       {/* ── Collapsed header row ── */}
-      <motion.button
-        layout
+      <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="flex items-center gap-2 text-[13px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300 transition-all group px-1 rounded-lg"
+        className="flex items-center gap-2 text-[14px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300 transition-all group px-1 rounded-lg"
       >
+        <span>{headerText}</span>
         <motion.div
-          animate={{ rotate: isCollapsed ? 0 : 90 }}
+          animate={{ rotate: isCollapsed ? 0 : 180 }}
           transition={{ type: 'spring', stiffness: 300, damping: 20 }}
         >
-          <ChevronRight size={14} className="text-zinc-400" />
+          <ChevronDown size={14} className="text-zinc-500 opacity-60" />
         </motion.div>
-
-        <motion.span layout className="flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-[420px]">
-          {summaryLabel}
-          {totalSubSteps > 0 && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-white/5 text-zinc-400 dark:text-zinc-500">
-              {totalSubSteps} sub-step{totalSubSteps > 1 ? 's' : ''}
-            </span>
-          )}
-          {activeNode && (
-            <motion.span
-              animate={{ opacity: [0.4, 1, 0.4] }}
-              transition={{ repeat: Infinity, duration: 2 }}
-              className="text-[11px] font-normal italic opacity-60"
-            >
-              (running…)
-            </motion.span>
-          )}
-        </motion.span>
-      </motion.button>
+      </button>
 
       {/* ── Expanded timeline ── */}
-      <AnimatePresence>
-        {!isCollapsed && (
+      <motion.div
+        initial={false}
+        animate={{ 
+          height: isCollapsed ? 0 : 'auto',
+          opacity: isCollapsed ? 0 : 1,
+          marginTop: isCollapsed ? 0 : 16
+        }}
+        transition={{ 
+          height: { duration: isStreaming ? 0 : 0.25, ease: "easeInOut" },
+          opacity: { duration: 0.2 }
+        }}
+        className="overflow-hidden"
+      >
+        <div className="ml-[7px] border-l border-zinc-100 dark:border-white/10 space-y-5 relative py-1">
+          {nodes.map((node, i) => (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden mt-5 ml-4 pl-10 border-l border-zinc-100 dark:border-white/10 space-y-6 relative"
+              key={node.id}
+              initial={isStreaming ? false : { opacity: 0, x: -10 }} // Skip entrance animation while streaming
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className="relative flex items-center gap-3 pl-8"
             >
-              {nodes.map((node, i) => (
+              {/* Small connector line to the main vertical line */}
+              <div className="absolute left-0 top-[10px] w-4 h-[1px] bg-zinc-100 dark:bg-white/5" />
+              
+              {/* Icon */}
+              <div className={`transition-colors shrink-0 ${node.status === 'active' ? 'text-blue-500' : 'text-zinc-400 dark:text-zinc-500'}`}>
+                {node.icon || <FileText size={14} />}
+              </div>
+
+              {/* Label */}
+              <span className={`text-[13.5px] font-medium transition-colors ${
+                node.status === 'active'
+                  ? 'text-blue-500'
+                  : 'text-zinc-600 dark:text-zinc-400'
+              }`}>
+                {node.label}
+              </span>
+
+              {/* Optional: subtler running indicator */}
+              {node.status === 'active' && (
                 <motion.div
-                  key={node.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.08 }}
-                  className="relative flex flex-col gap-1"
-                >
-                  {/* Timeline dot */}
-                  <div className={`absolute -left-[41.5px] top-[5px] w-3 h-3 rounded-full border-2 bg-white dark:bg-zinc-950 z-10 transition-all duration-300 ${
-                  node.status === 'active'
-                    ? 'border-blue-500 animate-pulse bg-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.3)]'
-                    : node.status === 'complete'
-                      ? 'border-emerald-500 dark:border-emerald-500/50 bg-emerald-500 dark:bg-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
-                      : 'border-zinc-200 dark:border-zinc-800 opacity-50'
-                }`}>
-                  {node.status === 'complete' && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Check size={8} className="text-white" strokeWidth={3} />
-                    </div>
-                  )}
-                  {node.status === 'active' && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-1 h-1 rounded-full bg-blue-500" />
-                    </div>
-                  )}
-                </div>
+                  animate={{ opacity: [0.4, 1, 0.4] }}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                  className="ml-2 w-1.5 h-1.5 rounded-full bg-blue-500"
+                />
+              )}
+            </motion.div>
+          ))}
 
-                {/* Main node label row */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {node.icon && (
-                    <span className={`${node.status === 'active' ? 'text-blue-500' : 'text-zinc-400 dark:text-zinc-600'} transition-colors`}>
-                      {node.icon}
-                    </span>
-                  )}
-                  <span className={`text-[13px] font-medium transition-colors ${
-                    node.status === 'active'
-                      ? 'text-blue-500'
-                      : node.type === 'ai'
-                        ? 'text-zinc-700 dark:text-zinc-300'
-                        : 'text-zinc-600 dark:text-zinc-400'
-                  }`}>
-                    {node.label}
-                  </span>
-
-                  {/* Status badge */}
-                  {node.status === 'complete' && (
-                    <span className="text-[10px] text-emerald-500 dark:text-emerald-600 font-semibold uppercase tracking-widest">
-                      done
-                    </span>
-                  )}
-                  {node.status === 'active' && (
-                    <motion.span
-                      animate={{ opacity: [0.5, 1, 0.5] }}
-                      transition={{ repeat: Infinity, duration: 1.5 }}
-                      className="text-[10px] text-blue-400 font-semibold uppercase tracking-widest"
-                    >
-                      running…
-                    </motion.span>
-                  )}
-                  {node.status === 'failed' && (
-                    <span className="text-[10px] text-red-400 font-semibold uppercase tracking-widest">
-                      failed
-                    </span>
-                  )}
-
-                  {/* Duration badge (when available) */}
-                  {node.durationMs !== undefined && (
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono bg-zinc-100 dark:bg-white/5 px-1.5 py-0.5 rounded-md">
-                      {node.durationMs < 1000
-                        ? `${node.durationMs}ms`
-                        : `${(node.durationMs / 1000).toFixed(1)}s`}
-                    </span>
-                  )}
-                </div>
-
-                {/* Result summary / args badge */}
-                {(node.resultSummary || (node.type === 'tool' && node.argsCount !== undefined)) && (
-                  <div className="flex items-center gap-2 pl-0.5 flex-wrap">
-                    {node.type === 'tool' && node.argsCount !== undefined && (
-                      <span className="text-[10px] text-zinc-500 dark:text-zinc-600 font-mono italic">
-                        {node.argsCount === 0 ? 'no args' : `${node.argsCount} arg${node.argsCount > 1 ? 's' : ''}`}
-                      </span>
-                    )}
-                    {node.resultSummary && (
-                      <span className="text-[10px] text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-white/[0.04] px-2 py-0.5 rounded-full border border-zinc-200 dark:border-white/5">
-                        {node.resultSummary}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* ── Sub-nodes (nested steps this node spawned) ── */}
-                {node.subNodes && node.subNodes.length > 0 && (
-                  <div className="mt-2 ml-2 pl-5 border-l border-dashed border-zinc-200 dark:border-white/[0.06] space-y-2.5">
-                    {node.subNodes.map((sub, si) => (
-                      <motion.div
-                        key={sub.id}
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.08 + si * 0.05 }}
-                        className="flex items-center gap-2 flex-wrap"
-                      >
-                        {/* Sub-dot */}
-                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          sub.status === 'complete'
-                            ? 'bg-emerald-400 dark:bg-emerald-500/60'
-                            : sub.status === 'active'
-                              ? 'bg-blue-400 animate-pulse'
-                              : 'bg-zinc-300 dark:bg-zinc-700'
-                        }`} />
-
-                        {sub.icon && (
-                          <span className="text-zinc-400 dark:text-zinc-600">{sub.icon}</span>
-                        )}
-
-                        <span className={`text-[11px] font-medium ${
-                          sub.type === 'result'
-                            ? 'text-zinc-500 dark:text-zinc-500'
-                            : 'text-zinc-500 dark:text-zinc-500'
-                        }`}>
-                          {sub.label}
-                        </span>
-
-                        {sub.resultSummary && (
-                          <span className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono bg-zinc-100 dark:bg-white/[0.03] px-1.5 py-0.5 rounded-md border border-zinc-200 dark:border-white/[0.06]">
-                            {sub.resultSummary}
-                          </span>
-                        )}
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+          {allComplete && !isStreaming && (
+            <motion.div
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: nodes.length * 0.05 }}
+              className="relative flex items-center gap-3 pl-8 pt-1"
+            >
+                {/* Small connector line to the main vertical line */}
+              <div className="absolute left-0 top-[14px] w-4 h-[1px] bg-zinc-100 dark:bg-white/5" />
+              
+              <div className="shrink-0 flex items-center justify-center w-4 h-4 rounded-full border border-zinc-500 text-zinc-500">
+                <Check size={10} strokeWidth={3} />
+              </div>
+              <span className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200">Done</span>
+            </motion.div>
+          )}
+        </div>
+      </motion.div>
     </div>
   );
-}
+});
 
-const ArtifactCard = ({ artifact, onOpen }: { artifact: Artifact; onOpen: (a: Artifact) => void }) => {
+const ArtifactCard = React.memo(({ artifact, onOpen }: { artifact: Artifact; onOpen: (a: Artifact) => void }) => {
   const downloadFile = (e: React.MouseEvent) => {
     e.stopPropagation();
     const typeMap = {
@@ -983,7 +609,226 @@ const ArtifactCard = ({ artifact, onOpen }: { artifact: Artifact; onOpen: (a: Ar
       </button>
     </motion.div>
   );
-};
+});
+
+const MessageItem = React.memo(({ 
+  message, 
+  markdownComponents, 
+  userProfile, 
+  persona, 
+  isSourcesPanelOpen, 
+  setIsSourcesPanelOpen, 
+  setSourcesPanelMessageId,
+  setActiveArtifact, 
+  setIsCanvasOpen, 
+  setCanvasView 
+}: { 
+  message: Message; 
+  markdownComponents: any; 
+  userProfile: any; 
+  persona: any; 
+  isSourcesPanelOpen: boolean; 
+  setIsSourcesPanelOpen: (v: boolean) => void;
+  setSourcesPanelMessageId: (v: string | null) => void;
+  setActiveArtifact: (v: any) => void;
+  setIsCanvasOpen: (v: boolean) => void;
+  setCanvasView: (v: 'code' | 'preview') => void;
+}) => {
+  const [copied, setCopied] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <motion.div
+      layout
+      className={`flex flex-col w-full ${message.role === 'user' ? 'items-end mb-8' : 'items-start mb-12'}`}
+    >
+      {message.role === 'user' ? (
+        /* User Message */
+        <motion.div className="flex flex-col max-w-[85%] items-end">
+          <div className="px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm bg-black dark:bg-white text-white dark:text-black rounded-tr-none border border-black/5 dark:border-white/10">
+            <div className="markdown-body">
+              <Markdown components={markdownComponents}>{message.content}</Markdown>
+            </div>
+          </div>
+          <div className="mt-2 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight flex items-center gap-2">
+            {userProfile.avatar && (
+              <img src={userProfile.avatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
+            )}
+            {userProfile.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        </motion.div>
+      ) : (
+        /* Assistant Message */
+        <div className="w-full space-y-4 max-w-3xl">
+          {message.toolCalls && message.toolCalls.length > 0 && (
+            <NodeGraph nodes={message.toolCalls} isStreaming={message.isStreaming} />
+          )}
+          {message.searchQuery && (
+            <SearchResultsUI 
+              query={message.searchQuery} 
+              sources={message.sources || []} 
+              isSearching={!!message.isSearching} 
+              onToggleSources={() => {
+                setSourcesPanelMessageId(message.id);
+                setIsSourcesPanelOpen(!isSourcesPanelOpen);
+              }}
+            />
+          )}
+
+          <div className="markdown-body prose-lg max-w-none px-1 min-h-[1.5rem]">
+            <Markdown components={markdownComponents}>{message.content}</Markdown>
+          </div>
+
+          {message.images && message.images.length > 0 && (
+            <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 gap-3">
+              {message.images.map((img, idx) => (
+                <motion.div 
+                  key={idx}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="relative aspect-square rounded-2xl overflow-hidden group border border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-zinc-950 shadow-sm transition-all hover:shadow-md"
+                >
+                  <img 
+                    src={img.url} 
+                    alt={img.title}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
+                    <p className="text-[10px] text-white font-medium truncate mb-1">{img.title}</p>
+                    <div className="flex items-center justify-between">
+                      <a 
+                        href={img.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-[9px] text-blue-400 hover:underline truncate mr-2"
+                      >
+                        {img.source || 'Original Source'}
+                      </a>
+                      <button 
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = img.url;
+                          link.download = `image-${idx}`;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        }}
+                        className="p-1.5 bg-white/20 hover:bg-white/40 rounded-xl text-white transition-colors"
+                        title="Download Image"
+                      >
+                        <Download size={12} />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+
+          {message.artifacts && message.artifacts.length > 0 && (
+            <div className="w-full space-y-2 mt-4">
+              {message.artifacts.map(art => (
+                <ArtifactCard 
+                  key={art.id} 
+                  artifact={art} 
+                  onOpen={(a) => {
+                    setActiveArtifact(a);
+                    setIsCanvasOpen(true);
+                    setCanvasView(a.type === 'html' ? 'preview' : 'code');
+                  }} 
+                />
+              ))}
+            </div>
+          )}
+          {!message.thinking && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="mt-6 flex flex-col gap-4 border-t border-zinc-100 dark:border-white/5 pt-4 pl-1"
+            >
+              <div className="flex items-center gap-4">
+                {message.sources && message.sources.length > 0 && (
+                  <button 
+                    onClick={() => {
+                      setSourcesPanelMessageId(message.id);
+                      setIsSourcesPanelOpen(true);
+                    }}
+                    className="flex items-center gap-2 text-[11px] font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors uppercase tracking-wider"
+                  >
+                    <Layout size={14} />
+                    {message.sources.length} Sources
+                  </button>
+                )}
+                <div className="text-[10px] text-zinc-400 font-medium uppercase tracking-tight flex items-center gap-2">
+                  {persona.avatar && (
+                    <img src={persona.avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
+                  )}
+                  {persona.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={handleCopy}
+                  className={`p-1.5 transition-colors rounded-lg flex items-center gap-1.5 ${
+                    copied ? 'text-green-500 bg-green-500/10' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200'
+                  }`}
+                  title={copied ? "Copied!" : "Copy message"}
+                >
+                  {copied ? <Check size={14} /> : <Copy size={16} />}
+                  {copied && <span className="text-[10px] font-bold uppercase tracking-widest">Copied</span>}
+                </button>
+                <div className="relative">
+                  <button 
+                    onClick={() => setShowHistory(!showHistory)}
+                    className={`p-1.5 transition-colors rounded-lg ${
+                      showHistory ? 'text-blue-500 bg-blue-500/10' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200'
+                    }`}
+                    title="Message history"
+                  >
+                    <History size={16} />
+                  </button>
+                  <AnimatePresence>
+                    {showHistory && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                        className="absolute bottom-full left-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 rounded-xl shadow-xl z-50 p-3 overflow-hidden"
+                      >
+                        <div className="space-y-2">
+                          <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-100 dark:border-white/5 pb-1 mb-2">Metadata</h4>
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-zinc-500 font-medium italic">ID</span>
+                            <span className="text-[10px] text-zinc-400 font-mono truncate max-w-[80px]">{message.id}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-zinc-500 font-medium italic">Sent</span>
+                            <span className="text-[10px] text-zinc-400 font-mono italic">{message.timestamp.toLocaleTimeString()}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-zinc-500 font-medium italic">Chars</span>
+                            <span className="text-[10px] text-zinc-400 font-bold">{message.content.length}</span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </div>
+      )}
+    </motion.div>
+  );
+});
 
 const Canvas = ({ 
   artifact, 
@@ -1068,20 +913,43 @@ const Canvas = ({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto custom-scrollbar bg-[#0d0d0d]"
+                  className="h-full overflow-y-auto custom-scrollbar bg-transparent"
                 >
                   <SyntaxHighlighter
                     language={artifact.language}
                     style={oneDark}
                     customStyle={{ 
                       background: 'transparent', 
+                      backgroundColor: 'transparent',
                       fontSize: '14px', 
                       lineHeight: '1.7', 
                       margin: 0,
-                      padding: '24px'
+                      padding: '24px',
+                      border: 'none',
+                      boxShadow: 'none',
+                      textDecoration: 'none'
+                    }}
+                    codeTagProps={{
+                      style: {
+                        background: 'transparent',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        textDecoration: 'none',
+                        boxShadow: 'none'
+                      }
                     }}
                     showLineNumbers
-                    lineNumberStyle={{ color: '#3f3f46', minWidth: '3.5em' }}
+                    lineNumberStyle={{ 
+                      color: '#3f3f46', 
+                      minWidth: '3.5em',
+                      background: 'transparent',
+                      backgroundColor: 'transparent',
+                      paddingRight: '1em',
+                      textAlign: 'right',
+                      userSelect: 'none',
+                      borderRight: 'none',
+                      textDecoration: 'none'
+                    }}
                   >
                     {artifact.content}
                   </SyntaxHighlighter>
@@ -1092,7 +960,7 @@ const Canvas = ({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto bg-white dark:bg-zinc-900 p-8"
+                  className="h-full overflow-y-auto bg-white dark:bg-zinc-900 p-8 custom-scrollbar"
                 >
                   {artifact.type === 'markdown' ? (
                     <div className="markdown-body prose dark:prose-invert max-w-none">
@@ -1115,6 +983,377 @@ const Canvas = ({
     </AnimatePresence>
   );
 };
+
+export default function App() {
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [isResizing, setIsResizing] = useState(false);
+  // Resize logic
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      
+      const newWidth = e.clientX;
+      if (newWidth >= 180 && newWidth <= 600) {
+        setSidebarWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+    };
+  }, [isResizing]);
+
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCompactSidebar, setIsCompactSidebar] = useState(false);
+  const [useBubbles, setUseBubbles] = useState(true);
+  const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
+  const [sourcesPanelMessageId, setSourcesPanelMessageId] = useState<string | null>(null);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search' | 'persona' | 'profile'>('general');
+  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'project' | 'skills' | 'style'>('main');
+  const [userProfile, setUserProfile] = useState({
+    name: 'User',
+    avatar: '',
+    dob: '',
+    location: ''
+  });
+  const [mcpMode, setMcpMode] = useState<'local' | 'remote'>('local');
+  const [remoteMcpConfig, setRemoteMcpConfig] = useState({ url: '', status: 'disconnected' as 'disconnected' | 'connecting' | 'connected', error: '' });
+  const [testToolInput, setTestToolInput] = useState({ name: '', args: '{}' });
+  const [isTestingTool, setIsTestingTool] = useState(false);
+  const [testToolResult, setTestToolResult] = useState<any>(null);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const [persona, setPersona] = useState({
+    name: 'Lumina',
+    role: 'Modern Intelligence',
+    avatar: '', // Base64 or URL
+    isGeneratingAvatar: false
+  });
+  const DEFAULT_SERVER_URL = '/api';
+  const DEFAULT_MCP_URL = '/api';
+  const DEFAULT_API_KEY = 'llama';
+
+  const safeGetItem = (key: string, fallback: string) => {
+    try {
+      return localStorage.getItem(key) || fallback;
+    } catch (error) {
+      return fallback;
+    }
+  };
+
+  const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', DEFAULT_SERVER_URL));
+  const [apiKey, setApiKey] = useState(() => safeGetItem('lumina_api_key', DEFAULT_API_KEY));
+  const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
+  const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', DEFAULT_API_KEY));
+  const [tavilyApiKey, setTavilyApiKey] = useState(() => safeGetItem('lumina_tavily_key', ''));
+  const [serpApiKey, setSerpApiKey] = useState(() => safeGetItem('lumina_serp_key', ''));
+  
+  const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
+  const [searchVerificationState, setSearchVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
+  const [isAiSaved, setIsAiSaved] = useState(false);
+  const [isSearchSaved, setIsSearchSaved] = useState(false);
+   const [isMcpSaved, setIsMcpSaved] = useState(false);
+   const [mcpTools, setMcpTools] = useState<Tool[]>([]);
+  const [inbuiltTools, setInbuiltTools] = useState<Tool[]>([
+    { id: 'wikipedia', name: 'Wikipedia', enabled: false, description: 'Search pages and get data', icon: <Book size={16} /> },
+    { id: 'image', name: 'Image Search', enabled: true, description: 'Search and send images', icon: <ImageIcon size={16} /> },
+    { id: 'weather', name: 'Weather', enabled: false, description: 'Real-time weather info', icon: <CloudSun size={16} /> },
+    { id: 'news', name: 'Global News', enabled: false, description: 'Latest headlines and stories', icon: <Newspaper size={16} /> },
+    { id: 'dictionary', name: 'Dictionary', enabled: false, description: 'Definitions and synonyms', icon: <Library size={16} /> },
+    { id: 'coderunner', name: 'Code Runner', enabled: false, description: 'Execute code snippets', icon: <Play size={16} /> },
+  ]);
+  const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>([
+    { id: 'lumina-ultra-plus', name: 'Lumina Ultra Plus', icon: <Sparkles size={14} />, color: 'text-blue-500' },
+    { id: 'lumina-pro-max', name: 'Lumina Pro Max', icon: <Plus size={14} />, color: 'text-purple-500' },
+    { id: 'lumina-mini-flash', name: 'Lumina Mini Flash', icon: <ArrowUp size={14} />, color: 'text-orange-500' },
+  ]);
+
+  const [isMcpConnected, setIsMcpConnected] = useState(false);
+  const [isConnectingMcp, setIsConnectingMcp] = useState(false);
+  const [writingStyle, setWritingStyle] = useState('default');
+  const [selectedProvider, setSelectedProvider] = useState('custom');
+
+  const handleProviderSelect = (providerId: string) => {
+    setSelectedProvider(providerId);
+    const p = CLOUD_PROVIDERS.find(p => p.id === providerId);
+    if (p && p.endpoint) {
+      setServerUrl(p.endpoint);
+      setIsAiSaved(false);
+    }
+    if (providerId === 'custom') {
+      setServerUrl(DEFAULT_SERVER_URL);
+      setApiKey(DEFAULT_API_KEY);
+      setIsAiSaved(false);
+    }
+  };
+
+  const WRITING_STYLES = [
+    { id: 'default', label: 'Default', icon: <PenTool size={14} /> },
+    { id: 'poem', label: 'Poem', icon: <Music size={14} /> },
+    { id: 'story', label: 'Story', icon: <History size={14} /> },
+    { id: 'letter', label: 'Letter', icon: <Mail size={14} /> },
+    { id: 'essay', label: 'Essay', icon: <FileText size={14} /> },
+    { id: 'script', label: 'Script', icon: <TypeIcon size={14} /> },
+  ];
+
+  const SKILLS: Skill[] = [
+    { id: 'summarize', label: 'Summarize', prompt: 'Summarize the following: ', icon: <FileText size={16} /> },
+    { id: 'translate', label: 'Translate', prompt: 'Translate the following to English: ', icon: <Globe size={16} /> },
+    { id: 'explain', label: 'Explain Code', prompt: 'Explain this code step by step: ', icon: <Code size={16} /> },
+    { id: 'brainstorm', label: 'Brainstorm', prompt: 'Brainstorm 5 creative ideas for: ', icon: <Sparkles size={16} /> },
+    { id: 'refactor', label: 'Refactor', prompt: 'Refactor and improve this code: ', icon: <Wrench size={16} /> },
+  ];
+
+  const handleSaveAI = () => {
+    localStorage.setItem('lumina_server_url', serverUrl);
+    localStorage.setItem('lumina_api_key', apiKey);
+    setIsAiSaved(true);
+    setTimeout(() => setIsAiSaved(false), 2000);
+  };
+
+  const handleVerifyAI = useCallback(async () => {
+    setAiVerificationState('verifying');
+    try {
+      // Direct call to proxy /api/models endpoint
+      const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const modelsArr = data.data || data.models || [];
+        if (Array.isArray(modelsArr)) {
+          const fetchedModels = modelsArr.map((m: any) => ({
+            id: m.id,
+            name: m.display_name || m.id,
+            icon: <Sparkles size={14} />,
+            color: 'text-blue-500'
+          }));
+          if (fetchedModels.length > 0) {
+            setAvailableModels(fetchedModels);
+            setSelectedModel(fetchedModels[0].id);
+          }
+        }
+        setAiVerificationState('success');
+      } else {
+        setAiVerificationState('error');
+      }
+    } catch (error) {
+      console.error('Verification failed:', error);
+      setAiVerificationState('error');
+    } finally {
+      setTimeout(() => setAiVerificationState('idle'), 3000);
+    }
+  }, [serverUrl, apiKey]);
+
+  const handleSaveSearch = () => {
+    localStorage.setItem('lumina_tavily_key', tavilyApiKey);
+    localStorage.setItem('lumina_serp_key', serpApiKey);
+    setIsSearchSaved(true);
+    setTimeout(() => setIsSearchSaved(false), 2000);
+  };
+
+  const handleVerifySearch = () => {
+    setSearchVerificationState('verifying');
+    setTimeout(() => {
+      if (tavilyApiKey || serpApiKey) {
+        setSearchVerificationState('success');
+      } else {
+        setSearchVerificationState('error');
+      }
+      setTimeout(() => setSearchVerificationState('idle'), 3000);
+    }, 1200);
+  };
+
+  const handleSaveMcp = () => {
+    localStorage.setItem('lumina_mcp_url', mcpUrl);
+    localStorage.setItem('lumina_mcp_key', mcpKey);
+    setIsMcpSaved(true);
+    setTimeout(() => setIsMcpSaved(false), 2000);
+  };
+
+  const handleConnectMcp = useCallback(async () => {
+    if (!mcpUrl) return;
+    setIsConnectingMcp(true);
+    try {
+      // Direct call to llama-bridge /v1/tools endpoint
+      const response = await fetch(`${mcpUrl}/v1/tools`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${mcpKey}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const toolsList = data.tools || data.openai_tools || [];
+        
+        if (Array.isArray(toolsList)) {
+          setMcpTools(toolsList.map((t: any) => {
+            const name = t.name || (t.function?.name);
+            const desc = t.description || (t.function?.description) || 'Bridge Tool';
+            
+            // Map icons based on tool names
+            let icon = <Box size={14} />;
+            if (name.includes('search') || name.includes('research')) icon = <Search size={14} />;
+            if (name.includes('shell') || name.includes('terminal')) icon = <Terminal size={14} />;
+            if (name.includes('weather')) icon = <CloudMoon size={14} />;
+            if (name.includes('wikipedia') || name.includes('globe')) icon = <Globe size={14} />;
+            if (name.includes('image')) icon = <ImageIcon size={14} />;
+            if (name.includes('date') || name.includes('time')) icon = <Calendar size={14} />;
+            if (name.includes('verify')) icon = <Check size={14} />;
+            if (name.includes('render') || name.includes('video')) icon = <Video size={14} />;
+
+            return {
+              id: name,
+              name: name,
+              description: desc,
+              enabled: true,
+              icon: icon
+            };
+          }));
+        }
+        setIsMcpConnected(true);
+      } else {
+        // Try fallback MCP list_tools if /v1/tools failed - direct call
+        const mcpResp = await fetch(`${mcpUrl}/list_tools`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${mcpKey}` 
+          },
+          body: JSON.stringify({})
+        });
+        
+        if (mcpResp.ok) {
+          const mcpData = await mcpResp.ok ? await mcpResp.json() : null;
+          if (mcpData && mcpData.tools) {
+            setMcpTools(mcpData.tools.map((t: any) => ({
+              id: t.name,
+              name: t.name,
+              description: t.description || 'MCP Tool',
+              enabled: true,
+              icon: <Box size={14} />
+            })));
+          }
+          setIsMcpConnected(true);
+        } else {
+          setIsMcpConnected(false);
+        }
+      }
+    } catch (error) {
+      console.error('MCP connection failed:', error);
+      setIsMcpConnected(false);
+    } finally {
+      setIsConnectingMcp(false);
+    }
+  }, [mcpUrl, mcpKey]);
+
+  const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
+  const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
+  const [isCanvasOpen, setIsCanvasOpen] = useState(false);
+  const [canvasView, setCanvasView] = useState<'code' | 'preview'>('code');
+  // Track which message id is currently animating/typing. When a new message
+  // is sent, we set this to the id of the interim thinking message. This
+  // prevents older assistant messages from re-triggering their animations
+  // whenever the global `isTyping` state changes.
+  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
+const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+const [isSearchOpen, setIsSearchOpen] = useState(false);
+const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
+const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
+const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
+const fileInputRef = useRef<HTMLInputElement>(null);
+const [searchQuery, setSearchQuery] = useState('');
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
+
+  // Suppress benign Vite WebSocket errors that cause popups in this environment
+  useEffect(() => {
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      // Benign HMR errors should not interrupt the user experience
+      if (event.reason?.message?.includes('WebSocket') || event.reason?.message?.includes('closed without opened')) {
+        event.preventDefault();
+        console.warn('Suppressed benign WebSocket error:', event.reason.message);
+      }
+    };
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => window.removeEventListener('unhandledrejection', handleRejection);
+  }, []);
+
+  // Track scroll for scroll-to-bottom button
+  useEffect(() => {
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      const isScrolledUp = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight > 200;
+      setShowScrollButton(isScrolledUp);
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll);
+    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+      if (headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
+        setIsHeaderMenuOpen(false);
+      }
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
+        setIsPlusMenuOpen(false);
+        setActivePlusSubMenu('main');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSetIsSourcesPanelOpen = useCallback((v: boolean) => setIsSourcesPanelOpen(v), []);
+  const handleSetActiveArtifact = useCallback((v: any) => setActiveArtifact(v), []);
+  const handleSetIsCanvasOpen = useCallback((v: boolean) => setIsCanvasOpen(v), []);
+  const handleSetCanvasView = useCallback((v: 'code' | 'preview') => setCanvasView(v), []);
+
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
@@ -1157,8 +1396,15 @@ const Canvas = ({
   };
 
   const handleSend = async (contentOverride?: string) => {
+    if (isTyping) return;
     let content = contentOverride || input.trim();
     if (!content && attachedFiles.length === 0) return;
+
+    // Apply active skills
+    if (activeSkills.length > 0) {
+      const skillPrompts = activeSkills.map(id => SKILLS.find(s => s.id === id)?.prompt).filter(Boolean);
+      content = skillPrompts.join('') + content;
+    }
 
     let chatId = currentChatId;
     if (!chatId) {
@@ -1205,6 +1451,16 @@ const Canvas = ({
       timestamp: new Date(),
       thinking: isWebSearchEnabled ? 'Searching the web...' : 'Thinking...',
       isSearching: isWebSearchEnabled,
+      isStreaming: true,
+      toolCalls: [
+        {
+          id: 'thinking-node',
+          label: isWebSearchEnabled ? 'Searching the web...' : `${persona.name} — thinking...`,
+          type: 'ai',
+          status: 'active',
+          icon: isWebSearchEnabled ? <Globe size={14} /> : <Sparkles size={14} />
+        }
+      ]
     };
 
     // Mark this message as the one currently generating a response. This will
@@ -1224,170 +1480,36 @@ const Canvas = ({
     let searchResults: any[] = [];
     let searchProvider = "";
 
-    // Advanced DuckDuckGo fallback search utility
-    const fetchDDGResults = async (query: string): Promise<any[]> => {
-      const results: any[] = [];
-      try {
-        // DDG Instant Answer API — returns JSON, no key required
-        const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`;
-        const ddgResp = await fetch(ddgUrl);
-        if (ddgResp.ok) {
-          const ddgData = await ddgResp.json();
-
-          // 1. Instant answer
-          if (ddgData.Answer) {
-            results.push({
-              title: 'DuckDuckGo Answer',
-              url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-              snippet: ddgData.Answer,
-              isInstant: true
-            });
-          }
-
-          // 2. Abstract (Wikipedia-style summary)
-          if (ddgData.Abstract) {
-            results.push({
-              title: ddgData.Heading || ddgData.AbstractSource || 'Summary',
-              url: ddgData.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-              snippet: ddgData.Abstract
-            });
-          }
-
-          // 3. Related topics (actual web results equivalent)
-          if (Array.isArray(ddgData.RelatedTopics)) {
-            for (const topic of ddgData.RelatedTopics) {
-              if (topic.FirstURL && topic.Text) {
-                results.push({
-                  title: topic.Text.split(' - ')[0] || topic.Text.substring(0, 60),
-                  url: topic.FirstURL,
-                  snippet: topic.Text
-                });
-              }
-              // Nested sub-topics
-              if (topic.Topics && Array.isArray(topic.Topics)) {
-                for (const sub of topic.Topics) {
-                  if (sub.FirstURL && sub.Text) {
-                    results.push({
-                      title: sub.Text.split(' - ')[0] || sub.Text.substring(0, 60),
-                      url: sub.FirstURL,
-                      snippet: sub.Text
-                    });
-                  }
-                }
-              }
-            }
-          }
-
-          // 4. Infobox entities
-          if (ddgData.Infobox?.content?.length) {
-            const infoSnippet = ddgData.Infobox.content
-              .slice(0, 5)
-              .map((item: any) => `${item.label}: ${item.value}`)
-              .join(' | ');
-            if (infoSnippet) {
-              results.push({
-                title: `${ddgData.Heading || query} — Quick Facts`,
-                url: ddgData.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-                snippet: infoSnippet
-              });
-            }
-          }
-
-          // 5. Results (news / external links)
-          if (Array.isArray(ddgData.Results)) {
-            for (const r of ddgData.Results) {
-              if (r.FirstURL && r.Text) {
-                results.push({
-                  title: r.Text.substring(0, 80),
-                  url: r.FirstURL,
-                  snippet: r.Text
-                });
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('DDG instant answer failed:', e);
-      }
-
-      // Fallback: DDG HTML scrape via a CORS-friendly approach
-      if (results.length === 0) {
-        try {
-          const corsProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`)}`;
-          const proxyResp = await fetch(corsProxy);
-          if (proxyResp.ok) {
-            const proxyData = await proxyResp.json();
-            const html = proxyData.contents || '';
-            // Parse result snippets from HTML
-            const snippetMatches = html.match(/class="result__snippet"[^>]*>([^<]{20,300})</g) || [];
-            const titleMatches = html.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</g) || [];
-            const urlMatches = html.match(/class="result__url"[^>]*>([^<]+)</g) || [];
-
-            const minLen = Math.min(snippetMatches.length, titleMatches.length, 8);
-            for (let i = 0; i < minLen; i++) {
-              const titleMatch = titleMatches[i].match(/href="([^"]+)"[^>]*>([^<]+)/);
-              const snippetMatch = snippetMatches[i].match(/>([^<]+)/);
-              const urlMatch = urlMatches[i]?.match(/>([^<]+)/);
-
-              if (titleMatch && snippetMatch) {
-                results.push({
-                  title: titleMatch[2].trim(),
-                  url: urlMatch ? `https://${urlMatch[1].trim()}` : titleMatch[1],
-                  snippet: snippetMatch[1].trim()
-                });
-              }
-            }
-          }
-        } catch (e2) {
-          console.warn('DDG HTML scrape failed:', e2);
-        }
-      }
-
-      return results.slice(0, 10);
-    };
-
     // 1. Perform Web Search if enabled
     if (isWebSearchEnabled) {
       try {
-        let usedFallback = false;
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map(m => m.id === thinkingId
+              ? { ...m, thinking: 'Searching the web...', isSearching: true }
+              : m)
+          };
+        }));
 
-        // Try backend search first (Tavily / SerpAPI)
-        if (tavilyApiKey || serpApiKey) {
-          const searchResp = await fetch(`${serverUrl}/search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              query: content, 
-              tavilyKey: tavilyApiKey, 
-              serpKey: serpApiKey 
-            })
-          });
-          
-          if (searchResp.ok) {
-            const searchData = await searchResp.json();
-            searchResults = searchData.results || [];
-            searchProvider = searchData.provider || "search";
-          } else {
-            usedFallback = true;
-          }
+        // Always try backend search. The backend handles Tavily/SerpAPI/DuckDuckGo selection.
+        const searchResp = await fetch(`${serverUrl}/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            query: content, 
+            tavilyKey: tavilyApiKey, 
+            serpKey: serpApiKey 
+          })
+        });
+        
+        if (searchResp.ok) {
+          const searchData = await searchResp.json();
+          searchResults = searchData.results || [];
+          searchProvider = searchData.provider || "Search";
         } else {
-          usedFallback = true;
-        }
-
-        // Advanced DuckDuckGo fallback when no API keys are configured or backend fails
-        if (usedFallback || searchResults.length === 0) {
-          setChats(prev => prev.map(chat => {
-            if (chat.id !== chatId) return chat;
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId
-                ? { ...m, thinking: 'Searching DuckDuckGo...' }
-                : m)
-            };
-          }));
-
-          searchResults = await fetchDDGResults(content);
-          searchProvider = "DuckDuckGo";
+          console.warn('Backend search failed, no further fallback available.');
         }
 
         if (searchResults.length > 0) {
@@ -1445,7 +1567,8 @@ const Canvas = ({
           messages: apiMessages,
           stream: false,
           writing_style: writingStyle,
-          system_prompt: systemPrompt
+          system_prompt: systemPrompt,
+          use_tools: inbuiltTools.some(t => t.id === 'image' && t.enabled)
         })
       });
 
@@ -1455,9 +1578,10 @@ const Canvas = ({
 
       const data = await response.json();
       const choice = data.choices?.[0]?.message;
-      const content = choice?.content;
+      const responseContent = choice?.content;
       const toolCallsRaw = choice?.tool_calls;
       const responseSources = data.sources || data.citations || [];
+      const responseImages = data.images || [];
 
       // Build tool call chain nodes from the response
       const toolCallNodes: ToolCallNode[] = [];
@@ -1474,22 +1598,29 @@ const Canvas = ({
             status: 'complete',
             argsCount: typeof args === 'object' && Object.keys(args).length === 0 ? 0 : Object.keys(args).length,
             toolName: name,          // plain-string alias for the args-badge row
-            icon: name.includes('search') || name.includes('research') ? <Search size={12} /> :
-                  name.includes('wikipedia') ? <Globe size={12} /> :
-                  name.includes('file') || name.includes('fs') ? <Box size={12} /> :
-                  name.includes('github') ? <Box size={12} /> :
-                  name.includes('weather') ? <CloudMoon size={12} /> :
-                  <Sparkles size={12} />
+            icon: name.includes('search') || name.includes('research') ? <Search size={14} /> :
+                  name.includes('wikipedia') ? <Globe size={14} /> :
+                  name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs') ? <FileText size={14} /> :
+                  name.includes('write') || name.includes('edit') ? <PenTool size={14} /> :
+                  name.includes('github') ? <Box size={14} /> :
+                  name.includes('weather') ? <CloudMoon size={14} /> :
+                  <Sparkles size={14} />
           });
         });
       }
 
       // Simulation of real-time streaming
-      const finalContent = content || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
+      const finalContent = responseContent || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
       const sourcesToAttach = responseSources.map((s: any) => ({
         title: s.title || s.url || 'Source',
         url: s.url || s.link || '#',
         icon: s.icon || ''
+      }));
+      const imagesToAttach = responseImages.map((img: any) => ({
+        title: img.title || 'Image',
+        url: img.url,
+        source: img.source,
+        thumbnail: img.thumbnail
       }));
 
       const finalToolNodes = [...toolCallNodes];
@@ -1594,21 +1725,33 @@ const Canvas = ({
       });
 
 
-      // Reveal the assistant's message character by character
+      // Hoist the active tool nodes to avoid repeated .map() calls in the loop
+      const activeToolNodes = finalToolNodes.map(n => ({ ...n, status: 'active' as const }));
+      
+      // Simulation of real-time streaming with batched updates to reduce layout thrash
+      let lastRenderTime = Date.now();
+      const RENDER_INTERVAL = 150; // ms: update roughly every ~150ms to reduce re-renders while keeping response fluid
+      
       for (let i = 1; i <= finalContent.length; i++) {
         const partial = finalContent.slice(0, i);
-        // Faster for longer content
-        const delay = finalContent.length > 500 ? 10 : 25;
+        // Slightly faster delays since we are batching updates
+        const delay = finalContent.length > 500 ? 5 : 15;
         await new Promise(resolve => setTimeout(resolve, delay));
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? { ...m, content: partial, toolCalls: finalToolNodes.map(n => ({...n, status: 'active'})) } : m),
-            };
-          }
-          return chat;
-        }));
+        
+        const now = Date.now();
+        // Update state if interval passed OR it's the very last character
+        if (now - lastRenderTime > RENDER_INTERVAL || i === finalContent.length) {
+          lastRenderTime = now;
+          setChats(prev => prev.map(chat => {
+            if (chat.id === chatId) {
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? { ...m, content: partial, toolCalls: activeToolNodes } : m),
+              };
+            }
+            return chat;
+          }));
+        }
       }
 
       // After streaming, finalize the message with the correct nodes
@@ -1625,7 +1768,9 @@ const Canvas = ({
                     content: finalContent.trim(),
                     thinking: undefined,
                     toolCalls: finalToolNodes,
+                    isStreaming: false,
                     sources: sourcesToAttach.length > 0 ? sourcesToAttach : undefined,
+                    images: imagesToAttach.length > 0 ? imagesToAttach : undefined,
                     searchQuery: isWebSearchEnabled ? userMessage.content : undefined,
                     isSearching: false,
                     timestamp: new Date(),
@@ -1672,9 +1817,12 @@ const Canvas = ({
 
   const adjustTextareaHeight = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const textarea = e.target;
-    textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     setInput(textarea.value);
+
+    requestAnimationFrame(() => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    });
   };
 
   const extractArtifacts = (content: string): Artifact[] => {
@@ -1746,7 +1894,7 @@ const Canvas = ({
     }
   };
 
-  const markdownComponents = {
+  const markdownComponents = useMemo(() => ({
     code({ className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '');
       if (match) {
@@ -1758,7 +1906,7 @@ const Canvas = ({
         </code>
       );
     }
-  };
+  }), []);
 
   return (
     <div className={`flex h-screen w-full bg-white text-brand-primary overflow-hidden relative ${isDarkMode ? 'dark' : ''}`}>
@@ -1804,11 +1952,14 @@ const Canvas = ({
 
       {/* Desktop Sidebar */}
       <motion.aside 
-        animate={{ width: isSidebarOpen ? 260 : 0, opacity: isSidebarOpen ? 1 : 0 }}
-        transition={{ duration: isSidebarOpen ? 0.22 : 0.18, ease: isSidebarOpen ? "easeOut" : "linear" }}
-        className={`hidden md:flex flex-col border-r border-gray-100 bg-gray-50/50 relative overflow-hidden`}
+        animate={{ width: isSidebarOpen ? sidebarWidth : 0, opacity: isSidebarOpen ? 1 : 0 }}
+        transition={{ 
+          duration: isResizing ? 0 : (isSidebarOpen ? 0.22 : 0.18), 
+          ease: isSidebarOpen ? "easeOut" : "linear" 
+        }}
+        className={`hidden md:flex flex-col border-r border-gray-100 bg-gray-50/50 relative group/sidebar`}
       >
-        <div className="w-[260px] h-full flex flex-col p-4">
+        <div className="h-full flex flex-col p-4 shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
           <SidebarContent 
             chats={chats} 
             currentChatId={currentChatId} 
@@ -1821,6 +1972,19 @@ const Canvas = ({
             userProfile={userProfile}
           />
         </div>
+
+        {/* Resize Handle */}
+        {isSidebarOpen && (
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setIsResizing(true);
+            }}
+            className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors z-50 group/resizer"
+          >
+            <div className={`absolute top-0 right-0 w-[2px] h-full transition-colors ${isResizing ? 'bg-blue-500' : 'bg-transparent group-hover/resizer:bg-blue-500/50'}`} />
+          </div>
+        )}
       </motion.aside>
 
       {/* Main Chat Area */}
@@ -1937,7 +2101,7 @@ const Canvas = ({
             ref={scrollRef}
             className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar scroll-smooth"
           >
-            <div className={`mx-auto space-y-8 pb-24 transition-all duration-500 ${isSourcesPanelOpen ? 'max-w-xl md:mr-4' : 'max-w-3xl'}`}>
+            <div className={`mx-auto space-y-8 pb-24 ${isSourcesPanelOpen ? 'max-w-xl md:mr-4' : 'max-w-3xl'} transition-[max-width,margin] duration-500`}>
               <AnimatePresence initial={false}>
                 {messages.length === 0 ? (
                   <motion.div 
@@ -1981,128 +2145,19 @@ const Canvas = ({
                   </motion.div>
                 ) : (
                   messages.map((message) => (
-                    <motion.div
+                    <MessageItem
                       key={message.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`flex flex-col w-full ${message.role === 'user' ? 'items-end mb-8' : 'items-start mb-12'}`}
-                    >
-                      {message.role === 'user' ? (
-                        /* User Message - Remains in a polished bubble */
-                        <motion.div 
-                          className="flex flex-col max-w-[85%] items-end animate-msg-in"
-                        >
-                          <div
-                            className="px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm bg-black dark:bg-white text-white dark:text-black rounded-tr-none border border-black/5 dark:border-white/10"
-                          >
-                            <div className="markdown-body">
-                              <Markdown components={markdownComponents}>{message.content}</Markdown>
-                            </div>
-                          </div>
-                          {/* Timestamp and author label */}
-                          <div className="mt-2 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight flex items-center gap-2">
-                             {userProfile.avatar && (
-                              <img src={userProfile.avatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
-                            )}
-                            {userProfile.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        </motion.div>
-                      ) : (
-                        /* Assistant Message - "Free" same as Claude */
-                        <div className="w-full space-y-4 max-w-3xl animate-msg-in">
-                          {/* Optional node graph for tool calls */}
-                          {message.toolCalls && message.toolCalls.length > 0 && (
-                            <NodeGraph nodes={message.toolCalls} />
-                          )}
-
-                          {/* Thinking Indicator */}
-                          {message.thinking && (
-                            <motion.div 
-                              layout
-                              initial={{ opacity: 0, y: 5 }} 
-                              animate={{ opacity: 1, y: 0 }}
-                              className="flex items-center gap-3 py-1 mb-2 h-10 overflow-hidden"
-                            >
-                              <div className="w-8 h-8 flex items-center justify-center shrink-0">
-                                {isWebSearchEnabled ? <WebSearchAnimation /> : (
-                                  (mcpTools.some(t => t.enabled) || inbuiltTools.some(t => t.enabled)) ? <ToolCallingAnimation /> : <ThinkingDots />
-                                )}
-                              </div>
-                              <span className="text-[13px] font-medium text-zinc-400 shimmer-text truncate">
-                                {message.thinking}
-                              </span>
-                            </motion.div>
-                          )}
-
-                          {/* Search details */}
-                          {message.searchQuery && (
-                            <SearchResultsUI 
-                              query={message.searchQuery} 
-                              sources={message.sources || []} 
-                              isSearching={!!message.isSearching} 
-                            />
-                          )}
-
-                          {/* Free-form content */}
-                          <div className="markdown-body prose-lg max-w-none px-1">
-                             <Markdown components={markdownComponents}>{message.content}</Markdown>
-                          </div>
-
-                          {/* Artifacts */}
-                          {message.artifacts && message.artifacts.length > 0 && (
-                            <div className="w-full space-y-2 mt-4">
-                              {message.artifacts.map(art => (
-                                <ArtifactCard 
-                                  key={art.id} 
-                                  artifact={art} 
-                                  onOpen={(a) => {
-                                    setActiveArtifact(a);
-                                    setIsCanvasOpen(true);
-                                    setCanvasView(a.type === 'html' ? 'preview' : 'code');
-                                  }} 
-                                />
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Footer Actions / Metadata */}
-                          {!message.thinking && (
-                            <motion.div 
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
-                              className="mt-6 flex flex-col gap-4 border-t border-zinc-100 dark:border-white/5 pt-4 pl-1"
-                            >
-                              <div className="flex items-center gap-4">
-                                {message.sources && message.sources.length > 0 && (
-                                  <button 
-                                    onClick={() => setIsSourcesPanelOpen(true)}
-                                    className="flex items-center gap-2 text-[11px] font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors uppercase tracking-wider"
-                                  >
-                                    <Layout size={14} />
-                                    {message.sources.length} Sources
-                                  </button>
-                                )}
-                                <div className="text-[10px] text-zinc-400 font-medium uppercase tracking-tight flex items-center gap-2">
-                                  {persona.avatar && (
-                                    <img src={persona.avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
-                                  )}
-                                  {persona.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              </div>
-                              
-                              <div className="flex items-center gap-2">
-                                <button className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
-                                  <Copy size={16} />
-                                </button>
-                                <button className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
-                                  <History size={16} />
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </div>
-                      )}
-                    </motion.div>
+                      message={message}
+                      markdownComponents={markdownComponents}
+                      userProfile={userProfile}
+                      persona={persona}
+                      isSourcesPanelOpen={isSourcesPanelOpen}
+                      setIsSourcesPanelOpen={handleSetIsSourcesPanelOpen}
+                      setSourcesPanelMessageId={setSourcesPanelMessageId}
+                      setActiveArtifact={handleSetActiveArtifact}
+                      setIsCanvasOpen={handleSetIsCanvasOpen}
+                      setCanvasView={handleSetCanvasView}
+                    />
                   ))
                 )}
               </AnimatePresence>
@@ -2150,31 +2205,37 @@ const Canvas = ({
                   </button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                  {messages.find(m => m.sources)?.sources?.map((source, sIdx) => (
+                  {(sourcesPanelMessageId ? messages.find(m => m.id === sourcesPanelMessageId)?.sources : messages.find(m => m.sources)?.sources)?.map((source, sIdx) => (
                     <motion.div
                       key={sIdx}
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: sIdx * 0.05 }}
-                      className="group p-4 bg-gray-50 dark:bg-white/5 border border-transparent hover:border-blue-500/30 rounded-2xl transition-all"
+                      className="group p-4 bg-gray-50 dark:bg-zinc-950 border border-transparent hover:border-blue-500/30 rounded-2xl transition-all"
                     >
                       <div className="flex items-start gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center shrink-0 shadow-sm">
-                          <Globe size={18} className="text-gray-400" />
+                        <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center shrink-0 shadow-sm transition-colors group-hover:border-blue-500/30">
+                          <Globe size={18} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <h4 className="text-xs font-bold text-gray-900 dark:text-white truncate uppercase tracking-tighter">{source.title}</h4>
-                            <Globe className="text-gray-400" size={10} />
+                            <Globe className="text-gray-400 group-hover:text-blue-500 transition-colors" size={10} />
                           </div>
-                          <p className="text-[10px] text-gray-400 truncate mb-3">{source.url}</p>
+                          <p className="text-[10px] text-gray-400 truncate mb-2 opacity-60">{source.url}</p>
+                          {source.snippet && (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-3 mb-3 leading-relaxed bg-white/50 dark:bg-white/5 p-2 rounded-lg border border-gray-100/50 dark:border-white/5">
+                              {source.snippet}
+                            </p>
+                          )}
                           <a 
                             href={source.url} 
                             target="_blank" 
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-widest"
+                            className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-widest transition-colors"
                           >
-                            Open Link <ExternalLink size={10} />
+                            View Source
+                            <ArrowRight size={10} />
                           </a>
                         </div>
                       </div>
@@ -2195,8 +2256,42 @@ const Canvas = ({
         <div className="px-4 pb-6 bg-transparent sticky bottom-0 shrink-0">
           <div className="max-w-3xl mx-auto relative group">
 
-            <div className="relative border border-white/5 bg-[#1a1a1a] dark:bg-[#121212]/95 backdrop-blur-3xl rounded-[28px] shadow-2xl focus-within:border-white/10 transition-all overflow-visible flex flex-col p-1.5 min-h-[110px] justify-between">
+            <div className="relative border border-white/5 bg-[#1a1a1a] dark:bg-[#121212]/95 backdrop-blur-3xl rounded-[28px] shadow-2xl focus-within:border-white/10 overflow-visible flex flex-col p-1.5 min-h-[110px] justify-between transition-colors">
               <div className="flex-1 px-3 pt-2">
+                {attachedFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-3 pt-2 pb-4">
+                    {attachedFiles.map((file, idx) => (
+                      <motion.div 
+                        key={`${file.name}-${idx}`}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="relative w-40 h-48 bg-zinc-900/50 border border-white/5 rounded-2xl p-5 flex flex-col group/file shadow-sm"
+                      >
+                        <button
+                          onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-zinc-800 border border-white/10 text-gray-400 hover:text-white flex items-center justify-center opacity-0 group-hover/file:opacity-100 transition-opacity z-10 shadow-lg"
+                        >
+                          <X size={14} />
+                        </button>
+                        
+                        <div className="flex flex-col gap-1 overflow-hidden">
+                          <div className="truncate font-semibold text-[13px] text-gray-100 leading-tight">
+                            {file.name}
+                          </div>
+                          <div className="text-[11px] text-gray-500 font-medium tracking-tight">
+                            {(file.size / 1024).toFixed(0)} KB
+                          </div>
+                        </div>
+
+                        <div className="mt-auto">
+                          <div className="inline-flex px-2 py-1 rounded-md bg-zinc-800/80 border border-white/5 text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                            {file.name.split('.').pop() || 'DOC'}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -2206,22 +2301,6 @@ const Canvas = ({
                   rows={1}
                   className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[16px] p-0 resize-none min-h-[40px] text-white placeholder-gray-500 scroll-none"
                 />
-                {attachedFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-3 pb-1">
-                    {attachedFiles.map((file, idx) => (
-                      <div key={idx} className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-[11px] font-medium text-gray-300">
-                        <FileUp size={12} className="text-blue-400 shrink-0" />
-                        <span className="max-w-[120px] truncate">{file.name}</span>
-                        <button
-                          onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-gray-500 hover:text-red-400 transition-colors ml-0.5"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
               
               <div className="flex items-center justify-between px-3 pb-1.5 pt-0">
@@ -2360,26 +2439,36 @@ const Canvas = ({
                                 </button>
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Skills</span>
                               </div>
-                              {[
-                                { id: 'summarize', label: 'Summarize', prompt: 'Please summarize the following: ' },
-                                { id: 'translate', label: 'Translate', prompt: 'Translate the following to English: ' },
-                                { id: 'explain', label: 'Explain Code', prompt: 'Explain this code step by step: ' },
-                                { id: 'brainstorm', label: 'Brainstorm', prompt: 'Brainstorm 5 creative ideas for: ' },
-                              ].map(skill => (
-                                <button
-                                  key={skill.id}
-                                  onClick={() => {
-                                    setInput(skill.prompt);
-                                    setIsPlusMenuOpen(false);
-                                    setActivePlusSubMenu('main');
-                                    setTimeout(() => inputRef.current?.focus(), 50);
-                                  }}
-                                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 hover:text-white transition-colors"
-                                >
-                                  <Box size={16} />
-                                  {skill.label}
-                                </button>
-                              ))}
+                              <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                {SKILLS.map(skill => (
+                                  <button
+                                    key={skill.id}
+                                    onClick={() => {
+                                      setActiveSkills(prev => 
+                                        prev.includes(skill.id) 
+                                          ? prev.filter(id => id !== skill.id) 
+                                          : [...prev, skill.id]
+                                      );
+                                      showToast(`${activeSkills.includes(skill.id) ? 'Deactivated' : 'Activated'} ${skill.label}`);
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                                      activeSkills.includes(skill.id) 
+                                        ? 'bg-white/10 text-white' 
+                                        : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <div className={`p-1.5 rounded-lg transition-colors ${activeSkills.includes(skill.id) ? 'bg-indigo-500/10 text-indigo-500' : 'bg-white/5 text-gray-500'}`}>
+                                        {skill.icon}
+                                      </div>
+                                      {skill.label}
+                                    </div>
+                                    <div className={`w-8 h-4 rounded-full transition-colors relative ${activeSkills.includes(skill.id) ? 'bg-indigo-500' : 'bg-white/10'}`}>
+                                      <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${activeSkills.includes(skill.id) ? 'right-0.5' : 'left-0.5'}`} />
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
                             </div>
                           ) : activePlusSubMenu === 'style' ? (
                             <div className="flex flex-col">
@@ -2464,7 +2553,18 @@ const Canvas = ({
                   </div>
 
                   {/* Status Indicators */}
-                  <AnimatePresence>
+                  <AnimatePresence mode="popLayout">
+                    {writingStyle !== 'default' && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.8, x: -5 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, x: -5 }}
+                        className="flex items-center justify-center w-9 h-9 rounded-xl bg-orange-500/10 text-orange-500 border border-orange-500/20 shadow-[0_2px_10px_rgba(249,115,22,0.1)]"
+                        title={`Writing Style: ${WRITING_STYLES.find(s => s.id === writingStyle)?.label}`}
+                      >
+                        {WRITING_STYLES.find(s => s.id === writingStyle)?.icon}
+                      </motion.div>
+                    )}
                     {isWebSearchEnabled && (
                       <motion.div
                         initial={{ opacity: 0, scale: 0.8, x: -5 }}
@@ -2498,6 +2598,26 @@ const Canvas = ({
                         <Wrench size={18} />
                       </motion.div>
                     )}
+                    {activeSkills.map(skillId => {
+                      const skill = SKILLS.find(s => s.id === skillId);
+                      if (!skill) return null;
+                      return (
+                        <motion.div
+                          key={skill.id}
+                          initial={{ opacity: 0, scale: 0.8, x: -5 }}
+                          animate={{ opacity: 1, scale: 1, x: 0 }}
+                          exit={{ opacity: 0, scale: 0.8, x: -5 }}
+                          className="flex items-center justify-center w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 shadow-[0_2px_10px_rgba(99,102,241,0.1)]"
+                          title={`Skill: ${skill.label}`}
+                          onClick={() => {
+                            setActiveSkills(prev => prev.filter(id => id !== skillId));
+                            showToast(`Deactivated ${skill.label}`);
+                          }}
+                        >
+                          {skill.icon}
+                        </motion.div>
+                      );
+                    })}
                   </AnimatePresence>
                 </div>
 
@@ -2520,27 +2640,53 @@ const Canvas = ({
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute bottom-full right-0 mb-3 w-64 max-h-64 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-y-auto z-[70] p-1.5"
+                          className="absolute bottom-full right-0 mb-3 w-64 max-h-[380px] bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl z-[70] flex flex-col overflow-hidden"
                         >
-                          {availableModels.map((model) => (
-                            <button
-                              key={model.id}
-                              onClick={() => {
-                                setSelectedModel(model.id);
-                                setIsModelDropdownOpen(false);
-                              }}
-                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
-                                selectedModel === model.id 
-                                  ? 'bg-white/10 text-white' 
-                                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                              }`}
-                            >
-                              <div className={model.color || ''}>
-                                {model.icon}
+                          {availableModels.length > 10 && (
+                            <div className="px-3 py-2.5 bg-[#1a1a1a] border-b border-white/10 shrink-0">
+                              <div className="relative group">
+                                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-500 transition-colors" />
+                                <input 
+                                  type="text"
+                                  placeholder="Search models..."
+                                  value={modelSearchQuery}
+                                  onChange={(e) => setModelSearchQuery(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-full h-8 pl-8 pr-3 bg-white/5 border border-white/10 rounded-xl text-[11px] outline-none focus:ring-1 focus:ring-blue-500/30 transition-all placeholder-gray-600 text-white"
+                                />
                               </div>
-                              {model.name}
-                            </button>
-                          ))}
+                            </div>
+                          )}
+                          <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar">
+                            {availableModels
+                              .filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                              .map((model) => (
+                                <button
+                                  key={model.id}
+                                  onClick={() => {
+                                    setSelectedModel(model.id);
+                                    setIsModelDropdownOpen(false);
+                                    setModelSearchQuery('');
+                                  }}
+                                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                                    selectedModel === model.id 
+                                      ? 'bg-white/10 text-white' 
+                                      : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                                  }`}
+                                >
+                                  <div className={model.color || ''}>
+                                    {model.icon}
+                                  </div>
+                                  <div className="flex-1 text-left truncate">{model.name}</div>
+                                  {selectedModel === model.id && <Check size={12} className="text-blue-500 shrink-0" />}
+                                </button>
+                              ))}
+                            {availableModels.filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
+                              <div className="py-8 text-center text-[10px] font-bold text-gray-500 uppercase tracking-widest italic">
+                                No models found
+                              </div>
+                            )}
+                          </div>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -2616,16 +2762,7 @@ const Canvas = ({
                     { id: 'general', label: 'General', icon: <Settings size={16} /> },
                     { id: 'profile', label: 'My Profile', icon: <User size={16} /> },
                     { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
-                    { id: 'providers', label: 'Providers', icon: <Box size={16} /> },
                     { id: 'search', label: 'Search', icon: <Search size={16} /> },
-                    {id: 'sources', label: 'Sources', icon: 
-                      <div className="relative">
-                        <Layout size={16} />
-                        {messages.filter(m => m.sources).flatMap(m => m.sources || []).length > 0 && (
-                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full border border-white dark:border-zinc-900" />
-                        )}
-                      </div>
-                    },
                     { id: 'persona', label: 'Persona', icon: <User size={16} /> },
                     { id: 'mcp', label: 'MCP Server', icon: <HardDrive size={16} /> },
                   ].map((tab) => (
@@ -2906,60 +3043,6 @@ const Canvas = ({
                     </motion.div>
                   )}
 
-                  {activeSettingsTab === 'sources' && (
-                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-                      <div>
-                        <div className="flex items-center justify-between mb-6">
-                          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Conversation Sources</h3>
-                          <span className="text-[10px] font-bold bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full">
-                            {messages.filter(m => m.sources).flatMap(m => m.sources || []).length} Total
-                          </span>
-                        </div>
-                        <div className="space-y-3">
-                          {messages.filter(m => m.sources).length > 0 ? (
-                            (() => {
-                              const uniqueSources = new Map();
-                              messages.filter(m => m.sources).flatMap(m => m.sources || []).forEach(s => {
-                                uniqueSources.set(s.url, s);
-                              });
-                              
-                              return Array.from(uniqueSources.values()).map((source: any) => (
-                                <motion.div 
-                                  key={source.url}
-                                  initial={{ opacity: 0, y: 10 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-2xl group hover:border-blue-500/30 transition-all"
-                                >
-                                  <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center text-gray-400 group-hover:text-blue-500 transition-colors shadow-sm shrink-0">
-                                    <Globe size={18} />
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="text-sm font-semibold truncate text-gray-900 dark:text-white">{source.title || 'Unknown Source'}</div>
-                                    <div className="text-[11px] text-gray-400 truncate">{source.url}</div>
-                                  </div>
-                                  <a 
-                                    href={source.url} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-blue-500 rounded-xl transition-all"
-                                  >
-                                    <ExternalLink size={16} />
-                                  </a>
-                                </motion.div>
-                              ));
-                            })()
-                          ) : (
-                            <div className="py-16 text-center bg-gray-50 dark:bg-zinc-950 border border-dashed border-gray-200 dark:border-white/5 rounded-3xl">
-                              <Layout size={40} className="mx-auto text-gray-200 dark:text-zinc-800 mb-4" />
-                              <p className="text-sm text-gray-500 font-medium">No sources collected yet</p>
-                              <p className="text-[11px] text-gray-400 mt-1">AI search results will appear here</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-
                   {activeSettingsTab === 'profile' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                       <div className="relative">
@@ -3100,211 +3183,6 @@ const Canvas = ({
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {activeSettingsTab === 'providers' && (
-                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-                      <div className="flex flex-col h-full">
-                        <div className="flex items-center justify-between mb-6">
-                          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">AI Providers</h3>
-                          <button 
-                            className="text-[10px] font-bold text-blue-500 hover:underline uppercase tracking-widest"
-                            onClick={() => {
-                              const newProvider = {
-                                id: `custom-${Date.now()}`,
-                                name: 'New Provider',
-                                type: 'openai',
-                                apiKey: '',
-                                enabled: true,
-                                models: []
-                              };
-                              setProviderProfiles(prev => [...prev, newProvider]);
-                            }}
-                          >
-                            + Add Profile
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3 mb-8">
-                          {providerProfiles.map((p) => (
-                            <button
-                              key={p.id}
-                              onClick={() => {
-                                setProviderProfiles(prev => prev.map(pro => ({ ...pro, active: pro.id === p.id })));
-                              }}
-                              className={`p-3.5 rounded-2xl border transition-all text-left group relative overflow-hidden ${
-                                p.active || (!providerProfiles.some(px => px.active) && p.id === providerProfiles[0].id)
-                                  ? 'bg-blue-500/5 border-blue-500/40' 
-                                  : 'bg-white dark:bg-zinc-900/50 border-gray-100 dark:border-white/5 hover:border-gray-200 dark:hover:border-white/10'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between mb-2.5 relative z-10">
-                                <div className={`p-2 rounded-xl transition-colors ${p.enabled ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-zinc-800 text-gray-400'}`}>
-                                  {p.type === 'openai' && <Sparkles size={14} />}
-                                  {p.type === 'anthropic' && <Brain size={14} />}
-                                  {p.type === 'gemini' && <Sparkles size={14} />}
-                                  {p.type === 'groq' && <Terminal size={14} />}
-                                  {p.type === 'openrouter' && <Globe size={14} />}
-                                </div>
-                                <div className={`w-1.5 h-1.5 rounded-full ${p.enabled ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-gray-300 dark:bg-zinc-700'}`} />
-                              </div>
-                              <div className="text-[11px] font-bold truncate uppercase tracking-widest text-gray-900 dark:text-white relative z-10">{p.name}</div>
-                              <div className="text-[10px] text-gray-400 capitalize font-medium relative z-10">{p.type}</div>
-                              
-                              {(p.active || (!providerProfiles.some(px => px.active) && p.id === providerProfiles[0].id)) && (
-                                <motion.div 
-                                  layoutId="provider-active-bg"
-                                  className="absolute inset-0 bg-blue-500/5 dark:bg-blue-500/[0.02]"
-                                  initial={false}
-                                />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-
-                        {providerProfiles.find(p => p.active || (!providerProfiles.some(px => px.active) && p.id === providerProfiles[0].id)) && (
-                          <div className="space-y-6">
-                            {(() => {
-                              const p = providerProfiles.find(px => px.active || (!providerProfiles.some(py => py.active) && px.id === providerProfiles[0].id));
-                              return (
-                                <>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Profile Name</label>
-                                      <input 
-                                        type="text" 
-                                        value={p.name}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, name: val } : pro));
-                                        }}
-                                        className="w-full h-10 px-4 text-xs bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 transition-all font-medium"
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">Provider Type</label>
-                                      <div className="relative">
-                                        <select 
-                                          value={p.type}
-                                          onChange={(e) => {
-                                            const val = e.target.value;
-                                            setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, type: val } : pro));
-                                          }}
-                                          className="w-full h-10 px-4 text-xs bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl outline-none appearance-none font-medium text-gray-900 dark:text-white"
-                                        >
-                                          <option value="openai" className="bg-white dark:bg-zinc-900">OpenAI</option>
-                                          <option value="anthropic" className="bg-white dark:bg-zinc-900">Anthropic</option>
-                                          <option value="gemini" className="bg-white dark:bg-zinc-900">Google Gemini</option>
-                                          <option value="groq" className="bg-white dark:bg-zinc-900">Groq</option>
-                                          <option value="openrouter" className="bg-white dark:bg-zinc-900">OpenRouter</option>
-                                        </select>
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                                          <ChevronDown size={14} />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <label className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest ml-1">API Key</label>
-                                    <div className="relative group">
-                                      <input 
-                                        type="password" 
-                                        value={p.apiKey}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, apiKey: val } : pro));
-                                        }}
-                                        placeholder={`Enter your ${p.type} API key`}
-                                        className="w-full h-10 pl-4 pr-20 text-xs bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 transition-all font-mono"
-                                      />
-                                      <button 
-                                        onClick={() => {
-                                          // Simulate fetching models
-                                          let models: {id: string; name: string}[] = [];
-                                          if (p.type === 'openai') models = [{id: 'gpt-4o', name: 'GPT-4o'}, {id: 'gpt-4-turbo', name: 'GPT-4 Turbo'}, {id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo'}];
-                                          else if (p.type === 'anthropic') models = [{id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet'}, {id: 'claude-3-opus', name: 'Claude 3 Opus'}, {id: 'claude-3-haiku', name: 'Claude 3 Haiku'}];
-                                          else if (p.type === 'gemini') models = [{id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro'}, {id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash'}];
-                                          else if (p.type === 'groq') models = [{id: 'llama-3-70b', name: 'Llama 3 70B'}, {id: 'llama-3-8b', name: 'Llama 3 8B'}, {id: 'mixtral-8x7b', name: 'Mixtral 8x7B'}];
-                                          else if (p.type === 'openrouter') models = [{id: 'meta-llama/llama-3-70b', name: 'Llama 3 70B'}, {id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet'}, {id: 'google/gemini-pro-1.5', name: 'Gemini 1.5 Pro'}];
-                                           
-                                          setProviderProfiles(prev => prev.map(pro => pro.id === p.id ? { ...pro, models, enabled: true } : pro));
-                                          showToast('Models fetched successfully!');
-                                        }}
-                                        className="absolute right-1 top-1 h-8 px-4 bg-gray-900 dark:bg-white text-white dark:text-black text-[10px] font-bold rounded-lg hover:opacity-90 transition-all uppercase tracking-widest active:scale-95"
-                                      >
-                                        Fetch
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  <div className="pt-6 border-t border-gray-100 dark:border-white/5 space-y-4">
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2">
-                                        <h4 className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Available Models</h4>
-                                        <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-500/10 text-blue-500 rounded-md">
-                                          {(p.models || []).length}
-                                        </span>
-                                      </div>
-                                      <div className="relative group">
-                                        <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
-                                        <input 
-                                          type="text"
-                                          placeholder="Search models..."
-                                          value={modelSearchQuery}
-                                          onChange={(e) => setModelSearchQuery(e.target.value)}
-                                          className="h-9 pl-9 pr-4 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 rounded-xl text-[10px] outline-none w-48 focus:w-64 transition-all focus:ring-1 focus:ring-blue-500/30"
-                                        />
-                                      </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-2.5 max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                                      {(p.models || []).filter((m: any) => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase())).map((model: any) => (
-                                        <div 
-                                          key={model.id}
-                                          className="flex items-center justify-between p-3 bg-white dark:bg-zinc-900 border border-gray-50 dark:border-white/5 rounded-2xl group hover:border-blue-500/30 hover:bg-blue-50/10 dark:hover:bg-blue-900/10 transition-all cursor-pointer"
-                                          onClick={() => {
-                                            const newModel = { 
-                                              id: model.id, 
-                                              name: model.name, 
-                                              icon: <Sparkles size={14} />, 
-                                              color: 'text-blue-500' 
-                                            };
-                                            if (!availableModels.some(m => m.id === model.id)) {
-                                              setAvailableModels(prev => [...prev, newModel]);
-                                            }
-                                            setSelectedModel(model.id);
-                                            showToast(`Switched to ${model.name}`);
-                                          }}
-                                        >
-                                          <div className="flex items-center gap-3 overflow-hidden">
-                                            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500 transition-colors group-hover:bg-blue-500 group-hover:text-white">
-                                              <Sparkles size={12} />
-                                            </div>
-                                            <div className="flex flex-col min-w-0">
-                                              <span className="text-[11px] font-bold text-gray-900 dark:text-white truncate uppercase tracking-tight">{model.name}</span>
-                                              <span className="text-[10px] text-gray-400 truncate font-mono">{model.id}</span>
-                                            </div>
-                                          </div>
-                                          <div className="text-[10px] font-bold text-blue-500 opacity-0 group-hover:opacity-100 transition-all uppercase tracking-widest translate-x-2 group-hover:translate-x-0">
-                                            Select
-                                          </div>
-                                        </div>
-                                      ))}
-                                      {(!p.models || p.models.length === 0) && (
-                                        <div className="col-span-2 py-12 text-center text-gray-400 text-[10px] font-bold uppercase tracking-widest italic bg-gray-50/50 dark:bg-zinc-900/20 rounded-3xl border border-dashed border-gray-100 dark:border-white/5 flex flex-col items-center gap-3">
-                                          <Box size={24} className="opacity-20" />
-                                          <span>Enter API Key and click Fetch</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </>
-                              );
-                            })()}
-                          </div>
-                        )}
                       </div>
                     </motion.div>
                   )}
