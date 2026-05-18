@@ -313,6 +313,17 @@ function CanvasBlock({ language, code }: { language: string; code: string }) {
   );
 }
 
+const CLOUD_PROVIDERS = [
+  { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: <Terminal size={13} /> },
+  { id: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1', key: '', icon: <Sparkles size={13} /> },
+  { id: 'anthropic', label: 'Anthropic', endpoint: 'https://api.anthropic.com/v1', key: '', icon: <Brain size={13} /> },
+  { id: 'gemini', label: 'Google Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', key: '', icon: <Globe size={13} /> },
+  { id: 'groq', label: 'Groq', endpoint: 'https://api.groq.com/openai/v1', key: '', icon: <Terminal size={13} /> },
+  { id: 'openrouter', label: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', key: '', icon: <Box size={13} /> },
+  { id: 'together', label: 'Together AI', endpoint: 'https://api.together.xyz/v1', key: '', icon: <Sparkles size={13} /> },
+  { id: 'mistral', label: 'Mistral', endpoint: 'https://api.mistral.ai/v1', key: '', icon: <Sparkles size={13} /> },
+];
+
 export default function App() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -384,6 +395,21 @@ export default function App() {
   const [isMcpConnected, setIsMcpConnected] = useState(false);
   const [isConnectingMcp, setIsConnectingMcp] = useState(false);
   const [writingStyle, setWritingStyle] = useState('default');
+  const [selectedProvider, setSelectedProvider] = useState('custom');
+
+  const handleProviderSelect = (providerId: string) => {
+    setSelectedProvider(providerId);
+    const p = CLOUD_PROVIDERS.find(p => p.id === providerId);
+    if (p && p.endpoint) {
+      setServerUrl(p.endpoint);
+      setIsAiSaved(false);
+    }
+    if (providerId === 'custom') {
+      setServerUrl(DEFAULT_SERVER_URL);
+      setApiKey(DEFAULT_API_KEY);
+      setIsAiSaved(false);
+    }
+  };
 
   const WRITING_STYLES = [
     { id: 'default', label: 'Default', icon: <PenTool size={14} /> },
@@ -764,22 +790,22 @@ const NodeGraph = ({ nodes }: { nodes: ToolCallNode[] }) => {
       {/* ── Expanded timeline ── */}
       <AnimatePresence>
         {!isCollapsed && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden mt-4 ml-3 pl-8 border-l border-zinc-100 dark:border-white/10 space-y-5 relative"
-          >
-            {nodes.map((node, i) => (
-              <motion.div
-                key={node.id}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.08 }}
-                className="relative flex flex-col gap-1"
-              >
-                {/* Timeline dot */}
-                <div className={`absolute -left-[33.5px] top-[5px] w-3 h-3 rounded-full border-2 bg-white dark:bg-zinc-950 z-10 transition-all duration-300 ${
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden mt-5 ml-4 pl-10 border-l border-zinc-100 dark:border-white/10 space-y-6 relative"
+            >
+              {nodes.map((node, i) => (
+                <motion.div
+                  key={node.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.08 }}
+                  className="relative flex flex-col gap-1"
+                >
+                  {/* Timeline dot */}
+                  <div className={`absolute -left-[41.5px] top-[5px] w-3 h-3 rounded-full border-2 bg-white dark:bg-zinc-950 z-10 transition-all duration-300 ${
                   node.status === 'active'
                     ? 'border-blue-500 animate-pulse bg-blue-500/20 shadow-[0_0_12px_rgba(59,130,246,0.3)]'
                     : node.status === 'complete'
@@ -2698,34 +2724,7 @@ const Canvas = ({
                     </motion.div>
                   )}
 
-                  {activeSettingsTab === 'ai' && (() => {
-                    const CLOUD_PROVIDERS = [
-                      { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: <Terminal size={13} /> },
-                      { id: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1', key: '', icon: <Sparkles size={13} /> },
-                      { id: 'anthropic', label: 'Anthropic', endpoint: 'https://api.anthropic.com/v1', key: '', icon: <Brain size={13} /> },
-                      { id: 'gemini', label: 'Google Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', key: '', icon: <Globe size={13} /> },
-                      { id: 'groq', label: 'Groq', endpoint: 'https://api.groq.com/openai/v1', key: '', icon: <Terminal size={13} /> },
-                      { id: 'openrouter', label: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', key: '', icon: <Box size={13} /> },
-                      { id: 'together', label: 'Together AI', endpoint: 'https://api.together.xyz/v1', key: '', icon: <Sparkles size={13} /> },
-                      { id: 'mistral', label: 'Mistral', endpoint: 'https://api.mistral.ai/v1', key: '', icon: <Sparkles size={13} /> },
-                    ];
-                    const [selectedProvider, setSelectedProvider] = React.useState('custom');
-
-                    const handleProviderSelect = (providerId: string) => {
-                      setSelectedProvider(providerId);
-                      const p = CLOUD_PROVIDERS.find(p => p.id === providerId);
-                      if (p && p.endpoint) {
-                        setServerUrl(p.endpoint);
-                        setIsAiSaved(false);
-                      }
-                      if (providerId === 'custom') {
-                        setServerUrl(DEFAULT_SERVER_URL);
-                        setApiKey(DEFAULT_API_KEY);
-                        setIsAiSaved(false);
-                      }
-                    };
-
-                    return (
+                  {activeSettingsTab === 'ai' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">AI Service Configuration</h3>
@@ -2822,7 +2821,7 @@ const Canvas = ({
                         </div>
                       </div>
                     </motion.div>
-                  );})()}
+                  )}
 
                   {activeSettingsTab === 'search' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
