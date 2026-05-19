@@ -12,7 +12,7 @@ const isDev = process.env.NODE_ENV !== "production";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 5173;
 
   // Handle JSON and CORS
   app.use(express.json());
@@ -75,28 +75,33 @@ async function startServer() {
         }
       ] : [];
 
-      const model = genAI.getGenerativeModel({ 
+      // Use genAI.models.generateContent for @google/genai v2 SDK
+      // Build conversation history in Gemini format
+      const history = messages.slice(0, -1).map((m: any) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      }));
+      const lastMessage = messages[messages.length - 1];
+
+      const contents = [
+        ...history,
+        { role: "user", parts: [{ text: lastMessage.content }] }
+      ];
+
+      let geminiResponse = await (genAI as any).models.generateContent({
         model: modelId,
         systemInstruction: baseInstruction,
-        tools: toolConfigs
+        tools: toolConfigs.length > 0 ? toolConfigs : undefined,
+        contents
       });
 
-      const chat = model.startChat({
-        history: messages.slice(0, -1).map((m: any) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }]
-        }))
-      });
-
-      const lastMessage = messages[messages.length - 1];
-      let result = await chat.sendMessage(lastMessage.content);
-      let response = result.response;
+      let response = geminiResponse;
       
       let toolCalls = [];
-      let imagesResponse = [];
+      let imagesResponse: { title: string; url: string; source: string; thumbnail: string }[] = [];
 
       // Inspect parts for function calls
-      const parts = response.candidates[0].content.parts;
+      const parts = response.candidates?.[0]?.content?.parts || response.candidates[0].content.parts;
       const functionCalls = parts.filter((p: any) => p.functionCall);
 
       if (functionCalls.length > 0) {
@@ -104,9 +109,9 @@ async function startServer() {
           const call = fc.functionCall;
           if (call.name === "image_search") {
             try {
-              const { images: ddgImages } = await import('duck-duck-scrape');
-              const searchResults = await ddgImages(call.args.query);
-              const results = searchResults.results.slice(0, 6).map(img => ({
+              const { searchImages } = await import('duck-duck-scrape');
+              const searchResults = await searchImages(call.args.query);
+              const results = searchResults.results.slice(0, 6).map((img: any) => ({
                 title: img.title,
                 url: img.image,
                 source: img.source,
@@ -114,15 +119,28 @@ async function startServer() {
               }));
               
               imagesResponse = results;
-              
-              // Provide results back to the model
-              result = await chat.sendMessage([{
-                functionResponse: {
-                  name: "image_search",
-                  response: { results }
+
+              // Follow-up call with tool result
+              const followUpContents = [
+                ...contents,
+                { role: "model", parts },
+                {
+                  role: "user",
+                  parts: [{
+                    functionResponse: {
+                      name: "image_search",
+                      response: { results }
+                    }
+                  }]
                 }
-              }]);
-              response = result.response;
+              ];
+
+              const followUpResponse = await (genAI as any).models.generateContent({
+                model: modelId,
+                systemInstruction: baseInstruction,
+                contents: followUpContents
+              });
+              response = followUpResponse;
               
               toolCalls.push({
                 id: Math.random().toString(36).substring(7),
@@ -138,10 +156,16 @@ async function startServer() {
         }
       }
 
+      // Extract text from response
+      const responseText = response.candidates?.[0]?.content?.parts
+        ?.filter((p: any) => p.text)
+        ?.map((p: any) => p.text)
+        ?.join('') || response.text?.() || '';
+
       res.json({
         choices: [{
           message: {
-            content: response.text(),
+            content: responseText,
             role: "assistant",
             tool_calls: toolCalls.length > 0 ? toolCalls : undefined
           }
@@ -201,27 +225,13 @@ async function startServer() {
     let provider = "duckduckgo";
 
     try {
-      // 1. Try Serper if key provided
-      if (serpKey) {
-        try {
-          const response = await axios.post('https://google.serper.dev/search', { q: query }, {
-            headers: { 'X-API-KEY': serpKey, 'Content-Type': 'application/json' }
-          });
-          if (response.data && response.data.organic) {
-            results = response.data.organic.map((r: any) => ({
-              title: r.title,
-              url: r.link,
-              snippet: r.snippet
-            }));
-            provider = "serper";
-          }
-        } catch (e) {
-          console.log("Serper failed, falling back...");
-        }
-      }
-
-      // 2. Try Tavily if Serper failed/not used and key provided
-      if (results.length === 0 && tavilyKey) {
+      // Priority-based search provider selection:
+      // 1. Tavily API (if key is saved) -> primary
+      // 2. SerpApi (if Tavily not present but SerpApi key saved) -> secondary
+      // 3. DuckDuckGo (fallback if neither key is configured)
+      
+      // 1. Try Tavily if key provided (primary)
+      if (tavilyKey) {
         try {
           const response = await axios.post('https://api.tavily.com/search', {
             api_key: tavilyKey,
@@ -243,10 +253,28 @@ async function startServer() {
         }
       }
 
-      // 3. Fallback to DDG (DuckDuckGo) - Advanced
+      // 2. Try SerpApi if Tavily failed/not used and key provided (secondary)
+      if (results.length === 0 && serpKey) {
+        try {
+          const response = await axios.post('https://google.serper.dev/search', { q: query }, {
+            headers: { 'X-API-KEY': serpKey, 'Content-Type': 'application/json' }
+          });
+          if (response.data && response.data.organic) {
+            results = response.data.organic.map((r: any) => ({
+              title: r.title,
+              url: r.link,
+              snippet: r.snippet
+            }));
+            provider = "serper";
+          }
+        } catch (e) {
+          console.log("SerpApi failed, falling back...");
+        }
+      }
+
+      // 3. Fallback to DDG (DuckDuckGo) if neither key configured or both failed
       if (results.length === 0) {
         try {
-          // Perform main search
           const ddgResults = await search(query, {
             region: 'wt-wt',
             safeSearch: -1,
@@ -254,7 +282,6 @@ async function startServer() {
             offset: 0
           });
 
-          // Map results with description as snippet
           let enrichedResults: any[] = [];
           for (const result of ddgResults.results.slice(0, 10)) {
             enrichedResults.push({
@@ -264,7 +291,6 @@ async function startServer() {
             });
           }
 
-          // Add related searches for additional context
           if (ddgResults.related && ddgResults.related.length > 0) {
             const relatedTopics = ddgResults.related.map((t) => ({
               title: t.text,
@@ -295,10 +321,10 @@ async function startServer() {
     }
 
     try {
-      const { images } = await import('duck-duck-scrape');
-      const results = await images(query);
+      const { searchImages } = await import('duck-duck-scrape');
+      const results = await searchImages(query);
       
-      const formattedResults = results.results.slice(0, 10).map(img => ({
+      const formattedResults = results.results.slice(0, 10).map((img: any) => ({
         title: img.title,
         url: img.image,
         source: img.source,
@@ -312,7 +338,89 @@ async function startServer() {
     }
   });
 
-  // MCP Mock Routes for Verification
+  // Llama Bridge proxy endpoints
+  app.get("/api/bridge/health", async (req, res) => {
+    const bridgeUrl = req.headers['x-bridge-url'] as string || 'http://localhost:8089';
+    try {
+      const response = await axios.get(`${bridgeUrl}/health`, { timeout: 5000 });
+      res.json(response.data);
+    } catch (e: any) {
+      res.status(502).json({ error: 'Could not reach Llama Bridge', detail: e.message });
+    }
+  });
+
+  // Proxy: list tools from Llama Bridge
+  app.post("/api/bridge/tools", async (req, res) => {
+    const { bridgeUrl, apiKey, model } = req.body;
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      
+      // Send a probe request to let the bridge return its available tools
+      const response = await axios.post(
+        `${bridgeUrl}/v1/chat/completions`,
+        {
+          model: model || 'auto',
+          messages: [{ role: 'user', content: '__tools_probe__' }],
+          max_tokens: 1,
+          _probe_tools: true
+        },
+        { headers, timeout: 8000 }
+      );
+      
+      // Extract tool definitions from the response
+      const tools = response.data?.tools || [];
+      res.json({ tools, connected: true });
+    } catch (e: any) {
+      // Fallback: try direct tool listing
+      try {
+        const response = await axios.get(`${bridgeUrl}/v1/tools`, { timeout: 5000 });
+        res.json({ tools: response.data?.tools || response.data?.data || [], connected: true });
+      } catch (e2: any) {
+        res.status(502).json({ error: 'Could not reach Llama Bridge', detail: e.message });
+      }
+    }
+  });
+
+  // Proxy: list models from Llama Bridge
+  app.get("/api/bridge/models", async (req, res) => {
+    const bridgeUrl = req.headers['x-bridge-url'] as string || 'http://localhost:8089';
+    const apiKey = req.headers['x-api-key'] as string || '';
+    try {
+      const headers: Record<string, string> = {};
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      const response = await axios.get(`${bridgeUrl}/v1/models`, { headers, timeout: 5000 });
+      res.json(response.data);
+    } catch (e: any) {
+      res.status(502).json({ error: 'Could not fetch models', detail: e.message });
+    }
+  });
+
+  // Proxy: connect to a remote MCP server
+  app.post("/api/mcp/connect", async (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: "URL required" });
+    
+    try {
+      // Try standard MCP tool listing endpoint (JSON-RPC over HTTP)
+      const response = await axios.post(url, {
+        jsonrpc: '2.0',
+        method: 'tools/list',
+        params: {},
+        id: 1
+      }, { 
+        timeout: 8000,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const tools = response.data?.result?.tools || [];
+      res.json({ tools, connected: true });
+    } catch (e: any) {
+      res.status(502).json({ error: 'Could not connect to MCP server', detail: e.message });
+    }
+  });
+
+  // Keep a minimal stub for backward compatibility
   app.get("/api/v1/tools", (req, res) => {
     res.json({ tools: [] });
   });
@@ -320,7 +428,6 @@ async function startServer() {
   app.post("/api/list_tools", (req, res) => {
     res.json({ tools: [] });
   });
-
   // Vite middleware for development
   if (isDev) {
     try {
@@ -343,9 +450,8 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n🚀 Proxy server ready at http://0.0.0.0:${PORT}`);
-    console.log(`🔗 App connects via internal API proxy`);
+  const server = app.listen(PORT, "localhost", () => {
+    console.log(`\n🚀 Proxy server ready at http://localhost:${PORT}`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);

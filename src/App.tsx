@@ -113,12 +113,26 @@ interface Chat {
 }
 
 interface Tool {
-   id: string;
-   name: string;
-   description: string;
-   enabled: boolean;
-   icon: React.ReactNode;
-}
+    id: string;
+    name: string;
+    description: string;
+    enabled: boolean;
+    icon: React.ReactNode;
+    parameters?: any;
+  }
+  
+  interface ToolDefinition {
+    type: 'function';
+    function: {
+      name: string;
+      description: string;
+      parameters: {
+        type: 'object';
+        properties: Record<string, { type: string; description: string }>;
+        required: string[];
+      };
+    };
+  }
 
 interface Skill {
   id: string;
@@ -1068,6 +1082,20 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => safeGetItem('lumina_api_key', DEFAULT_API_KEY));
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
   const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', DEFAULT_API_KEY));
+  
+  // Llama Bridge backend mode state
+  const [backendMode, setBackendMode] = useState<'gemini' | 'llamabridge'>(
+    () => (localStorage.getItem('lumina_backend_mode') as 'gemini' | 'llamabridge') || 'gemini'
+  );
+  const [llamaBridgeUrl, setLlamaBridgeUrl] = useState(() => 
+    localStorage.getItem('lumina_llama_url') || 'http://localhost:8080'
+  );
+  const [llamaBridgeApiKey, setLlamaBridgeApiKey] = useState(() => 
+    localStorage.getItem('lumina_llama_key') || ''
+  );
+  const [llamaBridgeModels, setLlamaBridgeModels] = useState<{id: string, name: string}[]>([]);
+  const [selectedLlamaModel, setSelectedLlamaModel] = useState('');
+  const [useBridgeTools, setUseBridgeTools] = useState(true);
   const [tavilyApiKey, setTavilyApiKey] = useState(() => safeGetItem('lumina_tavily_key', ''));
   const [serpApiKey, setSerpApiKey] = useState(() => safeGetItem('lumina_serp_key', ''));
   
@@ -1078,12 +1106,13 @@ export default function App() {
    const [isMcpSaved, setIsMcpSaved] = useState(false);
    const [mcpTools, setMcpTools] = useState<Tool[]>([]);
   const [inbuiltTools, setInbuiltTools] = useState<Tool[]>([
-    { id: 'wikipedia', name: 'Wikipedia', enabled: false, description: 'Search pages and get data', icon: <Book size={16} /> },
+    { id: 'web_search', name: 'Web Search', enabled: false, description: 'Search the web for current info', icon: <Globe size={16} /> },
     { id: 'image', name: 'Image Search', enabled: true, description: 'Search and send images', icon: <ImageIcon size={16} /> },
-    { id: 'weather', name: 'Weather', enabled: false, description: 'Real-time weather info', icon: <CloudSun size={16} /> },
-    { id: 'news', name: 'Global News', enabled: false, description: 'Latest headlines and stories', icon: <Newspaper size={16} /> },
-    { id: 'dictionary', name: 'Dictionary', enabled: false, description: 'Definitions and synonyms', icon: <Library size={16} /> },
-    { id: 'coderunner', name: 'Code Runner', enabled: false, description: 'Execute code snippets', icon: <Play size={16} /> },
+    { id: 'wikipedia', name: 'Wikipedia', enabled: false, description: 'Search pages and get data', icon: <Book size={16} /> },
+    { id: 'weather', name: 'Weather', enabled: false, description: 'Coming soon - Real-time weather info', icon: <CloudSun size={16} /> },
+    { id: 'news', name: 'Global News', enabled: false, description: 'Coming soon - Latest headlines and stories', icon: <Newspaper size={16} /> },
+    { id: 'dictionary', name: 'Dictionary', enabled: false, description: 'Coming soon - Definitions and synonyms', icon: <Library size={16} /> },
+    { id: 'coderunner', name: 'Code Runner', enabled: false, description: 'Coming soon - Execute code snippets', icon: <Play size={16} /> },
   ]);
   const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>([
     { id: 'lumina-ultra-plus', name: 'Lumina Ultra Plus', icon: <Sparkles size={14} />, color: 'text-blue-500' },
@@ -1197,6 +1226,275 @@ export default function App() {
     setIsMcpSaved(true);
     setTimeout(() => setIsMcpSaved(false), 2000);
   };
+  
+  // Build active tools array from enabled built-in tools and MCP tools
+  const buildActiveTools = (): ToolDefinition[] => {
+    const active: ToolDefinition[] = [];
+    
+    // Built-in tools that have real implementations (web_search, image, wikipedia)
+    if (inbuiltTools.find(t => t.id === 'web_search' && t.enabled)) {
+      active.push({
+        type: 'function',
+        function: {
+          name: 'web_search',
+          description: 'Search the web for current information. Use for news, facts, recent events, and real-time data.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'The search query' }
+            },
+            required: ['query']
+          }
+        }
+      });
+    }
+    
+    if (inbuiltTools.find(t => t.id === 'wikipedia' && t.enabled)) {
+      active.push({
+        type: 'function',
+        function: {
+          name: 'wikipedia',
+          description: 'Search Wikipedia for information. Use for factual queries and general knowledge.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'The search query' }
+            },
+            required: ['query']
+          }
+        }
+      });
+    }
+    
+    if (inbuiltTools.find(t => t.id === 'image' && t.enabled)) {
+      active.push({
+        type: 'function',
+        function: {
+          name: 'image_search',
+          description: 'Search for images on the web. Use when the user asks for pictures or photos.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'The image search query' }
+            },
+            required: ['query']
+          }
+        }
+      });
+    }
+    
+    // Add more built-in tools here as they are implemented...
+    
+    // MCP tools from bridge (already in OpenAI function-call format after normalization)
+    const enabledMcpTools = mcpTools
+      .filter(t => t.enabled)
+      .map(t => ({
+        type: 'function' as const,
+        function: {
+          name: t.id,
+          description: t.description || 'MCP Tool',
+          parameters: t.parameters || { type: 'object', properties: {}, required: [] }
+        }
+      }));
+    
+    active.push(...enabledMcpTools);
+    return active;
+  };
+  
+  // Handle tool calls from the model response
+  const handleToolCalls = async (
+    toolCalls: Array<{ id: string; function: { name: string; arguments: string } }>,
+    conversationMessages: any[]
+  ): Promise<string> => {
+    const toolResults = [];
+    
+    for (const call of toolCalls) {
+      const args = JSON.parse(call.function.arguments);
+      let result: any;
+      
+      // Update UI: show tool as active in ToolCallNode
+      updateToolCallStatus(call.id, 'active');
+      
+      if (call.function.name === 'web_search') {
+        // Call the Node.js proxy's real search endpoint
+        try {
+          const r = await fetch('/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: args.query })
+          });
+          result = await r.json();
+        } catch (e) {
+          result = { error: 'Web search failed' };
+        }
+      } else if (call.function.name === 'image_search') {
+        // Call the Node.js proxy's real image search endpoint
+        try {
+          const r = await fetch('/api/image-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: args.query })
+          });
+          result = await r.json();
+        } catch (e) {
+          result = { error: 'Image search failed' };
+        }
+      } else if (call.function.name === 'wikipedia') {
+        // Call the search endpoint for Wikipedia
+        try {
+          const r = await fetch('/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: args.query })
+          });
+          const data = await r.json();
+          result = { results: data.results || [] };
+        } catch (e) {
+          result = { error: 'Search failed' };
+        }
+      } else {
+        // Unknown tool or MCP tool — forward to Llama Bridge tool execution endpoint
+        result = { error: `Tool ${call.function.name} not implemented in UI` };
+      }
+      
+      // Update UI: show tool as complete
+      updateToolCallStatus(call.id, 'complete');
+      
+      toolResults.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        name: call.function.name,
+        content: JSON.stringify(result)
+      });
+    }
+    
+    // Send tool results back to the model to get the final answer
+    const continueMessages = [
+      ...conversationMessages,
+      { role: 'assistant', tool_calls: toolCalls },
+      ...toolResults
+    ];
+    
+    // Call the appropriate endpoint based on backend mode
+    let finalResponse;
+    if (backendMode === 'llamabridge') {
+      finalResponse = await callLlamaBridge(continueMessages, []);
+    } else {
+      // Call via proxy for Gemini mode
+      const response = await fetch(`${serverUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: continueMessages,
+          stream: false
+        })
+      });
+      finalResponse = await response.json();
+    }
+    
+    return finalResponse.choices?.[0]?.message?.content || '';
+  };
+  
+  // Llama Bridge API call function
+  const callLlamaBridge = async (messages: any[], tools: ToolDefinition[]) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (llamaBridgeApiKey) headers['Authorization'] = `Bearer ${llamaBridgeApiKey}`;
+    
+    const body: any = {
+      model: selectedLlamaModel,
+      messages: messages,
+      stream: false,
+    };
+    
+    // CRITICAL: attach tools if any are enabled
+    if (tools.length > 0) {
+      body.tools = tools;
+      body.tool_choice = 'auto';
+    }
+    
+    const response = await fetch(`${llamaBridgeUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    
+    return await response.json();
+  };
+  
+  // Update tool call status in UI
+  const updateToolCallStatus = (toolCallId: string, status: 'pending' | 'active' | 'complete' | 'failed') => {
+    setChats(prev => prev.map(chat => ({
+      ...chat,
+      messages: chat.messages.map((m: Message) => {
+        if (m.toolCalls) {
+          return {
+            ...m,
+            toolCalls: m.toolCalls.map((tc: ToolCallNode) => 
+              tc.id === toolCallId ? { ...tc, status } : tc
+            )
+          };
+        }
+        return m;
+      })
+    })));
+  };
+  
+  // Test connection to Llama Bridge
+  const handleTestLlamaConnection = async () => {
+    setAiVerificationState('verifying');
+    try {
+      const response = await fetch(`${llamaBridgeUrl}/health`, {
+        method: 'GET',
+        headers: llamaBridgeApiKey ? { 'Authorization': `Bearer ${llamaBridgeApiKey}` } : {}
+      });
+      
+      if (response.ok) {
+        setAiVerificationState('success');
+      } else {
+        setAiVerificationState('error');
+      }
+    } catch (error) {
+      console.error('Llama Bridge connection failed:', error);
+      setAiVerificationState('error');
+    } finally {
+      setTimeout(() => setAiVerificationState('idle'), 3000);
+    }
+  };
+  
+  // Load models from Llama Bridge
+  const handleLoadLlamaModels = async () => {
+    try {
+      const response = await fetch(`${llamaBridgeUrl}/v1/models`, {
+        method: 'GET',
+        headers: llamaBridgeApiKey ? { 'Authorization': `Bearer ${llamaBridgeApiKey}` } : {}
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const models = data.data || data.models || [];
+        const fetchedModels = models.map((m: any) => ({
+          id: m.id,
+          name: m.display_name || m.id,
+          icon: <Sparkles size={14} />,
+          color: 'text-blue-500'
+        }));
+        setLlamaBridgeModels(fetchedModels);
+        if (fetchedModels.length > 0 && !selectedLlamaModel) {
+          setSelectedLlamaModel(fetchedModels[0].id);
+        }
+        showToast(`Loaded ${fetchedModels.length} models`);
+      } else {
+        showToast('Failed to load models');
+      }
+    } catch (error) {
+      console.error('Failed to load Llama Bridge models:', error);
+      showToast('Failed to load models');
+    }
+  };
 
   const handleConnectMcp = useCallback(async () => {
     if (!mcpUrl) return;
@@ -1275,7 +1573,23 @@ export default function App() {
     }
   }, [mcpUrl, mcpKey]);
 
+  // selectedModel is used for Gemini/API mode; selectedLlamaModel for Llama Bridge mode
   const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
+  // Derive which model and model list to show based on backend mode
+  const activeModelList = useMemo(() => 
+    backendMode === 'llamabridge' && llamaBridgeModels.length > 0
+      ? llamaBridgeModels.map(m => ({ id: m.id, name: m.name, icon: <Sparkles size={14} />, color: 'text-blue-500' }))
+      : availableModels,
+    [backendMode, llamaBridgeModels, availableModels]
+  );
+  const activeModelId = backendMode === 'llamabridge' ? selectedLlamaModel : selectedModel;
+  const setActiveModelId = useCallback((id: string) => {
+    if (backendMode === 'llamabridge') {
+      setSelectedLlamaModel(id);
+    } else {
+      setSelectedModel(id);
+    }
+  }, [backendMode]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [activeSkills, setActiveSkills] = useState<string[]>([]);
@@ -1493,14 +1807,29 @@ const [searchQuery, setSearchQuery] = useState('');
           };
         }));
 
-        // Always try backend search. The backend handles Tavily/SerpAPI/DuckDuckGo selection.
+        // Priority-based search provider selection:
+        // 1. Tavily API (if key is saved) -> primary
+        // 2. SerpApi (if Tavily not present but SerpApi key saved) -> secondary
+        // 3. DuckDuckGo (fallback if neither key is configured)
+        const hasTavilyKey = tavilyApiKey && tavilyApiKey.trim().length > 0;
+        const hasSerpKey = serpApiKey && serpApiKey.trim().length > 0;
+        
+        let providerName = 'DuckDuckGo';
+        if (hasTavilyKey) {
+          providerName = 'Tavily';
+        } else if (hasSerpKey) {
+          providerName = 'SerpApi';
+        }
+
+        // Call backend search endpoint
         const searchResp = await fetch(`${serverUrl}/search`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             query: content, 
-            tavilyKey: tavilyApiKey, 
-            serpKey: serpApiKey 
+            tavilyKey: hasTavilyKey ? tavilyApiKey : '', 
+            serpKey: hasSerpKey && !hasTavilyKey ? serpApiKey : '',
+            provider: providerName
           })
         });
         
@@ -1539,44 +1868,57 @@ const [searchQuery, setSearchQuery] = useState('');
     try {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       
-      // Build API messages, filtering out entries with null/empty content 
-      // (these are tool_call-only responses from the bridge)
-      const apiMessages = [...chatContext, userMessage]
-        .filter(m => m.content && m.content.trim().length > 0)
-        .map(m => ({
-          role: m.role,
-          content: m.content
-        }));
-
-      // Inject search results into the prompt if available
-      let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`;
+// Build API messages, filtering out entries with null/empty content 
+       // (these are tool_call-only responses from the bridge)
+       const apiMessages = [...chatContext, userMessage]
+         .filter(m => m.content && m.content.trim().length > 0)
+         .map(m => ({
+           role: m.role,
+           content: m.content
+         }));
       
-      if (searchResults.length > 0) {
-        const contextString = searchResults.slice(0, 8).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
-        systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
-      }
+       // Build tools array from enabled tools
+       const activeTools = buildActiveTools();
 
-      const response = await fetch(`${serverUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: apiMessages,
-          stream: false,
-          writing_style: writingStyle,
-          system_prompt: systemPrompt,
-          use_tools: inbuiltTools.some(t => t.id === 'image' && t.enabled)
-        })
-      });
+       // Inject search results into the prompt if available
+       let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`;
+       
+       if (searchResults.length > 0) {
+         const contextString = searchResults.slice(0, 8).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
+         systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
+       }
+       
+       // Route based on backend mode
+       let rawResponse: any;
+       if (backendMode === 'llamabridge') {
+         // Direct call to Llama Bridge
+         rawResponse = await callLlamaBridge(apiMessages, activeTools);
+       } else {
+         // Call via proxy (existing Gemini mode)
+         const fetchResponse = await fetch(`${serverUrl}/chat/completions`, {
+           method: 'POST',
+           headers: {
+             'Content-Type': 'application/json',
+             'Authorization': `Bearer ${apiKey}`
+           },
+           body: JSON.stringify({
+             model: selectedModel,
+             messages: apiMessages,
+             stream: false,
+             writing_style: writingStyle,
+             system_prompt: systemPrompt,
+             use_tools: inbuiltTools.some(t => t.id === 'image' && t.enabled)
+           })
+         });
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`);
-      }
+         if (!fetchResponse.ok) {
+           throw new Error(`API error: ${fetchResponse.status} ${fetchResponse.statusText}`);
+         }
 
-      const data = await response.json();
+         rawResponse = await fetchResponse.json();
+       }
+
+      const data = rawResponse;
       const choice = data.choices?.[0]?.message;
       const responseContent = choice?.content;
       const toolCallsRaw = choice?.tool_calls;
@@ -1625,9 +1967,9 @@ const [searchQuery, setSearchQuery] = useState('');
 
       const finalToolNodes = [...toolCallNodes];
 
-      // Derive display name of the active model
-      const modelForLabel = availableModels.find(m => m.id === selectedModel);
-      const aiLabel = modelForLabel?.name || selectedModel;
+      // Derive display name of the active model (works for both Gemini and Llama Bridge)
+      const modelForLabel = activeModelList.find(m => m.id === activeModelId);
+      const aiLabel = modelForLabel?.name || activeModelId;
 
       // ─── Dynamic synthesis node builder ───────────────────────────────────
       // Inspects what actually happened this turn and produces a fully
@@ -1825,7 +2167,7 @@ const [searchQuery, setSearchQuery] = useState('');
     });
   };
 
-  const extractArtifacts = (content: string): Artifact[] => {
+  function extractArtifacts(content: string): Artifact[] {
     const artifacts: Artifact[] = [];
     const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
     let match;
@@ -1864,11 +2206,11 @@ const [searchQuery, setSearchQuery] = useState('');
     return artifacts;
   };
 
-  const showToast = (message: string) => {
+  function showToast(message: string) {
     const id = Date.now().toString();
     setToasts(prev => [...prev, { id, message }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
-  };
+  }
 
   const handleScreenshot = async () => {
     setIsPlusMenuOpen(false);
@@ -2630,7 +2972,7 @@ const [searchQuery, setSearchQuery] = useState('');
                       onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
                       className="flex items-center gap-1.5 px-3 py-2 hover:bg-white/5 rounded-2xl text-sm font-medium text-gray-400 transition-all active:scale-95"
                     >
-                      <span>{availableModels.find(m => m.id === selectedModel)?.name || 'Select Model'}</span>
+                      <span>{(activeModelList.find(m => m.id === activeModelId)?.name) || 'Select Model'}</span>
                       <ChevronDown size={14} className={`transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
                     </motion.button>
 
@@ -2658,18 +3000,18 @@ const [searchQuery, setSearchQuery] = useState('');
                             </div>
                           )}
                           <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar">
-                            {availableModels
+                            {activeModelList
                               .filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase()))
                               .map((model) => (
                                 <button
                                   key={model.id}
                                   onClick={() => {
-                                    setSelectedModel(model.id);
+                                    setActiveModelId(model.id);
                                     setIsModelDropdownOpen(false);
                                     setModelSearchQuery('');
                                   }}
                                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
-                                    selectedModel === model.id 
+                                    activeModelId === model.id 
                                       ? 'bg-white/10 text-white' 
                                       : 'text-gray-400 hover:bg-white/5 hover:text-white'
                                   }`}
@@ -2678,10 +3020,10 @@ const [searchQuery, setSearchQuery] = useState('');
                                     {model.icon}
                                   </div>
                                   <div className="flex-1 text-left truncate">{model.name}</div>
-                                  {selectedModel === model.id && <Check size={12} className="text-blue-500 shrink-0" />}
+                                  {activeModelId === model.id && <Check size={12} className="text-blue-500 shrink-0" />}
                                 </button>
                               ))}
-                            {availableModels.filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
+                            {activeModelList.filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase())).length === 0 && (
                               <div className="py-8 text-center text-[10px] font-bold text-gray-500 uppercase tracking-widest italic">
                                 No models found
                               </div>
@@ -2955,6 +3297,106 @@ const [searchQuery, setSearchQuery] = useState('');
                               </p>
                             </div>
                           </div>
+
+                          {/* ── Llama Bridge Backend Selector ── */}
+                          <div className="pt-4 border-t border-gray-100 dark:border-white/5">
+                            <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-4">Backend Mode</h4>
+                            <div className="flex bg-gray-100 dark:bg-zinc-950 p-1 rounded-xl mb-4">
+                              <button 
+                                onClick={() => { setBackendMode('gemini'); localStorage.setItem('lumina_backend_mode', 'gemini'); }}
+                                className={`flex-1 px-3 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${backendMode === 'gemini' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                              >
+                                Gemini (Proxy)
+                              </button>
+                              <button 
+                                onClick={() => { setBackendMode('llamabridge'); localStorage.setItem('lumina_backend_mode', 'llamabridge'); }}
+                                className={`flex-1 px-3 py-2 text-[11px] font-bold uppercase tracking-widest rounded-lg transition-all ${backendMode === 'llamabridge' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                              >
+                                Llama Bridge
+                              </button>
+                            </div>
+                          </div>
+
+                          <AnimatePresence>
+                            {backendMode === 'llamabridge' && (
+                              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-5 overflow-hidden">
+                                <div className="space-y-1.5">
+                                  <label className="text-[11px] font-medium text-gray-500">Bridge URL</label>
+                                  <input 
+                                    type="text" 
+                                    value={llamaBridgeUrl}
+                                    onChange={(e) => { setLlamaBridgeUrl(e.target.value); localStorage.setItem('lumina_llama_url', e.target.value); }}
+                                    placeholder="http://localhost:8080"
+                                    className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="text-[11px] font-medium text-gray-500">API Key (optional)</label>
+                                  <input 
+                                    type="password" 
+                                    value={llamaBridgeApiKey}
+                                    onChange={(e) => { setLlamaBridgeApiKey(e.target.value); localStorage.setItem('lumina_llama_key', e.target.value); }}
+                                    placeholder="Enter API key if required"
+                                    className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                                  />
+                                </div>
+                                <div className="flex gap-3">
+                                  <button
+                                    onClick={handleTestLlamaConnection}
+                                    disabled={aiVerificationState === 'verifying'}
+                                    className={`flex-1 h-11 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                                      aiVerificationState === 'success' 
+                                        ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
+                                        : aiVerificationState === 'error'
+                                          ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                                          : 'bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'
+                                    }`}
+                                  >
+                                    {aiVerificationState === 'verifying' ? (
+                                      <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                                    ) : null}
+                                    {aiVerificationState === 'success' ? <Check size={16} /> : null}
+                                    {aiVerificationState === 'error' ? <X size={16} /> : null}
+                                    {aiVerificationState === 'verifying' ? 'Testing...' : aiVerificationState === 'success' ? 'Connected' : aiVerificationState === 'error' ? 'Failed' : 'Test Connection'}
+                                  </button>
+                                  <button
+                                    onClick={handleLoadLlamaModels}
+                                    className="flex-1 h-11 rounded-xl text-sm font-semibold bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10 hover:opacity-90 transition-all"
+                                  >
+                                    Load Models
+                                  </button>
+                                </div>
+                                {llamaBridgeModels.length > 0 && (
+                                  <div className="space-y-1.5">
+                                    <label className="text-[11px] font-medium text-gray-500">Bridge Model</label>
+                                    <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
+                                      {llamaBridgeModels.map(m => (
+                                        <button
+                                          key={m.id}
+                                          onClick={() => setSelectedLlamaModel(m.id)}
+                                          className={`px-3 py-2 rounded-xl text-[11px] font-medium text-left transition-all ${
+                                            selectedLlamaModel === m.id
+                                              ? 'bg-blue-500/10 text-blue-500 border border-blue-500/30'
+                                              : 'bg-gray-50 dark:bg-zinc-950 text-gray-500 border border-gray-100 dark:border-white/5 hover:border-gray-200 dark:hover:border-white/10'
+                                          }`}
+                                        >
+                                          <div className="truncate">{m.name || m.id}</div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                                  <div className="flex gap-3 text-blue-500">
+                                    <Terminal size={16} className="shrink-0 mt-0.5" />
+                                    <p className="text-[11px] leading-relaxed">
+                                      When Llama Bridge is active, chat requests go directly to the bridge at <strong>{llamaBridgeUrl}</strong>. Enabled built-in tools and MCP tools are sent in the <code>tools</code> array to the bridge.
+                                    </p>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       </div>
                     </motion.div>
@@ -3029,19 +3471,33 @@ const [searchQuery, setSearchQuery] = useState('');
                         </div>
                       </div>
 
-                      <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
-                        <div className="flex gap-3">
-                          <Globe size={18} className="text-blue-500 shrink-0" />
-                          <div>
-                            <div className="text-xs font-bold text-blue-500 uppercase mb-1">Search Integration</div>
-                            <p className="text-xs text-blue-500/70 leading-relaxed">
-                              When configured, the AI will automatically use these tools to browse the web for time-sensitive information, ensuring responses are grounded in current facts.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
+<div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                         <div className="flex gap-3">
+                           <Globe size={18} className="text-blue-500 shrink-0" />
+                           <div>
+                             <div className="text-xs font-bold text-blue-500 uppercase mb-1">Search Integration</div>
+                             <p className="text-xs text-blue-500/70 leading-relaxed mb-2">
+                               When configured, the AI will automatically use these tools to browse the web for time-sensitive information, ensuring responses are grounded in current facts.
+                             </p>
+<div className="text-[10px] text-gray-400 space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full ${tavilyApiKey && tavilyApiKey.trim() ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                                  <span>Tavily {(tavilyApiKey && tavilyApiKey.trim()) ? '(Primary)' : '(Not configured)'}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full ${(!tavilyApiKey || !tavilyApiKey.trim()) && serpApiKey && serpApiKey.trim() ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                                  <span>SerpApi {((!tavilyApiKey || !tavilyApiKey.trim()) && serpApiKey && serpApiKey.trim()) ? '(Active)' : '(Not configured or shadowed)'}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full ${(!tavilyApiKey || !tavilyApiKey.trim()) && (!serpApiKey || !serpApiKey.trim()) ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                                  <span>DuckDuckGo {(!tavilyApiKey?.trim() && !serpApiKey?.trim()) ? '(Active)' : '(Fallback)'}</span>
+                                </div>
+                              </div>
+                           </div>
+                         </div>
+                       </div>
+                     </motion.div>
+                   )}
 
                   {activeSettingsTab === 'profile' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
@@ -3403,10 +3859,34 @@ const [searchQuery, setSearchQuery] = useState('');
                                 onClick={async () => {
                                   if (!remoteMcpConfig.url) return;
                                   setRemoteMcpConfig(prev => ({ ...prev, status: 'connecting', error: '' }));
-                                  // Simulate connection
-                                  await new Promise(r => setTimeout(r, 1500));
-                                  setRemoteMcpConfig(prev => ({ ...prev, status: 'connected' }));
-                                  showToast('Connected to remote MCP server!');
+                                  try {
+                                    // Real MCP connection via proxy
+                                    const response = await fetch('/api/mcp/connect', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ url: remoteMcpConfig.url })
+                                    });
+                                    
+                                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                                    const data = await response.json();
+                                    
+                                    // Load discovered tools into mcpTools state
+                                    const discoveredTools = (data.tools || []).map((t: any) => ({
+                                      id: t.name || t.id || `mcp-${Math.random().toString(36).substring(7)}`,
+                                      name: t.name || t.id || 'MCP Tool',
+                                      description: t.description || '',
+                                      enabled: true,
+                                      icon: <Wrench size={14} />,
+                                      parameters: t.inputSchema || t.parameters
+                                    }));
+                                    
+                                    setMcpTools(prev => [...prev, ...discoveredTools]);
+                                    setRemoteMcpConfig(prev => ({ ...prev, status: 'connected' }));
+                                    showToast(`Connected! Discovered ${discoveredTools.length} tools.`);
+                                  } catch (err: any) {
+                                    setRemoteMcpConfig(prev => ({ ...prev, status: 'disconnected', error: err.message }));
+                                    showToast('Connection failed: ' + (err.message || 'Unknown error'));
+                                  }
                                 }}
                                 disabled={remoteMcpConfig.status === 'connecting' || !remoteMcpConfig.url}
                                 className="w-full h-11 bg-black dark:bg-white text-white dark:text-black rounded-2xl text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
