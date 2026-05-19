@@ -23,197 +23,12 @@ async function startServer() {
     next();
   });
 
-  // Gemini API Implementation
-  const genaiModule = await import("@google/genai");
-  const GoogleGenAI = genaiModule.GoogleGenAI;
-  const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-
-  app.get("/api/models", async (req, res) => {
-    res.json({
-      data: [
-        { id: "gemini-1.5-pro", display_name: "Lumina Ultra Plus" },
-        { id: "gemini-1.5-flash", display_name: "Lumina Mini Flash" }
-      ]
-    });
+  // Health check endpoint
+  app.get("/api/health", async (req, res) => {
+    res.json({ status: 'ok', server: 'Lumina Web UI Server' });
   });
 
-  app.post("/api/chat/completions", async (req, res) => {
-    try {
-      const { model: requestedModel, messages, writing_style = 'default', system_prompt, use_tools } = req.body;
-      const modelId = (requestedModel && requestedModel.includes("ultra")) ? "gemini-1.5-pro" : "gemini-1.5-flash";
-      
-      const stylePrompts: Record<string, string> = {
-        poem: "You are a poet. Write in a poetic style with stanzas and rhythmic line breaks. Use evocative language.",
-        letter: "You are a correspondent. Format your response as a formal or informal letter, including a date, salutation, body, and closing.",
-        story: "You are a storyteller. Use narrative techniques, descriptive imagery, and character-driven prose. Structure your response as a story.",
-        essay: "You are an academic writer. Use a formal tone, clear structure (introduction, body, conclusion), and logical flow.",
-        script: "You are a screenwriter. Use standard screenplay formatting for dialogues, scene headings, and action lines.",
-        default: "You are a helpful and intelligent assistant. Be concise and use Markdown for formatting."
-      };
-
-      const baseInstruction = system_prompt || stylePrompts[writing_style] || stylePrompts.default;
-
-      // Define tools for image search
-      const toolConfigs = use_tools ? [
-        {
-          functionDeclarations: [
-            {
-              name: "image_search",
-              description: "Search for images using DuckDuckGo. Use this tool when the user asks for pictures, images, or photos of something.",
-              parameters: {
-                type: "OBJECT",
-                properties: {
-                  query: {
-                    type: "STRING",
-                    description: "The search query for images."
-                  }
-                },
-                required: ["query"]
-              }
-            }
-          ]
-        }
-      ] : [];
-
-      // Use genAI.models.generateContent for @google/genai v2 SDK
-      // Build conversation history in Gemini format
-      const history = messages.slice(0, -1).map((m: any) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }]
-      }));
-      const lastMessage = messages[messages.length - 1];
-
-      const contents = [
-        ...history,
-        { role: "user", parts: [{ text: lastMessage.content }] }
-      ];
-
-      let geminiResponse = await (genAI as any).models.generateContent({
-        model: modelId,
-        systemInstruction: baseInstruction,
-        tools: toolConfigs.length > 0 ? toolConfigs : undefined,
-        contents
-      });
-
-      let response = geminiResponse;
-      
-      let toolCalls = [];
-      let imagesResponse: { title: string; url: string; source: string; thumbnail: string }[] = [];
-
-      // Inspect parts for function calls
-      const parts = response.candidates?.[0]?.content?.parts || response.candidates[0].content.parts;
-      const functionCalls = parts.filter((p: any) => p.functionCall);
-
-      if (functionCalls.length > 0) {
-        for (const fc of functionCalls) {
-          const call = fc.functionCall;
-          if (call.name === "image_search") {
-            try {
-              const { searchImages } = await import('duck-duck-scrape');
-              const searchResults = await searchImages(call.args.query);
-              const results = searchResults.results.slice(0, 6).map((img: any) => ({
-                title: img.title,
-                url: img.image,
-                source: img.source,
-                thumbnail: img.thumbnail
-              }));
-              
-              imagesResponse = results;
-
-              // Follow-up call with tool result
-              const followUpContents = [
-                ...contents,
-                { role: "model", parts },
-                {
-                  role: "user",
-                  parts: [{
-                    functionResponse: {
-                      name: "image_search",
-                      response: { results }
-                    }
-                  }]
-                }
-              ];
-
-              const followUpResponse = await (genAI as any).models.generateContent({
-                model: modelId,
-                systemInstruction: baseInstruction,
-                contents: followUpContents
-              });
-              response = followUpResponse;
-              
-              toolCalls.push({
-                id: Math.random().toString(36).substring(7),
-                function: {
-                  name: "image_search",
-                  arguments: JSON.stringify(call.args)
-                }
-              });
-            } catch (err) {
-              console.error("Tool execution failed:", err);
-            }
-          }
-        }
-      }
-
-      // Extract text from response
-      const responseText = response.candidates?.[0]?.content?.parts
-        ?.filter((p: any) => p.text)
-        ?.map((p: any) => p.text)
-        ?.join('') || response.text?.() || '';
-
-      res.json({
-        choices: [{
-          message: {
-            content: responseText,
-            role: "assistant",
-            tool_calls: toolCalls.length > 0 ? toolCalls : undefined
-          }
-        }],
-        images: imagesResponse.length > 0 ? imagesResponse : undefined
-      });
-    } catch (error: any) {
-      console.error("Gemini Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post("/api/generate-avatar", async (req, res) => {
-    try {
-      const { prompt } = req.body;
-      
-      // Use gemini-2.5-flash-image for standard image generation
-      const response = await (genAI as any).models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [{ text: `A clean, minimalist profile avatar image for a digital assistant persona. Description: ${prompt}. Cinematic lighting, flat design aesthetic, centered composition, high quality, square format.` }]
-        },
-        config: {
-          imageConfig: {
-            aspectRatio: "1:1"
-          }
-        }
-      });
-
-      let base64Image = "";
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          base64Image = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-          break;
-        }
-      }
-
-      if (!base64Image) {
-        throw new Error("No image data returned from model");
-      }
-
-      res.json({ imageUrl: base64Image });
-    } catch (error: any) {
-      console.error("Avatar Gen Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
+  // Search endpoint
   app.post("/api/search", async (req, res) => {
     const { query, tavilyKey, serpKey } = req.body;
     
@@ -428,6 +243,7 @@ async function startServer() {
   app.post("/api/list_tools", (req, res) => {
     res.json({ tools: [] });
   });
+
   // Vite middleware for development
   if (isDev) {
     try {
