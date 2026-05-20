@@ -1,17 +1,13 @@
 /**
  * Llama Bridge client for Lumina.
- * Large async helpers extracted from App.tsx so the component
- * body stays readable and each function is independently testable.
+ * All tools are sourced from the bridge - no built-in tool duplication.
  */
 import type { ToolDefinition } from './types';
 
 /**
- * Sinless no-op shim – the real Llama Bridge client.
- * Kept minimal here as a placeholder so the rest of the prompt can be implemented
- * with confidence.
+ * Call the Llama Bridge chat completions endpoint.
+ * Tools are sent to the bridge and the bridge handles execution server-side.
  */
-// ── helpers ─────────────────────────────────────────────────────────────────
-
 export async function callLlamaBridge(
   messages: Array<{ role: string; content: string }>,
   tools: ToolDefinition[],
@@ -24,7 +20,9 @@ export async function callLlamaBridge(
   const { url, apiKey, model } = options;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  // Use provided API key, or default to "ollama" for localhost bridge
+  const effectiveApiKey = apiKey || (url.includes('localhost') || url.includes('127.0.0.1') ? 'ollama' : '');
+  if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`;
 
   const body: Record<string, any> = {
     model,
@@ -50,90 +48,73 @@ export async function callLlamaBridge(
   return res.json();
 }
 
-export async function handleToolCalls(
-  toolCalls: Array<{ id: string; function: { name: string; arguments: string } }>,
-  conversationMessages: Array<{ role: string; content: string }>,
-  options: {
-    url: string;
-    apiKey: string;
-    model: string;
-    bridgeMode: boolean; // not used yet; reserved for future MCP-to-bridge proxying
-  }
-): Promise<string> {
-  const { url, apiKey, model } = options;
+/**
+ * Fetch tools available from the Llama Bridge.
+ * This replaces the old inbuiltTools approach - all tools come from the bridge.
+ */
+export async function fetchBridgeTools(
+  bridgeUrl: string,
+  apiKey: string
+): Promise<Array<{ id: string; name: string; description: string; enabled: boolean; icon?: string }>> {
+  const headers: Record<string, string> = {};
+  // Use provided API key, or default to "ollama" for localhost bridge
+  const effectiveApiKey = apiKey || (bridgeUrl.includes('localhost') || bridgeUrl.includes('127.0.0.1') ? 'ollama' : '');
+  if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`;
 
-  const toolResults: any[] = [];
-
-  for (const call of toolCalls) {
-    const args = JSON.parse(call.function.arguments);
-    let result: any;
-
-    // ── built-in: web_search ──────────────────────────────────────────────
-    if (call.function.name === 'web_search') {
-      try {
-        const r = await fetch('/api/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: args.query }),
-        });
-        result = await r.json();
-      } catch (e) {
-        result = { error: 'Web search failed' };
-      }
+  try {
+    // Try the OpenAI-compatible tools listing
+    const res = await fetch(`${bridgeUrl}/v1/tools`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      const toolsList = data.tools || data.data || [];
+      return toolsList.map((t: any) => ({
+        id: t.function?.name || t.name,
+        name: t.function?.name || t.name,
+        description: t.function?.description || t.description || '',
+        enabled: true,
+        parameters: t.function?.parameters || t.parameters,
+      }));
     }
-    // ── built-in: image_search ────────────────────────────────────────────
-    else if (call.function.name === 'image_search') {
-      try {
-        const r = await fetch('/api/image-search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: args.query }),
-        });
-        result = await r.json();
-      } catch (e) {
-        result = { error: 'Image search failed' };
-      }
-    }
-    // ── built-in: Wikipedia (via search backend) ──────────────────────────
-    else if (call.function.name === 'wikipedia') {
-      try {
-        const r = await fetch('/api/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: args.query }),
-        });
-        const data = await r.json();
-        result = { results: data.results || [] };
-      } catch (e) {
-        result = { error: 'Wikipedia search failed' };
-      }
-    }
-    // ── MCP / third-party tools ───────────────────────────────────────────
-    else {
-      // MCP tools are executed by Llama Bridge itself; just acknowledge them.
-      result = { status: 'forwarded', tool: call.function.name };
-    }
-
-    toolResults.push({
-      role: 'tool' as const,
-      tool_call_id: call.id,
-      name: call.function.name,
-      content: JSON.stringify(result),
-    });
+  } catch (e) {
+    // Fall through to /api/tools
   }
 
-  // Feed results back to the model
-  const followUpMessages = [
-    ...conversationMessages,
-    { role: 'assistant', tool_calls: toolCalls },
-    ...toolResults,
-  ];
+  try {
+    // Fallback to the bridge's /api/tools endpoint
+    const res = await fetch(`${bridgeUrl}/api/tools`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      const toolsList = data.tools || data.data || [];
+      return toolsList.map((t: any) => ({
+        id: t.name,
+        name: t.name,
+        description: t.description || '',
+        enabled: true,
+        parameters: t.parameters,
+      }));
+    }
+  } catch (e) {
+    // No tools available
+  }
 
-  const finalResponse = await callLlamaBridge(
-    followUpMessages,
-    [],
-    { url, apiKey, model }
-  );
+  return [];
+}
 
-  return finalResponse?.choices?.[0]?.message?.content ?? '';
+/**
+ * Check health of the Llama Bridge server.
+ */
+export async function checkBridgeHealth(
+  bridgeUrl: string,
+  apiKey: string
+): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = {};
+    // Use provided API key, or default to "ollama" for localhost bridge
+    const effectiveApiKey = apiKey || (bridgeUrl.includes('localhost') || bridgeUrl.includes('127.0.0.1') ? 'ollama' : '');
+    if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`;
+    const res = await fetch(`${bridgeUrl}/health`, { headers });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

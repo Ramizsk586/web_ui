@@ -4,6 +4,8 @@
  * 
  * A polished, dark-native AI chat prototype built with React, Lucide-react, 
  * Motion, and Tailwind CSS v4.
+ * 
+ * All tools are sourced from the Llama Bridge - no built-in UI-side tool definitions.
  */
 
 // Dependencies: react-syntax-highlighter @types/react-syntax-highlighter
@@ -68,6 +70,8 @@ import {
 import Markdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+import { fetchBridgeTools, callLlamaBridge as bridgeCall, checkBridgeHealth } from './bridgeClient';
 
 interface ToolCallNode {
   id: string;
@@ -1055,9 +1059,9 @@ export default function App() {
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
   const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', DEFAULT_API_KEY));
   
-  // Llama Bridge backend (always uses Llama Bridge - Gemini proxy removed)
+  // Llama Bridge backend
   const [llamaBridgeUrl, setLlamaBridgeUrl] = useState(() => 
-    localStorage.getItem('lumina_llama_url') || 'http://localhost:8080'
+    localStorage.getItem('lumina_llama_url') || 'http://localhost:8089'
   );
   const [llamaBridgeApiKey, setLlamaBridgeApiKey] = useState(() => 
     localStorage.getItem('lumina_llama_key') || ''
@@ -1073,16 +1077,7 @@ export default function App() {
   const [isAiSaved, setIsAiSaved] = useState(false);
   const [isSearchSaved, setIsSearchSaved] = useState(false);
    const [isMcpSaved, setIsMcpSaved] = useState(false);
-   const [mcpTools, setMcpTools] = useState<Tool[]>([]);
-  const [inbuiltTools, setInbuiltTools] = useState<Tool[]>([
-    { id: 'web_search', name: 'Web Search', enabled: false, description: 'Search the web for current info', icon: <Globe size={16} /> },
-    { id: 'image', name: 'Image Search', enabled: true, description: 'Search and send images', icon: <ImageIcon size={16} /> },
-    { id: 'wikipedia', name: 'Wikipedia', enabled: false, description: 'Search pages and get data', icon: <Book size={16} /> },
-    { id: 'weather', name: 'Weather', enabled: false, description: 'Coming soon - Real-time weather info', icon: <CloudSun size={16} /> },
-    { id: 'news', name: 'Global News', enabled: false, description: 'Coming soon - Latest headlines and stories', icon: <Newspaper size={16} /> },
-    { id: 'dictionary', name: 'Dictionary', enabled: false, description: 'Coming soon - Definitions and synonyms', icon: <Library size={16} /> },
-    { id: 'coderunner', name: 'Code Runner', enabled: false, description: 'Coming soon - Execute code snippets', icon: <Play size={16} /> },
-  ]);
+  const [bridgeTools, setBridgeTools] = useState<Tool[]>([]);
   const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>([
     { id: 'lumina-ultra-plus', name: 'Lumina Ultra Plus', icon: <Sparkles size={14} />, color: 'text-blue-500' },
     { id: 'lumina-pro-max', name: 'Lumina Pro Max', icon: <Plus size={14} />, color: 'text-purple-500' },
@@ -1194,146 +1189,22 @@ export default function App() {
     setTimeout(() => setIsMcpSaved(false), 2000);
   };
   
+  // ─── Tool Building ──────────────────────────────────────────────────────────
+  // All tools come from the bridge. No inbuilt tools are defined in the UI.
   const buildActiveTools = (): ToolDefinition[] => {
-    const active: ToolDefinition[] = [];
-    
-    if (inbuiltTools.find(t => t.id === 'web_search' && t.enabled)) {
-      active.push({
-        type: 'function',
-        function: {
-          name: 'web_search',
-          description: 'Search the web for current information. Use for news, facts, recent events, and real-time data.',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: { type: 'string', description: 'The search query' }
-            },
-            required: ['query']
-          }
-        }
-      });
-    }
-    
-    if (inbuiltTools.find(t => t.id === 'wikipedia' && t.enabled)) {
-      active.push({
-        type: 'function',
-        function: {
-          name: 'wikipedia',
-          description: 'Search Wikipedia for information. Use for factual queries and general knowledge.',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: { type: 'string', description: 'The search query' }
-            },
-            required: ['query']
-          }
-        }
-      });
-    }
-    
-    if (inbuiltTools.find(t => t.id === 'image' && t.enabled)) {
-      active.push({
-        type: 'function',
-        function: {
-          name: 'image_search',
-          description: 'Search for images on the web. Use when the user asks for pictures or photos.',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: { type: 'string', description: 'The image search query' }
-            },
-            required: ['query']
-          }
-        }
-      });
-    }
-    
-    const enabledMcpTools = mcpTools
+    return bridgeTools
       .filter(t => t.enabled)
       .map(t => ({
         type: 'function' as const,
         function: {
           name: t.id,
-          description: t.description || 'MCP Tool',
+          description: t.description || 'Bridge Tool',
           parameters: t.parameters || { type: 'object', properties: {}, required: [] }
         }
       }));
-    
-    active.push(...enabledMcpTools);
-    return active;
   };
   
-  const handleToolCalls = async (
-    toolCalls: Array<{ id: string; function: { name: string; arguments: string } }>,
-    conversationMessages: any[]
-  ): Promise<string> => {
-    const toolResults = [];
-    
-    for (const call of toolCalls) {
-      const args = JSON.parse(call.function.arguments);
-      let result: any;
-      
-      updateToolCallStatus(call.id, 'active');
-      
-      if (call.function.name === 'web_search') {
-        try {
-          const r = await fetch('/api/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: args.query })
-          });
-          result = await r.json();
-        } catch (e) {
-          result = { error: 'Web search failed' };
-        }
-      } else if (call.function.name === 'image_search') {
-        try {
-          const r = await fetch('/api/image-search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: args.query })
-          });
-          result = await r.json();
-        } catch (e) {
-          result = { error: 'Image search failed' };
-        }
-      } else if (call.function.name === 'wikipedia') {
-        try {
-          const r = await fetch('/api/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: args.query })
-          });
-          const data = await r.json();
-          result = { results: data.results || [] };
-        } catch (e) {
-          result = { error: 'Search failed' };
-        }
-      } else {
-        result = { error: `Tool ${call.function.name} not implemented in UI` };
-      }
-      
-      updateToolCallStatus(call.id, 'complete');
-      
-      toolResults.push({
-        role: 'tool',
-        tool_call_id: call.id,
-        name: call.function.name,
-        content: JSON.stringify(result)
-      });
-    }
-    
-    const continueMessages = [
-      ...conversationMessages,
-      { role: 'assistant', tool_calls: toolCalls },
-      ...toolResults
-    ];
-    
-    let finalResponse = await callLlamaBridge(continueMessages, []);
-    
-    return finalResponse.choices?.[0]?.message?.content || '';
-  };
-  
+  // ─── Bridge Communication ──────────────────────────────────────────────────
   const callLlamaBridge = async (messages: any[], tools: ToolDefinition[]) => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (llamaBridgeApiKey) headers['Authorization'] = `Bearer ${llamaBridgeApiKey}`;
@@ -1378,16 +1249,8 @@ export default function App() {
   const handleTestLlamaConnection = async () => {
     setAiVerificationState('verifying');
     try {
-      const response = await fetch(`${llamaBridgeUrl}/health`, {
-        method: 'GET',
-        headers: llamaBridgeApiKey ? { 'Authorization': `Bearer ${llamaBridgeApiKey}` } : {}
-      });
-      
-      if (response.ok) {
-        setAiVerificationState('success');
-      } else {
-        setAiVerificationState('error');
-      }
+      const healthy = await checkBridgeHealth(llamaBridgeUrl, llamaBridgeApiKey);
+      setAiVerificationState(healthy ? 'success' : 'error');
     } catch (error) {
       console.error('Llama Bridge connection failed:', error);
       setAiVerificationState('error');
@@ -1395,6 +1258,41 @@ export default function App() {
       setTimeout(() => setAiVerificationState('idle'), 3000);
     }
   };
+  
+  // ─── Bridge Tool Discovery ─────────────────────────────────────────────────
+  const handleLoadBridgeTools = useCallback(async () => {
+    try {
+      const tools = await fetchBridgeTools(llamaBridgeUrl, llamaBridgeApiKey);
+      if (tools.length > 0) {
+        const mappedTools: Tool[] = tools.map((t: any) => {
+          let icon = <Box size={14} />;
+          const name = (t.name || t.id || '').toLowerCase();
+          if (name.includes('search') || name.includes('research')) icon = <Search size={14} />;
+          if (name.includes('shell') || name.includes('terminal')) icon = <Terminal size={14} />;
+          if (name.includes('weather')) icon = <CloudMoon size={14} />;
+          if (name.includes('wikipedia') || name.includes('globe')) icon = <Globe size={14} />;
+          if (name.includes('image')) icon = <ImageIcon size={14} />;
+          if (name.includes('date') || name.includes('time')) icon = <Calendar size={14} />;
+          if (name.includes('verify')) icon = <Check size={14} />;
+          if (name.includes('render') || name.includes('video')) icon = <Video size={14} />;
+          
+          return {
+            id: t.id || t.name,
+            name: t.name || t.id,
+            description: t.description || '',
+            enabled: true,
+            icon,
+            parameters: t.parameters,
+          };
+        });
+        setBridgeTools(mappedTools);
+        setIsMcpConnected(true);
+        showToast(`Loaded ${mappedTools.length} bridge tools`);
+      }
+    } catch (error) {
+      console.error('Failed to load bridge tools:', error);
+    }
+  }, [llamaBridgeUrl, llamaBridgeApiKey]);
   
   const handleLoadLlamaModels = async () => {
     try {
@@ -1425,80 +1323,6 @@ export default function App() {
       showToast('Failed to load models');
     }
   };
-
-  const handleConnectMcp = useCallback(async () => {
-    if (!mcpUrl) return;
-    setIsConnectingMcp(true);
-    try {
-      const response = await fetch(`${mcpUrl}/v1/tools`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${mcpKey}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const toolsList = data.tools || data.openai_tools || [];
-        
-        if (Array.isArray(toolsList)) {
-          setMcpTools(toolsList.map((t: any) => {
-            const name = t.name || (t.function?.name);
-            const desc = t.description || (t.function?.description) || 'Bridge Tool';
-            
-            let icon = <Box size={14} />;
-            if (name.includes('search') || name.includes('research')) icon = <Search size={14} />;
-            if (name.includes('shell') || name.includes('terminal')) icon = <Terminal size={14} />;
-            if (name.includes('weather')) icon = <CloudMoon size={14} />;
-            if (name.includes('wikipedia') || name.includes('globe')) icon = <Globe size={14} />;
-            if (name.includes('image')) icon = <ImageIcon size={14} />;
-            if (name.includes('date') || name.includes('time')) icon = <Calendar size={14} />;
-            if (name.includes('verify')) icon = <Check size={14} />;
-            if (name.includes('render') || name.includes('video')) icon = <Video size={14} />;
-
-            return {
-              id: name,
-              name: name,
-              description: desc,
-              enabled: true,
-              icon: icon
-            };
-          }));
-        }
-        setIsMcpConnected(true);
-      } else {
-        const mcpResp = await fetch(`${mcpUrl}/list_tools`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${mcpKey}` 
-          },
-          body: JSON.stringify({})
-        });
-        
-        if (mcpResp.ok) {
-          const mcpData = await mcpResp.ok ? await mcpResp.json() : null;
-          if (mcpData && mcpData.tools) {
-            setMcpTools(mcpData.tools.map((t: any) => ({
-              id: t.name,
-              name: t.name,
-              description: t.description || 'MCP Tool',
-              enabled: true,
-              icon: <Box size={14} />
-            })));
-          }
-          setIsMcpConnected(true);
-        } else {
-          setIsMcpConnected(false);
-        }
-      }
-    } catch (error) {
-      console.error('MCP connection failed:', error);
-      setIsMcpConnected(false);
-    } finally {
-      setIsConnectingMcp(false);
-    }
-  }, [mcpUrl, mcpKey]);
 
   const [selectedModel, setSelectedModel] = useState('lumina-ultra-plus');
   const activeModelList = useMemo(() => 
@@ -1591,17 +1415,12 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+  // Auto-discover bridge tools on mount
   useEffect(() => {
-    const autoConnect = async () => {
-      if (serverUrl && apiKey) {
-        handleVerifyAI();
-      }
-      if (mcpUrl && mcpKey) {
-        handleConnectMcp();
-      }
-    };
-    autoConnect();
-  }, []);
+    if (llamaBridgeUrl) {
+      handleLoadBridgeTools();
+    }
+  }, [llamaBridgeUrl, handleLoadBridgeTools]);
 
   const createNewChat = () => {
     const newChat: Chat = {
@@ -2221,7 +2040,7 @@ export default function App() {
                     {[
                       { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
                       { id: 'account', label: 'Account', icon: <User size={16} />, onClick: () => { setIsHeaderMenuOpen(false); } },
-                      { id: 'mcp', label: 'MCP Status', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
+                      { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
                     ].map((item) => (
                       <button
                         key={item.id}
@@ -2469,11 +2288,9 @@ export default function App() {
                       className={`p-2 rounded-2xl transition-all ${
                         isWebSearchEnabled 
                           ? 'text-blue-500 bg-blue-500/10 hover:bg-blue-500/20 animate-active-ring' 
-                          : mcpTools.some(t => t.enabled)
+                          : bridgeTools.some(t => t.enabled)
                             ? 'text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 animate-active-ring-green' 
-                            : inbuiltTools.some(t => t.enabled)
-                              ? 'text-purple-500 bg-purple-500/10 hover:bg-purple-500/20 animate-active-ring-purple'
-                              : 'text-gray-400 hover:text-white hover:bg-white/5'
+                            : 'text-gray-400 hover:text-white hover:bg-white/5'
                       }`}
                     >
                       <Plus size={20} className={`transition-transform duration-200 ${isPlusMenuOpen ? 'rotate-45' : ''}`} />
@@ -2494,9 +2311,8 @@ export default function App() {
                                 { id: 'skills', label: 'Skills', icon: <Box size={16} />, hasArrow: true },
                                 { id: 'style', label: 'Writing Style', icon: <Palette size={16} />, hasArrow: true },
                                 { type: 'separator' },
-                                { id: 'tools', label: 'Tools', icon: <Wrench size={16} />, hasArrow: true },
+                                { id: 'tools', label: 'Bridge Tools', icon: <Wrench size={16} />, hasArrow: true },
                                 { id: 'search', label: 'Web search', icon: <Globe size={16} />, isSelected: isWebSearchEnabled },
-                                { id: 'mcp_tools', label: 'MCP tools', icon: <HardDrive size={16} />, hasArrow: true },
                               ].map((item, idx) => (
                                 item.type === 'separator' ? (
                                   <div key={idx} className="my-1 border-t border-white/5" />
@@ -2520,9 +2336,6 @@ export default function App() {
                                           break;
                                         case 'search':
                                           setIsWebSearchEnabled(prev => !prev);
-                                          break;
-                                        case 'mcp_tools':
-                                          setActivePlusSubMenu('mcp');
                                           break;
                                         case 'tools':
                                           setActivePlusSubMenu('tools');
@@ -2552,14 +2365,14 @@ export default function App() {
                                 >
                                   <ChevronLeft size={16} />
                                 </button>
-                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Built-in Tools</span>
+                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Bridge Tools</span>
                               </div>
                               <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                                {inbuiltTools.map(tool => (
+                                {bridgeTools.map(tool => (
                                   <button
                                     key={tool.id}
                                     onClick={() => {
-                                      setInbuiltTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                      setBridgeTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
                                       showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
                                     }}
                                     className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 transition-colors group/tool"
@@ -2659,46 +2472,7 @@ export default function App() {
                                 ))}
                               </div>
                             </div>
-                          ) : (
-                            <div className="flex flex-col">
-                              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 mb-1">
-                                <button 
-                                  onClick={() => setActivePlusSubMenu('main')}
-                                  className="p-1 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"
-                                >
-                                  <ChevronLeft size={16} />
-                                </button>
-                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">MCP Tools</span>
-                              </div>
-                              <div className="max-h-64 overflow-y-auto custom-scrollbar">
-                                {mcpTools.map(tool => (
-                                  <button
-                                    key={tool.id}
-                                    onClick={() => {
-                                      setMcpTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
-                                    }}
-                                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-gray-400 hover:bg-white/5 transition-colors group/tool"
-                                  >
-                                    <div className="flex items-center gap-3">
-                                      <div className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? 'bg-blue-500/10 text-blue-500' : 'bg-white/5 text-gray-500'}`}>
-                                        {tool.icon}
-                                      </div>
-                                      <div className="text-left">
-                                        <div className={`transition-colors ${tool.enabled ? 'text-white' : 'text-gray-400'}`}>{tool.name}</div>
-                                        <div className="text-[10px] text-gray-500 truncate w-32">{tool.description}</div>
-                                      </div>
-                                    </div>
-                                    <div className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? 'bg-blue-600' : 'bg-gray-700'}`}>
-                                      <motion.div 
-                                        animate={{ x: tool.enabled ? 18 : 2 }}
-                                        className="absolute top-1 w-2 h-2 rounded-full bg-white shadow-sm"
-                                      />
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                          ) : null}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -2727,26 +2501,15 @@ export default function App() {
                         <Globe size={18} />
                       </motion.div>
                     )}
-                    {mcpTools.some(t => t.enabled) && (
+                    {bridgeTools.some(t => t.enabled) && (
                       <motion.div
                         initial={{ opacity: 0, scale: 0.8, x: -5 }}
                         animate={{ opacity: 1, scale: 1, x: 0 }}
                         exit={{ opacity: 0, scale: 0.8, x: -5 }}
                         className="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-[0_2px_10px_rgba(16,185,129,0.1)]"
-                        title="MCP Tools Active"
+                        title="Bridge Tools Active"
                       >
                         <Hammer size={18} />
-                      </motion.div>
-                    )}
-                    {inbuiltTools.some(t => t.enabled) && (
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.8, x: -5 }}
-                        animate={{ opacity: 1, scale: 1, x: 0 }}
-                        exit={{ opacity: 0, scale: 0.8, x: -5 }}
-                        className="flex items-center justify-center w-9 h-9 rounded-xl bg-purple-500/10 text-purple-500 border border-purple-500/20 shadow-[0_2px_10px_rgba(168,85,247,0.1)]"
-                        title="Inbuilt Tools Active"
-                      >
-                        <Wrench size={18} />
                       </motion.div>
                     )}
                     {activeSkills.map(skillId => {
@@ -2910,7 +2673,7 @@ export default function App() {
                     { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
                     { id: 'search', label: 'Search', icon: <Search size={16} /> },
                     { id: 'persona', label: 'Persona', icon: <User size={16} /> },
-                    { id: 'mcp', label: 'MCP Server', icon: <HardDrive size={16} /> },
+                    { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} /> },
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -3150,6 +2913,12 @@ export default function App() {
                               >
                                 Load Models
                               </button>
+                              <button
+                                onClick={handleLoadBridgeTools}
+                                className="flex-1 h-11 rounded-xl text-sm font-semibold bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10 hover:opacity-90 transition-all"
+                              >
+                                Load Tools
+                              </button>
                             </div>
                             {llamaBridgeModels.length > 0 && (
                               <div className="space-y-1.5">
@@ -3175,7 +2944,7 @@ export default function App() {
                               <div className="flex gap-3 text-blue-500">
                                 <Terminal size={16} className="shrink-0 mt-0.5" />
                                 <p className="text-[11px] leading-relaxed">
-                                  Chat requests go directly to the bridge at <strong>{llamaBridgeUrl}</strong>. Enabled built-in tools and MCP tools are sent in the <code>tools</code> array to the bridge.
+                                  Chat requests go directly to the bridge at <strong>{llamaBridgeUrl}</strong>. Bridge tools are auto-discovered and sent in the <code>tools</code> array. Tools not duplicated in the UI.
                                 </p>
                               </div>
                             </div>
@@ -3281,19 +3050,144 @@ export default function App() {
 
                   {activeSettingsTab === 'profile' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
-                      {/* Profile content same as before */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Personal Information</h3>
+                        <div className="space-y-5">
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Display Name</label>
+                            <input
+                              type="text"
+                              value={userProfile.name}
+                              onChange={(e) => setUserProfile({ ...userProfile, name: e.target.value })}
+                              placeholder="Your name"
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Avatar URL</label>
+                            <input
+                              type="text"
+                              value={userProfile.avatar}
+                              onChange={(e) => setUserProfile({ ...userProfile, avatar: e.target.value })}
+                              placeholder="https://example.com/avatar.png"
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Date of Birth</label>
+                            <input
+                              type="date"
+                              value={userProfile.dob}
+                              onChange={(e) => setUserProfile({ ...userProfile, dob: e.target.value })}
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Location</label>
+                            <input
+                              type="text"
+                              value={userProfile.location}
+                              onChange={(e) => setUserProfile({ ...userProfile, location: e.target.value })}
+                              placeholder="City, Country"
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </motion.div>
                   )}
 
                   {activeSettingsTab === 'persona' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-                      {/* Persona content same as before */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">AI Persona</h3>
+                        <div className="space-y-5">
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Persona Name</label>
+                            <input
+                              type="text"
+                              value={persona.name}
+                              onChange={(e) => setPersona({ ...persona, name: e.target.value })}
+                              placeholder="e.g., Lumina"
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Role/Description</label>
+                            <input
+                              type="text"
+                              value={persona.role}
+                              onChange={(e) => setPersona({ ...persona, role: e.target.value })}
+                              placeholder="e.g., Modern Intelligence"
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Avatar URL</label>
+                            <input
+                              type="text"
+                              value={persona.avatar}
+                              onChange={(e) => setPersona({ ...persona, avatar: e.target.value })}
+                              placeholder="https://example.com/avatar.png"
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </motion.div>
                   )}
 
                   {activeSettingsTab === 'mcp' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
-                      {/* MCP content same as before */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Bridge Tools</h3>
+                        <div className="space-y-4">
+                          <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                            <div className="flex gap-3">
+                              <Wrench size={18} className="text-blue-500 shrink-0" />
+                              <div>
+                                <div className="text-xs font-bold text-blue-500 uppercase mb-1">Tool Discovery</div>
+                                <p className="text-xs text-blue-500/70 leading-relaxed">
+                                  Tools are auto-discovered from the Llama Bridge at <strong>{llamaBridgeUrl}</strong>.
+                                  All tools (web_search, wikipedia, image_search, etc.) come from the bridge - no duplicates in the UI.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {bridgeTools.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500">
+                              <p className="text-sm">No bridge tools loaded.</p>
+                              <button
+                                onClick={handleLoadBridgeTools}
+                                className="mt-3 px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-xl text-sm font-semibold"
+                              >
+                                Discover Bridge Tools
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                              {bridgeTools.map(tool => (
+                                <div
+                                  key={tool.id}
+                                  className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-zinc-950 rounded-xl border border-gray-100 dark:border-white/5"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
+                                      {tool.icon}
+                                    </div>
+                                    <div className="text-left truncate">
+                                      <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{tool.name}</div>
+                                      <div className="text-[10px] text-gray-500 truncate max-w-[200px]">{tool.description}</div>
+                                    </div>
+                                  </div>
+                                  <div className="text-[10px] text-gray-400 font-mono shrink-0 ml-2">bridge</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </motion.div>
                   )}
                 </div>
