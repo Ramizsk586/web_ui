@@ -614,3 +614,29 @@
 .txt-row-between{ display: flex; align-items: center; justify-content: space-between; }
 
 .dark .shadow-\[0_8px_30px_rgb\(0\,0\,0\,0\.04\)\] { @apply shadow-none; }
+
+/* ─────────────────────────────────────────
+   THEME SYSTEM
+───────────────────────────────────────── */
+
+:root {
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-theme] {
+  background-color: var(--theme-bg);
+  color: var(--theme-primary);
+}
+
+[data-theme] .theme-bg { background-color: var(--theme-bg); }
+[data-theme] .theme-surface { background-color: var(--theme-surface); }
+[data-theme] .theme-surface-alt { background-color: var(--theme-surface-alt); }
+[data-theme] .theme-border { border-color: var(--theme-border); }
+[data-theme] .theme-primary { color: var(--theme-primary); }
+[data-theme] .theme-secondary { color: var(--theme-secondary); }
+[data-theme] .theme-accent { color: var(--theme-accent); }
+[data-theme] .theme-accent-bg { background-color: var(--theme-accent); }
+[data-theme] .theme-muted { color: var(--theme-muted); }
+[data-theme] .theme-sidebar { background-color: var(--theme-sidebar); }
+[data-theme] .theme-input { background-color: var(--theme-input-bg); border-color: var(--theme-input-border); }
+[data-theme] .theme-card { background-color: var(--theme-card-bg); }

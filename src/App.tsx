@@ -72,6 +72,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 import { fetchBridgeTools, callLlamaBridge as bridgeCall, checkBridgeHealth } from './bridgeClient';
+import { useTheme, ThemeSettingsPanel } from './themes';
 
 interface ToolCallNode {
   id: string;
@@ -976,6 +977,7 @@ const Canvas = ({
 };
 
 export default function App() {
+  const { isDark: isDarkMode } = useTheme();
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -1016,13 +1018,12 @@ export default function App() {
   }, [isResizing]);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCompactSidebar, setIsCompactSidebar] = useState(false);
   const [useBubbles, setUseBubbles] = useState(true);
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = useState<string | null>(null);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'sources' | 'search' | 'persona' | 'profile'>('general');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'project' | 'skills' | 'style'>('main');
   const [userProfile, setUserProfile] = useState({
     name: 'User',
@@ -1220,7 +1221,7 @@ export default function App() {
       body.tool_choice = 'auto';
     }
     
-    const response = await fetch(`${llamaBridgeUrl}/v1/chat/completions`, {
+    const response = await fetch(`${llamaBridgeUrl.replace(/\/+$/, '')}/v1/chat/completions`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -1296,9 +1297,13 @@ export default function App() {
   
   const handleLoadLlamaModels = async () => {
     try {
-      const response = await fetch(`${llamaBridgeUrl}/v1/models`, {
+      // Use the Express proxy to avoid CORS issues
+      const response = await fetch('/api/bridge/models', {
         method: 'GET',
-        headers: llamaBridgeApiKey ? { 'Authorization': `Bearer ${llamaBridgeApiKey}` } : {}
+        headers: {
+          'X-Bridge-Url': llamaBridgeUrl.replace(/\/+$/, ''),
+          'X-Api-Key': llamaBridgeApiKey,
+        }
       });
       
       if (response.ok) {
@@ -1407,20 +1412,13 @@ export default function App() {
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDarkMode]);
-
-  // Auto-discover bridge tools on mount
+  // Auto-discover bridge tools once on mount
   useEffect(() => {
     if (llamaBridgeUrl) {
-      handleLoadBridgeTools();
+      const timer = setTimeout(() => handleLoadBridgeTools(), 1000);
+      return () => clearTimeout(timer);
     }
-  }, [llamaBridgeUrl, handleLoadBridgeTools]);
+  }, []); // only run once on mount
 
   const createNewChat = () => {
     const newChat: Chat = {
@@ -1900,8 +1898,70 @@ export default function App() {
     }
   }), []);
 
+  const [isMaximized, setIsMaximized] = useState(false);
+  const isElectron = typeof window !== 'undefined' && (window as any).__electronAPI;
+
+  useEffect(() => {
+    const api = (window as any).__electronAPI;
+    if (!api) return;
+    api.onMaximized((maximized: boolean) => setIsMaximized(maximized));
+    api.isMaximized().then((maximized: boolean) => setIsMaximized(maximized));
+  }, []);
+
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      const api = (window as any).__electronAPI;
+      if (api) api.showContextMenu();
+    };
+    document.addEventListener('contextmenu', handleContextMenu);
+    return () => document.removeEventListener('contextmenu', handleContextMenu);
+  }, []);
+
   return (
-    <div className={`flex h-screen w-full bg-white text-brand-primary overflow-hidden relative ${isDarkMode ? 'dark' : ''}`}>
+    <div className="flex flex-col h-screen w-full bg-white text-brand-primary overflow-hidden relative">
+
+      {isElectron && (
+        <div className="h-9 shrink-0 flex items-center px-4 relative z-50" style={{ WebkitAppRegion: 'drag' } as any}>
+          <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as any}>
+            <button
+              onClick={() => (window as any).__electronAPI.close()}
+              className="w-3 h-3 rounded-full bg-red-500 hover:brightness-110 transition-all flex items-center justify-center group"
+              title="Close"
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                <path d="M1.5 1.5L6.5 6.5M6.5 1.5L1.5 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="text-red-900" />
+              </svg>
+            </button>
+            <button
+              onClick={() => (window as any).__electronAPI.minimize()}
+              className="w-3 h-3 rounded-full bg-yellow-500 hover:brightness-110 transition-all flex items-center justify-center group"
+              title="Minimize"
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                <line x1="2" y1="4" x2="6" y2="4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="text-yellow-900" />
+              </svg>
+            </button>
+            <button
+              onClick={() => (window as any).__electronAPI.maximize()}
+              className="w-3 h-3 rounded-full bg-green-500 hover:brightness-110 transition-all flex items-center justify-center group"
+              title={isMaximized ? 'Restore' : 'Maximize'}
+            >
+              {isMaximized ? (
+                <svg width="7" height="7" viewBox="0 1 8 8" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                  <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="0.5" fill="none" stroke="currentColor" strokeWidth="1" className="text-green-900" />
+                  <rect x="1" y="1" width="4.5" height="4.5" rx="0.5" fill="none" stroke="currentColor" strokeWidth="1" className="text-green-900" />
+                </svg>
+              ) : (
+                <svg width="8" height="8" viewBox="0 0 8 8" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                  <rect x="1.5" y="1.5" width="5" height="5" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.2" className="text-green-900" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       <AnimatePresence>
         {isMobileMenuOpen && (
           <>
@@ -1941,6 +2001,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      <div className="flex flex-1 overflow-hidden">
       <motion.aside 
         animate={{ width: isSidebarOpen ? sidebarWidth : 0, opacity: isSidebarOpen ? 1 : 0 }}
         transition={{ 
@@ -2053,21 +2114,11 @@ export default function App() {
                     ))}
                     <div className="my-1.5 border-t border-gray-100 dark:border-white/5" />
                     <button
-                      onClick={() => setIsDarkMode(!isDarkMode)}
-                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white transition-colors"
+                      onClick={() => { setActiveSettingsTab('theme'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white transition-colors"
                     >
-                      <div className="flex items-center gap-3">
-                        <motion.div animate={{ rotate: isDarkMode ? 180 : 0 }}>
-                          <Sparkles size={16} />
-                        </motion.div>
-                        Dark Mode
-                      </div>
-                      <div className={`w-8 h-4 rounded-full relative transition-colors ${isDarkMode ? 'bg-blue-600' : 'bg-gray-200'}`}>
-                        <motion.div 
-                          animate={{ x: isDarkMode ? 18 : 2 }}
-                          className="absolute top-1 w-2 h-2 rounded-full bg-white" 
-                        />
-                      </div>
+                      <Palette size={16} />
+                      Themes
                     </button>
                   </motion.div>
                 )}
@@ -2081,7 +2132,7 @@ export default function App() {
             ref={scrollRef}
             className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar scroll-smooth"
           >
-            <div className={`mx-auto space-y-8 pb-24 ${isSourcesPanelOpen ? 'max-w-xl md:mr-4' : 'max-w-3xl'} transition-[max-width,margin] duration-500`}>
+            <div className={`mx-auto space-y-8 pb-24 ${isSourcesPanelOpen ? 'max-w-lg md:mr-6' : 'max-w-3xl'} transition-[max-width,margin] duration-500`}>
               <AnimatePresence initial={false}>
                 {messages.length === 0 ? (
                   <motion.div 
@@ -2165,61 +2216,77 @@ export default function App() {
           <AnimatePresence>
             {isSourcesPanelOpen && (
               <motion.div
-                initial={{ x: 400, opacity: 0 }}
+                initial={{ x: 480, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
-                exit={{ x: 400, opacity: 0 }}
-                transition={{ duration: isSourcesPanelOpen ? 0.22 : 0.18 }}
-                className="w-80 border-l border-gray-100 dark:border-white/5 bg-white dark:bg-zinc-950 flex flex-col shrink-0 shadow-2xl relative z-20"
+                exit={{ x: 480, opacity: 0 }}
+                transition={{ duration: isSourcesPanelOpen ? 0.25 : 0.2 }}
+                className="w-[460px] border-l border-gray-100 dark:border-white/5 bg-gradient-to-b from-white to-gray-50/50 dark:from-zinc-950 dark:to-zinc-900/50 flex flex-col shrink-0 shadow-2xl relative z-20"
               >
-                <div className="p-6 flex items-center justify-between border-b border-gray-50 dark:border-white/5">
-                  <h3 className="font-display font-semibold tracking-tight text-gray-900 dark:text-white">Sources</h3>
+                <div className="px-6 py-5 flex items-center justify-between border-b border-gray-100 dark:border-white/5 bg-gradient-to-r from-blue-50/30 to-transparent dark:from-blue-950/10 dark:to-transparent">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-sm">
+                      <Globe size={15} className="text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-display font-semibold tracking-tight text-gray-900 dark:text-white text-sm">Sources</h3>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                        {(sourcesPanelMessageId ? messages.find(m => m.id === sourcesPanelMessageId)?.sources : messages.find(m => m.sources)?.sources)?.length ?? 0} references
+                      </p>
+                    </div>
+                  </div>
                   <button 
                     onClick={() => setIsSourcesPanelOpen(false)}
-                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-white/5 rounded-md text-gray-400 transition-colors"
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-all"
                   >
-                    <X size={18} />
+                    <X size={16} />
                   </button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto p-5 space-y-3 custom-scrollbar">
                   {(sourcesPanelMessageId ? messages.find(m => m.id === sourcesPanelMessageId)?.sources : messages.find(m => m.sources)?.sources)?.map((source, sIdx) => (
                     <motion.div
                       key={sIdx}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: sIdx * 0.05 }}
-                      className="group p-4 bg-gray-50 dark:bg-zinc-950 border border-transparent hover:border-blue-500/30 rounded-2xl transition-all"
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: sIdx * 0.04, duration: 0.3 }}
+                      className="group relative overflow-hidden rounded-xl border border-gray-100/80 dark:border-white/5 bg-white dark:bg-zinc-950 hover:border-blue-200 dark:hover:border-blue-500/30 hover:shadow-md hover:shadow-blue-500/5 transition-all duration-200"
                     >
-                      <div className="flex items-start gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center shrink-0 shadow-sm transition-colors group-hover:border-blue-500/30">
-                          <Globe size={18} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h4 className="text-xs font-bold text-gray-900 dark:text-white truncate uppercase tracking-tighter">{source.title}</h4>
-                            <Globe className="text-gray-400 group-hover:text-blue-500 transition-colors" size={10} />
+                      <div className="absolute inset-0 bg-gradient-to-br from-blue-50/0 via-transparent to-transparent dark:from-blue-950/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                      <a 
+                        href={source.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="block p-4 relative"
+                      >
+                        <div className="flex items-start gap-3.5">
+                          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-gray-50 to-gray-100 dark:from-zinc-900 dark:to-zinc-800 border border-gray-100 dark:border-white/5 flex items-center justify-center shrink-0 shadow-sm group-hover:border-blue-200 dark:group-hover:border-blue-500/30 group-hover:shadow-md group-hover:shadow-blue-500/10 transition-all duration-200">
+                            <Globe size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors duration-200" />
                           </div>
-                          <p className="text-[10px] text-gray-400 truncate mb-2 opacity-60">{source.url}</p>
-                          {source.snippet && (
-                            <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-3 mb-3 leading-relaxed bg-white/50 dark:bg-white/5 p-2 rounded-lg border border-gray-100/50 dark:border-white/5">
-                              {source.snippet}
-                            </p>
-                          )}
-                          <a 
-                            href={source.url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-widest transition-colors"
-                          >
-                            View Source
-                            <ArrowRight size={10} />
-                          </a>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <h4 className="text-xs font-semibold text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{source.title}</h4>
+                              <ExternalLink size={10} className="text-gray-300 dark:text-gray-600 group-hover:text-blue-400 transition-colors shrink-0" />
+                            </div>
+                            <p className="text-[10px] text-gray-400 truncate mb-2 font-mono">{source.url}</p>
+                            {source.snippet && (
+                              <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed bg-gray-50/80 dark:bg-white/[0.03] p-2.5 rounded-lg border border-gray-100/50 dark:border-white/5">
+                                {source.snippet}
+                              </p>
+                            )}
+                            <div className="inline-flex items-center gap-1 text-[9px] font-bold text-blue-500 group-hover:text-blue-600 uppercase tracking-widest transition-colors mt-2.5">
+                              Visit Source
+                              <ArrowRight size={9} className="group-hover:translate-x-0.5 transition-transform" />
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      </a>
                     </motion.div>
                   )) || (
-                    <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
-                      <Layout size={32} className="mb-4" />
-                      <p className="text-xs font-semibold uppercase tracking-widest">No Sources Available</p>
+                    <div className="h-full flex flex-col items-center justify-center text-center">
+                      <div className="w-14 h-14 rounded-2xl bg-gray-50 dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center mb-4">
+                        <Layout size={26} className="text-gray-300 dark:text-gray-600" />
+                      </div>
+                      <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">No Sources Available</p>
+                      <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-1">Search results will appear here</p>
                     </div>
                   )}
                 </div>
@@ -2647,6 +2714,7 @@ export default function App() {
           </div>
         </div>
       </main>
+      </div>
 
       <AnimatePresence>
         {isSettingsOpen && (
@@ -2673,7 +2741,9 @@ export default function App() {
                     { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
                     { id: 'search', label: 'Search', icon: <Search size={16} /> },
                     { id: 'persona', label: 'Persona', icon: <User size={16} /> },
-                    { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} /> },
+                    { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
+                    { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
+                    { id: 'theme', label: 'Themes', icon: <Palette size={16} /> },
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -2721,16 +2791,13 @@ export default function App() {
                           <div className="flex items-center justify-between">
                             <div>
                               <div className="font-medium text-sm">Theme</div>
-                              <div className="text-xs text-gray-400">Light or dark interface preference</div>
+                              <div className="text-xs text-gray-400">Customize colors and appearance</div>
                             </div>
-                            <button 
-                              onClick={() => setIsDarkMode(!isDarkMode)}
-                              className={`w-12 h-6 rounded-full transition-all relative ${isDarkMode ? 'bg-blue-600' : 'bg-gray-200'}`}
+                            <button
+                              onClick={() => setActiveSettingsTab('theme')}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors"
                             >
-                              <motion.div 
-                                animate={{ x: isDarkMode ? 24 : 4 }}
-                                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
-                              />
+                              Open Themes
                             </button>
                           </div>
                           <div className="flex items-center justify-between">
@@ -2862,91 +2929,12 @@ export default function App() {
                             </div>
                           </div>
 
-                          {/* ── Llama Bridge Configuration ── */}
-                          <div className="pt-4 border-t border-gray-100 dark:border-white/5">
-                            <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-4">Llama Bridge Backend</h4>
-                          </div>
-
-                          <div className="space-y-5">
-                            <div className="space-y-1.5">
-                              <label className="text-[11px] font-medium text-gray-500">Bridge URL</label>
-                              <input 
-                                type="text" 
-                                value={llamaBridgeUrl}
-                                onChange={(e) => { setLlamaBridgeUrl(e.target.value); localStorage.setItem('lumina_llama_url', e.target.value); }}
-                                placeholder="http://localhost:8080"
-                                className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <label className="text-[11px] font-medium text-gray-500">API Key (optional)</label>
-                              <input 
-                                type="password" 
-                                value={llamaBridgeApiKey}
-                                onChange={(e) => { setLlamaBridgeApiKey(e.target.value); localStorage.setItem('lumina_llama_key', e.target.value); }}
-                                placeholder="Enter API key if required"
-                                className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
-                              />
-                            </div>
-                            <div className="flex gap-3">
-                              <button
-                                onClick={handleTestLlamaConnection}
-                                disabled={aiVerificationState === 'verifying'}
-                                className={`flex-1 h-11 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
-                                  aiVerificationState === 'success' 
-                                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' 
-                                    : aiVerificationState === 'error'
-                                      ? 'bg-red-500/10 text-red-500 border border-red-500/20'
-                                      : 'bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5'
-                                }`}
-                              >
-                                {aiVerificationState === 'verifying' ? (
-                                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                                ) : null}
-                                {aiVerificationState === 'success' ? <Check size={16} /> : null}
-                                {aiVerificationState === 'error' ? <X size={16} /> : null}
-                                {aiVerificationState === 'verifying' ? 'Testing...' : aiVerificationState === 'success' ? 'Connected' : aiVerificationState === 'error' ? 'Failed' : 'Test Connection'}
-                              </button>
-                              <button
-                                onClick={handleLoadLlamaModels}
-                                className="flex-1 h-11 rounded-xl text-sm font-semibold bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10 hover:opacity-90 transition-all"
-                              >
-                                Load Models
-                              </button>
-                              <button
-                                onClick={handleLoadBridgeTools}
-                                className="flex-1 h-11 rounded-xl text-sm font-semibold bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10 hover:opacity-90 transition-all"
-                              >
-                                Load Tools
-                              </button>
-                            </div>
-                            {llamaBridgeModels.length > 0 && (
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-medium text-gray-500">Bridge Model</label>
-                                <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
-                                  {llamaBridgeModels.map(m => (
-                                    <button
-                                      key={m.id}
-                                      onClick={() => setSelectedLlamaModel(m.id)}
-                                      className={`px-3 py-2 rounded-xl text-[11px] font-medium text-left transition-all ${
-                                        selectedLlamaModel === m.id
-                                          ? 'bg-blue-500/10 text-blue-500 border border-blue-500/30'
-                                          : 'bg-gray-50 dark:bg-zinc-950 text-gray-500 border border-gray-100 dark:border-white/5 hover:border-gray-200 dark:hover:border-white/10'
-                                      }`}
-                                    >
-                                      <div className="truncate">{m.name || m.id}</div>
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
-                              <div className="flex gap-3 text-blue-500">
-                                <Terminal size={16} className="shrink-0 mt-0.5" />
-                                <p className="text-[11px] leading-relaxed">
-                                  Chat requests go directly to the bridge at <strong>{llamaBridgeUrl}</strong>. Bridge tools are auto-discovered and sent in the <code>tools</code> array. Tools not duplicated in the UI.
-                                </p>
-                              </div>
+                          <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                            <div className="flex gap-3 text-blue-500">
+                              <Terminal size={16} className="shrink-0 mt-0.5" />
+                              <p className="text-[11px] leading-relaxed">
+                                The Llama Bridge settings have moved to their own <button onClick={() => setActiveSettingsTab('bridge')} className="underline font-semibold hover:text-blue-400">Bridge panel</button>.
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -3188,6 +3176,177 @@ export default function App() {
                           )}
                         </div>
                       </div>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 'bridge' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Llama Bridge Backend</h3>
+                        <div className="space-y-5">
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="p-3 rounded-xl border" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: 'var(--theme-accent)', color: 'var(--theme-accent-foreground)' }}>
+                                  <Terminal size={12} />
+                                </div>
+                                <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--theme-secondary)' }}>Server</span>
+                              </div>
+                              <div className="text-xs font-semibold truncate" style={{ color: 'var(--theme-primary)' }}>{llamaBridgeUrl}</div>
+                              <div className="text-[10px] mt-0.5" style={{ color: 'var(--theme-accent)' }}>llama-bridge v0.1.0</div>
+                            </div>
+                            <div className="p-3 rounded-xl border" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/10 text-emerald-500">
+                                  <Check size={12} />
+                                </div>
+                                <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--theme-secondary)' }}>Status</span>
+                              </div>
+                              <div className="text-xs font-semibold" style={{ color: 'var(--theme-primary)' }}>
+                                {isMcpConnected ? 'Connected' : aiVerificationState === 'success' ? 'Connected' : aiVerificationState === 'error' ? 'Error' : 'Unknown'}
+                              </div>
+                              <div className="text-[10px] mt-0.5" style={{ color: 'var(--theme-secondary)' }}>
+                                {llamaBridgeModels.length > 0 ? `${llamaBridgeModels.length} models` : 'No models loaded'}
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-xl border" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: `${isMcpConnected ? 'var(--theme-success)' : 'var(--theme-muted)'}20`, color: isMcpConnected ? 'var(--theme-success)' : 'var(--theme-muted)' }}>
+                                  <HardDrive size={12} />
+                                </div>
+                                <span className="text-[10px] font-bold uppercase" style={{ color: 'var(--theme-secondary)' }}>Tools</span>
+                              </div>
+                              <div className="text-xs font-semibold" style={{ color: 'var(--theme-primary)' }}>{bridgeTools.length} loaded</div>
+                              <div className="text-[10px] mt-0.5" style={{ color: 'var(--theme-secondary)' }}>HTTP + MCP endpoints</div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-medium" style={{ color: 'var(--theme-secondary)' }}>Bridge URL</label>
+                            <input
+                              type="text"
+                              value={llamaBridgeUrl}
+                              onChange={(e) => { setLlamaBridgeUrl(e.target.value); localStorage.setItem('lumina_llama_url', e.target.value); }}
+                              placeholder="http://localhost:8089"
+                              className="w-full h-11 px-4 text-sm rounded-xl border outline-none transition-all"
+                              style={{ background: 'var(--theme-input-bg)', borderColor: 'var(--theme-input-border)', color: 'var(--theme-primary)' }}
+                            />
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-medium" style={{ color: 'var(--theme-secondary)' }}>API Key (optional)</label>
+                            <input
+                              type="password"
+                              value={llamaBridgeApiKey}
+                              onChange={(e) => { setLlamaBridgeApiKey(e.target.value); localStorage.setItem('lumina_llama_key', e.target.value); }}
+                              placeholder="Enter API key if required"
+                              className="w-full h-11 px-4 text-sm rounded-xl border outline-none transition-all"
+                              style={{ background: 'var(--theme-input-bg)', borderColor: 'var(--theme-input-border)', color: 'var(--theme-primary)' }}
+                            />
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={handleTestLlamaConnection}
+                              disabled={aiVerificationState === 'verifying'}
+                              className="h-10 px-5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 border"
+                              style={{
+                                background: aiVerificationState === 'success' ? 'var(--theme-success)' : aiVerificationState === 'error' ? 'var(--theme-danger)' : 'var(--theme-surface)',
+                                borderColor: aiVerificationState === 'success' ? 'var(--theme-success)' : aiVerificationState === 'error' ? 'var(--theme-danger)' : 'var(--theme-border)',
+                                color: aiVerificationState !== 'idle' ? 'white' : 'var(--theme-primary)',
+                              }}
+                            >
+                              {aiVerificationState === 'verifying' ? (
+                                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
+                              ) : aiVerificationState === 'success' ? <Check size={13} /> : aiVerificationState === 'error' ? <X size={13} /> : null}
+                              {aiVerificationState === 'verifying' ? 'Testing...' : aiVerificationState === 'success' ? 'Connected' : aiVerificationState === 'error' ? 'Failed' : 'Test Connection'}
+                            </button>
+                            <button
+                              onClick={handleLoadLlamaModels}
+                              className="h-10 px-5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2"
+                              style={{ background: 'var(--theme-accent)', color: 'var(--theme-accent-foreground)' }}
+                            >
+                              <Brain size={13} />
+                              Load Models
+                            </button>
+                            <button
+                              onClick={handleLoadBridgeTools}
+                              className="h-10 px-5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2"
+                              style={{ background: 'var(--theme-surface)', color: 'var(--theme-primary)', border: '1px solid var(--theme-border)' }}
+                            >
+                              <Wrench size={13} />
+                              Load Tools
+                            </button>
+                          </div>
+
+                          {llamaBridgeModels.length > 0 && (
+                            <div className="space-y-2">
+                              <label className="text-[11px] font-medium" style={{ color: 'var(--theme-secondary)' }}>Available Models ({llamaBridgeModels.length})</label>
+                              <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                                {llamaBridgeModels.map(m => (
+                                  <button
+                                    key={m.id}
+                                    onClick={() => setSelectedLlamaModel(m.id)}
+                                    className="px-3 py-2.5 rounded-xl text-[11px] font-medium text-left transition-all border"
+                                    style={{
+                                      background: selectedLlamaModel === m.id ? 'var(--theme-accent)' : 'var(--theme-surface)',
+                                      borderColor: selectedLlamaModel === m.id ? 'var(--theme-accent)' : 'var(--theme-border)',
+                                      color: selectedLlamaModel === m.id ? 'var(--theme-accent-foreground)' : 'var(--theme-primary)',
+                                    }}
+                                  >
+                                    <div className="truncate">{m.name || m.id}</div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--theme-border)' }}>
+                            <div className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest" style={{ background: 'var(--theme-surface)', color: 'var(--theme-secondary)', borderBottom: '1px solid var(--theme-border)' }}>
+                              Supported Endpoints
+                            </div>
+                            <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
+                              {[
+                                { path: '/health', method: 'GET', desc: 'Server health check' },
+                                { path: '/v1/models', method: 'GET', desc: 'List available models' },
+                                { path: '/v1/chat/completions', method: 'POST', desc: 'Chat & tool execution' },
+                                { path: '/v1/tools', method: 'GET', desc: 'List bridge tools' },
+                                { path: '/v1/tools/call', method: 'POST', desc: 'Call a bridge tool' },
+                                { path: '/v1/messages', method: 'POST', desc: 'Anthropic-compatible chat' },
+                                { path: '/v1/embeddings', method: 'POST', desc: 'Text embeddings' },
+                                { path: '/mcp', method: 'POST', desc: 'MCP JSON-RPC endpoint' },
+                                { path: '/api/generate', method: 'POST', desc: 'Ollama-compatible generate' },
+                                { path: '/api/chat', method: 'POST', desc: 'Ollama-compatible chat' },
+                              ].map((ep, i) => (
+                                <div key={i} className="flex items-center gap-3 px-4 py-2" style={{ background: i % 2 === 0 ? 'transparent' : 'var(--theme-surface-alt)' }}>
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase shrink-0 ${
+                                    ep.method === 'GET' ? 'text-emerald-500 bg-emerald-500/10' : 'text-blue-500 bg-blue-500/10'
+                                  }`}>{ep.method}</span>
+                                  <code className="text-[10px] font-mono" style={{ color: 'var(--theme-primary)' }}>{ep.path}</code>
+                                  <span className="text-[10px] ml-auto" style={{ color: 'var(--theme-secondary)' }}>{ep.desc}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="p-4 rounded-xl border" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                            <div className="flex gap-3">
+                              <Terminal size={16} className="shrink-0 mt-0.5" style={{ color: 'var(--theme-accent)' }} />
+                              <p className="text-xs leading-relaxed" style={{ color: 'var(--theme-secondary)' }}>
+                                The Llama Bridge is a universal API gateway that translates between OpenAI, Anthropic, Cohere, Gemini, and Ollama formats. Chat requests go directly to <strong style={{ color: 'var(--theme-primary)' }}>{llamaBridgeUrl}</strong>. Bridge tools are auto-discovered via <code style={{ color: 'var(--theme-accent)' }}>/v1/tools</code>.
+                              </p>
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 'theme' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}>
+                      <ThemeSettingsPanel />
                     </motion.div>
                   )}
                 </div>

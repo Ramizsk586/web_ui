@@ -5,8 +5,15 @@
 import type { ToolDefinition } from './types';
 
 /**
+ * Normalize a URL by removing trailing slash.
+ */
+function normalizeUrl(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+/**
  * Call the Llama Bridge chat completions endpoint.
- * Tools are sent to the bridge and the bridge handles execution server-side.
+ * Routes through the Express proxy to avoid CORS issues.
  */
 export async function callLlamaBridge(
   messages: Array<{ role: string; content: string }>,
@@ -19,23 +26,37 @@ export async function callLlamaBridge(
 ): Promise<any> {
   const { url, apiKey, model } = options;
 
+  // Use the Express proxy (same origin, no CORS issues)
+  const proxyRes = await fetch('/api/bridge/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      bridgeUrl: normalizeUrl(url),
+      apiKey,
+      model,
+      messages,
+      tools: tools.length > 0 ? tools : undefined,
+      stream: false,
+    }),
+  });
+
+  if (proxyRes.ok) {
+    return proxyRes.json();
+  }
+
+  // Fallback: try direct to bridge
+  const baseUrl = normalizeUrl(url);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  // Use provided API key, or default to "ollama" for localhost bridge
-  const effectiveApiKey = apiKey || (url.includes('localhost') || url.includes('127.0.0.1') ? 'ollama' : '');
+  const effectiveApiKey = apiKey || (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') ? 'ollama' : '');
   if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`;
 
-  const body: Record<string, any> = {
-    model,
-    messages,
-    stream: false,
-  };
-
+  const body: Record<string, any> = { model, messages, stream: false };
   if (tools.length > 0) {
     body.tools = tools;
     body.tool_choice = 'auto';
   }
 
-  const res = await fetch(`${url}/v1/chat/completions`, {
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -49,21 +70,43 @@ export async function callLlamaBridge(
 }
 
 /**
- * Fetch tools available from the Llama Bridge.
- * This replaces the old inbuiltTools approach - all tools come from the bridge.
+ * Fetch tools available from the Llama Bridge via the Express proxy.
+ * This avoids CORS issues by routing through the same-origin server.
  */
 export async function fetchBridgeTools(
   bridgeUrl: string,
   apiKey: string
 ): Promise<Array<{ id: string; name: string; description: string; enabled: boolean; icon?: string }>> {
+  try {
+    // Use the Express proxy (same origin, no CORS issues)
+    const res = await fetch('/api/bridge/tools', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bridgeUrl: normalizeUrl(bridgeUrl), apiKey }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const toolsList = data.tools || data.data || [];
+      return toolsList.map((t: any) => ({
+        id: t.function?.name || t.name || t.id,
+        name: t.function?.name || t.name || t.id,
+        description: t.function?.description || t.description || '',
+        enabled: true,
+        parameters: t.function?.parameters || t.parameters,
+      }));
+    }
+  } catch (e) {
+    console.warn('Bridge proxy tool discovery failed, trying direct...');
+  }
+
+  // Fallback: try direct (some bridges handle CORS)
+  const baseUrl = normalizeUrl(bridgeUrl);
   const headers: Record<string, string> = {};
-  // Use provided API key, or default to "ollama" for localhost bridge
-  const effectiveApiKey = apiKey || (bridgeUrl.includes('localhost') || bridgeUrl.includes('127.0.0.1') ? 'ollama' : '');
+  const effectiveApiKey = apiKey || (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') ? 'ollama' : '');
   if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`;
 
   try {
-    // Try the OpenAI-compatible tools listing
-    const res = await fetch(`${bridgeUrl}/v1/tools`, { headers });
+    const res = await fetch(`${baseUrl}/v1/tools`, { headers, mode: 'cors' });
     if (res.ok) {
       const data = await res.json();
       const toolsList = data.tools || data.data || [];
@@ -75,13 +118,10 @@ export async function fetchBridgeTools(
         parameters: t.function?.parameters || t.parameters,
       }));
     }
-  } catch (e) {
-    // Fall through to /api/tools
-  }
+  } catch {}
 
   try {
-    // Fallback to the bridge's /api/tools endpoint
-    const res = await fetch(`${bridgeUrl}/api/tools`, { headers });
+    const res = await fetch(`${baseUrl}/api/tools`, { headers, mode: 'cors' });
     if (res.ok) {
       const data = await res.json();
       const toolsList = data.tools || data.data || [];
@@ -93,28 +133,38 @@ export async function fetchBridgeTools(
         parameters: t.parameters,
       }));
     }
-  } catch (e) {
-    // No tools available
-  }
+  } catch {}
 
   return [];
 }
 
 /**
- * Check health of the Llama Bridge server.
+ * Check health of the Llama Bridge server via the Express proxy.
  */
 export async function checkBridgeHealth(
   bridgeUrl: string,
   apiKey: string
 ): Promise<boolean> {
   try {
-    const headers: Record<string, string> = {};
-    // Use provided API key, or default to "ollama" for localhost bridge
-    const effectiveApiKey = apiKey || (bridgeUrl.includes('localhost') || bridgeUrl.includes('127.0.0.1') ? 'ollama' : '');
-    if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`;
-    const res = await fetch(`${bridgeUrl}/health`, { headers });
+    // Use the Express proxy (same origin, no CORS issues)
+    const res = await fetch('/api/bridge/health', {
+      headers: {
+        'X-Bridge-Url': normalizeUrl(bridgeUrl),
+        'X-Api-Key': apiKey,
+      },
+    });
     return res.ok;
   } catch {
-    return false;
+    // Fallback: try direct
+    try {
+      const baseUrl = normalizeUrl(bridgeUrl);
+      const headers: Record<string, string> = {};
+      const effectiveApiKey = apiKey || (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') ? 'ollama' : '');
+      if (effectiveApiKey) headers['Authorization'] = `Bearer ${effectiveApiKey}`;
+      const res = await fetch(`${baseUrl}/health`, { headers, mode: 'cors' });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 }

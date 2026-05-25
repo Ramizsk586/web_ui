@@ -12,14 +12,18 @@ const isDev = process.env.NODE_ENV !== "production";
 
 async function startServer() {
   const app = express();
-  const PORT = 5173;
+  const PORT = parseInt(process.env.PORT || '5173', 10);
 
   // Handle JSON and CORS
   app.use(express.json());
 
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', '*');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
     next();
   });
 
@@ -156,8 +160,11 @@ async function startServer() {
   // Llama Bridge proxy endpoints
   app.get("/api/bridge/health", async (req, res) => {
     const bridgeUrl = req.headers['x-bridge-url'] as string || 'http://localhost:8089';
+    const apiKey = req.headers['x-api-key'] as string || '';
     try {
-      const response = await axios.get(`${bridgeUrl}/health`, { timeout: 5000 });
+      const headers: Record<string, string> = {};
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      const response = await axios.get(`${bridgeUrl}/health`, { headers, timeout: 5000 });
       res.json(response.data);
     } catch (e: any) {
       res.status(502).json({ error: 'Could not reach Llama Bridge', detail: e.message });
@@ -208,6 +215,27 @@ async function startServer() {
       res.json(response.data);
     } catch (e: any) {
       res.status(502).json({ error: 'Could not fetch models', detail: e.message });
+    }
+  });
+
+  // Proxy: chat completions to Llama Bridge
+  app.post("/api/bridge/chat", async (req, res) => {
+    const { bridgeUrl, apiKey, model, messages, tools, stream } = req.body;
+    if (!bridgeUrl || !messages) {
+      return res.status(400).json({ error: "bridgeUrl and messages are required" });
+    }
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      const body: Record<string, any> = { model, messages, stream: !!stream };
+      if (tools && tools.length > 0) {
+        body.tools = tools;
+        body.tool_choice = 'auto';
+      }
+      const response = await axios.post(`${bridgeUrl}/v1/chat/completions`, body, { headers, timeout: 30000 });
+      res.json(response.data);
+    } catch (e: any) {
+      res.status(502).json({ error: 'Bridge chat failed', detail: e.message });
     }
   });
 

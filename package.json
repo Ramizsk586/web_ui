@@ -1,16 +1,70 @@
 {
-  "name": "react-example",
+  "name": "lumina-ai-chat",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server.ts",
     "dev:server": "cross-env NODE_ENV=development tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && npm run build:electron",
+    "build:electron": "esbuild electron/main.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist-electron/main.cjs && esbuild electron/preload.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist-electron/preload.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "dev:app": "npm run build:electron && concurrently --kill-others \"cross-env NODE_ENV=development tsx server.ts\" \"wait-on http://localhost:5173/api/health && electron .\"",
+    "electron:dev": "npm run build:electron && concurrently --kill-others \"cross-env NODE_ENV=development tsx server.ts\" \"wait-on http://localhost:5173/api/health && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "clean": "rm -rf dist dist-electron server.js",
     "lint": "tsc --noEmit"
+  },
+  "build": {
+    "appId": "com.lumina.aichat",
+    "productName": "Lumina AI Chat",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "dist"
+      },
+      {
+        "from": "dist-electron",
+        "to": "dist-electron"
+      },
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/sparkles.png"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "assets/sparkles.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "assets/sparkles.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -36,6 +90,8 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
