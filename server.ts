@@ -12,7 +12,7 @@ const isDev = process.env.NODE_ENV !== "production";
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '5173', 10);
+  const PORT = 3000;
 
   // Handle JSON and CORS
   app.use(express.json());
@@ -294,8 +294,8 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "localhost", () => {
-    console.log(`\n🚀 Proxy server ready at http://localhost:${PORT}`);
+  const server = app.listen(PORT, "127.0.0.1", () => {
+    console.log(`\n🚀 Proxy server ready at http://127.0.0.1:${PORT}`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);

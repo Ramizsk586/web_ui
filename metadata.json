@@ -1,6 +1,6 @@
 {
   "name": "Lumina",
-  "description": "Modern intelligence, refined interface. A polished, dark-native AI chat UI with tool-call transparency.",
+  "description": "An interactive 3D chemical compounds laboratory. Build visual molecules manually with orbital valence limits, search a directory of 100 compounds, and load template presets onto the sandbox.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

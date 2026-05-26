@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────
@@ -6,7 +6,7 @@
 ───────────────────────────────────────── */
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Outfit", sans-serif;
+  --font-display: var(--font-display-theme, "Outfit", sans-serif);
 
   --color-brand-primary:   #101010;
   --color-brand-secondary: #f4f4f5;
@@ -411,11 +411,61 @@
 /* ─────────────────────────────────────────
    SCROLLBAR
 ───────────────────────────────────────── */
-.custom-scrollbar::-webkit-scrollbar       { @apply w-1; }
-.custom-scrollbar::-webkit-scrollbar-track { @apply bg-transparent; }
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-border, rgba(120, 120, 120, 0.2)) transparent;
+}
+
+/* Custom scrollbars for Chrome, Safari, Edge, Opera */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  @apply bg-gray-200/50 rounded-full hover:bg-gray-300/80
-         dark:bg-white/10 dark:hover:bg-white/20 transition-all duration-300;
+  background-color: var(--theme-border, rgba(120, 120, 120, 0.25));
+  border-radius: 9999px;
+}
+
+/* Subtle fade on hover inside scroll containers */
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: var(--theme-secondary, var(--theme-muted, rgba(120, 120, 120, 0.4)));
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--theme-accent, #3b82f6) !important;
+}
+
+/* Apply redesigned scrollbar globally to all elements */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-border, rgba(120, 120, 120, 0.2)) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--theme-border, rgba(120, 120, 120, 0.25));
+  border-radius: 9999px;
+}
+
+* :hover::-webkit-scrollbar-thumb {
+  background-color: var(--theme-secondary, var(--theme-muted, rgba(120, 120, 120, 0.4)));
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--theme-accent, #3b82f6) !important;
 }
 
 /* Hide scrollbar by default and reveal on hover if requested */
@@ -460,15 +510,40 @@
 
 .markdown-body {
   @apply text-[16px] leading-[1.7] break-words;
+  color: var(--theme-primary, #ffffff);
 }
 
 .markdown-body p {
   @apply mb-5 last:mb-0;
   white-space: pre-wrap;
+  color: var(--theme-primary, #ffffff);
 }
 
 .markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  @apply font-display font-semibold mt-8 mb-4 tracking-tight text-zinc-900 dark:text-zinc-100;
+  @apply font-display font-semibold mt-8 mb-4 tracking-tight;
+  color: var(--theme-primary, #ffffff);
+}
+
+.markdown-body strong {
+  color: var(--theme-primary, #ffffff);
+}
+
+.markdown-body em {
+  color: var(--theme-primary, #ffffff);
+}
+
+.markdown-body code:not([class*="language-"]) {
+  background: var(--theme-surface-alt, #141414);
+  color: var(--theme-accent, #60A5FA);
+}
+
+.markdown-body a {
+  color: var(--theme-accent, #60A5FA);
+}
+
+.markdown-body blockquote {
+  border-left-color: var(--theme-border, #3f3f46);
+  color: var(--theme-secondary, #a1a1aa);
 }
 
 .markdown-body ul, .markdown-body ol {
@@ -495,6 +570,17 @@
 /* ═════════════════════════════════════════
     15. TEXTING / MESSAGE BUBBLES
 ═════════════════════════════════════════ */
+
+.user-message-bubble .markdown-body,
+.user-message-bubble .markdown-body p,
+.user-message-bubble .markdown-body h1,
+.user-message-bubble .markdown-body h2,
+.user-message-bubble .markdown-body h3,
+.user-message-bubble .markdown-body strong,
+.user-message-bubble .markdown-body em,
+.user-message-bubble .markdown-body blockquote {
+  color: inherit !important;
+}
 
 /* ── Base bubble ─────────────────────────── */
 .txt-bubble {
@@ -614,6 +700,39 @@
 .txt-row-between{ display: flex; align-items: center; justify-content: space-between; }
 
 .dark .shadow-\[0_8px_30px_rgb\(0\,0\,0\,0\.04\)\] { @apply shadow-none; }
+
+/* ═════════════════════════════════════════
+    17. STREAMING WORD HIGHLIGHT
+═════════════════════════════════════════ */
+
+@keyframes streamHighlight {
+  0% { background-color: var(--theme-accent, #60A5FA); color: #fff; border-radius: 2px; }
+  100% { background-color: transparent; color: inherit; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .streaming-content {
+    animation: fadeInToken 200ms ease-out both;
+  }
+}
+
+/* ═════════════════════════════════════════
+    18. THINK CONTAINER
+═════════════════════════════════════════ */
+
+@keyframes thinkSlideIn {
+  from { opacity: 0; transform: translateY(-8px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0); max-height: 500px; }
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.think-cursor {
+  animation: cursorBlink 0.8s ease-in-out infinite;
+}
 
 /* ─────────────────────────────────────────
    THEME SYSTEM

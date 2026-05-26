@@ -71,6 +71,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--theme-card-bg', c.cardBg);
     root.style.setProperty('--theme-hover-bg', c.hoverBg);
     root.style.setProperty('--theme-tooltip-bg', c.tooltipBg);
+    root.style.setProperty('--font-display-theme', theme.font || '"Outfit", sans-serif');
 
     root.classList.toggle('dark', theme.isDark);
     root.setAttribute('data-theme', theme.id);

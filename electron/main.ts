@@ -8,7 +8,7 @@ let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcessWithoutNullStreams | null = null;
 
 const isDev = !app.isPackaged;
-const SERVER_PORT = parseInt(process.env.PORT || '5173', 10);
+const SERVER_PORT = parseInt(process.env.PORT || '3000', 10);
 
 function getLoadingHTML(): string {
   return `<!DOCTYPE html>
@@ -267,10 +267,20 @@ function waitForServer(url: string, timeout = 30000): Promise<void> {
 }
 
 function startServerProcess(): Promise<string> {
+  const url = `http://localhost:${SERVER_PORT}`;
+
+  // In dev mode, the server is already started by concurrently.
+  // Just wait for it to be ready instead of spawning a duplicate.
+  if (isDev) {
+    sendToLoadingScreen('server:log', 'Waiting for development server...');
+    return waitForServer(url, 30000).then(() => {
+      sendToLoadingScreen('server:ready', url);
+      return url;
+    });
+  }
+
   return new Promise((resolve, reject) => {
-    const serverPath = isDev
-      ? path.join(__dirname, '..', 'dist', 'server.cjs')
-      : path.join(process.resourcesPath, 'dist', 'server.cjs');
+    const serverPath = path.join(process.resourcesPath, 'dist', 'server.cjs');
 
     console.log('Starting server from:', serverPath);
     sendToLoadingScreen('server:log', `Loading server: ${path.basename(serverPath)}`);
@@ -280,9 +290,7 @@ function startServerProcess(): Promise<string> {
       console.log('Primary path not found, trying:', altPath);
       sendToLoadingScreen('server:log', `Trying alternate path...`);
       
-      if (fs.existsSync(altPath)) {
-        // Use alternate path
-      } else {
+      if (!fs.existsSync(altPath)) {
         const err = `Server file not found`;
         console.error(err);
         sendToLoadingScreen('server:error', err);
@@ -300,16 +308,8 @@ function startServerProcess(): Promise<string> {
       LUMINA_DATA_DIR: path.join(app.getPath('userData'), '.lumina'),
     };
 
-    let serverCommand: string;
-    let serverArgs: string[];
-
-    if (isDev) {
-      serverCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-      serverArgs = ['tsx', path.join(__dirname, '..', 'server.ts')];
-    } else {
-      serverCommand = process.platform === 'win32' ? 'node.exe' : 'node';
-      serverArgs = [actualServerPath];
-    }
+    const serverCommand = process.platform === 'win32' ? 'node.exe' : 'node';
+    const serverArgs = [actualServerPath];
 
     sendToLoadingScreen('server:log', `Starting server (${path.basename(serverCommand)})...`);
 
@@ -320,7 +320,6 @@ function startServerProcess(): Promise<string> {
 
     let output = '';
     let resolved = false;
-    const url = `http://localhost:${SERVER_PORT}`;
 
     const onData = (text: string) => {
       output += text;
