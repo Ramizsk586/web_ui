@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
@@ -34,7 +35,7 @@ async function startServer() {
 
   // Search endpoint
   app.post("/api/search", async (req, res) => {
-    const { query, tavilyKey, serpKey } = req.body;
+    const { query, tavilyKey, serpKey, provider: preferredProvider } = req.body;
     
     if (!query) {
       return res.status(400).json({ error: "Query is required" });
@@ -44,13 +45,8 @@ async function startServer() {
     let provider = "duckduckgo";
 
     try {
-      // Priority-based search provider selection:
-      // 1. Tavily API (if key is saved) -> primary
-      // 2. SerpApi (if Tavily not present but SerpApi key saved) -> secondary
-      // 3. DuckDuckGo (fallback if neither key is configured)
-      
-      // 1. Try Tavily if key provided (primary)
-      if (tavilyKey) {
+      const tryTavily = async () => {
+        if (!tavilyKey) return;
         try {
           const response = await axios.post('https://api.tavily.com/search', {
             api_key: tavilyKey,
@@ -70,10 +66,10 @@ async function startServer() {
         } catch (e) {
           console.log("Tavily failed, falling back...");
         }
-      }
+      };
 
-      // 2. Try SerpApi if Tavily failed/not used and key provided (secondary)
-      if (results.length === 0 && serpKey) {
+      const trySerpApi = async () => {
+        if (!serpKey) return;
         try {
           const response = await axios.post('https://google.serper.dev/search', { q: query }, {
             headers: { 'X-API-KEY': serpKey, 'Content-Type': 'application/json' }
@@ -89,10 +85,9 @@ async function startServer() {
         } catch (e) {
           console.log("SerpApi failed, falling back...");
         }
-      }
+      };
 
-      // 3. Fallback to DDG (DuckDuckGo) if neither key configured or both failed
-      if (results.length === 0) {
+      const tryDdg = async () => {
         try {
           const ddgResults = await search(query, {
             region: 'wt-wt',
@@ -124,7 +119,17 @@ async function startServer() {
         } catch (e) {
           console.error("DuckDuckGo search failed:", e);
         }
+      };
+
+      // Try the preferred provider first, then fallback to the other, then DDG
+      if (preferredProvider === 'serpapi') {
+        await trySerpApi();
+        if (results.length === 0) await tryTavily();
+      } else {
+        await tryTavily();
+        if (results.length === 0) await trySerpApi();
       }
+      if (results.length === 0) await tryDdg();
 
       res.json({ results, provider });
     } catch (error: any) {
@@ -263,6 +268,136 @@ async function startServer() {
     }
   });
 
+  // Helper to list files recursively
+  function getFilesRecursively(dir: string, baseDir: string = dir): any[] {
+    let results: any[] = [];
+    try {
+      if (!fs.existsSync(dir)) return [];
+      const list = fs.readdirSync(dir, { withFileTypes: true });
+      for (const file of list) {
+        const name = file.name;
+        // Skip common dependency folders, builds, and dot folders
+        if (
+          name === 'node_modules' || 
+          name === '.git' || 
+          name === 'dist' || 
+          name === '.next' || 
+          name === 'dist-electron' ||
+          name === '.svelte-kit' ||
+          name === '.github' ||
+          name === 'package-lock.json' ||
+          name === 'yarn.lock' ||
+          name === 'pnpm-lock.yaml'
+        ) {
+          continue;
+        }
+        const fullPath = path.join(dir, name);
+        const relativePath = path.relative(baseDir, fullPath).replace(/\\/g, '/');
+        const isDirectory = file.isDirectory();
+        
+        results.push({
+          name,
+          path: fullPath.replace(/\\/g, '/'),
+          relativePath,
+          isDirectory,
+        });
+
+        if (isDirectory) {
+          results = results.concat(getFilesRecursively(fullPath, baseDir));
+        }
+      }
+    } catch (error) {
+      console.error(`Error scanning directory: ${dir}`, error);
+    }
+    return results;
+  }
+
+  // Filesystem Listing Endpoints
+  app.post("/api/fs/list", (req, res) => {
+    let { folderPath } = req.body;
+    if (!folderPath) {
+      folderPath = process.cwd();
+    }
+    
+    const resolvedPath = path.resolve(folderPath);
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({ error: "Directory not found" });
+    }
+    
+    const files = getFilesRecursively(resolvedPath);
+    res.json({ files, rootPath: resolvedPath.replace(/\\/g, '/') });
+  });
+
+  app.post("/api/fs/read", (req, res) => {
+    const { filePath } = req.body;
+    if (!filePath) {
+      return res.status(400).json({ error: "filePath is required" });
+    }
+    
+    const resolvedPath = path.resolve(filePath);
+    try {
+      const content = fs.readFileSync(resolvedPath, 'utf8');
+      res.json({ content, filePath: resolvedPath.replace(/\\/g, '/'), name: path.basename(resolvedPath) });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to read file", detail: e.message });
+    }
+  });
+
+  app.post("/api/fs/write", (req, res) => {
+    const { filePath, content } = req.body;
+    if (!filePath || content === undefined) {
+      return res.status(400).json({ error: "filePath and content are required" });
+    }
+    
+    const resolvedPath = path.resolve(filePath);
+    try {
+      fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+      fs.writeFileSync(resolvedPath, content, 'utf8');
+      res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to write file", detail: e.message });
+    }
+  });
+
+  app.post("/api/fs/create", (req, res) => {
+    const { filePath, isDirectory } = req.body;
+    if (!filePath) {
+      return res.status(400).json({ error: "filePath is required" });
+    }
+    
+    const resolvedPath = path.resolve(filePath);
+    try {
+      if (isDirectory) {
+        fs.mkdirSync(resolvedPath, { recursive: true });
+       } else {
+        fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+        fs.writeFileSync(resolvedPath, '', 'utf8');
+      }
+      res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to create", detail: e.message });
+    }
+  });
+
+  app.post("/api/fs/delete", (req, res) => {
+    const { filePath } = req.body;
+    if (!filePath) {
+      return res.status(400).json({ error: "filePath is required" });
+    }
+    
+    const resolvedPath = path.resolve(filePath);
+    try {
+      if (fs.statSync(resolvedPath).isDirectory()) {
+        fs.rmSync(resolvedPath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(resolvedPath);
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to delete", detail: e.message });
+    }
+  });
+
   // Keep a minimal stub for backward compatibility
   app.get("/api/v1/tools", (req, res) => {
     res.json({ tools: [] });
@@ -294,8 +429,8 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "127.0.0.1", () => {
-    console.log(`\n🚀 Proxy server ready at http://127.0.0.1:${PORT}`);
+  const server = app.listen(PORT, "localhost", () => {
+    console.log(`\n🚀 Proxy server ready at http://localhost:${PORT}`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);

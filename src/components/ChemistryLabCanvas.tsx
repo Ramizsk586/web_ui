@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   X, Play, RotateCcw, ZoomIn, ZoomOut, Flame, Info, Pipette, Beaker, HelpCircle, AlertTriangle,
-  ChevronDown, ChevronRight, Sparkles, BookOpen, Atom, Zap, RefreshCw, Thermometer, Eye, Search
+  ChevronDown, ChevronRight, Sparkles, BookOpen, Atom, Zap, RefreshCw, Thermometer, Eye, Search, Sliders
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PeriodicPlayground } from './PeriodicPlayground';
@@ -678,6 +678,7 @@ export const ChemistryLabCanvas: React.FC<{
 }> = ({ onClose, isInline = true }) => {
   const [activeTab, setActiveTab] = useState<'beaker' | 'orbital' | 'molecules' | 'playground'>('beaker');
   const [selectedPreset, setSelectedPreset] = useState<ReactionPreset>(REACTION_PRESETS[0]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   // Molecules search state
   const [selectedMolecule, setSelectedMolecule] = useState<MoleculeDetail | null>(MOLECULES_DIRECTORY[0] || null);
@@ -1490,7 +1491,16 @@ export const ChemistryLabCanvas: React.FC<{
     <div className="flex-1 flex flex-col md:flex-row h-full w-full min-h-0 text-[var(--theme-primary)]">
       
       {/* LEFT COLUMN: Collapsible Sidebar & Preset trigger cards */}
-      <div className="w-full md:w-80 border-b md:border-b-0 md:border-r border-[var(--theme-border)] p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar shrink-0 bg-[var(--theme-surface)]">
+      <AnimatePresence initial={false}>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 320, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="w-full md:w-80 border-b md:border-b-0 md:border-r border-[var(--theme-border)] p-4 flex flex-col gap-4 overflow-hidden shrink-0 bg-[var(--theme-surface)] h-full"
+          >
+            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 w-[288px]">
         
         {/* Module title header */}
         <div className="select-none py-1 border-b border-zinc-200/40 dark:border-white/5">
@@ -1776,16 +1786,34 @@ export const ChemistryLabCanvas: React.FC<{
             </div>
           </div>
         )}
-      </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* CENTER COLUMN: Central Laboratory Visualizer & Detailed Bonding Mechanism */}
       <div className="flex-1 flex flex-col min-h-0 bg-[var(--theme-surface-alt)] relative">
         
         {/* Workspace bar header */}
-        <div className="px-4 py-3 border-b border-[var(--theme-border)] flex items-center justify-between bg-[var(--theme-surface)]">
+        <div className="px-4 py-3 border-b border-[var(--theme-border)] flex flex-wrap items-center justify-between gap-3 bg-[var(--theme-surface)]">
           
-          {/* Tab selector */}
-          <div className="flex bg-[var(--theme-surface-alt)] p-1 rounded-xl border border-[var(--theme-border)] h-9 items-center">
+          <div className="flex items-center gap-2">
+            {/* COLLAPSIBLE SIDEBAR TOGGLER BUTTON */}
+            <button
+              onClick={() => setIsSidebarOpen(prev => !prev)}
+              className={`p-1.5 rounded-xl border flex items-center justify-center transition-all cursor-pointer h-8 px-2.5 gap-1.5 text-xs font-bold leading-none ${
+                isSidebarOpen
+                  ? 'bg-[var(--theme-surface-alt)] border-[var(--theme-accent)] text-[var(--theme-accent)]'
+                  : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]'
+              }`}
+              title={isSidebarOpen ? 'Collapse panel' : 'Expand panel'}
+            >
+              <Sliders size={12} />
+              <span className="hidden sm:inline">{isSidebarOpen ? 'Hide' : 'Controls'}</span>
+            </button>
+
+            {/* Tab selector */}
+            <div className="flex bg-[var(--theme-surface-alt)] p-1 rounded-xl border border-[var(--theme-border)] h-9 items-center overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => setActiveTab('beaker')}
@@ -1835,8 +1863,63 @@ export const ChemistryLabCanvas: React.FC<{
               <span>Interactive Playground</span>
             </button>
           </div>
+        </div>
 
           <div className="flex items-center gap-2">
+            {/* QUICK OPTIONS OF CURRENT PANEL IN THE HEADER */}
+            <div className="hidden lg:flex items-center gap-1.5 border-r border-[var(--theme-border)] pr-2 select-none h-8 mr-1">
+              {activeTab === 'beaker' && (
+                <>
+                  <select
+                    value={selectedPreset.id}
+                    onChange={(e) => {
+                      const matched = REACTION_PRESETS.find(p => p.id === e.target.value);
+                      if (matched) setSelectedPreset(matched);
+                    }}
+                    className="bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] hover:bg-[var(--theme-hover-bg)] text-[11px] py-1 px-2 rounded-lg font-bold cursor-pointer outline-none focus:ring-1 focus:ring-[var(--theme-accent)] transition-all max-w-[145px] truncate"
+                  >
+                    {REACTION_PRESETS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+
+                  <select
+                    value={indicatorType}
+                    onChange={e => setIndicatorType(e.target.value as any)}
+                    className="bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] hover:bg-[var(--theme-hover-bg)] text-[11px] py-1 px-2 rounded-lg font-bold cursor-pointer outline-none focus:ring-1 focus:ring-[var(--theme-accent)] transition-all max-w-[130px] truncate"
+                  >
+                    <option value="universal">Universal</option>
+                    <option value="phenolphthalein">Phenolphthalein</option>
+                    <option value="real">Real Chemistry</option>
+                  </select>
+                </>
+              )}
+
+              {activeTab === 'orbital' && (
+                <select
+                  value={selectedPreset.id}
+                  onChange={(e) => {
+                    const matched = REACTION_PRESETS.find(p => p.id === e.target.value);
+                    if (matched) setSelectedPreset(matched);
+                  }}
+                  className="bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] hover:bg-[var(--theme-hover-bg)] text-[11px] py-1 px-2 rounded-lg font-bold cursor-pointer outline-none focus:ring-1 focus:ring-[var(--theme-accent)] transition-all max-w-[150px] truncate"
+                >
+                  {REACTION_PRESETS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              )}
+
+              {activeTab === 'molecules' && (
+                <select
+                  value={selectedMolecule?.id ? String(selectedMolecule.id) : ''}
+                  onChange={(e) => {
+                    const matched = MOLECULES_DIRECTORY.find(m => String(m.id) === e.target.value);
+                    if (matched) setSelectedMolecule(matched);
+                  }}
+                  className="bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] hover:bg-[var(--theme-hover-bg)] text-[11px] py-1 px-2 rounded-lg font-bold cursor-pointer outline-none focus:ring-1 focus:ring-[var(--theme-accent)] transition-all max-w-[150px] truncate"
+                >
+                  {MOLECULES_DIRECTORY.map(m => <option key={m.id} value={String(m.id)}>{m.name} ({m.formula})</option>)}
+                </select>
+              )}
+            </div>
+
             {/* Zoom tool buttons */}
             <div className="flex items-center bg-[var(--theme-surface-alt)] border border-[var(--theme-border)] rounded-xl overflow-hidden h-8">
               <button

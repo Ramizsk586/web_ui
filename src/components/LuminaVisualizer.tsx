@@ -1982,11 +1982,11 @@ export const CustomCodeBlockVisualizer: React.FC<{ language: string; code: strin
 // 5. MATH EQUATION TEXT EXTRACTOR
 // ==========================================
 
-export function renderTextWithMath(content: React.ReactNode): React.ReactNode {
+export function renderTextWithMath(content: React.ReactNode, sources?: any[]): React.ReactNode {
   if (typeof content !== 'string') {
     if (Array.isArray(content)) {
       return content.map((child, idx) => (
-        <React.Fragment key={idx}>{renderTextWithMath(child)}</React.Fragment>
+        <React.Fragment key={idx}>{renderTextWithMath(child, sources)}</React.Fragment>
       ));
     }
     return content;
@@ -2008,7 +2008,80 @@ export function renderTextWithMath(content: React.ReactNode): React.ReactNode {
           const formula = iPart.slice(1, -1);
           parts.push(<MathEquation key={`i-${bIdx}-${iIdx}`} formula={formula} block={false} />);
         } else {
-          parts.push(iPart);
+          if (sources && sources.length > 0) {
+            const citationParts = iPart.split(/(\[\d+\]|\(\d+\))/g);
+            citationParts.forEach((cPart, cIdx) => {
+              const cleaned = cPart.replace(/[\[\]\(\)]/g, '');
+              const num = parseInt(cleaned, 10);
+              const isCitation = !isNaN(num) && num > 0 && num <= sources.length && 
+                ((cPart.startsWith('[') && cPart.endsWith(']')) || (cPart.startsWith('(') && cPart.endsWith(')')));
+              
+              if (isCitation) {
+                const source = sources[num - 1];
+                if (source && source.url) {
+                  parts.push(
+                    <a
+                      key={`c-${bIdx}-${iIdx}-${cIdx}`}
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-bold hover:underline mx-0.5 cursor-pointer inline"
+                      title={source.title || source.url}
+                    >
+                      [{num}]
+                    </a>
+                  );
+                } else {
+                  parts.push(cPart);
+                }
+              } else {
+                // If it's not a standard citation block, parse for standalone citation numbers (like suffix citations)
+                if (cPart.trim().length === 0) {
+                  parts.push(cPart);
+                  return;
+                }
+                const miniParts = cPart.split(/(\b\d+\b)/g);
+                let currentPosOffset = 0;
+                miniParts.forEach((mPart, mIdx) => {
+                  if (mIdx % 2 === 1) { // It is a captured matched number from the split regex
+                    const mNum = parseInt(mPart, 10);
+                    if (!isNaN(mNum) && mNum > 0 && mNum <= sources.length) {
+                      const precedingText = cPart.slice(0, currentPosOffset);
+                      const followingText = cPart.slice(currentPosOffset + mPart.length);
+                      
+                      const isPrecededByParenthesis = precedingText.trim().endsWith(')');
+                      const isPrecededBySpace = precedingText.length === 0 || /\s$/.test(precedingText);
+                      const isSucceededByPunctuation = followingText.length === 0 || /^[\.\,\s]/.test(followingText);
+                      
+                      if (isPrecededByParenthesis || (isPrecededBySpace && isSucceededByPunctuation)) {
+                        const source = sources[mNum - 1];
+                        if (source && source.url) {
+                          parts.push(
+                            <a
+                              key={`cm-${bIdx}-${iIdx}-${cIdx}-${mIdx}`}
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-bold hover:underline mx-0.5 cursor-pointer inline"
+                              title={source.title || source.url}
+                            >
+                              [{mNum}]
+                            </a>
+                          );
+                          currentPosOffset += mPart.length;
+                          return;
+                        }
+                      }
+                    }
+                  }
+                  parts.push(mPart);
+                  currentPosOffset += mPart.length;
+                });
+              }
+            });
+          } else {
+            parts.push(iPart);
+          }
         }
       });
     }

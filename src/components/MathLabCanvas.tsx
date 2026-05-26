@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, ZoomIn, ZoomOut, Play, RotateCcw, Plus, Percent, Sliders, Settings, Check, Compass, Eye
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface MathPreset {
   id: string;
@@ -26,6 +27,7 @@ export const MathLabCanvas: React.FC<{
   isInline?: boolean;
 }> = ({ onClose, isInline = true }) => {
   const [selectedPreset, setSelectedPreset] = useState<MathPreset>(MATH_PRESETS[0]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [paramA, setParamA] = useState<number>(2.0);
   const [paramB, setParamB] = useState<number>(1.5);
   const [paramC, setParamC] = useState<number>(0.0);
@@ -342,7 +344,16 @@ export const MathLabCanvas: React.FC<{
   return (
     <div className="flex-1 flex flex-col md:flex-row h-full w-full min-h-0 text-[var(--theme-primary)]">
       {/* LEFT COLUMN: Controls & Presets */}
-      <div className="w-full md:w-80 border-b md:border-b-0 md:border-r border-[var(--theme-border)] p-4 flex flex-col gap-4 overflow-y-auto custom-scrollbar shrink-0">
+      <AnimatePresence initial={false}>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 320, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="w-full md:w-80 border-b md:border-b-0 md:border-r border-[var(--theme-border)] p-4 flex flex-col gap-4 overflow-hidden shrink-0 bg-[var(--theme-surface)] h-full"
+          >
+            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 w-[288px]">
         <div>
           <div className="flex items-center gap-1.5 mb-1">
             <Compass size={16} className="text-blue-500" />
@@ -471,18 +482,86 @@ export const MathLabCanvas: React.FC<{
             )}
           </div>
         </div>
-      </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* CENTER COLUMN: Interactive Graphical Coordinate Canvas */}
       <div className="flex-1 flex flex-col min-h-0 bg-[var(--theme-surface-alt)] relative">
         {/* Canvas Header */}
-        <div className="px-4 py-3 border-b border-[var(--theme-border)] flex items-center justify-between bg-[var(--theme-surface)]">
+        <div className="px-4 py-3 border-b border-[var(--theme-border)] flex flex-wrap items-center justify-between gap-3 bg-[var(--theme-surface)]">
           <div className="flex items-center gap-2">
+            {/* COLLAPSIBLE SIDEBAR TOGGLER BUTTON */}
+            <button
+              onClick={() => setIsSidebarOpen(prev => !prev)}
+              className={`p-1.5 rounded-xl border flex items-center justify-center transition-all cursor-pointer h-8 px-2.5 gap-1.5 text-xs font-bold leading-none ${
+                isSidebarOpen
+                  ? 'bg-[var(--theme-surface-alt)] border-[var(--theme-accent)] text-[var(--theme-accent)]'
+                  : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]'
+              }`}
+              title={isSidebarOpen ? 'Collapse panel' : 'Expand panel'}
+            >
+              <Sliders size={12} />
+              <span className="hidden sm:inline">{isSidebarOpen ? 'Hide' : 'Controls'}</span>
+            </button>
             <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
             <span className="text-xs font-bold uppercase font-mono tracking-wider">Analytical Mathematical Plotter</span>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* QUICK OPTIONS OF CURRENT PANEL IN THE HEADER */}
+            <div className="hidden lg:flex items-center gap-1.5 border-r border-[var(--theme-border)] pr-2 select-none h-8 mr-1">
+              <select
+                value={selectedPreset.id}
+                onChange={(e) => {
+                  const matched = MATH_PRESETS.find(p => p.id === e.target.value);
+                  if (matched) setSelectedPreset(matched);
+                }}
+                className="bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] hover:bg-[var(--theme-hover-bg)] text-[11px] py-1 px-2 rounded-lg font-bold cursor-pointer outline-none focus:ring-1 focus:ring-[var(--theme-accent)] transition-all max-w-[155px] truncate"
+              >
+                {MATH_PRESETS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setShowAxes(prev => !prev)}
+                className={`h-7 px-2.5 rounded-lg text-[10px] uppercase tracking-wider font-extrabold border transition-all cursor-pointer ${
+                  showAxes
+                    ? 'bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-400'
+                    : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                }`}
+              >
+                Axes
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowGrid(prev => !prev)}
+                className={`h-7 px-2.5 rounded-lg text-[10px] uppercase tracking-wider font-extrabold border transition-all cursor-pointer ${
+                  showGrid
+                    ? 'bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-400'
+                    : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                }`}
+              >
+                Grid
+              </button>
+
+              {selectedPreset.presetType === '2D' && (
+                <button
+                  type="button"
+                  onClick={() => setShowTangent(prev => !prev)}
+                  className={`h-7 px-2.5 rounded-lg text-[10px] uppercase tracking-wider font-extrabold border transition-all cursor-pointer ${
+                    showTangent
+                      ? 'bg-blue-500/15 border-blue-500/40 text-blue-600 dark:text-blue-400'
+                      : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Tangent
+                </button>
+              )}
+            </div>
+
             {/* Zoom Controls */}
             <div className="flex items-center bg-[var(--theme-surface-alt)] border border-[var(--theme-border)] rounded-xl overflow-hidden h-8">
               <button

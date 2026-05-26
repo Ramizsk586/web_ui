@@ -81,12 +81,13 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 import { fetchBridgeTools, callLlamaBridge as bridgeCall, checkBridgeHealth } from './bridgeClient';
-import { useTheme, ThemeSettingsPanel } from './themes';
+import { useTheme } from './themes';
 import { CustomCodeBlockVisualizer, renderTextWithMath, InteractiveTableVisualizer } from './components/LuminaVisualizer';
 import { PhysicsGraphCanvas } from './components/PhysicsGraphCanvas';
 import { ChemistryLabCanvas } from './components/ChemistryLabCanvas';
 import { MathLabCanvas } from './components/MathLabCanvas';
 import { BiologyLabCanvas } from './components/BiologyLabCanvas';
+import { CodingAgentWorkspace } from './components/Coder';
 
 interface ToolCallNode {
   id: string;
@@ -213,17 +214,19 @@ interface SidebarProps {
   createNewChat: () => void;
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
   isCollapsed: boolean;
-  onToggle: () => void;
   onOpenSettings: () => void;
   userProfile: {
     name: string;
     avatar: string;
     dob: string;
     location: string;
+    age?: number | string;
   };
-  hideToggle?: boolean;
   activeLabTab: 'physics' | 'chemistry' | 'math' | 'biology' | null;
   setActiveLabTab: (tab: 'physics' | 'chemistry' | 'math' | 'biology' | null) => void;
+  isCodingAgentMode?: boolean;
+  setIsCodingAgentMode?: (val: boolean) => void;
+  onSelect?: () => void;
 }
 
 const SidebarContent = ({ 
@@ -232,14 +235,17 @@ const SidebarContent = ({
   setCurrentChatId, 
   createNewChat, 
   setChats,
-  onToggle,
   onOpenSettings,
   userProfile,
-  hideToggle,
   activeLabTab,
-  setActiveLabTab
+  setActiveLabTab,
+  isCodingAgentMode,
+  setIsCodingAgentMode,
+  onSelect
 }: SidebarProps) => {
   const [labsHovered, setLabsHovered] = useState(false);
+  const [isRecentChatsOpen, setIsRecentChatsOpen] = useState(true);
+  const [isLabsSectionOpen, setIsLabsSectionOpen] = useState(true);
   const isPhysicsTabActive = activeLabTab !== null;
   const setIsPhysicsTabActive = (active: boolean) => {
     setActiveLabTab(active ? 'physics' : null);
@@ -254,14 +260,24 @@ const SidebarContent = ({
           </div>
           <span className="font-display font-semibold tracking-tight">Lumina</span>
         </div>
-        {!hideToggle && (
-          <button 
-            onClick={onToggle}
-            className="p-1.5 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded-md transition-colors text-gray-500"
-          >
-            <SidebarIcon size={18} />
-          </button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {setIsCodingAgentMode && (
+            <button
+              onClick={() => {
+                setIsCodingAgentMode(!isCodingAgentMode);
+                setActiveLabTab(null);
+              }}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                isCodingAgentMode
+                  ? 'bg-amber-500/10 text-amber-500 dark:text-[#df9e7e] border border-amber-500/20'
+                  : 'hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+              }`}
+              title={isCodingAgentMode ? "Disable Coding Agent" : "Coding Agent"}
+            >
+              <Code size={18} />
+            </button>
+          )}
+        </div>
       </div>
 
       <button 
@@ -281,71 +297,105 @@ const SidebarContent = ({
           onMouseEnter={() => setLabsHovered(true)}
           onMouseLeave={() => setLabsHovered(false)}
         >
-          <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-3">Laboratories</div>
           <button
-            onClick={() => {
-              if (!activeLabTab) {
-                setActiveLabTab('physics');
-                setCurrentChatId(null);
-              }
-            }}
-            className={`w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors ${
-              isPhysicsTabActive 
-                ? 'bg-gray-200/50 dark:bg-white/10 text-black dark:text-white font-bold' 
-                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/5 dark:hover:text-zinc-300'
-            }`}
+            onClick={() => setIsLabsSectionOpen(!isLabsSectionOpen)}
+            className="w-full flex items-center justify-between text-[11px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 px-3 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 transition-colors rounded-lg cursor-pointer text-left"
           >
-            <Beaker size={16} className={isPhysicsTabActive ? 'text-blue-500 animate-pulse' : 'text-gray-450'} />
-            <span className="truncate">Labs</span>
-            <ChevronDown size={14} className={`ml-auto transition-transform duration-200 text-gray-450 ${labsHovered ? 'rotate-180 text-blue-505 dark:text-white' : ''}`} />
+            <span>Laboratories</span>
+            <ChevronDown size={12} className={`transition-transform duration-200 text-gray-400 dark:text-zinc-500 ${isLabsSectionOpen ? '' : '-rotate-90'}`} />
           </button>
 
-          <AnimatePresence>
-            {(labsHovered || isPhysicsTabActive) && (
+          <AnimatePresence initial={false}>
+            {isLabsSectionOpen && (
               <motion.div
-                initial={isPhysicsTabActive ? { opacity: 1, height: 'auto' } : { opacity: 0, height: 0 }}
+                initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="pl-3 pr-1 py-1 space-y-1 overflow-hidden border-l border-zinc-200/50 dark:border-white/5 ml-4"
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="space-y-1 overflow-hidden"
               >
-                {[
-                  { id: 'physics' as const, name: 'Physics Tab', icon: <Activity size={14} className="text-blue-500" /> },
-                  { id: 'chemistry' as const, name: 'Chemistry Tab', icon: <Beaker size={14} className="text-emerald-500" /> },
-                  { id: 'math' as const, name: 'Math Tab', icon: <Compass size={14} className="text-purple-500" /> },
-                  { id: 'biology' as const, name: 'Biology Tab', icon: <Flower2 size={14} className="text-rose-500" /> }
-                ].map(lab => (
-                  <button
-                    key={lab.id}
-                    onClick={() => {
-                      setActiveLabTab(lab.id);
+                <button
+                  onClick={() => {
+                    if (!activeLabTab) {
+                      setActiveLabTab('physics');
                       setCurrentChatId(null);
-                      if (!hideToggle && onToggle) onToggle();
-                    }}
-                    className={`w-full p-2 rounded-md flex items-center gap-2.5 text-xs font-medium transition-all ${
-                      activeLabTab === lab.id
-                        ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold'
-                        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-white/5 dark:hover:text-zinc-200'
-                    }`}
-                  >
-                    {lab.icon}
-                    <span className="truncate">{lab.name}</span>
-                  </button>
-                ))}
+                    }
+                  }}
+                  className={`w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors ${
+                    isPhysicsTabActive 
+                      ? 'bg-gray-200/50 dark:bg-white/10 text-black dark:text-white font-bold' 
+                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/5 dark:hover:text-zinc-300'
+                  }`}
+                >
+                  <Beaker size={16} className={isPhysicsTabActive ? 'text-blue-500 animate-pulse' : 'text-gray-450'} />
+                  <span className="truncate">Labs</span>
+                  <ChevronDown size={14} className={`ml-auto transition-transform duration-200 text-gray-450 ${labsHovered ? 'rotate-180 text-blue-505 dark:text-white' : ''}`} />
+                </button>
+
+                <AnimatePresence>
+                  {(labsHovered || isPhysicsTabActive) && (
+                    <motion.div
+                      initial={isPhysicsTabActive ? { opacity: 1, height: 'auto' } : { opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="pl-3 pr-1 py-1 space-y-1 overflow-hidden border-l border-zinc-200/50 dark:border-white/5 ml-4"
+                    >
+                      {[
+                        { id: 'physics' as const, name: 'Physics Tab', icon: <Activity size={14} className="text-blue-500" /> },
+                        { id: 'chemistry' as const, name: 'Chemistry Tab', icon: <Beaker size={14} className="text-emerald-500" /> },
+                        { id: 'math' as const, name: 'Math Tab', icon: <Compass size={14} className="text-purple-500" /> },
+                        { id: 'biology' as const, name: 'Biology Tab', icon: <Flower2 size={14} className="text-rose-500" /> }
+                      ].map(lab => (
+                        <button
+                          key={lab.id}
+                          onClick={() => {
+                            setActiveLabTab(lab.id);
+                            setCurrentChatId(null);
+                            if (onSelect) onSelect();
+                          }}
+                          className={`w-full p-2 rounded-md flex items-center gap-2.5 text-xs font-medium transition-all ${
+                            activeLabTab === lab.id
+                              ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold'
+                              : 'text-gray-500 hover:bg-gray-100 hover:text-gray-805 dark:hover:bg-white/5 dark:hover:text-zinc-200'
+                          }`}
+                        >
+                          {lab.icon}
+                          <span className="truncate">{lab.name}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
       <div className="space-y-1">
-        <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-3">Recent Chats</div>
+        <button
+          onClick={() => setIsRecentChatsOpen(!isRecentChatsOpen)}
+          className="w-full flex items-center justify-between text-[11px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 px-3 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 transition-colors rounded-lg cursor-pointer text-left"
+        >
+          <span>Recent Chats</span>
+          <ChevronDown size={12} className={`transition-transform duration-200 text-gray-400 dark:text-zinc-500 ${isRecentChatsOpen ? '' : '-rotate-90'}`} />
+        </button>
+        <AnimatePresence initial={false}>
+          {isRecentChatsOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2, ease: "easeInOut" }}
+              className="space-y-1 overflow-hidden"
+            >
         {chats.map(chat => (
           <div key={chat.id} className="group relative">
             <button
               onClick={() => {
                 setCurrentChatId(chat.id);
                 setIsPhysicsTabActive(false);
-                if (!hideToggle && onToggle) onToggle();
+                if (onSelect) onSelect();
               }}
               className={`w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors pr-10 ${
                 (!isPhysicsTabActive && currentChatId === chat.id)
@@ -368,9 +418,12 @@ const SidebarContent = ({
             </button>
           </div>
         ))}
-        {chats.length === 0 && (
-          <div className="px-3 py-4 text-xs text-gray-400 italic">No recent chats</div>
-        )}
+              {chats.length === 0 && (
+                <div className="px-3 py-4 text-xs text-gray-400 dark:text-zinc-500 italic">No recent chats</div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
 
@@ -400,7 +453,7 @@ const SidebarContent = ({
   );
 };
 
-const CanvasBlock = React.memo(({ language, code }: { language: string; code: string }) => {
+const CanvasBlock = React.memo(({ language, code, isStreaming }: { language: string; code: string; isStreaming?: boolean }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -410,14 +463,27 @@ const CanvasBlock = React.memo(({ language, code }: { language: string; code: st
   };
 
   return (
-    <div className="bg-[#0d0d0d] border border-white/8 rounded-2xl overflow-hidden shadow-xl my-4">
-      <div className="flex items-center justify-between px-4 py-2.5 bg-[#161616] border-b border-white/5">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full">
-          {language || 'code'}
-        </span>
+    <div className={`bg-[#0d0d0d] border rounded-2xl overflow-hidden shadow-xl my-4 transition-all duration-300 ${isStreaming ? 'border-blue-500/30 ring-1 ring-blue-500/15 shadow-md shadow-blue-500/5' : 'border-white/8'}`}>
+      <div className={`flex items-center justify-between px-4 py-2.5 border-b transition-all duration-300 relative overflow-hidden ${isStreaming ? 'bg-[#151a24] border-blue-500/20' : 'bg-[#161616] border-white/5'}`}>
+        {isStreaming && (
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/[0.04] to-blue-500/0 animate-pulse pointer-events-none" />
+        )}
+        <div className="flex items-center gap-2.5 z-10">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full flex items-center gap-1.5 font-sans">
+            {isStreaming && (
+              <Loader2 size={11} className="animate-spin text-blue-450" />
+            )}
+            {language || 'code'}
+          </span>
+          {isStreaming && (
+            <span className="text-[10px] text-blue-400/80 font-medium animate-pulse uppercase tracking-wider font-sans">
+              Generating code...
+            </span>
+          )}
+        </div>
         <button
           onClick={handleCopy}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all z-10 ${
             copied
               ? 'text-emerald-400 bg-emerald-500/10'
               : 'text-gray-500 hover:text-white hover:bg-white/5'
@@ -539,51 +605,82 @@ function parseThinkTags(content: string): { before: string; think: string; after
   return { before, think, after, isThinking: false };
 }
 
-const SearchResultsUI = React.memo(({ query, sources, onToggleSources }: { query: string; sources: any[]; isSearching?: boolean; onToggleSources?: () => void }) => {
+const SearchResultsUI = React.memo(({ query, sources }: { query: string; sources: any[]; isSearching?: boolean }) => {
+  const [isOpen, setIsOpen] = useState(true);
+
   return (
     <div className="my-6 space-y-4">
-      <div className="flex items-center gap-3 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 pl-1">
-        <button 
-          onClick={onToggleSources}
-          className="p-1.5 rounded-lg border shadow-sm transition-all hover:scale-105 active:scale-95 bg-zinc-50 border-zinc-100 dark:bg-white/5 dark:border-white/10 hover:bg-zinc-100 dark:hover:bg-white/10"
-        >
-          <Globe size={14} />
-        </button>
-        <div className="flex flex-col">
-          <span className="text-zinc-800 dark:text-zinc-200">{query}</span>
-          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{sources.length} sources found</span>
+      <div className="flex items-center justify-between text-[13px] font-medium text-zinc-500 dark:text-zinc-400 pl-1">
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 rounded-lg border shadow-xs bg-zinc-50 border-zinc-100 dark:bg-white/5 dark:border-white/10 text-blue-500">
+            <Globe size={14} />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-zinc-850 dark:text-zinc-200 font-semibold">{query}</span>
+            <span className="text-[10px] text-zinc-400 dark:text-zinc-550 uppercase tracking-widest">{sources.length} sources found</span>
+          </div>
         </div>
+
+        {/* Collapsible Area Trigger named Web Source */}
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-zinc-200/50 dark:border-white/5 bg-zinc-50/50 dark:bg-zinc-900/30 hover:bg-zinc-100 dark:hover:bg-zinc-900/50 text-zinc-700 dark:text-zinc-300 cursor-pointer transition-all hover:border-zinc-300 dark:hover:border-white/10 shadow-3xs"
+        >
+          <span className="font-bold">Web Source</span>
+          <motion.div
+            animate={{ rotate: isOpen ? 0 : -90 }}
+            transition={{ duration: 0.15 }}
+            className="text-zinc-400"
+          >
+            <ChevronDown size={11} />
+          </motion.div>
+        </button>
       </div>
 
-      <div className="bg-zinc-50/50 dark:bg-white/[0.02] border border-zinc-100 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm">
-        <div className="p-1 space-y-0.5">
-          {sources.map((source, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: -5 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="flex items-center justify-between p-3 hover:bg-white dark:hover:bg-white/5 rounded-xl transition-all group"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-6 h-6 rounded-md bg-white dark:bg-zinc-800 border border-zinc-100 dark:border-white/10 flex items-center justify-center p-1 shrink-0 bg-white/50 backdrop-blur-sm">
-                  {getFavicon(source.url) ? (
-                    <img src={getFavicon(source.url)!} alt="" className="w-full h-full object-contain filter dark:brightness-90 truncate" />
-                  ) : (
-                    <Globe size={12} className="text-zinc-400" />
-                  )}
-                </div>
-                <span className="text-[13px] font-medium text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 truncate transition-colors">
-                  {source.title}
-                </span>
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            <div className="bg-zinc-50/50 dark:bg-white/[0.02] border border-zinc-100 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm mt-1">
+              <div className="p-1 space-y-0.5">
+                {sources.map((source, i) => (
+                  <motion.a
+                    key={i}
+                    href={source.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    initial={{ opacity: 0, x: -5 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    className="flex items-center justify-between p-3 hover:bg-white dark:hover:bg-white/10 rounded-xl transition-all group cursor-pointer block"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-6 h-6 rounded-md bg-white dark:bg-zinc-800 border border-zinc-100 dark:border-white/10 flex items-center justify-center p-1 shrink-0 bg-white/50 backdrop-blur-sm">
+                        {getFavicon(source.url) ? (
+                          <img src={getFavicon(source.url)!} alt="" className="w-full h-full object-contain filter dark:brightness-90 truncate" referrerPolicy="no-referrer" />
+                        ) : (
+                          <Globe size={12} className="text-zinc-400" />
+                        )}
+                      </div>
+                      <span className="text-[13px] font-medium text-zinc-650 dark:text-zinc-350 group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate transition-colors underline-offset-2 group-hover:underline">
+                        {source.title || source.url}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-zinc-450 dark:text-zinc-500 font-mono tracking-tight shrink-0 pl-4 opacity-60 group-hover:opacity-100 transition-opacity">
+                      {getDomain(source.url)}
+                    </span>
+                  </motion.a>
+                ))}
               </div>
-              <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono tracking-tight shrink-0 pl-4 opacity-60 group-hover:opacity-100 transition-opacity">
-                {getDomain(source.url)}
-              </span>
-            </motion.div>
-          ))}
-        </div>
-      </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 });
@@ -762,12 +859,15 @@ const NodeGraph = React.memo(({
                         {sources.map((source, idx) => {
                           const domain = getDomain(source.url);
                           return (
-                            <motion.div 
+                            <motion.a 
                               key={source.url + '-' + idx}
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
                               initial={{ opacity: 0, y: 5 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ duration: 0.2, delay: idx * 0.04 }}
-                              className="flex items-start justify-between text-xs p-2.5 rounded-lg border border-zinc-205 dark:border-white/5 bg-white dark:bg-zinc-950/20 font-sans group/src shadow-xs"
+                              className="flex items-start justify-between text-xs p-2.5 rounded-lg border border-zinc-205 dark:border-white/5 bg-white dark:bg-zinc-950/20 font-sans group/src shadow-xs hover:border-zinc-300 dark:hover:bg-white/5 transition-colors cursor-pointer"
                             >
                               <div className="flex items-center gap-2.5 min-w-0 pr-4">
                                 <div className="p-1 rounded bg-zinc-50 dark:bg-white/5 border border-zinc-150 dark:border-white/10 shrink-0">
@@ -802,7 +902,7 @@ const NodeGraph = React.memo(({
                                   </>
                                 )}
                               </div>
-                            </motion.div>
+                            </motion.a>
                           );
                         })}
 
@@ -832,24 +932,7 @@ const NodeGraph = React.memo(({
                         )}
                       </div>
 
-                      {/* Scrape Agent logs */}
-                      {isSearching && (
-                        <div className="p-2.5 rounded-lg border border-zinc-200/50 dark:border-zinc-850 bg-zinc-900 dark:bg-zinc-950 text-[10.5px] font-mono text-zinc-300 dark:text-zinc-400 space-y-1 overflow-hidden shadow-inner max-h-[110px] overflow-y-auto">
-                          <div className="text-zinc-500 font-bold">// REAL-TIME WEB SCRAPING SESSION</div>
-                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}>
-                            <span className="text-emerald-500 font-semibold">[info]</span> Initializing Lumina Scraper Engine... Done!
-                          </motion.div>
-                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }}>
-                            <span className="text-blue-450 font-semibold">[query]</span> Searching {searchQuery || 'requested terms'}...
-                          </motion.div>
-                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}>
-                            <span className="text-amber-500 font-semibold">[parser]</span> Spawning headless scrape cluster...
-                          </motion.div>
-                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.8 }} className="animate-pulse text-zinc-400">
-                            &gt; Scraping active. Results will be synthesized in real-time.
-                          </motion.div>
-                        </div>
-                      )}
+
                     </div>
                   </motion.div>
                 )}
@@ -1118,6 +1201,137 @@ const MessageItem = React.memo(({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const messageComponents = useMemo(() => {
+    return {
+      ...markdownComponents,
+      a({ href, children, ...props }: any) {
+        const isImgUrl = href && /\.(png|jpe?g|gif|webp|svg|bmp)(\?.*)?$/i.test(href);
+        if (isImgUrl) {
+          return markdownComponents.a({ href, children, ...props });
+        }
+        
+        const childText = String(children || '').trim();
+        const hrefMatches = href ? href.match(/\d+/) : null;
+        const isHrefCitation = href && /^[#\d\s\[\]\(\)]+$/.test(href) && hrefMatches;
+        const isChildCitation = /^\d+$/.test(childText) || /^\[\d+\]$/.test(childText) || /^\(\d+\)$/.test(childText) || childText === '.' || childText === 'source' || childText === '' || childText === '[.]';
+
+        if (isHrefCitation || isChildCitation) {
+          let numStr = '';
+          if (isHrefCitation && hrefMatches) {
+            numStr = hrefMatches[0];
+          } else {
+            const childMatches = childText.match(/\d+/);
+            if (childMatches) {
+              numStr = childMatches[0];
+            } else if (hrefMatches) {
+              numStr = hrefMatches[0];
+            }
+          }
+          
+          const num = numStr ? parseInt(numStr, 10) : NaN;
+          
+          if (!isNaN(num) && num > 0) {
+            let resolvedHref = href;
+            let siteTitle = '';
+            
+            if (message.sources && message.sources.length > 0 && num <= message.sources.length) {
+              const matchedSource = message.sources[num - 1];
+              if (matchedSource && matchedSource.url) {
+                resolvedHref = matchedSource.url;
+                siteTitle = matchedSource.title || matchedSource.url;
+              }
+            } else if (href && message.sources && message.sources.length > 0) {
+              const foundSource = message.sources.find((s: any) => s.url === href);
+              if (foundSource) {
+                siteTitle = foundSource.title || foundSource.url;
+              }
+            }
+            
+            const isPlaceholderText = isChildCitation;
+            const displayChildren = isPlaceholderText ? `[${num}]` : children;
+
+            const isValidWebUrl = resolvedHref && /^https?:\/\//i.test(resolvedHref);
+            if (!isValidWebUrl && href && !href.startsWith('http')) {
+              resolvedHref = '#';
+            }
+
+            return (
+              <a
+                href={resolvedHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-bold hover:underline mx-0.5 cursor-pointer inline"
+                title={siteTitle || (resolvedHref !== '#' ? resolvedHref : undefined)}
+                {...props}
+              >
+                {displayChildren}
+              </a>
+            );
+          }
+        }
+        
+        return markdownComponents.a({ href, children, ...props });
+      },
+      code({ className, children, ...props }: any) {
+        const match = /language-(\w+)/.exec(className || '');
+        const codeStr = String(children).replace(/\n$/, '');
+        if (match) {
+          return (
+            <CustomCodeBlockVisualizer
+              language={match[1]}
+              code={codeStr}
+              defaultRender={
+                <CanvasBlock 
+                  language={match[1]} 
+                  code={codeStr} 
+                  isStreaming={message.isStreaming} 
+                />
+              }
+            />
+          );
+        }
+        return (
+          <code className="bg-white/10 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+            {children}
+          </code>
+        );
+      },
+      p({ children, ...props }: any) {
+        return (
+          <p className="leading-relaxed my-2" {...props}>
+            {renderTextWithMath(children, message.sources)}
+          </p>
+        );
+      },
+      li({ children, ...props }: any) {
+        return (
+          <li className="leading-relaxed my-1" {...props}>
+            {renderTextWithMath(children, message.sources)}
+          </li>
+        );
+      },
+      h1({ children, ...props }: any) {
+        return <h1 className="text-2xl font-bold my-4" {...props}>{renderTextWithMath(children, message.sources)}</h1>;
+      },
+      h2({ children, ...props }: any) {
+        return <h2 className="text-xl font-bold my-3" {...props}>{renderTextWithMath(children, message.sources)}</h2>;
+      },
+      h3({ children, ...props }: any) {
+        return <h3 className="text-lg font-bold my-2" {...props}>{renderTextWithMath(children, message.sources)}</h3>;
+      },
+      h4({ children, ...props }: any) {
+        return <h4 className="text-base font-bold my-2" {...props}>{renderTextWithMath(children, message.sources)}</h4>;
+      },
+      blockquote({ children, ...props }: any) {
+        return (
+          <blockquote className="border-l-4 border-zinc-200 dark:border-white/10 pl-4 my-2 italic text-zinc-650 dark:text-zinc-450" {...props}>
+            {renderTextWithMath(children, message.sources)}
+          </blockquote>
+        );
+      }
+    };
+  }, [markdownComponents, message.sources, message.isStreaming]);
+
   return (
     <motion.div
       layout
@@ -1125,9 +1339,9 @@ const MessageItem = React.memo(({
     >
       {message.role === 'user' ? (
         <motion.div className="flex flex-col max-w-[85%] items-end">
-          <div className="user-message-bubble px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm bg-black dark:bg-white text-white/90 dark:text-zinc-800 rounded-tr-none border border-black/5 dark:border-white/10">
+          <div className="user-message-bubble px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm bg-zinc-50 dark:bg-[var(--theme-surface-alt)] text-gray-800 dark:text-[var(--theme-primary)] rounded-tr-none border border-zinc-200/50 dark:border-[var(--theme-border)]">
             <div className="markdown-body text-left">
-              <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{message.content}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
             </div>
           </div>
           <div className="mt-2 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight flex items-center gap-2">
@@ -1150,21 +1364,17 @@ const MessageItem = React.memo(({
               sources={message.sources || []}
             />
           )}
-          {message.searchQuery && message.sources && message.sources.length > 0 && (
+          {message.searchQuery && (
             <SearchResultsUI 
               query={message.searchQuery} 
               sources={message.sources || []} 
-              onToggleSources={() => {
-                setSourcesPanelMessageId(message.id);
-                setIsSourcesPanelOpen(!isSourcesPanelOpen);
-              }}
             />
           )}
           <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined }}>
             {message.content ? (
               message.isStreaming ? (
                 <span className="streaming-content">
-                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{message.content}</Markdown>
+                  <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
                   <motion.span
                     animate={{ opacity: [1, 0] }}
                     transition={{ repeat: Infinity, duration: 0.6 }}
@@ -1173,8 +1383,7 @@ const MessageItem = React.memo(({
                 </span>
               ) : (
                 <>
-                  <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{message.content}</Markdown>
-                  {renderLabSuggestions(message.content)}
+                  <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
                 </>
               )
             ) : message.isStreaming ? (
@@ -1376,18 +1585,109 @@ const MessageItem = React.memo(({
   );
 });
 
+function getArtifactFilename(art: Artifact): string {
+  if (art.title && /[\w\.-]+\.\w+/.test(art.title)) {
+    return art.title.trim();
+  }
+  
+  const firstLine = art.content.split('\n')[0] || '';
+  const commentMatch = firstLine.match(/^(?:\/\*|<!--|\/\/)\s*(?:File:\s*)?([\w\.-]+\.\w+)\s*(?:\*\/|-->)?/i);
+  if (commentMatch && commentMatch[1]) {
+    return commentMatch[1].trim();
+  }
+  
+  if (art.language === 'css') return 'style.css';
+  if (['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx'].includes(art.language)) return 'script.js';
+  if (art.language === 'html' || art.type === 'html') return 'index.html';
+  
+  return '';
+}
+
+function getCombinedSrcDoc(htmlContent: string, allArtifacts: Artifact[]): string {
+  let doc = htmlContent;
+  
+  const artifactMap = new Map<string, Artifact>();
+  allArtifacts.forEach(art => {
+    const filename = getArtifactFilename(art);
+    if (filename) {
+      artifactMap.set(filename.toLowerCase(), art);
+    }
+  });
+
+  const inlinedIds = new Set<string>();
+
+  const linkRegex = /<link\s+[^>]*href=["']([^"']+)["'][^>]*>/gi;
+  doc = doc.replace(linkRegex, (match, href) => {
+    const filename = href.split('/').pop()?.toLowerCase();
+    if (filename && artifactMap.has(filename)) {
+      const cssArt = artifactMap.get(filename)!;
+      inlinedIds.add(cssArt.id);
+      return `<style data-filename="${filename}">\n/* Inlined from ${filename} */\n${cssArt.content}\n</style>`;
+    }
+    return match;
+  });
+
+  const scriptRegex = /<script\s+[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi;
+  doc = doc.replace(scriptRegex, (match, src) => {
+    const filename = src.split('/').pop()?.toLowerCase();
+    if (filename && artifactMap.has(filename)) {
+      const jsArt = artifactMap.get(filename)!;
+      inlinedIds.add(jsArt.id);
+      return `<script data-filename="${filename}">\n// Inlined from ${filename}\n${jsArt.content}\n</script>`;
+    }
+    return match;
+  });
+
+  const leftoverCss: string[] = [];
+  const leftoverJs: string[] = [];
+
+  allArtifacts.forEach(art => {
+    if (inlinedIds.has(art.id)) return;
+    
+    if (art.language === 'css') {
+      leftoverCss.push(art.content);
+      inlinedIds.add(art.id);
+    } else if (['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx'].includes(art.language)) {
+      leftoverJs.push(art.content);
+      inlinedIds.add(art.id);
+    }
+  });
+
+  if (leftoverCss.length > 0) {
+    const stylesBlock = leftoverCss.map(content => `<style>\n${content}\n</style>`).join('\n');
+    if (doc.includes('</head>')) {
+      doc = doc.replace('</head>', `${stylesBlock}\n</head>`);
+    } else {
+      doc = stylesBlock + '\n' + doc;
+    }
+  }
+
+  if (leftoverJs.length > 0) {
+    const scriptsBlock = leftoverJs.map(content => `<script>\n${content}\n</script>`).join('\n');
+    if (doc.includes('</body>')) {
+      doc = doc.replace('</body>', `${scriptsBlock}\n</body>`);
+    } else {
+      doc = doc + '\n' + scriptsBlock;
+    }
+  }
+
+  return doc;
+}
+
 const Canvas = ({ 
   artifact, 
   isOpen, 
   onClose, 
   view, 
-  onSetView 
+  onSetView,
+  allArtifacts = []
 }: { 
   artifact: Artifact | null; 
   isOpen: boolean; 
   onClose: () => void;
   view: 'code' | 'preview';
   onSetView: (v: 'code' | 'preview') => void;
+  allArtifacts?: Artifact[];
 }) => {
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false);
 
@@ -1973,95 +2273,163 @@ const Canvas = ({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto bg-zinc-50 dark:bg-zinc-950 custom-scrollbar"
+                  className="h-full overflow-y-auto bg-[var(--theme-bg)] custom-scrollbar"
                 >
                   {artifact.type === 'poem' ? (
-                    <div className="flex flex-col items-center justify-center min-h-full py-12 px-4 md:px-6 bg-gradient-to-b from-amber-55/15 to-orange-55/10 dark:from-zinc-950/40 dark:to-zinc-950/20">
-                      <motion.div 
-                        initial={{ opacity: 0, y: 15 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="w-full max-w-xl bg-amber-50/15 dark:bg-zinc-900/90 border border-amber-250/30 dark:border-zinc-800/60 rounded-3xl p-8 md:p-12 shadow-xl relative overflow-hidden font-serif"
-                      >
-                        {/* Decorative borders styling */}
-                        <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-amber-400 via-pink-400 to-rose-400" />
-                        <div className="absolute inset-4 md:inset-5 border border-dashed border-amber-200/40 dark:border-zinc-800/60 pointer-events-none rounded-2xl" />
-                        
-                        <div className="text-center relative z-10 py-2">
-                          <div className="flex justify-center mb-5 text-amber-500/80">
-                            <span className="text-2xl">✦ ❁ ✦</span>
+                    <div className="flex flex-col min-h-full bg-[#030303] text-zinc-300 font-mono select-none">
+                      {/* IDE Title and Tabs */}
+                      <div className="flex items-center justify-between px-5 py-2.5 bg-[#0a0a0c] border-b border-zinc-900 text-xs text-zinc-400 shrink-0 select-none">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
+                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
+                            <span className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
                           </div>
-                          
-                          <h1 className="text-2xl md:text-3xl font-extrabold tracking-wide text-zinc-900 dark:text-zinc-50 mb-2 font-serif leading-tight">
-                            {artifact.title}
-                          </h1>
-                          <div className="text-[10px] md:text-xs italic text-zinc-400 dark:text-zinc-500 mb-8 font-sans uppercase tracking-widest font-semibold flex items-center justify-center gap-2">
-                            <span>By Lumina AI</span>
-                            <span>•</span>
-                            <span>Verse</span>
-                          </div>
-                          
-                          <div className="text-base md:text-lg text-zinc-700 dark:text-zinc-200 leading-loose whitespace-pre-wrap text-center tracking-wide italic font-serif px-2">
-                            {artifact.content}
-                          </div>
-                          
-                          <div className="mt-12 pt-6 border-t border-dashed border-amber-200/30 dark:border-zinc-800/40 flex justify-center text-amber-500/80">
-                            <span className="text-xl">❦</span>
+                          <div className="w-px h-3.5 bg-zinc-800 mx-2" />
+                          <div className="flex items-center gap-1.5 bg-[#121215] text-zinc-100 px-3 py-1.5 rounded-t-lg border-t border-x border-zinc-900 text-[10px] font-bold">
+                            <PenTool size={12} className="text-amber-500 animate-pulse" />
+                            <span>{artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'verse'}.poetry</span>
                           </div>
                         </div>
-                      </motion.div>
-                    </div>
-                  ) : artifact.type === 'report' ? (
-                    <div className="min-h-full py-12 px-4 md:px-6 bg-zinc-50 dark:bg-zinc-950/40">
-                      <motion.div 
-                        initial={{ opacity: 0, y: 15 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="w-full max-w-3xl bg-white dark:bg-[#121212] border border-zinc-200/60 dark:border-white/5 rounded-2xl p-6 md:p-14 shadow-xl relative"
-                      >
-                        {/* Professional Letterhead */}
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center pb-6 border-b-2 border-zinc-100 dark:border-zinc-800/80 mb-8 gap-4">
-                          <div>
-                            <div className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1 font-mono">
-                              Official Intelligence Report
+                        <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-extrabold flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping" />
+                          LUMINA VERSE ENGINE
+                        </div>
+                      </div>
+
+                      {/* Code Canvas Container */}
+                      <div className="flex-1 flex overflow-y-auto bg-[#030303] custom-scrollbar">
+                        {/* Gutter */}
+                        <div className="py-6 border-r border-zinc-900/60 flex flex-col items-end pr-4 text-[11px] text-zinc-700 font-mono select-none bg-[#030205] w-14 shrink-0">
+                          {artifact.content.split('\n').map((_, idx) => (
+                            <div key={idx} className="h-7 flex items-center justify-end font-medium">
+                              {idx + 1}
                             </div>
-                            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-white leading-tight">
-                              {artifact.title}
-                            </h1>
+                          ))}
+                        </div>
+
+                        {/* Poem Body */}
+                        <div className="flex-1 py-6 px-8 font-mono text-[13px] md:text-[14px] leading-relaxed text-zinc-100 select-text overflow-x-auto">
+                          {/* File Docstring Comment Block */}
+                          <div className="text-zinc-600 select-none mb-6 font-mono italic">
+                            <div>/**</div>
+                            <div>&nbsp;* @file {artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'verse'}.poetry</div>
+                            <div>&nbsp;* @title {artifact.title}</div>
+                            <div>&nbsp;* @author Lumina Core Synthesizer</div>
+                            <div>&nbsp;* @synthesized {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                            <div>&nbsp;*/</div>
                           </div>
-                          <div className="text-left md:text-right text-[11px] font-medium text-zinc-400 dark:text-zinc-500 space-y-0.5 font-mono">
-                            <div><span className="font-semibold text-zinc-600 dark:text-zinc-300">Date:</span> {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                            <div><span className="font-semibold text-zinc-600 dark:text-zinc-300">Author:</span> Lumina Engine</div>
-                            <div><span className="font-semibold text-zinc-600 dark:text-zinc-300">Doc ID:</span> LUM-{(Math.random() * 100000).toFixed(0)}</div>
+
+                          {/* Verses with hover-focused lines */}
+                          <div className="space-y-0.5">
+                            {artifact.content.split('\n').map((line, idx) => {
+                              const isComment = line.trim().startsWith('//') || line.trim().startsWith('/*') || line.trim().startsWith('*');
+                              const isEmpty = line.trim().length === 0;
+                              return (
+                                <div 
+                                  key={idx} 
+                                  className={`h-7 flex items-center px-2 -mx-2 hover:bg-zinc-900/40 rounded transition-colors group cursor-text ${
+                                    isEmpty ? 'h-4' : ''
+                                  }`}
+                                >
+                                  <span className={
+                                    isComment ? 'text-zinc-500 italic' :
+                                    isEmpty ? 'text-zinc-700' :
+                                    'text-amber-100/90 dark:text-amber-50 font-medium'
+                                  }>
+                                    {line || '\u00A0'}
+                                  </span>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
-                        
-                        <div className="markdown-body prose dark:prose-invert max-w-none prose-zinc dark:prose-zinc text-zinc-800 dark:text-zinc-200 leading-relaxed text-sm md:text-base">
-                          <Markdown remarkPlugins={[remarkGfm]}>{artifact.content}</Markdown>
+                      </div>
+
+                      {/* Workspace Status Bar */}
+                      <div className="px-4 py-1.5 bg-[#0a0a0c] border-t border-zinc-900 text-[10px] text-zinc-500 font-mono flex justify-between select-none shrink-0">
+                        <div className="flex items-center gap-4">
+                          <span>UTF-8</span>
+                          <span>LF</span>
+                          <span className="text-amber-500 font-semibold">Poetry Visualizer</span>
                         </div>
-                        
-                        <div className="mt-16 pt-8 border-t border-zinc-150 dark:border-zinc-800/80 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                          <div className="text-[10.5px] text-zinc-400 dark:text-zinc-500 font-mono leading-relaxed">
-                            This publication was synthesized dynamically by the Lumina Intelligence layer.
-                          </div>
-                          <div className="shrink-0 flex flex-col items-center">
-                            <div className="w-40 border-b border-zinc-300 dark:border-zinc-700 mb-1.5 h-10 flex items-end justify-center select-none">
-                              <span className="font-serif italic text-sm text-blue-500/60 dark:text-blue-400/60 font-semibold select-none">Lumina AI</span>
-                            </div>
-                            <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Authorized Signature</span>
-                          </div>
+                        <div className="flex items-center gap-4">
+                          <span>Lines: {artifact.content.split('\n').length}</span>
+                          <span>Words: {artifact.content.trim().split(/\s+/).filter(Boolean).length}</span>
                         </div>
-                      </motion.div>
+                      </div>
                     </div>
-                  ) : artifact.type === 'markdown' ? (
-                    <div className="h-full overflow-y-auto bg-white dark:bg-zinc-900 p-8 custom-scrollbar">
-                      <div className="markdown-body prose dark:prose-invert max-w-none">
-                        <Markdown remarkPlugins={[remarkGfm]}>{artifact.content}</Markdown>
+                  ) : artifact.type === 'report' || artifact.type === 'markdown' ? (
+                    <div className="flex flex-col min-h-full bg-[#030303] text-zinc-300 font-mono select-none">
+                      {/* IDE Title and Tabs */}
+                      <div className="flex items-center justify-between px-5 py-2.5 bg-[#0a0a0c] border-b border-zinc-900 text-xs text-zinc-400 shrink-0 select-none">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-400/70" />
+                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400/70" />
+                            <span className="w-2.5 h-2.5 rounded-full bg-green-400/70" />
+                          </div>
+                          <div className="w-px h-3.5 bg-zinc-800 mx-2" />
+                          <div className="flex items-center gap-1.5 bg-[#121215] text-zinc-100 px-3 py-1.5 rounded-t-lg border-t border-x border-zinc-900 text-[10px] font-bold">
+                            <FileText size={12} className="text-blue-500 animate-pulse" />
+                            <span>{artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'document'}.md</span>
+                          </div>
+                        </div>
+                        <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-extrabold flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
+                          LUMINA DOCS ENGINE
+                        </div>
+                      </div>
+
+                      {/* Code Canvas Container */}
+                      <div className="flex-1 flex overflow-y-auto bg-[#030303] custom-scrollbar">
+                        {/* Gutter */}
+                        <div className="py-8 border-r border-zinc-900/65 flex flex-col items-end pr-4 text-[11px] text-zinc-700 font-mono select-none bg-[#030205] w-14 shrink-0">
+                          {Array.from({ length: Math.max(12, Math.ceil(artifact.content.split('\n').length * 1.05)) }).map((_, idx) => (
+                            <div key={idx} className="h-6 flex items-center justify-end font-medium">
+                              {idx + 1}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Rich Document with Code Vibe */}
+                        <div className="flex-1 py-8 px-8 select-text overflow-x-hidden">
+                          {/* Markdown Meta Comment Block / Frontmatter */}
+                          <div className="text-zinc-600 select-none mb-6 font-mono text-[13px] md:text-[14px] italic border-b border-zinc-900 pb-4">
+                            <div>---</div>
+                            <div>document: {artifact.title}</div>
+                            <div>author: Lumina Core</div>
+                            <div>synthesized: {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                            <div>document_id: LUM-{(Math.random() * 100000).toFixed(0)}</div>
+                            <div>type: {artifact.type}</div>
+                            <div>---</div>
+                          </div>
+
+                          {/* Markdown rendering nested beautifully inside the IDE shell */}
+                          <div className="markdown-body prose dark:prose-invert max-w-none prose-zinc dark:prose-zinc text-zinc-200 leading-relaxed text-sm md:text-base font-sans pb-12">
+                            <Markdown remarkPlugins={[remarkGfm]}>{artifact.content}</Markdown>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Workspace Status Bar */}
+                      <div className="px-4 py-1.5 bg-[#0a0a0c] border-t border-zinc-900 text-[10px] text-zinc-500 font-mono flex justify-between select-none shrink-0">
+                        <div className="flex items-center gap-4">
+                          <span>UTF-8</span>
+                          <span>LF</span>
+                          <span className="text-blue-400 font-semibold">Markdown Live Preview</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span>Lines: {artifact.content.split('\n').length}</span>
+                          <span>Words: {artifact.content.trim().split(/\s+/).filter(Boolean).length}</span>
+                        </div>
                       </div>
                     </div>
                   ) : (
-                    <div className="h-full bg-white dark:bg-zinc-900 overflow-hidden">
+                    <div className="h-full bg-[var(--theme-surface)] overflow-hidden">
                       <iframe
                         title="Preview"
-                        srcDoc={artifact.content}
+                        srcDoc={artifact.language === 'html' || artifact.type === 'html' ? getCombinedSrcDoc(artifact.content, allArtifacts) : artifact.content}
                         className="w-full h-full border-none bg-white"
                         sandbox="allow-scripts"
                       />
@@ -2083,8 +2451,77 @@ const ClaudeAsterisk = () => (
   </svg>
 );
 
+// CodingAgentWorkspace properties and component is implemented in /src/components/Coder.tsx
+
+
 export default function App() {
   const { isDark: isDarkMode, theme } = useTheme();
+  const [userProfile, setUserProfile] = useState<{
+    name: string;
+    avatar: string;
+    dob: string;
+    location: string;
+    age?: number | string;
+  }>(() => {
+    try {
+      const saved = localStorage.getItem('lumina_user_profile');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      name: 'User',
+      avatar: '',
+      dob: '',
+      location: '',
+      age: ''
+    };
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lumina_user_profile', JSON.stringify(userProfile));
+    } catch (e) {}
+  }, [userProfile]);
+
+  const [showLogin, setShowLogin] = useState(() => {
+    try {
+      const created = localStorage.getItem('lumina_profile_created');
+      return created !== 'true';
+    } catch (e) {
+      return true;
+    }
+  });
+  const [loginName, setLoginName] = useState('');
+  const [loginAge, setLoginAge] = useState('');
+  const [errorText, setErrorText] = useState('');
+
+  const handleOnboardingSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginName.trim()) {
+      setErrorText('Please enter a valid name.');
+      return;
+    }
+    const ageNum = parseInt(loginAge);
+    if (isNaN(ageNum) || ageNum <= 0 || ageNum > 120) {
+      setErrorText('Please enter a valid age (1-120).');
+      return;
+    }
+
+    const updatedProfile = {
+      name: loginName.trim(),
+      age: ageNum,
+      avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(loginName.trim())}`,
+      dob: '',
+      location: 'Local Workspace'
+    };
+
+    setUserProfile(updatedProfile);
+    try {
+      localStorage.setItem('lumina_user_profile', JSON.stringify(updatedProfile));
+      localStorage.setItem('lumina_profile_created', 'true');
+    } catch (err) {}
+    setShowLogin(false);
+  };
+
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -2130,14 +2567,36 @@ export default function App() {
   const [useBubbles, setUseBubbles] = useState(true);
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = useState<string | null>(null);
+
+  // Coding Agent states
+  const [isCodingAgentMode, setIsCodingAgentMode] = useState<boolean>(false);
+  const [agentWorkspace, setAgentWorkspace] = useState<string | null>(null);
+  const [agentPlan, setAgentPlan] = useState<string | null>(null);
+  const [agentTodos, setAgentTodos] = useState<{ id: string; title: string; status: 'pending' | 'success' | 'running' | 'failed' | 'waiting' }[]>([]);
+  const [agentRunning, setAgentRunning] = useState<boolean>(false);
+  const [agentStep, setAgentStep] = useState<number>(0);
+  const [agentLogs, setAgentLogs] = useState<string[]>([]);
+  const [agentSelectedProvider, setAgentSelectedProvider] = useState<string>('K2.6 Agent');
+  const [agentApiKeys, setAgentApiKeys] = useState<{
+    planner: { provider: string; key: string; endpoint: string; model: string };
+    coder: { provider: string; key: string; endpoint: string; model: string };
+    linter: { provider: string; key: string; endpoint: string; model: string };
+    fallback: { provider: string; key: string; endpoint: string; model: string };
+  }>(() => {
+    try {
+      const saved = localStorage.getItem('lumina_agent_apikeys');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      planner: { provider: 'gemini', key: 'AIzaSyPlannerKey1103', endpoint: 'https://generativelanguage.googleapis.com', model: 'gemini-2.5-pro' },
+      coder: { provider: 'deepseek', key: 'sk-dsCoderSecretKey9922', endpoint: 'https://api.deepseek.com', model: 'deepseek-coder' },
+      linter: { provider: 'anthropic', key: 'sk-antLinterSecurity786', endpoint: 'https://api.anthropic.com', model: 'claude-3-5-sonnet' },
+      fallback: { provider: 'openai', key: 'sk-projOpenFallback554', endpoint: 'https://api.openai.com', model: 'gpt-4o-mini' }
+    };
+  });
+
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'project' | 'skills' | 'style'>('main');
-  const [userProfile, setUserProfile] = useState({
-    name: 'User',
-    avatar: '',
-    dob: '',
-    location: ''
-  });
   const [mcpMode, setMcpMode] = useState<'local' | 'remote'>('local');
   const [remoteMcpConfig, setRemoteMcpConfig] = useState({ url: '', status: 'disconnected' as 'disconnected' | 'connecting' | 'connected', error: '' });
   const [testToolInput, setTestToolInput] = useState({ name: '', args: '{}' });
@@ -2178,6 +2637,7 @@ export default function App() {
   const [llamaBridgeModels, setLlamaBridgeModels] = useState<{id: string, name: string}[]>([]);
   const [selectedLlamaModel, setSelectedLlamaModel] = useState('');
   const [useBridgeTools, setUseBridgeTools] = useState(() => localStorage.getItem('lumina_bridge_enabled') === 'true');
+  const [searchProvider, setSearchProvider] = useState(() => localStorage.getItem('lumina_search_provider') || 'tavily');
   const [tavilyApiKey, setTavilyApiKey] = useState(() => safeGetItem('lumina_tavily_key', ''));
   const [serpApiKey, setSerpApiKey] = useState(() => safeGetItem('lumina_serp_key', ''));
   
@@ -2275,6 +2735,7 @@ export default function App() {
   const handleSaveSearch = () => {
     localStorage.setItem('lumina_tavily_key', tavilyApiKey);
     localStorage.setItem('lumina_serp_key', serpApiKey);
+    localStorage.setItem('lumina_search_provider', searchProvider);
     setIsSearchSaved(true);
     setTimeout(() => setIsSearchSaved(false), 2000);
   };
@@ -2282,14 +2743,15 @@ export default function App() {
   const handleVerifySearch = useCallback(() => {
     setSearchVerificationState('verifying');
     setTimeout(() => {
-      if (tavilyApiKey || serpApiKey) {
+      const key = searchProvider === 'serpapi' ? serpApiKey : tavilyApiKey;
+      if (key && key.trim().length > 0) {
         setSearchVerificationState('success');
       } else {
         setSearchVerificationState('error');
       }
       setTimeout(() => setSearchVerificationState('idle'), 3000);
     }, 1200);
-  }, [tavilyApiKey, serpApiKey]);
+  }, [searchProvider, tavilyApiKey, serpApiKey]);
 
   // Auto-verify pre-configured API keys on app boot / mount
   useEffect(() => {
@@ -2297,9 +2759,11 @@ export default function App() {
     if (savedApiKey && savedApiKey.trim().length > 0) {
       handleVerifyAI();
     }
-    const savedTavily = localStorage.getItem('lumina_tavily_key');
-    const savedSerp = localStorage.getItem('lumina_serp_key');
-    if ((savedTavily && savedTavily.trim().length > 0) || (savedSerp && savedSerp.trim().length > 0)) {
+    const savedProvider = localStorage.getItem('lumina_search_provider') || 'tavily';
+    const key = savedProvider === 'serpapi'
+      ? localStorage.getItem('lumina_serp_key')
+      : localStorage.getItem('lumina_tavily_key');
+    if (key && key.trim().length > 0) {
       handleVerifySearch();
     }
   }, [handleVerifyAI, handleVerifySearch]);
@@ -2327,7 +2791,7 @@ export default function App() {
   };
   
   // ─── Bridge Communication ──────────────────────────────────────────────────
-  const callLlamaBridge = async (messages: any[], tools: ToolDefinition[]) => {
+  const callLlamaBridge = async (messages: any[], tools: ToolDefinition[], signal?: AbortSignal) => {
     const useBridge = useBridgeTools && llamaBridgeUrl;
     const baseUrl = useBridge ? llamaBridgeUrl.replace(/\/+$/, '') : serverUrl.replace(/\/+$/, '');
     const key = useBridge ? llamaBridgeApiKey : apiKey;
@@ -2353,6 +2817,7 @@ export default function App() {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal,
     });
     
     return await response.json();
@@ -2435,19 +2900,25 @@ export default function App() {
       });
       
       if (response.ok) {
-        const data = await response.json();
-        const models = data.data || data.models || [];
-        const fetchedModels = models.map((m: any) => ({
-          id: m.id,
-          name: m.display_name || m.id,
-          icon: <Sparkles size={14} />,
-          color: 'text-blue-500'
-        }));
-        setLlamaBridgeModels(fetchedModels);
-        if (fetchedModels.length > 0 && !selectedLlamaModel) {
-          setSelectedLlamaModel(fetchedModels[0].id);
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json();
+          const models = data.data || data.models || [];
+          const fetchedModels = models.map((m: any) => ({
+            id: m.id,
+            name: m.display_name || m.id,
+            icon: <Sparkles size={14} />,
+            color: 'text-blue-500'
+          }));
+          setLlamaBridgeModels(fetchedModels);
+          if (fetchedModels.length > 0 && !selectedLlamaModel) {
+            setSelectedLlamaModel(fetchedModels[0].id);
+          }
+          showToast(`Loaded ${fetchedModels.length} models`);
+        } else {
+          console.warn('Expected JSON response from /api/bridge/models, got non-JSON content type:', contentType);
+          showToast('Failed to load models (unexpected server response)');
         }
-        showToast(`Loaded ${fetchedModels.length} models`);
       } else {
         showToast('Failed to load models');
       }
@@ -2493,6 +2964,7 @@ export default function App() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -2605,14 +3077,6 @@ export default function App() {
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
-  // Auto-discover bridge tools once on mount
-  useEffect(() => {
-    if (llamaBridgeUrl) {
-      const timer = setTimeout(() => handleLoadBridgeTools(), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, []); // only run once on mount
-
   const createNewChat = () => {
     const newChat: Chat = {
       id: Date.now().toString(),
@@ -2627,6 +3091,10 @@ export default function App() {
 
   const handleSend = async (contentOverride?: string) => {
     if (isTyping) return;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
+
     let content = contentOverride || input.trim();
     if (!content && attachedFiles.length === 0) return;
 
@@ -2720,21 +3188,26 @@ export default function App() {
         const hasSerpKey = serpApiKey && serpApiKey.trim().length > 0;
         
         let providerName = 'DuckDuckGo';
-        if (hasTavilyKey) {
+        if (searchProvider === 'tavily' && hasTavilyKey) {
+          providerName = 'Tavily';
+        } else if (searchProvider === 'serpapi' && hasSerpKey) {
+          providerName = 'SerpApi';
+        } else if (hasTavilyKey) {
           providerName = 'Tavily';
         } else if (hasSerpKey) {
           providerName = 'SerpApi';
         }
 
-        const searchResp = await fetch(`${serverUrl}/search`, {
+        const searchResp = await fetch(`/api/search`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             query: content, 
-            tavilyKey: hasTavilyKey ? tavilyApiKey : '', 
-            serpKey: hasSerpKey && !hasTavilyKey ? serpApiKey : '',
-            provider: providerName
-          })
+            tavilyKey: tavilyApiKey,
+            serpKey: serpApiKey,
+            provider: searchProvider
+          }),
+          signal
         });
         
         if (searchResp.ok) {
@@ -2773,7 +3246,14 @@ export default function App() {
       
       const activeTools = buildActiveTools();
 
-      let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'} You have access to 4 interactive visual laboratories: Physics Lab (for graphing and forces), Chemistry Lab (for compounds and reactions), Math Lab (for trigonometric and fractal curves), and Biology Lab (for predator-prey dynamics and DNA pair sequencing). If the user asks to simulate, visualize, or model anything matching these labs, explain the concepts and guide them to use or open that lab canvas. Ensure that you suggest launching the respective interactive workspace.`;
+      let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'} You have access to 4 interactive visual laboratories: Physics Lab (for graphing and forces), Chemistry Lab (for compounds and reactions), Math Lab (for trigonometric and fractal curves), and Biology Lab (for predator-prey dynamics and DNA pair sequencing).`;
+
+      // FIX: Inject search context into systemPrompt BEFORE building apiMessages,
+      // so the AI actually receives the web search results.
+      if (searchResults.length > 0) {
+        const contextString = searchResults.slice(0, 8).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
+        systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
+      }
 
       const apiMessages = [
         { role: 'system', content: systemPrompt },
@@ -2785,19 +3265,13 @@ export default function App() {
           })))
       ];
       
-      if (searchResults.length > 0) {
-        const contextString = searchResults.slice(0, 8).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
-        systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
-      }
-      
       // Direct call to Llama Bridge
-      let rawResponse: any = await callLlamaBridge(apiMessages, activeTools);
+      let rawResponse: any = await callLlamaBridge(apiMessages, activeTools, signal);
 
       const data = rawResponse;
       const choice = data.choices?.[0]?.message;
       const responseContent = choice?.content;
       const toolCallsRaw = choice?.tool_calls;
-      const responseSources = data.sources || data.citations || [];
       const responseImages = data.images || [];
 
       const toolCallNodes: ToolCallNode[] = [];
@@ -2826,11 +3300,6 @@ export default function App() {
       }
 
       const finalContent = responseContent || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
-      const sourcesToAttach = responseSources.map((s: any) => ({
-        title: s.title || s.url || 'Source',
-        url: s.url || s.link || '#',
-        icon: s.icon || ''
-      }));
       const imagesToAttach = responseImages.map((img: any) => ({
         title: img.title || 'Image',
         url: img.url,
@@ -2926,16 +3395,44 @@ export default function App() {
       const finalThinkContent = thinkTagMatch ? thinkTagMatch[0] : '';
       const finalDisplayContent = finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
+      // Detect if there's any code block with > 50 lines to increase speed
+      const codeBlockThreshold = 50;
+      let hasLargeCodeBlock = false;
+      const codeMatches = finalContent.match(/```[\s\S]*?```/g);
+      if (codeMatches) {
+        for (const block of codeMatches) {
+          const lines = block.split('\n').length;
+          if (lines > codeBlockThreshold) {
+            hasLargeCodeBlock = true;
+            break;
+          }
+        }
+      }
+
       let lastRenderTime = Date.now();
       const RENDER_INTERVAL = 120;
       
-      for (let i = 1; i <= finalContent.length; i++) {
-        const partial = finalContent.slice(0, i);
-        const delay = finalContent.length > 500 ? 5 : 15;
-        await new Promise(resolve => setTimeout(resolve, delay));
+      let stepSize = 1;
+      let baseDelay = finalContent.length > 500 ? 5 : 15;
+      if (hasLargeCodeBlock) {
+        stepSize = 2; // Grab 2 characters at a time to render up to 1.5x - 2.0x faster
+        baseDelay = Math.max(3, Math.round(baseDelay / 1.5));
+      }
+
+      for (let i = stepSize; i <= finalContent.length + stepSize - 1; i += stepSize) {
+        if (signal.aborted) {
+          break;
+        }
+        const currentPos = Math.min(i, finalContent.length);
+        const partial = finalContent.slice(0, currentPos);
+        await new Promise(resolve => setTimeout(resolve, baseDelay));
+        
+        if (signal.aborted) {
+          break;
+        }
         
         const now = Date.now();
-        if (now - lastRenderTime > RENDER_INTERVAL || i === finalContent.length) {
+        if (now - lastRenderTime > RENDER_INTERVAL || currentPos === finalContent.length) {
           lastRenderTime = now;
           const parsed = parseThinkTags(partial);
           const displayContent = (parsed.before + parsed.after).trim();
@@ -2948,7 +3445,7 @@ export default function App() {
                   content: parsed.isThinking ? displayContent : (displayContent || partial),
                   thinkContent: parsed.think || undefined,
                   isThinking: parsed.isThinking,
-                  streamPos: i,
+                  streamPos: currentPos,
                   toolCalls: activeToolNodes
                 } : m),
               };
@@ -2958,7 +3455,16 @@ export default function App() {
         }
       }
 
-      const finalArtifacts = extractArtifacts(finalContent);
+      if (signal.aborted) {
+        return;
+      }
+
+      const finalArtifacts = extractArtifacts(finalDisplayContent);
+      if (finalArtifacts.length > 0) {
+        setActiveArtifact(finalArtifacts[0]);
+        setIsCanvasOpen(true);
+        setCanvasView(finalArtifacts[0].type === 'html' ? 'preview' : 'code');
+      }
 
       setChats(prev => prev.map(chat => {
         if (chat.id === chatId) {
@@ -2975,7 +3481,7 @@ export default function App() {
                     thinking: undefined,
                     toolCalls: finalToolNodes,
                     isStreaming: false,
-                    sources: sourcesToAttach.length > 0 ? sourcesToAttach : undefined,
+                    sources: searchResults.length > 0 ? searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) : undefined,
                     images: imagesToAttach.length > 0 ? imagesToAttach : undefined,
                     searchQuery: isWebSearchEnabled ? userMessage.content : undefined,
                     isSearching: false,
@@ -2989,7 +3495,32 @@ export default function App() {
         }
         return chat;
       }));
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.name === 'AbortError' || signal.aborted) {
+        console.log('Stream generation aborted.');
+        // Gracefully finalize typing message structure up to where it currently was
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: chat.messages.map(m =>
+                m.id === thinkingId
+                  ? {
+                      ...m,
+                      isThinking: false,
+                      isStreaming: false,
+                      isSearching: false,
+                      timestamp: new Date()
+                    }
+                  : m
+              ),
+              updatedAt: new Date(),
+            };
+          }
+          return chat;
+        }));
+        return;
+      }
       console.error('Lumina API Error:', error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -3007,6 +3538,7 @@ export default function App() {
     } finally {
       setIsTyping(false);
       setTypingMessageId(null);
+      abortControllerRef.current = null;
     }
   };
 
@@ -3028,12 +3560,14 @@ export default function App() {
   };
 
   function extractArtifacts(content: string): Artifact[] {
+    // Strip the <think>...</think> portion from the content analyzed for artifacts
+    const cleanContent = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     const artifacts: Artifact[] = [];
     const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
     let match;
     const seenCode = new Set<string>();
     
-    while ((match = codeBlockRegex.exec(content)) !== null) {
+    while ((match = codeBlockRegex.exec(cleanContent)) !== null) {
       const lang = (match[1] || 'text').toLowerCase();
       const code = match[2].trim();
       seenCode.add(code);
@@ -3078,48 +3612,76 @@ export default function App() {
 
     // Heuristics fallback if no document, poem or report artifacts were detected
     if (artifacts.filter(a => ['poem', 'report', 'markdown'].includes(a.type)).length === 0) {
-      const lowerContent = content.toLowerCase();
-      const stanzas = content.split('\n\n').filter(s => s.trim().length > 0);
+      const lowerContent = cleanContent.toLowerCase();
+      const stanzas = cleanContent.split('\n\n').filter(s => s.trim().length > 0);
       
-      // Let's detect Poem: Typically verses separated into stanzas and some indicator
-      const poemKeywords = ['poem', 'poetry', 'sonnet', 'verse', 'haiku', 'rhyme', 'ode', 'ballad', 'stanzas', 'strophes'];
-      const hasPoemIndicator = poemKeywords.some(kw => lowerContent.includes(kw));
-      const hasShortRhythmicLines = stanzas.length >= 2 && stanzas.slice(0, 3).every(s => {
-        const lines = s.split('\n').map(l => l.trim()).filter(Boolean);
-        return lines.length >= 2 && lines.length <= 10 && lines.every(l => l.length < 90);
-      });
+      // Get last user prompt to detect intent
+      const currentChat = chats.find(c => c.id === currentChatId);
+      const userMessages = currentChat ? currentChat.messages.filter(m => m.role === 'user') : [];
+      const lastUserMessage = userMessages[userMessages.length - 1];
+      const userPromptLower = lastUserMessage ? lastUserMessage.content.toLowerCase() : '';
 
-      if (hasShortRhythmicLines && hasPoemIndicator && content.length < 3500) {
-        const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+      // Check current writing style first
+      if (writingStyle === 'poem' && cleanContent.length > 30) {
+        const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
         const titleCand = lines[0]?.replace(/^#+\s*/, '') || 'A Beautiful Poem';
         artifacts.push({
           id: 'art-' + Math.random().toString(36).substring(7),
           title: titleCand.length < 40 ? titleCand : 'A Beautiful Poem',
           language: 'poetry',
-          content: content,
+          content: cleanContent,
           type: 'poem'
         });
-      }
-      // Let's detect Professional Report/Memo/Letter: structured markdown with headers
-      else if (content.includes('## ') && content.length > 500 && 
-               (lowerContent.includes('report') || lowerContent.includes('summary') || 
-                lowerContent.includes('executive') || lowerContent.includes('proposal') || 
-                lowerContent.includes('document') || lowerContent.includes('analysis') || 
-                lowerContent.includes('memo') || lowerContent.includes('letter'))) {
-        const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-        const titleCand = lines[0]?.replace(/^#+\s*/, '') || 'Executive Report';
+      } else if (['letter', 'story', 'essay', 'script'].includes(writingStyle) && cleanContent.length > 30) {
+        const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
+        const titleCand = lines[0]?.replace(/^#+\s*/, '') || (writingStyle.charAt(0).toUpperCase() + writingStyle.slice(1));
         artifacts.push({
           id: 'art-' + Math.random().toString(36).substring(7),
-          title: titleCand.length < 40 ? titleCand : 'Executive Report',
+          title: titleCand.length < 40 ? titleCand : (writingStyle.charAt(0).toUpperCase() + writingStyle.slice(1)),
           language: 'markdown',
-          content: content,
+          content: cleanContent,
           type: 'report'
         });
+      } else {
+        // Fallback checks using keywords from either content or user prompt
+        const poemKeywords = ['poem', 'poetry', 'sonnet', 'verse', 'haiku', 'rhyme', 'ode', 'ballad', 'stanzas', 'strophes'];
+        const hasPoemIndicator = poemKeywords.some(kw => lowerContent.includes(kw)) || poemKeywords.some(kw => userPromptLower.includes(kw));
+        
+        const docKeywords = ['report', 'summary', 'executive', 'proposal', 'document', 'analysis', 'memo', 'letter', 'essay', 'story', 'script', 'paragraph'];
+        const hasDocIndicator = docKeywords.some(kw => lowerContent.includes(kw)) || docKeywords.some(kw => userPromptLower.includes(kw));
+
+        const hasShortRhythmicLines = stanzas.length >= 2 && stanzas.slice(0, 3).every(s => {
+          const lines = s.split('\n').map(l => l.trim()).filter(Boolean);
+          return lines.length >= 2 && lines.length <= 10 && lines.every(l => l.length < 90);
+        });
+
+        if (hasShortRhythmicLines && hasPoemIndicator && cleanContent.length < 5000) {
+          const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
+          const titleCand = lines[0]?.replace(/^#+\s*/, '') || 'A Beautiful Poem';
+          artifacts.push({
+            id: 'art-' + Math.random().toString(36).substring(7),
+            title: titleCand.length < 40 ? titleCand : 'A Beautiful Poem',
+            language: 'poetry',
+            content: cleanContent,
+            type: 'poem'
+          });
+        }
+        else if (hasDocIndicator && cleanContent.length > 300) {
+          const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
+          const titleCand = lines[0]?.replace(/^#+\s*/, '') || 'Executive Document';
+          artifacts.push({
+            id: 'art-' + Math.random().toString(36).substring(7),
+            title: titleCand.length < 40 ? titleCand : 'Executive Document',
+            language: 'markdown',
+            content: cleanContent,
+            type: 'report'
+          });
+        }
       }
     }
     
     return artifacts;
-  };
+  }
 
   function showToast(message: string) {
     const id = Date.now().toString();
@@ -3718,7 +4280,12 @@ export default function App() {
             {isTyping ? (
               <motion.button
                 whileTap={{ scale: 0.92 }}
-                onClick={() => setIsTyping(false)}
+                onClick={() => {
+                  setIsTyping(false);
+                  if (abortControllerRef.current) {
+                    abortControllerRef.current.abort();
+                  }
+                }}
                 className="w-10 h-10 rounded-2xl bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] flex items-center justify-center text-[var(--theme-primary)] transition-all active:scale-95"
               >
                 <StopCircle size={20} fill="currentColor" />
@@ -3756,6 +4323,94 @@ export default function App() {
     </div>
     );
   };
+
+  if (showLogin) {
+    return (
+      <div id="login-page-container" className="flex flex-col items-center justify-center min-h-screen bg-[#060608] text-white p-6 relative overflow-hidden font-sans select-none w-full">
+        {/* Glow Effects */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none animate-pulse" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none animate-pulse" style={{ animationDelay: '2s' }} />
+
+        {/* Floating particles background */}
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-40">
+          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="10%" cy="20%" r="2" fill="#3b82f6" className="animate-pulse" style={{ animationDuration: '3s' }} />
+            <circle cx="85%" cy="15%" r="1.5" fill="#a855f7" className="animate-pulse" style={{ animationDuration: '4s' }} />
+            <circle cx="75%" cy="80%" r="2" fill="#3b82f6" className="animate-pulse" style={{ animationDuration: '5s' }} />
+            <circle cx="20%" cy="75%" r="1" fill="#c084fc" className="animate-pulse" style={{ animationDuration: '3s' }} />
+          </svg>
+        </div>
+
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4 }}
+          className="w-full max-w-md bg-zinc-900/60 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl p-8 shadow-2xl relative z-10 flex flex-col items-center text-center"
+        >
+          {/* Logo */}
+          <div className="w-14 h-14 rounded-2xl bg-white text-black flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(255,255,255,0.15)]">
+            <Sparkles size={28} className="text-zinc-900" />
+          </div>
+
+          <h1 className="text-2xl font-semibold tracking-tight text-white mb-2 font-sans select-none">
+            Welcome to Lumina
+          </h1>
+          <p className="text-sm text-zinc-400 mb-8 font-sans select-none max-w-xs">
+            Create your profile to initialize your persistent AI workspace and labs.
+          </p>
+
+          <form onSubmit={handleOnboardingSubmit} className="w-full space-y-5 text-left">
+            <div className="space-y-2">
+              <label htmlFor="login-name-input" className="text-xs font-semibold text-zinc-400 uppercase tracking-widest pl-1">
+                Name
+              </label>
+              <input
+                id="login-name-input"
+                type="text"
+                required
+                value={loginName}
+                onChange={(e) => setLoginName(e.target.value)}
+                placeholder="Enter your name"
+                className="w-full h-12 px-4 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 rounded-xl text-sm outline-none transition-all focus:ring-4 focus:ring-zinc-800/40 text-white placeholder-zinc-500"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="login-age-input" className="text-xs font-semibold text-zinc-400 uppercase tracking-widest pl-1">
+                Age
+              </label>
+              <input
+                id="login-age-input"
+                type="number"
+                required
+                min="1"
+                max="120"
+                value={loginAge}
+                onChange={(e) => setLoginAge(e.target.value)}
+                placeholder="Enter your age"
+                className="w-full h-12 px-4 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 rounded-xl text-sm outline-none transition-all focus:ring-4 focus:ring-zinc-800/40 text-white placeholder-zinc-500"
+              />
+            </div>
+
+            {errorText && (
+              <div className="text-xs text-rose-500 font-medium pl-1 animate-pulse">
+                {errorText}
+              </div>
+            )}
+
+            <button
+              id="login-submit-button"
+              type="submit"
+              className="w-full h-12 mt-4 bg-white text-black hover:bg-zinc-200 active:scale-[0.98] transition-all rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-[0_4px_20px_rgba(255,255,255,0.08)]"
+            >
+              Initialize Profile
+              <ArrowRight size={16} strokeWidth={2.5} />
+            </button>
+          </form>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen w-full bg-[var(--theme-bg)] text-[var(--theme-primary)] overflow-hidden relative">
@@ -3828,7 +4483,7 @@ export default function App() {
                 createNewChat={createNewChat} 
                 setChats={setChats}
                 isCollapsed={false}
-                onToggle={() => setIsMobileMenuOpen(false)}
+                onSelect={() => setIsMobileMenuOpen(false)}
                 onOpenSettings={() => {
                   setIsSettingsOpen(true);
                   setIsMobileMenuOpen(false);
@@ -3836,6 +4491,8 @@ export default function App() {
                 userProfile={userProfile}
                 activeLabTab={activeLabTab}
                 setActiveLabTab={setActiveLabTab}
+                isCodingAgentMode={isCodingAgentMode}
+                setIsCodingAgentMode={setIsCodingAgentMode}
               />
             </motion.aside>
           </>
@@ -3859,28 +4516,15 @@ export default function App() {
             createNewChat={createNewChat} 
             setChats={setChats}
             isCollapsed={false}
-            hideToggle={true}
-            onToggle={() => setIsSidebarOpen(false)}
             onOpenSettings={() => setIsSettingsOpen(true)}
             userProfile={userProfile}
             activeLabTab={activeLabTab}
             setActiveLabTab={setActiveLabTab}
+            isCodingAgentMode={isCodingAgentMode}
+            setIsCodingAgentMode={setIsCodingAgentMode}
           />
         </div>
         
-        {/* Absolute sliding collapse button that moves perfectly with the sidebar with no delay */}
-        <button
-          onClick={() => setIsSidebarOpen(false)}
-          className="absolute top-[22px] right-4 z-50 p-1.5 hover:bg-black/5 dark:hover:bg-white/10 rounded-md transition-all text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 cursor-pointer hidden md:flex items-center justify-center"
-          style={{
-            opacity: isSidebarOpen ? 1 : 0,
-            pointerEvents: isSidebarOpen ? 'auto' : 'none'
-          }}
-          title="Collapse sidebar"
-        >
-          <SidebarIcon size={18} />
-        </button>
-
         {isSidebarOpen && (
           <div
             onMouseDown={(e) => {
@@ -3895,7 +4539,7 @@ export default function App() {
       </motion.aside>
 
       <main className="flex-1 flex flex-col relative h-full min-w-0 bg-[var(--theme-bg)] text-[var(--theme-primary)] transition-colors duration-300">
-        {!isPhysicsTabActive && (
+        {!isCodingAgentMode && (
           <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md z-10 sticky top-0 shrink-0">
             <div className="flex items-center gap-2">
               <button 
@@ -3904,51 +4548,50 @@ export default function App() {
               >
                 <SidebarIcon size={20} />
               </button>
-              <AnimatePresence>
-                {!isSidebarOpen && (
-                  <motion.button 
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    transition={{ duration: 0.18, ease: "easeOut" }}
-                    onClick={() => setIsSidebarOpen(true)}
-                    className="hidden md:flex p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors text-gray-500 cursor-pointer"
-                    title="Expand sidebar"
-                  >
-                    <SidebarIcon size={20} />
-                  </motion.button>
-                )}
-              </AnimatePresence>
-              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-400 truncate ml-2">Lumina Intelligence</h2>
+              <button 
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="hidden md:flex p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors text-gray-500 cursor-pointer"
+                title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+              >
+                <SidebarIcon size={20} />
+              </button>
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-400 truncate ml-2">
+                {isPhysicsTabActive 
+                  ? `${activeLabTab ? activeLabTab.charAt(0).toUpperCase() + activeLabTab.slice(1) : 'Physics'} Laboratory`
+                  : 'Lumina Intelligence'
+                }
+              </h2>
             </div>
             <div className="flex items-center gap-4">
-              <div className="relative flex items-center">
-                <AnimatePresence>
-                  {isSearchOpen && (
-                    <motion.div
-                      initial={{ width: 0, opacity: 0 }}
-                      animate={{ width: 200, opacity: 1 }}
-                      exit={{ width: 0, opacity: 0 }}
-                      className="absolute right-full mr-2"
-                    >
-                      <input 
-                        autoFocus
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search messages..."
-                        className="w-full h-9 px-4 bg-gray-100 dark:bg-zinc-800 border-none rounded-full text-xs focus:ring-1 focus:ring-blue-500 outline-none"
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                <button 
-                  onClick={() => setIsSearchOpen(!isSearchOpen)}
-                  className={`p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-full transition-colors ${isSearchOpen ? 'text-blue-500 bg-gray-100 dark:bg-white/5' : 'text-gray-500'}`}
-                >
-                  <Search size={18} />
-                </button>
-              </div>
+              {!isPhysicsTabActive && (
+                <div className="relative flex items-center">
+                  <AnimatePresence>
+                    {isSearchOpen && (
+                      <motion.div
+                        initial={{ width: 0, opacity: 0 }}
+                        animate={{ width: 200, opacity: 1 }}
+                        exit={{ width: 0, opacity: 0 }}
+                        className="absolute right-full mr-2"
+                      >
+                        <input 
+                          autoFocus
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search messages..."
+                          className="w-full h-9 px-4 bg-gray-100 dark:bg-zinc-800 border-none rounded-full text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <button 
+                    onClick={() => setIsSearchOpen(!isSearchOpen)}
+                    className={`p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-full transition-colors ${isSearchOpen ? 'text-blue-500 bg-gray-100 dark:bg-white/5' : 'text-gray-500'}`}
+                  >
+                    <Search size={18} />
+                  </button>
+                </div>
+              )}
               <div className="relative" ref={headerMenuRef}>
                 <button 
                   onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}
@@ -3969,6 +4612,7 @@ export default function App() {
                         { id: 'chemistry_lab', label: 'Chemistry Lab', icon: <Beaker size={16} className="text-emerald-500" />, onClick: () => { setActiveLabTab('chemistry'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
                         { id: 'math_lab', label: 'Math Lab', icon: <Compass size={16} className="text-purple-500" />, onClick: () => { setActiveLabTab('math'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
                         { id: 'biology_lab', label: 'Biology Lab', icon: <Flower2 size={16} className="text-rose-500" />, onClick: () => { setActiveLabTab('biology'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
+                        { id: 'coding_agent', label: isCodingAgentMode ? 'Disable Coding Agent' : 'Coding Agent', icon: <Code size={16} className={isCodingAgentMode ? 'text-emerald-500 animate-pulse' : 'text-amber-500'} />, onClick: () => { setIsCodingAgentMode(!isCodingAgentMode); setActiveLabTab(null); setIsHeaderMenuOpen(false); } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'account', label: 'Account', icon: <User size={16} />, onClick: () => { setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
@@ -3984,7 +4628,7 @@ export default function App() {
                       ))}
                       <div className="my-1.5 border-t border-gray-100 dark:border-white/5" />
                       <button
-                        onClick={() => { setActiveSettingsTab('theme'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); }}
+                        onClick={() => { setActiveSettingsTab('general'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); }} style={{ display: 'none' }}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-605 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white transition-colors"
                       >
                         <Palette size={16} />
@@ -4026,6 +4670,32 @@ export default function App() {
               />
             )}
           </div>
+        ) : isCodingAgentMode ? (
+          <CodingAgentWorkspace
+            isDark={isDarkMode}
+            theme={theme}
+            agentWorkspace={agentWorkspace}
+            setAgentWorkspace={setAgentWorkspace}
+            agentPlan={agentPlan}
+            setAgentPlan={setAgentPlan}
+            agentTodos={agentTodos}
+            setAgentTodos={setAgentTodos}
+            agentRunning={agentRunning}
+            setAgentRunning={setAgentRunning}
+            agentStep={agentStep}
+            setAgentStep={setAgentStep}
+            agentLogs={agentLogs}
+            setAgentLogs={setAgentLogs}
+            agentSelectedProvider={agentSelectedProvider}
+            setAgentSelectedProvider={setAgentSelectedProvider}
+            agentApiKeys={agentApiKeys}
+            setAgentApiKeys={setAgentApiKeys}
+            setIsSettingsOpen={setIsSettingsOpen}
+            setActiveSettingsTab={setActiveSettingsTab}
+            onExitMode={() => setIsCodingAgentMode(false)}
+            isSidebarOpen={isSidebarOpen}
+            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          />
         ) : (
           <>
             <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
@@ -4033,7 +4703,7 @@ export default function App() {
                 ref={scrollRef}
                 className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar scroll-smooth"
               >
-                <div className={`mx-auto space-y-8 pb-24 ${isSourcesPanelOpen ? 'max-w-lg md:mr-6' : 'max-w-3xl'} transition-[max-width,margin] duration-500`}>
+                <div className="mx-auto space-y-8 pb-24 max-w-3xl">
                   <AnimatePresence initial={false}>
                     {messages.length === 0 ? (
                       <motion.div 
@@ -4083,9 +4753,9 @@ export default function App() {
                           markdownComponents={markdownComponents}
                           userProfile={userProfile}
                           persona={persona}
-                          isSourcesPanelOpen={isSourcesPanelOpen}
-                          setIsSourcesPanelOpen={handleSetIsSourcesPanelOpen}
-                          setSourcesPanelMessageId={setSourcesPanelMessageId}
+                          isSourcesPanelOpen={false}
+                          setIsSourcesPanelOpen={() => {}}
+                          setSourcesPanelMessageId={() => {}}
                           setActiveArtifact={handleSetActiveArtifact}
                           setIsCanvasOpen={handleSetIsCanvasOpen}
                           setCanvasView={handleSetCanvasView}
@@ -4112,87 +4782,6 @@ export default function App() {
                   >
                     <ArrowUp size={20} />
                   </motion.button>
-                )}
-              </AnimatePresence>
-
-              <AnimatePresence>
-                {isSourcesPanelOpen && (
-                  <motion.div
-                    initial={{ x: 480, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    exit={{ x: 480, opacity: 0 }}
-                    transition={{ duration: isSourcesPanelOpen ? 0.25 : 0.2 }}
-                    className="w-[460px] border-l border-gray-100 dark:border-white/5 bg-gradient-to-b from-white to-gray-50/50 dark:from-zinc-950 dark:to-zinc-900/50 flex flex-col shrink-0 shadow-2xl relative z-20"
-                  >
-                    <div className="px-6 py-5 flex items-center justify-between border-b border-gray-100 dark:border-white/5 bg-gradient-to-r from-blue-50/30 to-transparent dark:from-blue-950/10 dark:to-transparent">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-sm">
-                          <Globe size={15} className="text-white" />
-                        </div>
-                        <div>
-                          <h3 className="font-display font-semibold tracking-tight text-gray-900 dark:text-white text-sm">Sources</h3>
-                          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
-                            {(sourcesPanelMessageId ? messages.find(m => m.id === sourcesPanelMessageId)?.sources : messages.find(m => m.sources)?.sources)?.length ?? 0} references
-                          </p>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => setIsSourcesPanelOpen(false)}
-                        className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-all"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-5 space-y-3 custom-scrollbar">
-                      {(sourcesPanelMessageId ? messages.find(m => m.id === sourcesPanelMessageId)?.sources : messages.find(m => m.sources)?.sources)?.map((source, sIdx) => (
-                        <motion.div
-                          key={sIdx}
-                          initial={{ opacity: 0, y: 12 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: sIdx * 0.04, duration: 0.3 }}
-                          className="group relative overflow-hidden rounded-xl border border-gray-100/80 dark:border-white/5 bg-white dark:bg-zinc-950 hover:border-blue-200 dark:hover:border-blue-500/30 hover:shadow-md hover:shadow-blue-500/5 transition-all duration-200"
-                        >
-                          <div className="absolute inset-0 bg-gradient-to-br from-blue-50/0 via-transparent to-transparent dark:from-blue-950/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                          <a 
-                            href={source.url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="block p-4 relative"
-                          >
-                            <div className="flex items-start gap-3.5">
-                              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-gray-50 to-gray-100 dark:from-zinc-900 dark:to-zinc-800 border border-gray-100 dark:border-white/5 flex items-center justify-center shrink-0 shadow-sm group-hover:border-blue-200 dark:group-hover:border-blue-500/30 group-hover:shadow-md group-hover:shadow-blue-500/10 transition-all duration-200">
-                                <Globe size={16} className="text-gray-400 group-hover:text-blue-500 transition-colors duration-200" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-0.5">
-                                  <h4 className="text-xs font-semibold text-gray-900 dark:text-white truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{source.title}</h4>
-                                  <ExternalLink size={10} className="text-gray-300 dark:text-gray-600 group-hover:text-blue-400 transition-colors shrink-0" />
-                                </div>
-                                <p className="text-[10px] text-gray-400 truncate mb-2 font-mono">{source.url}</p>
-                                {source.snippet && (
-                                  <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed bg-gray-50/80 dark:bg-white/[0.03] p-2.5 rounded-lg border border-gray-100/50 dark:border-white/5">
-                                    {source.snippet}
-                                  </p>
-                                )}
-                                <div className="inline-flex items-center gap-1 text-[9px] font-bold text-blue-500 group-hover:text-blue-600 uppercase tracking-widest transition-colors mt-2.5">
-                                  Visit Source
-                                  <ArrowRight size={9} className="group-hover:translate-x-0.5 transition-transform" />
-                                </div>
-                              </div>
-                            </div>
-                          </a>
-                        </motion.div>
-                      )) || (
-                        <div className="h-full flex flex-col items-center justify-center text-center">
-                          <div className="w-14 h-14 rounded-2xl bg-gray-50 dark:bg-zinc-900 border border-gray-100 dark:border-white/5 flex items-center justify-center mb-4">
-                            <Layout size={26} className="text-gray-300 dark:text-gray-600" />
-                          </div>
-                          <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">No Sources Available</p>
-                          <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-1">Search results will appear here</p>
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
                 )}
               </AnimatePresence>
             </div>
@@ -4239,7 +4828,7 @@ export default function App() {
                     { id: 'persona', label: 'Persona', icon: <User size={16} /> },
                     { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
                     { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
-                    { id: 'theme', label: 'Themes', icon: <Palette size={16} /> },
+
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -4286,11 +4875,11 @@ export default function App() {
                         <div className="space-y-6">
                           <div className="flex items-center justify-between">
                             <div>
-                              <div className="font-medium text-sm">Theme</div>
-                              <div className="text-xs text-gray-400">Customize colors and appearance</div>
+                              <div className="font-medium text-sm" style={{ display: 'none' }}>Theme</div>
+                              <div className="text-xs text-gray-400" style={{ display: 'none' }}>Customize colors and appearance</div>
                             </div>
                             <button
-                              onClick={() => setActiveSettingsTab('theme')}
+                              onClick={() => {}} style={{ display: 'none' }}
                               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors"
                             >
                               Open Themes
@@ -4333,8 +4922,8 @@ export default function App() {
                         <div className="space-y-6">
                           <div className="flex items-center justify-between">
                             <div>
-                              <div className="font-medium text-sm">Llama Bridge</div>
-                              <div className="text-xs text-gray-400">Enable local Llama Bridge integration</div>
+                              <div className="font-medium text-sm">Llama Tools</div>
+                              <div className="text-xs text-gray-400">Use tools from Llama Bridge</div>
                             </div>
                             <button 
                               onClick={() => {
@@ -4513,34 +5102,62 @@ export default function App() {
                       <div>
                         <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Search API Configuration</h3>
                         <div className="space-y-6">
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-gray-500 uppercase">Tavily API Key</label>
-                              <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">Get Key</a>
+                          <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase block mb-3">Search Provider</label>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => { setSearchProvider('tavily'); setIsSearchSaved(false); }}
+                                className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all border ${
+                                  searchProvider === 'tavily'
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'bg-gray-50 dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-white/10'
+                                }`}
+                              >
+                                Tavily
+                              </button>
+                              <button
+                                onClick={() => { setSearchProvider('serpapi'); setIsSearchSaved(false); }}
+                                className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all border ${
+                                  searchProvider === 'serpapi'
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'bg-gray-50 dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-white/10'
+                                }`}
+                              >
+                                SerpAPI
+                              </button>
                             </div>
-                            <input 
-                              type="password"
-                              value={tavilyApiKey}
-                              onChange={(e) => { setTavilyApiKey(e.target.value); setIsSearchSaved(false); }}
-                              placeholder="Enter your Tavily API key"
-                              className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
-                            />
-                            <p className="text-[10px] text-gray-500 italic">Optimized for AI researchers and real-time data retrieval.</p>
                           </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-gray-500 uppercase">Serp API Key</label>
-                              <a href="https://serpapi.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">Get Key</a>
+                          {searchProvider === 'tavily' ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-gray-500 uppercase">Tavily API Key</label>
+                                <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">Get Key</a>
+                              </div>
+                              <input 
+                                type="password"
+                                value={tavilyApiKey}
+                                onChange={(e) => { setTavilyApiKey(e.target.value); setIsSearchSaved(false); }}
+                                placeholder="Enter your Tavily API key"
+                                className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                              />
+                              <p className="text-[10px] text-gray-500 italic">Optimized for AI researchers and real-time data retrieval.</p>
                             </div>
-                            <input 
-                              type="password"
-                              value={serpApiKey}
-                              onChange={(e) => { setSerpApiKey(e.target.value); setIsSearchSaved(false); }}
-                              placeholder="Enter your SerpAPI key"
-                              className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
-                            />
-                            <p className="text-[10px] text-gray-500 italic">Universal search API for Google, Bing, and more.</p>
-                          </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-gray-500 uppercase">SerpAPI API Key</label>
+                                <a href="https://serpapi.com" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline">Get Key</a>
+                              </div>
+                              <input 
+                                type="password"
+                                value={serpApiKey}
+                                onChange={(e) => { setSerpApiKey(e.target.value); setIsSearchSaved(false); }}
+                                placeholder="Enter your SerpAPI key"
+                                className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 transition-all outline-none"
+                              />
+                              <p className="text-[10px] text-gray-500 italic">Universal search API for Google, Bing, and more.</p>
+                            </div>
+                          )}
                           <div className="flex gap-3">
                             <button
                               onClick={handleVerifySearch}
@@ -4585,15 +5202,15 @@ export default function App() {
                             <div className="text-[10px] text-gray-400 space-y-1">
                               <div className="flex items-center gap-2">
                                 <span className={`w-2 h-2 rounded-full ${tavilyApiKey && tavilyApiKey.trim() ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                                <span>Tavily {(tavilyApiKey && tavilyApiKey.trim()) ? '(Primary)' : '(Not configured)'}</span>
+                                <span>Tavily {tavilyApiKey?.trim() ? '(Active)' : '(Not configured)'}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${(!tavilyApiKey || !tavilyApiKey.trim()) && serpApiKey && serpApiKey.trim() ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                                <span>SerpApi {((!tavilyApiKey || !tavilyApiKey.trim()) && serpApiKey && serpApiKey.trim()) ? '(Active)' : '(Not configured or shadowed)'}</span>
+                                <span className={`w-2 h-2 rounded-full ${serpApiKey && serpApiKey.trim() ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                                <span>SerpAPI {serpApiKey?.trim() ? '(Active)' : '(Not configured)'}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full ${(!tavilyApiKey || !tavilyApiKey.trim()) && (!serpApiKey || !serpApiKey.trim()) ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                                <span>DuckDuckGo {(!tavilyApiKey?.trim() && !serpApiKey?.trim()) ? '(Active)' : '(Fallback)'}</span>
+                                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                <span>DuckDuckGo (Fallback)</span>
                               </div>
                             </div>
                           </div>
@@ -4633,6 +5250,19 @@ export default function App() {
                               type="date"
                               value={userProfile.dob}
                               onChange={(e) => setUserProfile({ ...userProfile, dob: e.target.value })}
+                              className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-medium text-gray-500">Age</label>
+                            <input
+                              type="number"
+                              value={userProfile.age || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setUserProfile({ ...userProfile, age: val ? parseInt(val) : '' });
+                              }}
+                              placeholder="Your age"
                               className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                             />
                           </div>
@@ -4910,11 +5540,7 @@ export default function App() {
                     </motion.div>
                   )}
 
-                  {activeSettingsTab === 'theme' && (
-                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}>
-                      <ThemeSettingsPanel />
-                    </motion.div>
-                  )}
+
                 </div>
               </div>
             </motion.div>
@@ -4944,6 +5570,7 @@ export default function App() {
         onClose={() => setIsCanvasOpen(false)} 
         view={canvasView}
         onSetView={setCanvasView}
+        allArtifacts={chats.find(c => c.id === currentChatId)?.messages.flatMap(m => m.artifacts || []) || []}
       />
 
       <PhysicsGraphCanvas 

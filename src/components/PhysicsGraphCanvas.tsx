@@ -366,7 +366,8 @@ export const PhysicsGraphCanvas: React.FC<{
   isOpen: boolean;
   onClose: () => void;
   isInline?: boolean;
-}> = ({ isOpen, onClose, isInline = false }) => {
+  initialConfig?: string;
+}> = ({ isOpen, onClose, isInline = false, initialConfig }) => {
   const { isDark: isDarkTheme, theme } = useTheme();
   const [isOptionsPanelOpen, setIsOptionsPanelOpen] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<PhysicsPreset>(PHYSICS_PRESETS[0]);
@@ -901,22 +902,22 @@ export const PhysicsGraphCanvas: React.FC<{
           <AnimatePresence>
             {isOptionsPanelOpen && (
               <>
-                {/* Backdrop overlay for focus & quick close */}
+                {/* Backdrop overlay for focus & quick close - hidden on desktop so it doesn't block interactivity */}
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 0.35 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setIsOptionsPanelOpen(false)}
-                  className="absolute inset-0 bg-black/60 z-30 pointer-events-auto"
+                  className="absolute inset-0 bg-black/60 z-30 pointer-events-auto md:hidden"
                 />
                 
-                {/* Sliding Card Container wrapping the left controls */}
+                {/* Sliding Card Container wrapping the left controls - push-styled on desktop (md:relative) */}
                 <motion.div
                   initial={{ x: '-100%', opacity: 0.95 }}
                   animate={{ x: 0, opacity: 1 }}
                   exit={{ x: '-100%', opacity: 0.95 }}
                   transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-                  className="absolute left-0 top-0 bottom-0 w-full sm:w-[350px] border-r border-[var(--theme-border)] bg-[var(--theme-surface)] dark:bg-[var(--theme-surface-alt)] backdrop-blur-md overflow-hidden flex flex-col z-40 shadow-2xl"
+                  className="md:relative absolute left-0 top-0 bottom-0 w-full sm:w-[350px] border-r border-[var(--theme-border)] bg-[var(--theme-surface)] dark:bg-[var(--theme-surface-alt)] backdrop-blur-md overflow-hidden flex flex-col z-40 shadow-2xl h-full shrink-0"
                 >
                   <div className="px-5 py-4 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0">
                     <span className="text-xs font-bold uppercase tracking-wider text-[var(--theme-primary)] flex items-center gap-1.5">
@@ -1512,14 +1513,14 @@ export const PhysicsGraphCanvas: React.FC<{
           <div className="flex-1 flex flex-col bg-[var(--theme-bg)] p-6 relative overflow-hidden select-none">
             
             {/* Simulation Motion Control Toolbar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/40 dark:border-white/5 rounded-2xl mb-4 text-xs font-semibold">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-[var(--theme-surface-alt)] border border-[var(--theme-border)] rounded-2xl mb-4 text-xs font-semibold">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setAnimating(!animating)}
                   className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 font-bold cursor-pointer transition-all ${
                     animating
                       ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
-                      : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-250 hover:bg-zinc-50'
+                      : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]'
                   }`}
                 >
                   {animating ? <Pause size={12} /> : <Play size={12} />}
@@ -1531,21 +1532,92 @@ export const PhysicsGraphCanvas: React.FC<{
                     setAnimTime(minX);
                   }}
                   disabled={animTime === minX}
-                  className="p-1.5 bg-white dark:bg-zinc-800 border border-zinc-150 dark:border-white/10 text-zinc-450 hover:text-zinc-700 disabled:opacity-40 rounded-xl cursor-pointer transition-opacity"
+                  className="p-1.5 bg-[var(--theme-surface)] border border-[var(--theme-border)] text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] disabled:opacity-40 rounded-xl cursor-pointer transition-opacity"
                   title="Reset simulation dot"
                 >
                   <RotateCcw size={12} />
                 </button>
-                {!isOptionsPanelOpen && (
-                  <button
-                    onClick={() => setIsOptionsPanelOpen(true)}
-                    className="px-3 py-1.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface)] hover:bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] flex items-center gap-1.5 font-bold cursor-pointer transition-all active:scale-95 text-[11px] select-none shadow-xs"
-                    title="Configure presets, constants, and custom parameters"
+                <button
+                  onClick={() => setIsOptionsPanelOpen(!isOptionsPanelOpen)}
+                  className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 font-bold cursor-pointer transition-all active:scale-95 text-[11px] select-none shadow-xs ${
+                    isOptionsPanelOpen
+                      ? 'bg-[var(--theme-surface-alt)] border-[var(--theme-accent)] text-[var(--theme-accent)]'
+                      : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]'
+                  }`}
+                  title="Configure presets, constants, and custom parameters"
+                >
+                  <Sliders size={11} className={isOptionsPanelOpen ? "text-[var(--theme-accent)]" : "text-zinc-450"} />
+                  <span>{isOptionsPanelOpen ? 'Collapse Panel' : 'Expand Panel'}</span>
+                </button>
+
+                {/* PRESETS QUICK DROP-DOWN DISPLAYED DIRECTLY IN TOP BAR */}
+                <span className="h-4 w-px bg-zinc-200 dark:bg-zinc-700/60 mx-1 hidden sm:inline" />
+                <div className="flex items-center gap-1.5 select-none text-[11px]">
+                  <span className="text-zinc-400 font-bold uppercase tracking-wider text-[9px] hidden sm:inline">System:</span>
+                  <select
+                    value={is3DMode ? selected3DPreset.id : selectedPreset.id}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (is3DMode) {
+                        const matched = PHYSICS_3D_PRESETS.find(p => p.id === val);
+                        if (matched) setSelected3DPreset(matched);
+                      } else {
+                        const matched = PHYSICS_PRESETS.find(p => p.id === val);
+                        if (matched) setSelectedPreset(matched);
+                      }
+                    }}
+                    className="bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] hover:bg-[var(--theme-hover-bg)] text-[11px] py-1 px-2.5 rounded-lg font-bold cursor-pointer outline-none focus:ring-1 focus:ring-[var(--theme-accent)] transition-all max-w-[145px] truncate"
                   >
-                    <Sliders size={11} className="text-[var(--theme-accent)] animate-pulse" />
-                    <span>Open Options Tray</span>
+                    {is3DMode 
+                      ? PHYSICS_3D_PRESETS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)
+                      : PHYSICS_PRESETS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)
+                    }
+                  </select>
+                </div>
+
+                {/* QUICK CHECKS / OPTIONS OF PANEL */}
+                <div className="flex items-center gap-1 hidden md:flex border-l border-[var(--theme-border)] pl-2">
+                  <button
+                    type="button"
+                    onClick={() => setIs3DMode(!is3DMode)}
+                    className={`h-7 px-2.5 rounded-lg text-[10px] uppercase tracking-wider font-extrabold border transition-all cursor-pointer ${
+                      is3DMode 
+                        ? 'bg-purple-500/15 border-purple-500/40 text-purple-600 dark:text-purple-450'
+                        : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    {is3DMode ? '3D' : '2D'}
                   </button>
-                )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!is3DMode) {
+                        setTangentMode(prev => !prev);
+                      }
+                    }}
+                    disabled={is3DMode}
+                    className={`h-7 px-2.5 rounded-lg text-[10px] uppercase tracking-wider font-extrabold border transition-all cursor-pointer ${
+                      tangentMode
+                        ? 'bg-[var(--theme-accent)]/15 border-[var(--theme-accent)]/40 text-[var(--theme-accent)]'
+                        : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    Tangent
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSketchMode(prev => !prev)}
+                    className={`h-7 px-2.5 rounded-lg text-[10px] uppercase tracking-wider font-extrabold border transition-all cursor-pointer ${
+                      sketchMode
+                        ? 'bg-[var(--theme-accent)]/15 border-[var(--theme-accent)]/40 text-[var(--theme-accent)]'
+                        : 'bg-[var(--theme-surface)] border-[var(--theme-border)] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    Grid
+                  </button>
+                </div>
               </div>
 
               {/* Simulation status logs */}

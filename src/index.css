@@ -480,23 +480,26 @@
    DARK MODE OVERRIDES
 ───────────────────────────────────────── */
 .dark {
-  @apply bg-dark-bg text-dark-text;
+  background-color: var(--theme-bg);
+  color: var(--theme-primary);
 }
 
-.dark .bg-white              { @apply bg-dark-bg; }
-.dark .bg-gray-50\/50        { @apply bg-dark-sidebar; }
-.dark .border-gray-100       { @apply border-dark-border; }
-.dark .border-gray-200       { @apply border-dark-border; }
-.dark .text-gray-900         { @apply text-dark-text; }
-.dark .text-gray-800         { @apply text-gray-200; }
-.dark .text-gray-700         { @apply text-gray-300; }
-.dark .text-gray-600         { @apply text-gray-400; }
-.dark .text-gray-500         { @apply text-gray-500; }
-.dark .hover\:bg-gray-100:hover  { @apply hover:bg-white/5; }
-.dark .hover\:bg-gray-200:hover  { @apply hover:bg-white/10; }
-.dark .bg-gray-100           { @apply bg-white/5; }
-.dark .bg-gray-50            { @apply bg-white/5; }
-.dark .bg-gray-200\/50       { @apply bg-white/10; }
+.dark .bg-white              { background-color: var(--theme-surface); }
+.dark .bg-zinc-900           { background-color: var(--theme-surface); }
+.dark .bg-zinc-950           { background-color: var(--theme-sidebar); }
+.dark .bg-gray-50\/50        { background-color: var(--theme-sidebar); }
+.dark .border-gray-100       { border-color: var(--theme-border); }
+.dark .border-gray-200       { border-color: var(--theme-border); }
+.dark .text-gray-900         { color: var(--theme-primary); }
+.dark .text-gray-800         { color: var(--theme-primary); }
+.dark .text-gray-700         { color: var(--theme-secondary); }
+.dark .text-gray-600         { color: var(--theme-secondary); }
+.dark .text-gray-500         { color: var(--theme-muted); }
+.dark .hover\:bg-gray-100:hover  { background-color: var(--theme-hover-bg); }
+.dark .hover\:bg-gray-200:hover  { background-color: var(--theme-hover-bg); }
+.dark .bg-gray-100           { background-color: var(--theme-surface-alt); }
+.dark .bg-gray-50            { background-color: var(--theme-surface-alt); }
+.dark .bg-gray-200\/50       { background-color: var(--theme-surface-alt); }
 .dark .shadow-sm             { @apply shadow-none; }
 .dark .shadow-md             { @apply shadow-none; }
 

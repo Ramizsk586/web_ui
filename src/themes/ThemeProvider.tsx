@@ -33,14 +33,12 @@ function getSystemPrefersDark(): boolean {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeId, setThemeId] = useState(getStoredTheme);
   const [mounted, setMounted] = useState(false);
 
-  const theme = getThemeById(themeId);
+  const theme = themes[0];
 
   const setTheme = useCallback((id: string) => {
-    setThemeId(id);
-    storeTheme(id);
+    // No-op to lock user to Claude theme always
   }, []);
 
   useEffect(() => {
