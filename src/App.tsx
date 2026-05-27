@@ -62,7 +62,6 @@ import {
   PenTool,
   History,
   FileText,
-  FileCode,
   Code,
   Type as TypeIcon,
   Music,
@@ -87,7 +86,6 @@ import { PhysicsGraphCanvas } from './components/PhysicsGraphCanvas';
 import { ChemistryLabCanvas } from './components/ChemistryLabCanvas';
 import { MathLabCanvas } from './components/MathLabCanvas';
 import { BiologyLabCanvas } from './components/BiologyLabCanvas';
-import { CodingAgentWorkspace } from './components/Coder';
 
 interface ToolCallNode {
   id: string;
@@ -213,7 +211,6 @@ interface SidebarProps {
   setCurrentChatId: (id: string | null) => void;
   createNewChat: () => void;
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
-  isCollapsed: boolean;
   onOpenSettings: () => void;
   userProfile: {
     name: string;
@@ -224,8 +221,6 @@ interface SidebarProps {
   };
   activeLabTab: 'physics' | 'chemistry' | 'math' | 'biology' | null;
   setActiveLabTab: (tab: 'physics' | 'chemistry' | 'math' | 'biology' | null) => void;
-  isCodingAgentMode?: boolean;
-  setIsCodingAgentMode?: (val: boolean) => void;
   onSelect?: () => void;
 }
 
@@ -239,8 +234,6 @@ const SidebarContent = ({
   userProfile,
   activeLabTab,
   setActiveLabTab,
-  isCodingAgentMode,
-  setIsCodingAgentMode,
   onSelect
 }: SidebarProps) => {
   const [labsHovered, setLabsHovered] = useState(false);
@@ -259,24 +252,6 @@ const SidebarContent = ({
             <Sparkles size={18} />
           </div>
           <span className="font-display font-semibold tracking-tight">Lumina</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {setIsCodingAgentMode && (
-            <button
-              onClick={() => {
-                setIsCodingAgentMode(!isCodingAgentMode);
-                setActiveLabTab(null);
-              }}
-              className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center ${
-                isCodingAgentMode
-                  ? 'bg-amber-500/10 text-amber-500 dark:text-[#df9e7e] border border-amber-500/20'
-                  : 'hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-              }`}
-              title={isCodingAgentMode ? "Disable Coding Agent" : "Coding Agent"}
-            >
-              <Code size={18} />
-            </button>
-          )}
         </div>
       </div>
 
@@ -2501,9 +2476,6 @@ const ClaudeAsterisk = () => (
   </svg>
 );
 
-// CodingAgentWorkspace properties and component is implemented in /src/components/Coder.tsx
-
-
 export default function App() {
   const { isDark: isDarkMode, theme } = useTheme();
   const [userProfile, setUserProfile] = useState<{
@@ -2618,32 +2590,7 @@ export default function App() {
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = useState<string | null>(null);
 
-  // Coding Agent states
-  const [isCodingAgentMode, setIsCodingAgentMode] = useState<boolean>(false);
-  const [agentWorkspace, setAgentWorkspace] = useState<string | null>(null);
-  const [agentPlan, setAgentPlan] = useState<string | null>(null);
-  const [agentTodos, setAgentTodos] = useState<{ id: string; title: string; status: 'pending' | 'success' | 'running' | 'failed' | 'waiting' }[]>([]);
-  const [agentRunning, setAgentRunning] = useState<boolean>(false);
-  const [agentStep, setAgentStep] = useState<number>(0);
-  const [agentLogs, setAgentLogs] = useState<string[]>([]);
-  const [agentSelectedProvider, setAgentSelectedProvider] = useState<string>('K2.6 Agent');
-  const [agentApiKeys, setAgentApiKeys] = useState<{
-    planner: { provider: string; key: string; endpoint: string; model: string };
-    coder: { provider: string; key: string; endpoint: string; model: string };
-    linter: { provider: string; key: string; endpoint: string; model: string };
-    fallback: { provider: string; key: string; endpoint: string; model: string };
-  }>(() => {
-    try {
-      const saved = localStorage.getItem('lumina_agent_apikeys');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return {
-      planner: { provider: 'gemini', key: 'AIzaSyPlannerKey1103', endpoint: 'https://generativelanguage.googleapis.com', model: 'gemini-2.5-pro' },
-      coder: { provider: 'deepseek', key: 'sk-dsCoderSecretKey9922', endpoint: 'https://api.deepseek.com', model: 'deepseek-coder' },
-      linter: { provider: 'anthropic', key: 'sk-antLinterSecurity786', endpoint: 'https://api.anthropic.com', model: 'claude-3-5-sonnet' },
-      fallback: { provider: 'openai', key: 'sk-projOpenFallback554', endpoint: 'https://api.openai.com', model: 'gpt-4o-mini' }
-    };
-  });
+
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'project' | 'skills' | 'style'>('main');
@@ -4532,7 +4479,6 @@ export default function App() {
                 }} 
                 createNewChat={createNewChat} 
                 setChats={setChats}
-                isCollapsed={false}
                 onSelect={() => setIsMobileMenuOpen(false)}
                 onOpenSettings={() => {
                   setIsSettingsOpen(true);
@@ -4541,8 +4487,6 @@ export default function App() {
                 userProfile={userProfile}
                 activeLabTab={activeLabTab}
                 setActiveLabTab={setActiveLabTab}
-                isCodingAgentMode={isCodingAgentMode}
-                setIsCodingAgentMode={setIsCodingAgentMode}
               />
             </motion.aside>
           </>
@@ -4565,13 +4509,10 @@ export default function App() {
             setCurrentChatId={setCurrentChatId} 
             createNewChat={createNewChat} 
             setChats={setChats}
-            isCollapsed={false}
             onOpenSettings={() => setIsSettingsOpen(true)}
             userProfile={userProfile}
             activeLabTab={activeLabTab}
             setActiveLabTab={setActiveLabTab}
-            isCodingAgentMode={isCodingAgentMode}
-            setIsCodingAgentMode={setIsCodingAgentMode}
           />
         </div>
         
@@ -4589,8 +4530,7 @@ export default function App() {
       </motion.aside>
 
       <main className="flex-1 flex flex-col relative h-full min-w-0 bg-[var(--theme-bg)] text-[var(--theme-primary)] transition-colors duration-300">
-        {!isCodingAgentMode && (
-          <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md z-10 sticky top-0 shrink-0">
+        <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md z-10 sticky top-0 shrink-0">
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => setIsMobileMenuOpen(true)}
@@ -4662,7 +4602,6 @@ export default function App() {
                         { id: 'chemistry_lab', label: 'Chemistry Lab', icon: <Beaker size={16} className="text-emerald-500" />, onClick: () => { setActiveLabTab('chemistry'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
                         { id: 'math_lab', label: 'Math Lab', icon: <Compass size={16} className="text-purple-500" />, onClick: () => { setActiveLabTab('math'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
                         { id: 'biology_lab', label: 'Biology Lab', icon: <Flower2 size={16} className="text-rose-500" />, onClick: () => { setActiveLabTab('biology'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
-                        { id: 'coding_agent', label: isCodingAgentMode ? 'Disable Coding Agent' : 'Coding Agent', icon: <Code size={16} className={isCodingAgentMode ? 'text-emerald-500 animate-pulse' : 'text-amber-500'} />, onClick: () => { setIsCodingAgentMode(!isCodingAgentMode); setActiveLabTab(null); setIsHeaderMenuOpen(false); } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'account', label: 'Account', icon: <User size={16} />, onClick: () => { setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
@@ -4690,7 +4629,6 @@ export default function App() {
               </div>
             </div>
           </header>
-        )}
 
         {isPhysicsTabActive ? (
           <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-[var(--theme-bg)]">
@@ -4720,32 +4658,6 @@ export default function App() {
               />
             )}
           </div>
-        ) : isCodingAgentMode ? (
-          <CodingAgentWorkspace
-            isDark={isDarkMode}
-            theme={theme}
-            agentWorkspace={agentWorkspace}
-            setAgentWorkspace={setAgentWorkspace}
-            agentPlan={agentPlan}
-            setAgentPlan={setAgentPlan}
-            agentTodos={agentTodos}
-            setAgentTodos={setAgentTodos}
-            agentRunning={agentRunning}
-            setAgentRunning={setAgentRunning}
-            agentStep={agentStep}
-            setAgentStep={setAgentStep}
-            agentLogs={agentLogs}
-            setAgentLogs={setAgentLogs}
-            agentSelectedProvider={agentSelectedProvider}
-            setAgentSelectedProvider={setAgentSelectedProvider}
-            agentApiKeys={agentApiKeys}
-            setAgentApiKeys={setAgentApiKeys}
-            setIsSettingsOpen={setIsSettingsOpen}
-            setActiveSettingsTab={setActiveSettingsTab}
-            onExitMode={() => setIsCodingAgentMode(false)}
-            isSidebarOpen={isSidebarOpen}
-            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-          />
         ) : (
           <>
             <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
