@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('__electronAPI', {
   openFolderDialog: () => {
     return ipcRenderer.invoke('dialog:openFolder');
   },
+  getStoredState: () => {
+    return ipcRenderer.invoke('storage:getState');
+  },
+  setStoredState: (state: Record<string, any>) => {
+    return ipcRenderer.invoke('storage:setState', state);
+  },
   zoomIn: () => ipcRenderer.invoke('zoom:in'),
   zoomOut: () => ipcRenderer.invoke('zoom:out'),
   zoomReset: () => ipcRenderer.invoke('zoom:reset'),

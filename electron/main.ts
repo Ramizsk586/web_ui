@@ -9,6 +9,32 @@ let serverProcess: ChildProcessWithoutNullStreams | null = null;
 
 const isDev = !app.isPackaged;
 const SERVER_PORT = parseInt(process.env.PORT || '3000', 10);
+const APP_STATE_FILE = 'lumina-state.json';
+
+function getStateFilePath() {
+  return path.join(app.getPath('userData'), APP_STATE_FILE);
+}
+
+function readAppState() {
+  try {
+    const filePath = getStateFilePath();
+    if (!fs.existsSync(filePath)) return {};
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch (error) {
+    console.error('Failed to read app state:', error);
+    return {};
+  }
+}
+
+function writeAppState(nextState: Record<string, any>) {
+  try {
+    const filePath = getStateFilePath();
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(nextState, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Failed to write app state:', error);
+  }
+}
 
 function waitForServer(url: string, timeout = 60000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -90,12 +116,11 @@ function startServerProcess(): Promise<string> {
 }
 
 function createWindow() {
-  const isMaximized = !isDev;
   mainWindow = new BrowserWindow({
-    width: 600,
-    height: 400,
-    minWidth: 400,
-    minHeight: 300,
+    width: 750,
+    height: 500,
+    minWidth: 500,
+    minHeight: 375,
     title: 'Lumina AI Chat',
     backgroundColor: '#09090b',
     frame: false,
@@ -112,7 +137,6 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
-    if (isDev) mainWindow?.maximize();
   });
 
   Menu.setApplicationMenu(null);
@@ -137,7 +161,7 @@ function createWindow() {
         webPreferences: { preload: path.join(__dirname, 'preload.cjs') },
       });
 
-      const promptHTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><style>
+      const promptHTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none';"><style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#1a1a1a;color:#f0f0f0;padding:20px;border-radius:12px;border:1px solid #333;overflow:hidden;height:100vh;display:flex;flex-direction:column}
 h3{font-size:13px;font-weight:600;margin-bottom:4px;color:#ccc}
@@ -209,6 +233,11 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
     if (mainWindow) mainWindow.webContents.setZoomFactor(Math.max(0.3, mainWindow.webContents.getZoomFactor() - 0.1));
   });
   ipcMain.handle('zoom:reset', () => mainWindow?.webContents.setZoomFactor(1.0));
+  ipcMain.handle('storage:getState', () => readAppState());
+  ipcMain.handle('storage:setState', (_event, nextState: Record<string, any>) => {
+    writeAppState(nextState);
+    return true;
+  });
 
   ipcMain.on('show-context-menu', () => {
     if (!mainWindow) return;
@@ -228,7 +257,7 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
   mainWindow.on('closed', () => { mainWindow = null; });
 
   // Show a simple dark background while waiting for the server
-  const loadingHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{background:#09090b;margin:0;overflow:hidden;display:flex;align-items:center;justify-content:center;height:100vh;color:rgba(255,255,255,0.3);font-family:sans-serif;font-size:14px;}</style></head><body><div>Loading Lumina AI Chat...</div></body></html>`;
+  const loadingHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none';"><style>body{background:#09090b;margin:0;overflow:hidden;display:flex;align-items:center;justify-content:center;height:100vh;color:rgba(255,255,255,0.3);font-family:sans-serif;font-size:14px;}</style></head><body><div>Loading Lumina AI Chat...</div></body></html>`;
   const loadingDir = isDev ? path.join(__dirname, '..', 'dist-electron') : path.join(process.resourcesPath, 'dist-electron');
   if (!fs.existsSync(loadingDir)) fs.mkdirSync(loadingDir, { recursive: true });
   const loadingFile = path.join(loadingDir, 'loading-wait.html');
@@ -240,6 +269,12 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
   startServerProcess()
     .then(async () => {
       mainWindow?.loadURL(url);
+      // Auto-open DevTools window separately after loading completes
+      if (isDev) {
+        mainWindow?.webContents.on('did-finish-load', () => {
+          mainWindow?.webContents.openDevTools({ mode: 'detach' });
+        });
+      }
     })
     .catch((err) => {
       console.error('Failed to start server:', err);

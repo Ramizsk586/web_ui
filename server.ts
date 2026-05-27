@@ -223,6 +223,125 @@ async function startServer() {
     }
   });
 
+  // Universal model listing proxy: fetch models from any OpenAI-compatible endpoint server-side to avoid CORS
+  app.post("/api/provider/models", async (req, res) => {
+    const { endpoint, apiKey } = req.body;
+    if (!endpoint) {
+      return res.status(400).json({ error: "endpoint is required" });
+    }
+    try {
+      const url = endpoint.replace(/\/+$/, '');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      // Most OpenAI-compatible endpoints expose /models or /v1/models
+      let models: any[] = [];
+      let triedPaths: string[] = [];
+
+      const tryFetch = async (path: string): Promise<boolean> => {
+        triedPaths.push(path);
+        try {
+          const response = await axios.get(path, { headers, timeout: 10000 });
+          if (response.status === 200) {
+            const data = response.data;
+            const list = data.data || data.models || [];
+            if (Array.isArray(list) && list.length > 0) {
+              models = list.map((m: any) => ({
+                id: m.id,
+                name: m.display_name || m.name || m.id,
+              }));
+              return true;
+            }
+          }
+        } catch {}
+        return false;
+      };
+
+      // Try multiple common paths: /models, /v1/models, /api/models
+      const pathsToTry = [
+        `${url}/models`,
+        `${url}/v1/models`,
+        `${url}/api/models`,
+      ];
+
+      for (const path of pathsToTry) {
+        if (await tryFetch(path)) break;
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      if (models.length > 0) {
+        res.json({ success: true, models });
+      } else {
+        // If all paths failed, try the health endpoint to at least verify connectivity
+        const healthPaths = [`${url}/health`, `${url}/v1/health`, `${url}/api/health`];
+        let reached = false;
+        for (const hp of healthPaths) {
+          try {
+            const hr = await axios.get(hp, { headers, timeout: 5000 });
+            if (hr.status === 200) { reached = true; break; }
+          } catch {}
+        }
+        if (reached) {
+          res.json({ success: true, models: [], message: 'Connected but no models endpoint found. Enter model name manually.' });
+        } else {
+          res.status(502).json({ error: 'Could not reach provider endpoint', triedPaths });
+        }
+      }
+    } catch (e: any) {
+      res.status(502).json({ error: 'Provider request failed', detail: e.message });
+    }
+  });
+
+  // Universal verification proxy: checks if an endpoint responds with valid auth
+  app.post("/api/provider/verify", async (req, res) => {
+    const { endpoint, apiKey } = req.body;
+    if (!endpoint) {
+      return res.status(400).json({ error: "endpoint is required" });
+    }
+    try {
+      const url = endpoint.replace(/\/+$/, '');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      // Try fetching models to verify connectivity + auth
+      const pathsToTry = [
+        `${url}/models`,
+        `${url}/v1/models`,
+        `${url}/api/models`,
+      ];
+
+      let verified = false;
+      for (const path of pathsToTry) {
+        try {
+          const response = await axios.get(path, { headers, timeout: 10000 });
+          if (response.status === 200) {
+            verified = true;
+            break;
+          }
+        } catch {}
+      }
+
+      // If models paths fail, try health
+      if (!verified) {
+        const healthPaths = [`${url}/health`, `${url}/v1/health`, `${url}/api/health`];
+        for (const hp of healthPaths) {
+          try {
+            const hr = await axios.get(hp, { headers, timeout: 5000 });
+            if (hr.status === 200) { verified = true; break; }
+          } catch {}
+        }
+      }
+
+      if (verified) {
+        res.json({ success: true, message: 'Connection verified' });
+      } else {
+        res.status(502).json({ error: 'Could not verify connection', message: 'Endpoint is unreachable or API key is invalid' });
+      }
+    } catch (e: any) {
+      res.status(502).json({ error: 'Verification failed', detail: e.message });
+    }
+  });
+
   // Proxy: chat completions to Llama Bridge
   app.post("/api/bridge/chat", async (req, res) => {
     const { bridgeUrl, apiKey, model, messages, tools, stream } = req.body;
@@ -395,6 +514,260 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to delete", detail: e.message });
+    }
+  });
+
+  // AI Chat Completion Proxy
+  app.post("/api/chat", async (req, res) => {
+    const { messages, systemPrompt, model, config } = req.body;
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: "messages array is required" });
+    }
+
+    // Determine provider configuration
+    let provider = 'openai-compatible';
+    let baseUrl = '';
+    let apiKey = '';
+
+    if (config) {
+      provider = config.provider || 'openai-compatible';
+      baseUrl = config.baseUrl || '';
+      apiKey = config.apiKey || '';
+    }
+
+    // Resolve endpoint based on the selected model/provider from agentApiKeys
+    // If no config provided, try to infer from the model name
+    if (!config || !config.baseUrl) {
+      const modelLower = (model || '').toLowerCase();
+      
+      // Google Gemini models
+      if (modelLower.includes('gemini')) {
+        provider = 'google-gemini';
+        baseUrl = 'https://generativelanguage.googleapis.com/v1beta';
+        apiKey = process.env.GEMINI_API_KEY || '';
+      }
+      // OpenAI models
+      else if (modelLower.startsWith('gpt') || modelLower.startsWith('o1') || modelLower.startsWith('o3')) {
+        provider = 'openai';
+        baseUrl = 'https://api.openai.com/v1';
+        apiKey = process.env.OPENAI_API_KEY || '';
+      }
+      // Anthropic Claude models
+      else if (modelLower.includes('claude')) {
+        provider = 'anthropic';
+        baseUrl = 'https://api.anthropic.com/v1';
+        apiKey = process.env.ANTHROPIC_API_KEY || '';
+      }
+      // DeepSeek models
+      else if (modelLower.includes('deepseek')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://api.deepseek.com/v1';
+        apiKey = process.env.DEEPSEEK_API_KEY || '';
+      }
+      // Groq models
+      else if (modelLower.includes('groq') || modelLower.includes('llama')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://api.groq.com/openai/v1';
+        apiKey = process.env.GROQ_API_KEY || '';
+      }
+      // Ollama local
+      else if (modelLower.includes('ollama')) {
+        provider = 'openai-compatible';
+        baseUrl = 'http://localhost:11434/v1';
+        apiKey = '';
+      }
+      // LM Studio local
+      else if (modelLower.includes('lm-studio') || modelLower.includes('lm studio')) {
+        provider = 'openai-compatible';
+        baseUrl = 'http://localhost:1234/v1';
+        apiKey = '';
+      }
+      // Default fallback to environment variable
+      else {
+        provider = 'openai-compatible';
+        baseUrl = process.env.AI_BASE_URL || 'http://localhost:11434/v1';
+        apiKey = process.env.AI_API_KEY || '';
+      }
+    }
+
+    // Build the API messages array with system prompt
+    const apiMessages: any[] = [];
+    if (systemPrompt) {
+      apiMessages.push({ role: 'system', content: systemPrompt });
+    }
+    apiMessages.push(...messages.map((m: any) => ({
+      role: m.role,
+      content: m.content
+    })));
+
+    try {
+      if (provider === 'anthropic') {
+        // Anthropic uses a different API format
+        const response = await axios.post(
+          `${baseUrl}/messages`,
+          {
+            model: model || 'claude-3-5-sonnet-20241022',
+            max_tokens: 4096,
+            system: systemPrompt || undefined,
+            messages: messages.map((m: any) => ({
+              role: m.role === 'assistant' ? 'assistant' : 'user',
+              content: m.content
+            })),
+            stream: true
+          },
+          {
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'Content-Type': 'application/json'
+            },
+            responseType: 'stream',
+            timeout: 60000
+          }
+        );
+
+        // Transform Anthropic stream to OpenAI-compatible SSE format
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const decoder = new TextDecoder();
+        response.data.on('data', (chunk: Buffer) => {
+          const text = decoder.decode(chunk, { stream: true });
+          const lines = text.split('\n').filter((l: string) => l.trim());
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'content_block_delta' && data.delta?.text) {
+                  res.write(data.delta.text);
+                }
+              } catch {}
+            }
+          }
+        });
+        response.data.on('end', () => res.end());
+        response.data.on('error', (err: any) => {
+          console.error('Anthropic stream error:', err);
+          res.end();
+        });
+        return;
+      }
+
+      if (provider === 'google-gemini') {
+        // Google Gemini API format
+        const url = `${baseUrl}/models/${model || 'gemini-2.5-flash'}:streamGenerateContent?alt=sse&key=${apiKey}`;
+        const response = await axios.post(
+          url,
+          {
+            contents: apiMessages.map((m: any) => ({
+              role: m.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: m.content }]
+            })),
+            systemInstruction: systemPrompt ? {
+              parts: [{ text: systemPrompt }]
+            } : undefined,
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 8192
+            }
+          },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            responseType: 'stream',
+            timeout: 60000
+          }
+        );
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const decoder = new TextDecoder();
+        response.data.on('data', (chunk: Buffer) => {
+          const text = decoder.decode(chunk, { stream: true });
+          const lines = text.split('\n').filter((l: string) => l.trim());
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                  res.write(data.candidates[0].content.parts[0].text);
+                }
+              } catch {}
+            }
+          }
+        });
+        response.data.on('end', () => res.end());
+        response.data.on('error', (err: any) => {
+          console.error('Gemini stream error:', err);
+          res.end();
+        });
+        return;
+      }
+
+      // Default: OpenAI-compatible streaming
+      const requestBody: any = {
+        model: model || 'gpt-4o-mini',
+        messages: apiMessages,
+        stream: true,
+        max_tokens: 4096,
+        temperature: 0.7
+      };
+
+      const response = await axios.post(
+        `${baseUrl}/chat/completions`,
+        requestBody,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+          },
+          responseType: 'stream',
+          timeout: 60000
+        }
+      );
+
+      // Stream the response back to the client
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      const decoder = new TextDecoder();
+      response.data.on('data', (chunk: Buffer) => {
+        const text = decoder.decode(chunk, { stream: true });
+        const lines = text.split('\n').filter((l: string) => l.trim());
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6);
+            if (dataStr === '[DONE]') {
+              res.end();
+              return;
+            }
+            try {
+              const data = JSON.parse(dataStr);
+              const content = data.choices?.[0]?.delta?.content || '';
+              if (content) {
+                res.write(content);
+              }
+            } catch {}
+          }
+        }
+      });
+      response.data.on('end', () => res.end());
+      response.data.on('error', (err: any) => {
+        console.error('Stream error:', err);
+        res.end();
+      });
+
+    } catch (e: any) {
+      console.error('Chat API Error:', e.message);
+      // If streaming headers haven't been set yet, send JSON error
+      if (!res.headersSent) {
+        res.status(502).json({ error: 'Chat completion failed', detail: e.message });
+      } else {
+        res.end();
+      }
     }
   });
 

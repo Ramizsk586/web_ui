@@ -685,6 +685,56 @@ const SearchResultsUI = React.memo(({ query, sources }: { query: string; sources
   );
 });
 
+const renderNodeIcon = (icon: any) => {
+  if (!icon) return <FileText size={14} />;
+  
+  if (React.isValidElement(icon)) {
+    return icon;
+  }
+  
+  if (typeof icon === 'string') {
+    const name = icon.toLowerCase();
+    if (name.includes('search') || name.includes('research')) return <Search size={14} />;
+    if (name.includes('wikipedia') || name.includes('globe')) return <Globe size={14} />;
+    if (name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs')) return <FileText size={14} />;
+    if (name.includes('write') || name.includes('edit')) return <PenTool size={14} />;
+    if (name.includes('github') || name.includes('box')) return <Box size={14} />;
+    if (name.includes('weather') || name.includes('cloud')) return <CloudMoon size={14} />;
+    if (name.includes('shell') || name.includes('terminal')) return <Terminal size={14} />;
+    if (name.includes('sparkles') || name.includes('ai')) return <Sparkles size={14} />;
+    if (name.includes('check') || name.includes('success')) return <Check size={14} />;
+    return <FileText size={14} />;
+  }
+
+  if (typeof icon === 'object') {
+    let typeName = '';
+    if (icon.type) {
+      if (typeof icon.type === 'string') {
+        typeName = icon.type;
+      } else if (typeof icon.type === 'object') {
+        typeName = icon.type.name || icon.type.displayName || '';
+      } else if (typeof icon.type === 'function') {
+        typeName = icon.type.name || icon.type.displayName || '';
+      }
+    }
+    
+    const name = typeName.toLowerCase();
+    if (name.includes('search') || name.includes('research')) return <Search size={14} />;
+    if (name.includes('wikipedia') || name.includes('globe')) return <Globe size={14} />;
+    if (name.includes('file') || name.includes('text')) return <FileText size={14} />;
+    if (name.includes('pen') || name.includes('write') || name.includes('edit')) return <PenTool size={14} />;
+    if (name.includes('github') || name.includes('box')) return <Box size={14} />;
+    if (name.includes('weather') || name.includes('cloud')) return <CloudMoon size={14} />;
+    if (name.includes('shell') || name.includes('terminal')) return <Terminal size={14} />;
+    if (name.includes('sparkles') || name.includes('ai')) return <Sparkles size={14} />;
+    if (name.includes('check') || name.includes('success')) return <Check size={14} />;
+    
+    return <FileText size={14} />;
+  }
+
+  return <FileText size={14} />;
+};
+
 const NodeGraph = React.memo(({ 
   nodes, 
   isStreaming,
@@ -1006,7 +1056,7 @@ const NodeGraph = React.memo(({
             >
               <div className="absolute left-0 top-[10px] w-4 h-[1px] bg-zinc-100 dark:bg-white/5" />
               <div className={`transition-colors shrink-0 ${node.status === 'active' ? 'text-blue-500' : 'text-zinc-400 dark:text-zinc-500'}`}>
-                {node.icon || <FileText size={14} />}
+                {renderNodeIcon(node.icon)}
               </div>
               <span className={`text-[13.5px] font-medium transition-colors ${
                 node.status === 'active'
