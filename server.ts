@@ -33,6 +33,17 @@ async function startServer() {
     res.json({ status: 'ok', server: 'Lumina Web UI Server' });
   });
 
+  // Ensure coder directory exists and serve static preview
+  try {
+    const coderPath = path.join(process.cwd(), 'coder');
+    if (!fs.existsSync(coderPath)) {
+      fs.mkdirSync(coderPath, { recursive: true });
+    }
+  } catch (err) {
+    console.error("Failed to ensure coder folder exists:", err);
+  }
+  app.use('/coder-preview', express.static(path.join(process.cwd(), 'coder')));
+
   // Search endpoint
   app.post("/api/search", async (req, res) => {
     const { query, tavilyKey, serpKey, provider: preferredProvider } = req.body;

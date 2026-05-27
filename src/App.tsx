@@ -33,6 +33,7 @@ import {
   Newspaper,
   Play,
   ExternalLink,
+  RefreshCw,
   X,
   Languages,
   Layout,
@@ -42,6 +43,7 @@ import {
   FileUp,
   Camera,
   FolderPlus,
+  Folder,
   Box,
   MapPin,
   CloudSun,
@@ -72,7 +74,8 @@ import {
   Activity,
   Beaker,
   Compass,
-  Flower2
+  Flower2,
+  Mic
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -86,6 +89,9 @@ import { PhysicsGraphCanvas } from './components/PhysicsGraphCanvas';
 import { ChemistryLabCanvas } from './components/ChemistryLabCanvas';
 import { MathLabCanvas } from './components/MathLabCanvas';
 import { BiologyLabCanvas } from './components/BiologyLabCanvas';
+import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
+import { CoderLeftExplorer } from './components/CoderLeftExplorer';
+import { FloatingCodeEditor } from './components/FloatingCodeEditor';
 
 interface ToolCallNode {
   id: string;
@@ -131,6 +137,7 @@ interface Chat {
    title: string;
    messages: Message[];
    updatedAt: Date;
+   projectId?: string;
 }
 
 interface Tool {
@@ -209,7 +216,7 @@ interface SidebarProps {
   chats: Chat[];
   currentChatId: string | null;
   setCurrentChatId: (id: string | null) => void;
-  createNewChat: () => void;
+  createNewChat: (projId?: string | null) => void;
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
   onOpenSettings: () => void;
   userProfile: {
@@ -219,10 +226,23 @@ interface SidebarProps {
     location: string;
     age?: number | string;
   };
+  setUserProfile?: React.Dispatch<React.SetStateAction<any>>;
+  projectFolders?: { id: string; name: string }[];
+  setProjectFolders?: React.Dispatch<React.SetStateAction<{ id: string; name: string }[]>>;
   activeLabTab: 'physics' | 'chemistry' | 'math' | 'biology' | null;
   setActiveLabTab: (tab: 'physics' | 'chemistry' | 'math' | 'biology' | null) => void;
   onSelect?: () => void;
+  activeProjectId?: string | null;
+  setActiveProjectId?: (id: string | null) => void;
 }
+
+const AVAILABLE_AVATARS = [
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Sophia",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=John",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Sasha",
+];
 
 const SidebarContent = ({ 
   chats, 
@@ -232,13 +252,39 @@ const SidebarContent = ({
   setChats,
   onOpenSettings,
   userProfile,
+  setUserProfile,
+  projectFolders = [],
+  setProjectFolders,
   activeLabTab,
   setActiveLabTab,
-  onSelect
+  onSelect,
+  activeProjectId,
+  setActiveProjectId
 }: SidebarProps) => {
   const [labsHovered, setLabsHovered] = useState(false);
   const [isRecentChatsOpen, setIsRecentChatsOpen] = useState(true);
-  const [isLabsSectionOpen, setIsLabsSectionOpen] = useState(true);
+  const [isLabsSectionOpen, setIsLabsSectionOpen] = useState(false);
+  const [isAvatarSelectorOpen, setIsAvatarSelectorOpen] = useState(false);
+  const [isProjectsOpen, setIsProjectsOpen] = useState(true);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+
+  const handleSaveProject = () => {
+    if (newProjectName.trim()) {
+      const newId = Date.now().toString();
+      if (setProjectFolders) {
+        setProjectFolders(prev => [
+          ...prev,
+          { id: newId, name: newProjectName.trim() }
+        ]);
+      }
+      setExpandedFolders(prev => ({ ...prev, [newId]: true }));
+      setNewProjectName('');
+      setIsCreatingProject(false);
+    }
+  };
+
   const isPhysicsTabActive = activeLabTab !== null;
   const setIsPhysicsTabActive = (active: boolean) => {
     setActiveLabTab(active ? 'physics' : null);
@@ -257,7 +303,10 @@ const SidebarContent = ({
 
       <button 
         onClick={() => {
-          createNewChat();
+          if (setActiveProjectId) {
+            setActiveProjectId(null);
+          }
+          createNewChat(null);
           setActiveLabTab(null);
         }}
         className="flex items-center gap-3 p-3 mb-6 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-white/5 rounded-xl shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-white/10 transition-all text-sm font-medium dark:text-white"
@@ -267,6 +316,200 @@ const SidebarContent = ({
       </button>
 
       <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
+        {/* Projects Category */}
+        <div className="space-y-1">
+          <button
+            onClick={() => setIsProjectsOpen(!isProjectsOpen)}
+            className="w-full flex items-center justify-between text-xs font-semibold text-zinc-400 dark:text-zinc-500 hover:text-zinc-300 dark:hover:text-zinc-300 mb-1.5 px-2.5 py-1 transition-colors cursor-pointer text-left animate-focus-target"
+            id="projects-category-header"
+          >
+            <span>Projects</span>
+            <ChevronDown size={11} className={`transition-transform duration-200 text-zinc-400 dark:text-zinc-500 ${isProjectsOpen ? '' : '-rotate-90'}`} />
+          </button>
+
+          <AnimatePresence initial={false}>
+            {isProjectsOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="space-y-0.5 overflow-hidden"
+              >
+                {!isCreatingProject ? (
+                  <button
+                    onClick={() => setIsCreatingProject(true)}
+                    className="w-full py-1 px-2.5 rounded-md flex items-center gap-2.5 text-xs font-medium bg-transparent text-zinc-450 hover:text-zinc-200 hover:bg-zinc-800/20 transition-all cursor-pointer select-none"
+                  >
+                    <FolderPlus size={15} className="shrink-0 text-zinc-500" />
+                    <span>New Project</span>
+                  </button>
+                ) : (
+                  <div className="px-2 py-0.5 mb-0.5">
+                    <div className="flex items-center gap-2 bg-transparent border border-zinc-800 rounded-md p-1">
+                      <Folder size={14} className="text-zinc-500 ml-1 shrink-0" />
+                      <input
+                        type="text"
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        placeholder="Folder name..."
+                        className="bg-transparent border-none text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-0 w-full font-medium"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveProject();
+                          } else if (e.key === 'Escape') {
+                            setIsCreatingProject(false);
+                            setNewProjectName('');
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={handleSaveProject}
+                        className="p-0.5 text-emerald-400 hover:bg-zinc-800/40 rounded cursor-pointer shrink-0"
+                      >
+                        <Check size={11} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsCreatingProject(false);
+                          setNewProjectName('');
+                        }}
+                        className="p-0.5 text-rose-450 hover:bg-zinc-800/40 rounded cursor-pointer shrink-0"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {projectFolders.map(folder => {
+                  const isSelected = activeProjectId === folder.id;
+                  const isFolderExpanded = expandedFolders[folder.id] ?? true;
+                  const folderChats = chats.filter(c => c.projectId === folder.id);
+
+                  return (
+                    <div key={folder.id} className="space-y-0.5">
+                      <div className="group/folder relative">
+                        <div
+                          onClick={() => {
+                            setExpandedFolders(prev => ({ ...prev, [folder.id]: !isFolderExpanded }));
+                            if (setActiveProjectId) {
+                              setActiveProjectId(folder.id);
+                            }
+                            setCurrentChatId(null);
+                          }}
+                          className={`w-full py-1 px-2.5 rounded-md flex items-center justify-between transition-all select-none cursor-pointer ${
+                            isSelected 
+                              ? 'bg-zinc-800/25 text-zinc-100 font-medium' 
+                              : 'bg-transparent text-zinc-400 hover:bg-zinc-800/20 hover:text-zinc-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <Folder size={15} className={`shrink-0 ${isSelected ? 'text-zinc-350' : 'text-zinc-500'}`} />
+                            <span className="truncate text-xs">{folder.name}</span>
+                            {folderChats.length > 0 && (
+                              <span className="text-[9px] px-1.2 py-0.2 rounded-full font-bold leading-none bg-zinc-800/40 text-zinc-500 border border-zinc-850/40">
+                                {folderChats.length}
+                              </span>
+                            )}
+                          </div>
+                          
+                          <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/folder:opacity-100 transition-opacity">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedFolders(prev => ({ ...prev, [folder.id]: true }));
+                                createNewChat(folder.id);
+                              }}
+                              className="p-0.5 hover:bg-zinc-800 rounded-md text-zinc-500 hover:text-zinc-300 transition-colors"
+                              title="New Chat in this folder"
+                            >
+                              <Plus size={10} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (setProjectFolders) {
+                                  setProjectFolders(prev => prev.filter(f => f.id !== folder.id));
+                                }
+                                if (activeProjectId === folder.id && setActiveProjectId) {
+                                  setActiveProjectId(null);
+                                }
+                              }}
+                              className="p-0.5 text-zinc-550 hover:text-red-400 hover:bg-zinc-800 rounded-md transition-colors"
+                              title="Delete folder"
+                            >
+                              <Trash2 size={10} />
+                            </button>
+                          </div>
+
+                          <ChevronDown size={10} className={`ml-1 text-zinc-500 shrink-0 transition-transform duration-200 ${isFolderExpanded ? '' : '-rotate-90 group-hover/folder:opacity-0'}`} />
+                        </div>
+                      </div>
+
+                      <AnimatePresence initial={false}>
+                        {isFolderExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.15, ease: "easeInOut" }}
+                            className="pl-4 pr-1 py-0.5 space-y-0.5 overflow-hidden border-l border-zinc-800/40 ml-4"
+                          >
+                            {folderChats.map(chat => (
+                              <div key={chat.id} className="group/chat relative">
+                                <button
+                                  onClick={() => {
+                                    setCurrentChatId(chat.id);
+                                    setIsPhysicsTabActive(false);
+                                    if (onSelect) onSelect();
+                                  }}
+                                  className={`w-full py-1 px-2 rounded-md flex items-center gap-2 text-xs transition-colors pr-8 ${
+                                    (!isPhysicsTabActive && currentChatId === chat.id)
+                                      ? 'text-zinc-200 bg-zinc-800/20 font-medium pl-1.5 border-l border-zinc-600' 
+                                      : 'text-zinc-500 hover:bg-zinc-800/20 hover:text-zinc-350'
+                                  }`}
+                                >
+                                  <MessageSquare size={13} className={(!isPhysicsTabActive && currentChatId === chat.id) ? 'text-zinc-400' : 'text-zinc-500'} />
+                                  <span className="truncate text-left flex-1">{chat.title}</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setChats(prev => prev.filter(c => c.id !== chat.id));
+                                    if (currentChatId === chat.id) setCurrentChatId(null);
+                                  }}
+                                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded opacity-0 group-hover/chat:opacity-100 transition-all cursor-pointer"
+                                  title="Delete chat"
+                                >
+                                  <Trash2 size={10} />
+                                </button>
+                              </div>
+                            ))}
+                            {folderChats.length === 0 && (
+                              <button
+                                onClick={() => createNewChat(folder.id)}
+                                className="w-full py-1.5 px-2 rounded-md flex items-center gap-2 text-[10px] text-zinc-550 hover:bg-zinc-800/20 border border-dashed border-zinc-800/60 hover:text-zinc-400 text-left transition-all"
+                              >
+                                <Plus size={11} className="text-zinc-550" />
+                                <span>Empty folder</span>
+                              </button>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
+                {projectFolders.length === 0 && !isCreatingProject && (
+                  <div className="px-3 py-2 text-xs text-zinc-500 italic">No projects created</div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
         <div 
           className="space-y-1 relative"
           onMouseEnter={() => setLabsHovered(true)}
@@ -364,7 +607,7 @@ const SidebarContent = ({
               transition={{ duration: 0.2, ease: "easeInOut" }}
               className="space-y-1 overflow-hidden"
             >
-        {chats.map(chat => (
+        {chats.filter(c => !c.projectId).map(chat => (
           <div key={chat.id} className="group relative">
             <button
               onClick={() => {
@@ -393,14 +636,15 @@ const SidebarContent = ({
             </button>
           </div>
         ))}
-              {chats.length === 0 && (
+              {chats.filter(c => !c.projectId).length === 0 && (
                 <div className="px-3 py-4 text-xs text-gray-400 dark:text-zinc-500 italic">No recent chats</div>
               )}
             </motion.div>
           )}
         </AnimatePresence>
       </div>
-    </div>
+
+      </div>
 
     <div className="mt-auto pt-4 border-t border-gray-200 space-y-1">
       <button 
@@ -410,18 +654,76 @@ const SidebarContent = ({
         <Settings size={18} />
         Settings
       </button>
-      <div className="p-2.5 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs overflow-hidden">
+      <div className="p-2.5 flex items-center gap-3 relative">
+        <div 
+          onClick={() => setIsAvatarSelectorOpen(!isAvatarSelectorOpen)}
+          className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-500/50 transition-all duration-200 relative group"
+          title="Change profile avatar"
+        >
           {userProfile.avatar ? (
-            <img src={userProfile.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            <img src={userProfile.avatar} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" referrerPolicy="no-referrer" />
           ) : (
             userProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
           )}
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <Camera size={10} className="text-white" />
+          </div>
         </div>
         <div className="flex-1 text-xs">
           <div className="font-semibold truncate">{userProfile.name}</div>
           <div className="text-gray-400">{userProfile.location || 'Pro Plan'}</div>
         </div>
+
+        {/* Dynamic Avatar Picker Popover */}
+        <AnimatePresence>
+          {isAvatarSelectorOpen && (
+            <>
+              <div 
+                className="fixed inset-0 z-40 bg-transparent" 
+                onClick={() => setIsAvatarSelectorOpen(false)} 
+              />
+              <motion.div
+                initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                transition={{ duration: 0.15 }}
+                className="absolute bottom-12 left-0 w-56 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-2.5 shadow-xl z-50 flex flex-col gap-2"
+              >
+                <div className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-widest px-1">
+                  Select avatar
+                </div>
+                <div className="grid grid-cols-5 gap-1.5 justify-items-center">
+                  {AVAILABLE_AVATARS.map((avatarUrl, idx) => {
+                    const isSelected = userProfile.avatar === avatarUrl;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          if (setUserProfile) {
+                            setUserProfile((prev: any) => ({ ...prev, avatar: avatarUrl }));
+                          }
+                          setIsAvatarSelectorOpen(false);
+                        }}
+                        className={`w-8 h-8 rounded-full overflow-hidden transition-all duration-200 border-2 hover:scale-110 active:scale-95 ${
+                          isSelected 
+                            ? "border-blue-500 scale-105 ring-2 ring-blue-500/10" 
+                            : "border-transparent hover:border-gray-200 dark:hover:border-zinc-700"
+                        }`}
+                      >
+                        <img 
+                          src={avatarUrl} 
+                          alt="" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   </>
@@ -2501,19 +2803,71 @@ export default function App() {
   useEffect(() => {
     try {
       localStorage.setItem('lumina_user_profile', JSON.stringify(userProfile));
+      if (userProfile.name && userProfile.name.trim() !== '' && userProfile.name !== 'User') {
+        localStorage.setItem('lumina_profile_created', 'true');
+      }
     } catch (e) {}
   }, [userProfile]);
+
+  const [projectFolders, setProjectFolders] = useState<{ id: string; name: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('lumina_project_folders');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return [
+      { id: '1', name: 'UI Components' },
+      { id: '2', name: 'Analysis Lab' },
+    ];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lumina_project_folders', JSON.stringify(projectFolders));
+    } catch (e) {}
+  }, [projectFolders]);
+
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('lumina_active_project_id');
+    } catch (e) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (activeProjectId) {
+        localStorage.setItem('lumina_active_project_id', activeProjectId);
+      } else {
+        localStorage.removeItem('lumina_active_project_id');
+      }
+    } catch (e) {}
+  }, [activeProjectId]);
 
   const [showLogin, setShowLogin] = useState(() => {
     try {
       const created = localStorage.getItem('lumina_profile_created');
-      return created !== 'true';
+      if (created === 'true') {
+        return false;
+      }
+      const saved = localStorage.getItem('lumina_user_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.name && parsed.name.trim() !== '' && parsed.name !== 'User') {
+          return false;
+        }
+      }
+      return true;
     } catch (e) {
       return true;
     }
   });
-  const [loginName, setLoginName] = useState('');
-  const [loginAge, setLoginAge] = useState('');
+  const [loginName, setLoginName] = useState(() => {
+    return userProfile.name && userProfile.name !== 'User' ? userProfile.name : '';
+  });
+  const [loginAge, setLoginAge] = useState(() => {
+    return userProfile.age ? String(userProfile.age) : '';
+  });
   const [errorText, setErrorText] = useState('');
 
   const handleOnboardingSubmit = (e: React.FormEvent) => {
@@ -2938,6 +3292,29 @@ export default function App() {
   }, []);
 
   const [input, setInput] = useState('');
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+
+  const SLASH_COMMANDS = useMemo(() => [
+    { id: 'goal', name: 'goal', desc: 'Run until the specified goal is completely finished' },
+    { id: 'schedule', name: 'schedule', desc: 'Run custom instruction on a recurring schedule or as a one-time timer' },
+    { id: 'browser', name: 'browser', desc: 'Invoke a browser agent for web tasks' },
+    { id: 'grill-me', name: 'grill-me', desc: 'Interview me to align on a plan' },
+    { id: 'coder', name: 'coder', desc: 'Activate autonomous Software Engineering Agent mode' },
+    { id: 'coder_off', name: 'coder off', desc: 'Deactivate autonomous Software Engineering Agent mode' }
+  ], []);
+
+  const showsSlashCommands = input.startsWith('/') && !input.substring(1).includes(' ');
+  const slashQuery = showsSlashCommands ? input.substring(1).toLowerCase() : '';
+  const filteredCommands = useMemo(() => {
+    if (!showsSlashCommands) return [];
+    return SLASH_COMMANDS.filter(cmd => cmd.name.toLowerCase().includes(slashQuery));
+  }, [showsSlashCommands, slashQuery, SLASH_COMMANDS]);
+
+  useEffect(() => {
+    if (filteredCommands.length > 0 && selectedCommandIndex >= filteredCommands.length) {
+      setSelectedCommandIndex(0);
+    }
+  }, [filteredCommands.length, selectedCommandIndex]);
   const [isTyping, setIsTyping] = useState(false);
   const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
@@ -2953,6 +3330,31 @@ export default function App() {
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
+  const [isCoderMode, setIsCoderMode] = useState(false);
+  const [isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen] = useState(true);
+  const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
+  const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(true);
+  const [floatingEditFile, setFloatingEditFile] = useState<string | null>(null);
+  const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0);
+  const [iframeKey, setIframeKey] = useState(0);
+
+  const currentChatActive = chats.find(c => c.id === currentChatId);
+  useEffect(() => {
+    if (currentChatActive) {
+      const chatIsCoder = !!(currentChatActive as any).isCoderMode;
+      setIsCoderMode(chatIsCoder);
+      if (chatIsCoder) {
+        setIsCoderWorkspacePanelOpen(true);
+      }
+    } else {
+      setIsCoderMode(false);
+    }
+  }, [currentChatId, currentChatActive]);
+
+  const triggerWorkspaceRefresh = useCallback(() => {
+    setWorkspaceRefreshKey(prev => prev + 1);
+  }, []);
+
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
@@ -3074,12 +3476,14 @@ export default function App() {
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
-  const createNewChat = () => {
+  const createNewChat = (projId?: string | null) => {
+    const pId = projId !== undefined ? projId : activeProjectId;
     const newChat: Chat = {
       id: Date.now().toString(),
       title: 'New chat',
       messages: [],
       updatedAt: new Date(),
+      projectId: pId || undefined,
     };
     setChats(prev => [newChat, ...prev]);
     setCurrentChatId(newChat.id);
@@ -3094,6 +3498,109 @@ export default function App() {
 
     let content = contentOverride || input.trim();
     if (!content && attachedFiles.length === 0) return;
+
+    if (content.toLowerCase().startsWith('/coder')) {
+      const trimCmd = content.trim().toLowerCase();
+      let newState = true;
+      if (trimCmd === '/coder off') {
+        newState = false;
+      }
+      
+      setIsCoderMode(newState);
+      setIsCoderWorkspacePanelOpen(newState);
+      
+      let targetChatId = currentChatId;
+      if (!targetChatId) {
+        const newId = Date.now().toString();
+        const newChat: Chat = {
+          id: newId,
+          title: "Coder Session",
+          messages: [],
+          updatedAt: new Date(),
+          isCoderMode: newState
+        } as any;
+        setChats(prev => [newChat, ...prev]);
+        setCurrentChatId(newId);
+        targetChatId = newId;
+      }
+      
+      setChats(prev => prev.map(chat => {
+        if (chat.id === targetChatId) {
+          const sysMsgId = (Date.now() + 1).toString();
+          return {
+            ...chat,
+            isCoderMode: newState,
+            messages: [
+              ...chat.messages,
+              {
+                id: Date.now().toString(),
+                role: 'user',
+                content: content,
+                timestamp: new Date()
+              },
+              {
+                id: sysMsgId,
+                role: 'assistant',
+                content: newState 
+                  ? "⚡ **Coder Mode Activated!**\n\nI am now running as an autonomous Software Engineering Agent. I've created the workspace folder (`/coder`) and am ready to write, read, edit, and list files inside it in real-time. Give me instructions on what to build!"
+                  : "🚫 **Coder Mode Deactivated.**\n\nI will now answer your questions as a standard digital assistant without modifying the coder workspace.",
+                timestamp: new Date()
+              }
+            ],
+            updatedAt: new Date()
+          };
+        }
+        return chat;
+      }));
+      
+      try {
+        await fetch('/api/fs/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: './coder', isDirectory: true })
+        });
+        
+        const listRes = await fetch('/api/fs/list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath: './coder' })
+        });
+        const listData = await listRes.json();
+        if (!listData.files || listData.files.length === 0) {
+          await fetch('/api/fs/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filePath: './coder/index.html',
+              content: `<!DOCTYPE html>
+<html>
+<head>
+    <title>Coder Workspace</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 50px; background: #fafafa; color: #333; }
+        .card { max-width: 450px; margin: auto; padding: 30px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #eef2f6; }
+        h1 { color: #2563eb; margin-top: 0; }
+        p { color: #64748b; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Coder Workspace</h1>
+        <p>Tell the AI what to build (e.g., "Build a beautiful countdown timer app"), and watch it create files and preview progress here in real-time!</p>
+    </div>
+</body>
+</html>`
+            })
+          });
+        }
+      } catch (e) {
+        console.error("Failed to initialize ./coder directory:", e);
+      }
+      
+      setInput('');
+      triggerWorkspaceRefresh();
+      return;
+    }
 
     if (activeSkills.length > 0) {
       const skillPrompts = activeSkills.map(id => SKILLS.find(s => s.id === id)?.prompt).filter(Boolean);
@@ -3242,8 +3749,89 @@ export default function App() {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       
       const activeTools = buildActiveTools();
+      if (isCoderMode) {
+        activeTools.push(
+          {
+            type: 'function',
+            function: {
+              name: 'list_coder_files',
+              description: 'List all files and subfolders within the static coder/ directory recursively to understand the existing workspace codebase.',
+              parameters: { type: 'object', properties: {}, required: [] }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'create_coder_file',
+              description: 'Create a new file with the specified relative filePath inside the coder/ directory.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the file inside coder/ (e.g., "index.html", "js/app.js").' },
+                  content: { type: 'string', description: 'Complete text contents to write into the file.' }
+                },
+                required: ['filePath', 'content']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'read_coder_file',
+              description: 'Read the contents of an existing file inside the coder/ directory to analyze code or check implementation.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the file inside coder/ to read.' }
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'edit_coder_file',
+              description: 'Edit or overwrite an existing file inside the coder/ directory with new contents.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the target file inside coder/ to edit/overwrite.' },
+                  content: { type: 'string', description: 'The complete new code content to be overwritten.' }
+                },
+                required: ['filePath', 'content']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'delete_coder_file',
+              description: 'Delete a file inside the coder/ directory.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the file to delete inside coder/.' }
+                },
+                required: ['filePath']
+              }
+            }
+          }
+        );
+      }
 
       let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'} You have access to 4 interactive visual laboratories: Physics Lab (for graphing and forces), Chemistry Lab (for compounds and reactions), Math Lab (for trigonometric and fractal curves), and Biology Lab (for predator-prey dynamics and DNA pair sequencing).`;
+
+      if (isCoderMode) {
+        systemPrompt += `\n\n[CODER MODE IS ACTIVE]
+You are a highly capable, autonomous, and professional software engineering agent running inside the "coder" directory of our workspace.
+When the user asks you to build page(s), applications, interfaces, features, or modify codes:
+1. You MUST make real modifications in the file system using the tools provided: 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'list_coder_files', and 'delete_coder_file'. All file paths are relative to the 'coder/' folder!
+2. Do NOT just output a text response with code blocks of code changes. You MUST actually execute the file-system tools to create or edit the actual files in real-time.
+3. If a file already exists, always use 'read_coder_file' first to understand its current content, then make edits with 'edit_coder_file'.
+4. Do NOT attempt to run terminal or environment commands - you modify files and the user's workspace previews them in real-time.
+5. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
+      }
 
       // FIX: Inject search context into systemPrompt BEFORE building apiMessages,
       // so the AI actually receives the web search results.
@@ -3266,36 +3854,168 @@ export default function App() {
       let rawResponse: any = await callLlamaBridge(apiMessages, activeTools, signal);
 
       const data = rawResponse;
-      const choice = data.choices?.[0]?.message;
-      const responseContent = choice?.content;
-      const toolCallsRaw = choice?.tool_calls;
+      let choice = data.choices?.[0]?.message;
+      let toolCallsRaw = choice?.tool_calls;
       const responseImages = data.images || [];
 
       const toolCallNodes: ToolCallNode[] = [];
-      if (Array.isArray(toolCallsRaw) && toolCallsRaw.length > 0) {
-        toolCallsRaw.forEach((tc: any, idx: number) => {
-          const fn = tc.function || {};
-          const name = fn.name || 'unknown';
-          const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
 
-          toolCallNodes.push({
-            id: tc.id || `tc-${idx}`,
-            type: 'tool',
-            label: name,
-            status: 'complete',
-            argsCount: typeof args === 'object' && Object.keys(args).length === 0 ? 0 : Object.keys(args).length,
-            toolName: name,
-            icon: name.includes('search') || name.includes('research') ? <Search size={14} /> :
-                  name.includes('wikipedia') ? <Globe size={14} /> :
-                  name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs') ? <FileText size={14} /> :
-                  name.includes('write') || name.includes('edit') ? <PenTool size={14} /> :
-                  name.includes('github') ? <Box size={14} /> :
-                  name.includes('weather') ? <CloudMoon size={14} /> :
-                  <Sparkles size={14} />
+      if (isCoderMode) {
+        let loopCount = 0;
+        const maxLoops = 10;
+        while (choice?.tool_calls && choice.tool_calls.length > 0 && loopCount < maxLoops) {
+          loopCount++;
+          const currentCallNodes: ToolCallNode[] = [];
+          
+          for (const [idx, tc] of choice.tool_calls.entries()) {
+            const fn = tc.function || {};
+            const name = fn.name || 'unknown';
+            const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
+            
+            const node: ToolCallNode = {
+              id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
+              type: 'tool',
+              label: `${name} ${args.filePath ? `(${args.filePath})` : ''}`,
+              status: 'active',
+              toolName: name,
+              argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
+              icon: name.includes('read') || name.includes('file') ? <FileText size={14} /> :
+                    name.includes('edit') || name.includes('create') ? <PenTool size={14} /> :
+                    <Sparkles size={14} />
+            };
+            currentCallNodes.push(node);
+            toolCallNodes.push(node);
+          }
+
+          setChats(prev => prev.map(chat => {
+            if (chat.id === chatId) {
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? {
+                  ...m,
+                  toolCalls: [...toolCallNodes]
+                } : m)
+              };
+            }
+            return chat;
+          }));
+
+          const toolResultMessages = [];
+          for (const tc of choice.tool_calls) {
+            const fn = tc.function || {};
+            const name = fn.name || 'unknown';
+            const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
+            let resultValue: any = null;
+
+            try {
+              if (name === 'list_coder_files') {
+                const listRes = await fetch('/api/fs/list', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ folderPath: './coder' }),
+                  signal
+                });
+                resultValue = await listRes.json();
+              } else if (name === 'create_coder_file' || name === 'edit_coder_file') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = `./coder/${cleanedPath}`;
+                if (cleanedPath.includes('/')) {
+                  const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
+                  await fetch('/api/fs/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: `./coder/${folderPart}`, isDirectory: true }),
+                    signal
+                  });
+                }
+                const writeRes = await fetch('/api/fs/write', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, content: args.content }),
+                  signal
+                });
+                resultValue = await writeRes.json();
+                showToast(`Wrote ${cleanedPath}`);
+              } else if (name === 'read_coder_file') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = `./coder/${cleanedPath}`;
+                const readRes = await fetch('/api/fs/read', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath }),
+                  signal
+                });
+                resultValue = await readRes.json();
+                showToast(`Read ${cleanedPath}`);
+              } else if (name === 'delete_coder_file') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = `./coder/${cleanedPath}`;
+                const delRes = await fetch('/api/fs/delete', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath }),
+                  signal
+                });
+                resultValue = await delRes.json();
+                showToast(`Deleted ${cleanedPath}`);
+              } else {
+                resultValue = { error: `Unsupported coder tool: ${name}` };
+              }
+            } catch (err: any) {
+              resultValue = { error: err.message };
+            }
+
+            toolResultMessages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              name: name,
+              content: JSON.stringify(resultValue)
+            });
+
+            const matchedIdx = toolCallNodes.findIndex(node => node.label.startsWith(name) && node.status === 'active');
+            if (matchedIdx !== -1) {
+              toolCallNodes[matchedIdx].status = 'complete';
+            }
+          }
+
+          apiMessages.push(choice);
+          apiMessages.push(...toolResultMessages);
+
+          await new Promise(r => setTimeout(r, 600));
+          triggerWorkspaceRefresh();
+
+          const nextResponse = await callLlamaBridge(apiMessages, activeTools, signal);
+          choice = nextResponse.choices?.[0]?.message;
+        }
+
+        triggerWorkspaceRefresh();
+      } else {
+        if (Array.isArray(toolCallsRaw) && toolCallsRaw.length > 0) {
+          toolCallsRaw.forEach((tc: any, idx: number) => {
+            const fn = tc.function || {};
+            const name = fn.name || 'unknown';
+            const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
+
+            toolCallNodes.push({
+              id: tc.id || `tc-${idx}`,
+              type: 'tool',
+              label: name,
+              status: 'complete',
+              argsCount: typeof args === 'object' && Object.keys(args).length === 0 ? 0 : Object.keys(args).length,
+              toolName: name,
+              icon: name.includes('search') || name.includes('research') ? <Search size={14} /> :
+                    name.includes('wikipedia') ? <Globe size={14} /> :
+                    name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs') ? <FileText size={14} /> :
+                    name.includes('write') || name.includes('edit') ? <PenTool size={14} /> :
+                    name.includes('github') ? <Box size={14} /> :
+                    name.includes('weather') ? <CloudMoon size={14} /> :
+                    <Sparkles size={14} />
+            });
           });
-        });
+        }
       }
 
+      const responseContent = choice?.content;
       const finalContent = responseContent || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
       const imagesToAttach = responseImages.map((img: any) => ({
         title: img.title || 'Image',
@@ -3540,6 +4260,33 @@ export default function App() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showsSlashCommands && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedCommandIndex(prev => (prev + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedCommandIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const selectedCmd = filteredCommands[selectedCommandIndex];
+        if (selectedCmd) {
+          setInput(`/${selectedCmd.name} `);
+          setSelectedCommandIndex(0);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInput(input + ' ');
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -3836,16 +4583,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-      const api = (window as any).__electronAPI;
-      if (api) api.showContextMenu();
-    };
-    document.addEventListener('contextmenu', handleContextMenu);
-    return () => document.removeEventListener('contextmenu', handleContextMenu);
-  }, []);
-
   const renderChatBox = (isCenteredState: boolean = false) => {
     const isClaude = theme.id === 'claude';
     return (
@@ -3931,7 +4668,59 @@ export default function App() {
           )}
         </AnimatePresence>
         <div className={`relative border border-[var(--theme-input-border)] bg-[var(--theme-input-bg)] rounded-[28px] focus-within:border-[var(--theme-accent)]/40 overflow-visible flex flex-col p-1.5 min-h-[110px] justify-between transition-all duration-300 shadow-2xl`}>
-        <div className="flex-1 px-3 pt-2">
+          {/* Slash Commands Suggestion Panel */}
+          <AnimatePresence>
+            {showsSlashCommands && filteredCommands.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.98, y: 8 }}
+                transition={{ duration: 0.12, ease: 'easeOut' }}
+                className="absolute bottom-full left-0 right-0 mb-2 bg-[#18181b]/95 backdrop-blur-md border border-zinc-800/80 rounded-[20px] shadow-2xl overflow-hidden z-[80] p-2 flex flex-col max-h-[280px] overflow-y-auto custom-scrollbar"
+              >
+                {filteredCommands.map((cmd, idx) => {
+                  const isSelected = idx === selectedCommandIndex;
+                  return (
+                    <button
+                      key={cmd.id}
+                      type="button"
+                      onClick={() => {
+                        setInput(`/${cmd.name} `);
+                        setSelectedCommandIndex(0);
+                        if (inputRef && 'current' in inputRef && inputRef.current) {
+                          inputRef.current.focus();
+                        }
+                      }}
+                      onMouseEnter={() => setSelectedCommandIndex(idx)}
+                      className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left transition-all select-none gap-2 ${
+                        isSelected 
+                          ? 'bg-zinc-800 text-white font-medium shadow-sm' 
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/30'
+                      }`}
+                    >
+                      <span className={`font-mono text-sm tracking-tight shrink-0 select-none mr-1 ${
+                        isSelected ? 'text-zinc-300' : 'text-zinc-650'
+                      }`}>
+                        &lt;&gt;
+                      </span>
+                      <span className={`font-sans text-[13px] shrink-0 font-medium ${
+                        isSelected ? 'text-white' : 'text-zinc-150'
+                      }`}>
+                        {cmd.name}
+                      </span>
+                      <span className={`font-sans text-[13px] truncate ml-1 ${
+                        isSelected ? 'text-zinc-350' : 'text-zinc-500'
+                      }`}>
+                        {cmd.desc}
+                      </span>
+                    </button>
+                  );
+                })}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="flex-1 px-3 pt-2">
           {attachedFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1 pb-3">
               {attachedFiles.map((file, idx) => {
@@ -4274,6 +5063,17 @@ export default function App() {
               </AnimatePresence>
             </div>
 
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              onClick={() => {
+                showToast("Voice input is configured. Adjust sources in Settings > General.");
+              }}
+              className="p-1.5 rounded-2xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-all cursor-pointer mr-0.5 flex items-center justify-center shrink-0"
+              title="Voice Input"
+            >
+              <Mic size={18} className="text-zinc-500 hover:text-zinc-300 transition-colors" />
+            </motion.button>
+
             {isTyping ? (
               <motion.button
                 whileTap={{ scale: 0.92 }}
@@ -4345,8 +5145,8 @@ export default function App() {
           className="w-full max-w-md bg-zinc-900/60 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl p-8 shadow-2xl relative z-10 flex flex-col items-center text-center"
         >
           {/* Logo */}
-          <div className="w-14 h-14 rounded-2xl bg-white text-black flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(255,255,255,0.15)]">
-            <Sparkles size={28} className="text-zinc-900" />
+          <div className="w-14 h-14 rounded-2xl !bg-[#ffffff] !text-[#09090b] flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(255,255,255,0.15)]">
+            <Sparkles size={28} className="!text-[#09090b]" />
           </div>
 
           <h1 className="text-2xl font-semibold tracking-tight text-white mb-2 font-sans select-none">
@@ -4398,10 +5198,10 @@ export default function App() {
             <button
               id="login-submit-button"
               type="submit"
-              className="w-full h-12 mt-4 bg-white text-black hover:bg-zinc-200 active:scale-[0.98] transition-all rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-[0_4px_20px_rgba(255,255,255,0.08)]"
+              className="w-full h-12 mt-4 !bg-[#ffffff] !text-[#09090b] hover:!bg-[#e4e4e7] active:scale-[0.98] transition-all rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-[0_4px_20px_rgba(255,255,255,0.08)]"
             >
               Initialize Profile
-              <ArrowRight size={16} strokeWidth={2.5} />
+              <ArrowRight size={16} strokeWidth={2.5} className="!text-[#09090b]" />
             </button>
           </form>
         </motion.div>
@@ -4485,8 +5285,13 @@ export default function App() {
                   setIsMobileMenuOpen(false);
                 }}
                 userProfile={userProfile}
+                setUserProfile={setUserProfile}
+                projectFolders={projectFolders}
+                setProjectFolders={setProjectFolders}
                 activeLabTab={activeLabTab}
                 setActiveLabTab={setActiveLabTab}
+                activeProjectId={activeProjectId}
+                setActiveProjectId={setActiveProjectId}
               />
             </motion.aside>
           </>
@@ -4511,8 +5316,13 @@ export default function App() {
             setChats={setChats}
             onOpenSettings={() => setIsSettingsOpen(true)}
             userProfile={userProfile}
+            setUserProfile={setUserProfile}
+            projectFolders={projectFolders}
+            setProjectFolders={setProjectFolders}
             activeLabTab={activeLabTab}
             setActiveLabTab={setActiveLabTab}
+            activeProjectId={activeProjectId}
+            setActiveProjectId={setActiveProjectId}
           />
         </div>
         
@@ -4530,7 +5340,8 @@ export default function App() {
       </motion.aside>
 
       <main className="flex-1 flex flex-col relative h-full min-w-0 bg-[var(--theme-bg)] text-[var(--theme-primary)] transition-colors duration-300">
-        <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md z-10 sticky top-0 shrink-0">
+        {!isCoderMode && (
+          <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md z-10 sticky top-0 shrink-0">
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => setIsMobileMenuOpen(true)}
@@ -4582,6 +5393,20 @@ export default function App() {
                   </button>
                 </div>
               )}
+              {isCoderMode && (
+                <button
+                  onClick={() => setIsCoderWorkspacePanelOpen(!isCoderWorkspacePanelOpen)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-xs font-semibold shadow-sm cursor-pointer border ${
+                    isCoderWorkspacePanelOpen 
+                      ? 'bg-teal-500 text-slate-950 border-teal-400' 
+                      : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:text-white'
+                  }`}
+                  title="Toggle Coder Workspace Side Panel"
+                >
+                  <Code size={13} className={isCoderWorkspacePanelOpen ? 'animate-pulse' : ''} />
+                  <span>Workspace Panel</span>
+                </button>
+              )}
               <div className="relative" ref={headerMenuRef}>
                 <button 
                   onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}
@@ -4629,8 +5454,175 @@ export default function App() {
               </div>
             </div>
           </header>
+        )}
 
-        {isPhysicsTabActive ? (
+        {isCoderMode ? (
+          <div className="flex-1 flex overflow-hidden bg-[#0b0b0c] text-[#e4e4e7] h-full relative font-sans">
+            {/* LEFT PANEL: File Explorer (VS Code Styled collapsible sidebar) */}
+            <AnimatePresence>
+              {isCoderLeftPanelOpen && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 280, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                  className="h-full border-r border-[#1e1e22] bg-[#141416]/95 backdrop-blur-md flex flex-col overflow-hidden shrink-0 z-10 shadow-xl"
+                >
+                  <CoderLeftExplorer 
+                    workspaceRefreshKey={workspaceRefreshKey}
+                    triggerWorkspaceRefresh={triggerWorkspaceRefresh}
+                    showToast={showToast}
+                    onSelectFile={(filePath) => setFloatingEditFile(filePath)}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* CENTER PANEL: Standard & customized Coder chat and text layout */}
+            <div className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0b0b0c]">
+              
+              {/* Coder Top Navigation Bar */}
+              <div className="h-12 border-b border-zinc-900 px-4 flex items-center justify-between shrink-0 bg-[#0e0e10]/80 backdrop-blur-md">
+                <div className="flex items-center gap-3">
+                  {/* Left Sidebar trigger */}
+                  <button
+                    onClick={() => setIsCoderLeftPanelOpen(!isCoderLeftPanelOpen)}
+                    className={`p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-all cursor-pointer ${
+                      isCoderLeftPanelOpen ? 'text-teal-400 bg-teal-500/5' : ''
+                    }`}
+                    title="Toggle Files Side Panel"
+                  >
+                    <SidebarIcon size={16} />
+                  </button>
+
+                  {/* Back and Forward navigation controls as requested in mockup */}
+                  <div className="flex items-center gap-1.5 border-l border-zinc-800 pl-3 select-none">
+                    <button className="p-1 text-zinc-655 hover:text-zinc-400 transition-colors cursor-pointer" title="Go Back">
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button className="p-1 text-zinc-655 hover:text-zinc-400 transition-colors cursor-pointer" title="Go Forward">
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Center instance indicator */}
+                <div className="text-[11px] font-mono font-semibold tracking-wide text-zinc-500 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>
+                  <span>CODER WORKSPACE ACTIVE</span>
+                </div>
+
+                {/* Right side live preview panel toggle */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsCoderRightPanelOpen(!isCoderRightPanelOpen)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all cursor-pointer ${
+                      isCoderRightPanelOpen 
+                        ? 'bg-teal-500/10 text-teal-400 border-teal-500/30' 
+                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                    }`}
+                    title="Toggle App Live Preview"
+                  >
+                    <Play size={10} className={isCoderRightPanelOpen ? 'animate-pulse' : ''} />
+                    <span>App Preview</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Chat View, Centered Watermarked / Mockup Interface */}
+              <div className="flex-1 flex flex-col justify-between overflow-hidden relative">
+                <div 
+                  ref={scrollRef}
+                  className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar scroll-smooth"
+                >
+                  <div className="mx-auto space-y-6 pb-28 max-w-3xl">
+                    {messages.length === 0 ? (
+                      <div className="min-h-[64vh] flex flex-col items-center justify-center text-center px-4 relative w-full animate-fade-in animate-duration-300">
+                        <div className="w-full max-w-2xl select-none">
+                          {renderChatBox(true)}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {messages.map((message) => (
+                          <MessageItem
+                            key={message.id}
+                            message={message}
+                            markdownComponents={markdownComponents}
+                            userProfile={userProfile}
+                            persona={persona}
+                            isSourcesPanelOpen={false}
+                            setIsSourcesPanelOpen={() => {}}
+                            setSourcesPanelMessageId={() => {}}
+                            setActiveArtifact={handleSetActiveArtifact}
+                            setIsCanvasOpen={handleSetIsCanvasOpen}
+                            setCanvasView={handleSetCanvasView}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {messages.length > 0 && (
+                  <div className="px-6 pb-6 sticky bottom-0 z-30 shrink-0">
+                    <div className="max-w-3xl mx-auto relative">
+                      {renderChatBox(false)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* RIGHT PANEL: Live App Preview Frame (collapsible sidebar) */}
+            <AnimatePresence>
+              {isCoderRightPanelOpen && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 480, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                  className="h-full border-l border-[#1e1e22] bg-[#141416] flex flex-col overflow-hidden shrink-0 z-10 shadow-2xl"
+                >
+                  <div className="flex items-center justify-between px-3.5 py-3.5 bg-zinc-950 border-b border-zinc-900/80 shrink-0 select-none">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="text-xs font-bold uppercase tracking-wider text-zinc-350">Live Preview Frame</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => setIframeKey(k => k + 1)}
+                        className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
+                        title="Force reload preview frame"
+                      >
+                        <RefreshCw size={12} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-white relative">
+                    <iframe
+                      key={iframeKey}
+                      src={`/coder-preview/?t=${iframeKey}`}
+                      className="w-full h-full border-none bg-white"
+                      referrerPolicy="no-referrer"
+                      title="Workspace App Preview"
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Floating manual code editor */}
+            {floatingEditFile && (
+              <FloatingCodeEditor 
+                filePath={floatingEditFile}
+                onClose={() => setFloatingEditFile(null)}
+                showToast={showToast}
+                triggerWorkspaceRefresh={triggerWorkspaceRefresh}
+              />
+            )}
+          </div>
+        ) : isPhysicsTabActive ? (
           <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-[var(--theme-bg)]">
             {activeLabTab === 'physics' && (
               <PhysicsGraphCanvas 
@@ -4673,7 +5665,20 @@ export default function App() {
                         animate={{ opacity: 1, y: 0 }}
                         className="min-h-[72vh] flex flex-col items-center justify-center text-center px-4 relative w-full"
                       >
-                        {theme.id === 'claude' ? (
+                        {activeProjectId && projectFolders.find(p => p.id === activeProjectId) ? (
+                          <>
+                            <div className="flex items-center gap-3.5 justify-center mb-10 select-none">
+                              <Folder className="text-zinc-200 shrink-0" size={36} />
+                              <span className="text-3xl font-medium text-zinc-150 tracking-tight font-sans">
+                                {projectFolders.find(p => p.id === activeProjectId)?.name}
+                              </span>
+                            </div>
+                            
+                            <div className="w-full max-w-2xl mb-8 animate-fade-in">
+                              {renderChatBox(true)}
+                            </div>
+                          </>
+                        ) : theme.id === 'claude' ? (
                           <>
                             <div className="w-full max-w-2xl mb-4">
                               {renderChatBox(true)}
@@ -4688,12 +5693,16 @@ export default function App() {
                             <motion.div 
                               animate={{ scale: [1, 1.05, 1] }}
                               transition={{ duration: 4, repeat: Infinity }}
-                              className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-3xl flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm animate-active-ring"
+                              className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-full flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm overflow-hidden animate-active-ring"
                             >
-                              <Sparkles size={32} />
+                              {userProfile.avatar ? (
+                                <img src={userProfile.avatar} alt={userProfile.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="font-bold text-lg font-display">{userProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}</span>
+                              )}
                             </motion.div>
                             <h1 className="text-4xl font-display font-medium text-gray-900 dark:text-white mb-3 tracking-tight">
-                              Welcome to Lumina
+                              Welcome back, {userProfile.name}
                             </h1>
                             <p className="text-gray-500 dark:text-gray-400 max-w-sm mb-6">
                               Modern intelligence, refined interface.
@@ -4746,6 +5755,16 @@ export default function App() {
                   </motion.button>
                 )}
               </AnimatePresence>
+
+              {isCoderMode && isCoderWorkspacePanelOpen && (
+                <div className="w-[450px] lg:w-[500px] h-full shrink-0 border-l border-[var(--theme-border)] bg-[var(--theme-surface-alt)] z-10">
+                  <CoderWorkspacePanel 
+                    workspaceRefreshKey={workspaceRefreshKey} 
+                    triggerWorkspaceRefresh={triggerWorkspaceRefresh}
+                    showToast={showToast}
+                  />
+                </div>
+              )}
             </div>
 
             {messages.length > 0 && (
