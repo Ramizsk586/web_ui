@@ -78,6 +78,7 @@ import {
   Beaker,
   Compass,
   Flower2,
+<<<<<<< HEAD
   Mic,
   Smartphone,
   Tablet,
@@ -88,6 +89,9 @@ import {
   AlignCenter,
   AlignRight,
   MousePointerClick
+=======
+  Mic
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -247,8 +251,11 @@ interface SidebarProps {
   onSelect?: () => void;
   activeProjectId?: string | null;
   setActiveProjectId?: (id: string | null) => void;
+<<<<<<< HEAD
   isSidebarOpen?: boolean;
   setIsSidebarOpen?: (open: boolean) => void;
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 }
 
 const AVAILABLE_AVATARS = [
@@ -274,9 +281,13 @@ const SidebarContent = ({
   setActiveLabTab,
   onSelect,
   activeProjectId,
+<<<<<<< HEAD
   setActiveProjectId,
   isSidebarOpen,
   setIsSidebarOpen,
+=======
+  setActiveProjectId
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 }: SidebarProps) => {
   const [labsHovered, setLabsHovered] = useState(false);
   const [isRecentChatsOpen, setIsRecentChatsOpen] = useState(true);
@@ -3465,11 +3476,16 @@ export default function App() {
   const [isCoderMode, setIsCoderMode] = useState(false);
   const [isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen] = useState(true);
   const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
+<<<<<<< HEAD
   const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(false);
+=======
+  const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(true);
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
   const [floatingEditFile, setFloatingEditFile] = useState<string | null>(null);
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
 
+<<<<<<< HEAD
   // New features for right preview panel: Viewport simulator & Subpath Route
   const [rightViewportMode, setRightViewportMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [rightIsGridEnabled, setRightIsGridEnabled] = useState<boolean>(false);
@@ -3489,6 +3505,8 @@ export default function App() {
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
 
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
   const currentChatActive = chats.find(c => c.id === currentChatId);
   useEffect(() => {
     if (currentChatActive) {
@@ -3496,7 +3514,10 @@ export default function App() {
       setIsCoderMode(chatIsCoder);
       if (chatIsCoder) {
         setIsCoderWorkspacePanelOpen(true);
+<<<<<<< HEAD
         setIsSidebarOpen(false);
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
       }
     } else {
       setIsCoderMode(false);
@@ -3815,7 +3836,11 @@ export default function App() {
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
+<<<<<<< HEAD
   const createNewChat = (projId?: string | null, isCoder?: boolean) => {
+=======
+  const createNewChat = (projId?: string | null) => {
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
     const pId = projId !== undefined ? projId : activeProjectId;
     const newChat: Chat = {
       id: Date.now().toString(),
@@ -3823,8 +3848,12 @@ export default function App() {
       messages: [],
       updatedAt: new Date(),
       projectId: pId || undefined,
+<<<<<<< HEAD
       isCoderMode: isCoder !== undefined ? isCoder : isCoderMode,
     } as any;
+=======
+    };
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
     setChats(prev => [newChat, ...prev]);
     setCurrentChatId(newChat.id);
     return newChat.id;
@@ -3863,9 +3892,12 @@ export default function App() {
       
       setIsCoderMode(newState);
       setIsCoderWorkspacePanelOpen(newState);
+<<<<<<< HEAD
       if (newState) {
         setIsSidebarOpen(false);
       }
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
       
       let targetChatId = currentChatId;
       if (!targetChatId) {
@@ -3900,8 +3932,13 @@ export default function App() {
                 id: sysMsgId,
                 role: 'assistant',
                 content: newState 
+<<<<<<< HEAD
                   ? "⚡ **Coder Mode Activated!**\n\nI am now running as an autonomous Software Engineering Agent. I am connected directly to your active project workspace directory and am ready to write, read, edit, and list files in real-time. Give me instructions on what to build!"
                   : "🚫 **Coder Mode Deactivated.**\n\nI will now answer your questions as a standard digital assistant without modifying the workspace.",
+=======
+                  ? "⚡ **Coder Mode Activated!**\n\nI am now running as an autonomous Software Engineering Agent. I've created the workspace folder (`/coder`) and am ready to write, read, edit, and list files inside it in real-time. Give me instructions on what to build!"
+                  : "🚫 **Coder Mode Deactivated.**\n\nI will now answer your questions as a standard digital assistant without modifying the coder workspace.",
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 timestamp: new Date()
               }
             ],
@@ -3911,6 +3948,53 @@ export default function App() {
         return chat;
       }));
       
+<<<<<<< HEAD
+=======
+      try {
+        await fetch('/api/fs/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: './coder', isDirectory: true })
+        });
+        
+        const listRes = await fetch('/api/fs/list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath: './coder' })
+        });
+        const listData = await listRes.json();
+        if (!listData.files || listData.files.length === 0) {
+          await fetch('/api/fs/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filePath: './coder/index.html',
+              content: `<!DOCTYPE html>
+<html>
+<head>
+    <title>Coder Workspace</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 50px; background: #fafafa; color: #333; }
+        .card { max-width: 450px; margin: auto; padding: 30px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #eef2f6; }
+        h1 { color: #2563eb; margin-top: 0; }
+        p { color: #64748b; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Coder Workspace</h1>
+        <p>Tell the AI what to build (e.g., "Build a beautiful countdown timer app"), and watch it create files and preview progress here in real-time!</p>
+    </div>
+</body>
+</html>`
+            })
+          });
+        }
+      } catch (e) {
+        console.error("Failed to initialize ./coder directory:", e);
+      }
+      
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
       setInput('');
       triggerWorkspaceRefresh();
       return;
@@ -4071,7 +4155,11 @@ export default function App() {
             type: 'function',
             function: {
               name: 'list_coder_files',
+<<<<<<< HEAD
               description: 'List all files and subfolders in the active project directory recursively to understand the existing codebase.',
+=======
+              description: 'List all files and subfolders within the static coder/ directory recursively to understand the existing workspace codebase.',
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               parameters: { type: 'object', properties: {}, required: [] }
             }
           },
@@ -4079,11 +4167,19 @@ export default function App() {
             type: 'function',
             function: {
               name: 'create_coder_file',
+<<<<<<< HEAD
               description: 'Create a new file with the specified relative filePath in the project root directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the file from the project root (e.g., "src/components/MyNewComp.tsx", "js/app.js").' },
+=======
+              description: 'Create a new file with the specified relative filePath inside the coder/ directory.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the file inside coder/ (e.g., "index.html", "js/app.js").' },
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   content: { type: 'string', description: 'Complete text contents to write into the file.' }
                 },
                 required: ['filePath', 'content']
@@ -4094,11 +4190,19 @@ export default function App() {
             type: 'function',
             function: {
               name: 'read_coder_file',
+<<<<<<< HEAD
               description: 'Read the contents of an existing file in the project directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the file within the project folder to read.' }
+=======
+              description: 'Read the contents of an existing file inside the coder/ directory to analyze code or check implementation.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the file inside coder/ to read.' }
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 },
                 required: ['filePath']
               }
@@ -4108,12 +4212,21 @@ export default function App() {
             type: 'function',
             function: {
               name: 'edit_coder_file',
+<<<<<<< HEAD
               description: 'Edit or overwrite an existing file in the project directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the target file to edit.' },
                   content: { type: 'string', description: 'The complete new code content to be written.' }
+=======
+              description: 'Edit or overwrite an existing file inside the coder/ directory with new contents.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the target file inside coder/ to edit/overwrite.' },
+                  content: { type: 'string', description: 'The complete new code content to be overwritten.' }
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 },
                 required: ['filePath', 'content']
               }
@@ -4123,11 +4236,19 @@ export default function App() {
             type: 'function',
             function: {
               name: 'delete_coder_file',
+<<<<<<< HEAD
               description: 'Delete a file inside the project directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the file to delete.' }
+=======
+              description: 'Delete a file inside the coder/ directory.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the file to delete inside coder/.' }
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 },
                 required: ['filePath']
               }
@@ -4138,6 +4259,7 @@ export default function App() {
 
       let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'} You have access to 4 interactive visual laboratories: Physics Lab (for graphing and forces), Chemistry Lab (for compounds and reactions), Math Lab (for trigonometric and fractal curves), and Biology Lab (for predator-prey dynamics and DNA pair sequencing).`;
 
+<<<<<<< HEAD
       // Active mode instructions
       if (activeAssistantMode === 'builder') {
         systemPrompt += `\n\n[ASSISTANT MODE: BUILDER - AUTONOMOUS CODING]
@@ -4155,6 +4277,13 @@ You are operating in DEBUGGER mode. Your focus is to trace errors, debug syntax 
 You are a highly capable, autonomous, and professional software engineering agent running inside the root directory of our workspace.
 When the user asks you to build page(s), applications, interfaces, features, or modify codes:
 1. You MUST make real modifications in the file system using the tools provided: 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'list_coder_files', and 'delete_coder_file'. All file paths are relative to the project root directory!
+=======
+      if (isCoderMode) {
+        systemPrompt += `\n\n[CODER MODE IS ACTIVE]
+You are a highly capable, autonomous, and professional software engineering agent running inside the "coder" directory of our workspace.
+When the user asks you to build page(s), applications, interfaces, features, or modify codes:
+1. You MUST make real modifications in the file system using the tools provided: 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'list_coder_files', and 'delete_coder_file'. All file paths are relative to the 'coder/' folder!
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 2. Do NOT just output a text response with code blocks of code changes. You MUST actually execute the file-system tools to create or edit the actual files in real-time.
 3. If a file already exists, always use 'read_coder_file' first to understand its current content, then make edits with 'edit_coder_file'.
 4. Do NOT attempt to run terminal or environment commands - you modify files and the user's workspace previews them in real-time.
@@ -4245,26 +4374,41 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             let resultValue: any = null;
 
             try {
+<<<<<<< HEAD
               if (!isCoderMode && ['list_coder_files', 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'delete_coder_file'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               }
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               if (name === 'list_coder_files') {
                 const listRes = await fetch('/api/fs/list', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
+<<<<<<< HEAD
                   body: JSON.stringify({ folderPath: '.' }),
+=======
+                  body: JSON.stringify({ folderPath: './coder' }),
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   signal
                 });
                 resultValue = await listRes.json();
               } else if (name === 'create_coder_file' || name === 'edit_coder_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
+<<<<<<< HEAD
                 const fullPath = `./${cleanedPath}`;
+=======
+                const fullPath = `./coder/${cleanedPath}`;
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 if (cleanedPath.includes('/')) {
                   const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
                   await fetch('/api/fs/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+<<<<<<< HEAD
                     body: JSON.stringify({ filePath: `./${folderPart}`, isDirectory: true }),
+=======
+                    body: JSON.stringify({ filePath: `./coder/${folderPart}`, isDirectory: true }),
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                     signal
                   });
                 }
@@ -4278,7 +4422,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 showToast(`Wrote ${cleanedPath}`);
               } else if (name === 'read_coder_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
+<<<<<<< HEAD
                 const fullPath = `./${cleanedPath}`;
+=======
+                const fullPath = `./coder/${cleanedPath}`;
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 const readRes = await fetch('/api/fs/read', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -4289,7 +4437,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 showToast(`Read ${cleanedPath}`);
               } else if (name === 'delete_coder_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
+<<<<<<< HEAD
                 const fullPath = `./${cleanedPath}`;
+=======
+                const fullPath = `./coder/${cleanedPath}`;
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 const delRes = await fetch('/api/fs/delete', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -5061,8 +5213,13 @@ When the user asks you to build page(s), applications, interfaces, features, or 
           </AnimatePresence>
 
           <div className="flex-1 px-3 pt-2">
+<<<<<<< HEAD
           {(attachedFiles.length > 0 || localElementAttachments.length > 0) && (
             <div className="flex flex-wrap gap-2 pt-1 pb-3 items-center">
+=======
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-1 pb-3">
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               {attachedFiles.map((file, idx) => {
                 const isImage = file.type.startsWith('image/');
                 const ext = file.name.split('.').pop()?.toUpperCase() || 'DOC';
@@ -5551,6 +5708,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
             <motion.button
               whileTap={{ scale: 0.92 }}
+<<<<<<< HEAD
               onClick={handleClearChat}
               className="p-1.5 rounded-2xl text-[var(--theme-secondary)] hover:text-red-500 hover:bg-[var(--theme-hover-bg)] transition-all cursor-pointer mr-0.5 flex items-center justify-center shrink-0"
               title="Clear Chat History"
@@ -5560,6 +5718,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
             <motion.button
               whileTap={{ scale: 0.92 }}
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               onClick={() => {
                 showToast("Voice input is configured. Adjust sources in Settings > General.");
               }}
@@ -5787,8 +5947,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 setActiveLabTab={setActiveLabTab}
                 activeProjectId={activeProjectId}
                 setActiveProjectId={setActiveProjectId}
+<<<<<<< HEAD
                 isSidebarOpen={isSidebarOpen}
                 setIsSidebarOpen={setIsSidebarOpen}
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               />
             </motion.aside>
           </>
@@ -5820,8 +5983,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             setActiveLabTab={setActiveLabTab}
             activeProjectId={activeProjectId}
             setActiveProjectId={setActiveProjectId}
+<<<<<<< HEAD
             isSidebarOpen={isSidebarOpen}
             setIsSidebarOpen={setIsSidebarOpen}
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
           />
         </div>
         
@@ -5839,7 +6005,10 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       </motion.aside>
 
       <main className="flex-1 flex flex-col relative h-full min-w-0 bg-[var(--theme-bg)] text-[var(--theme-primary)] transition-colors duration-300">
+<<<<<<< HEAD
 
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
         {!isCoderMode && (
           <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md z-10 sticky top-0 shrink-0">
             <div className="flex items-center gap-2">
@@ -5978,7 +6147,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
         )}
 
         {isCoderMode ? (
+<<<<<<< HEAD
           <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
+=======
+          <div className="flex-1 flex overflow-hidden bg-[#0b0b0c] text-[#e4e4e7] h-full relative font-sans">
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
             {/* LEFT PANEL: File Explorer (VS Code Styled collapsible sidebar) */}
             <AnimatePresence>
               {isCoderLeftPanelOpen && (
@@ -5987,12 +6160,17 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   animate={{ width: 280, opacity: 1 }}
                   exit={{ width: 0, opacity: 0 }}
                   transition={{ duration: 0.22, ease: 'easeOut' }}
+<<<<<<< HEAD
                   className="h-full border-r border-[#221B17] bg-[#110E0D] flex flex-col overflow-hidden shrink-0 z-10 shadow-xl"
+=======
+                  className="h-full border-r border-[#1e1e22] bg-[#141416]/95 backdrop-blur-md flex flex-col overflow-hidden shrink-0 z-10 shadow-xl"
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 >
                   <CoderLeftExplorer 
                     workspaceRefreshKey={workspaceRefreshKey}
                     triggerWorkspaceRefresh={triggerWorkspaceRefresh}
                     showToast={showToast}
+<<<<<<< HEAD
                     onSelectFile={(filePath) => {
                       setFloatingEditFile(filePath);
                       const rel = filePath.replace(/\\/g, '/').split('coder/').pop() || '';
@@ -6000,12 +6178,16 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         setRightPreviewSubpath(rel);
                       }
                     }}
+=======
+                    onSelectFile={(filePath) => setFloatingEditFile(filePath)}
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   />
                 </motion.div>
               )}
             </AnimatePresence>
 
             {/* CENTER PANEL: Standard & customized Coder chat and text layout */}
+<<<<<<< HEAD
             <div className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0A0908]">
               
               {/* Coder Top Navigation Bar */}
@@ -6044,6 +6226,30 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                       <ChevronLeft size={16} />
                     </button>
                     <button className="p-1 text-[#AD9F91] hover:text-white transition-colors cursor-pointer" title="Go Forward">
+=======
+            <div className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0b0b0c]">
+              
+              {/* Coder Top Navigation Bar */}
+              <div className="h-12 border-b border-zinc-900 px-4 flex items-center justify-between shrink-0 bg-[#0e0e10]/80 backdrop-blur-md">
+                <div className="flex items-center gap-3">
+                  {/* Left Sidebar trigger */}
+                  <button
+                    onClick={() => setIsCoderLeftPanelOpen(!isCoderLeftPanelOpen)}
+                    className={`p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-all cursor-pointer ${
+                      isCoderLeftPanelOpen ? 'text-teal-400 bg-teal-500/5' : ''
+                    }`}
+                    title="Toggle Files Side Panel"
+                  >
+                    <SidebarIcon size={16} />
+                  </button>
+
+                  {/* Back and Forward navigation controls as requested in mockup */}
+                  <div className="flex items-center gap-1.5 border-l border-zinc-800 pl-3 select-none">
+                    <button className="p-1 text-zinc-655 hover:text-zinc-400 transition-colors cursor-pointer" title="Go Back">
+                      <ChevronLeft size={16} />
+                    </button>
+                    <button className="p-1 text-zinc-655 hover:text-zinc-400 transition-colors cursor-pointer" title="Go Forward">
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                       <ChevronRight size={16} />
                     </button>
                   </div>
@@ -6059,6 +6265,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setIsCoderRightPanelOpen(!isCoderRightPanelOpen)}
+<<<<<<< HEAD
                     className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
                       isCoderRightPanelOpen 
                         ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
@@ -6067,16 +6274,34 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     title={isCoderRightPanelOpen ? "Collapse App Live Preview" : "Expand App Live Preview"}
                   >
                     <Play size={14} className={isCoderRightPanelOpen ? 'animate-pulse text-[#D97756]' : ''} />
+=======
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all cursor-pointer ${
+                      isCoderRightPanelOpen 
+                        ? 'bg-teal-500/10 text-teal-400 border-teal-500/30' 
+                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                    }`}
+                    title="Toggle App Live Preview"
+                  >
+                    <Play size={10} className={isCoderRightPanelOpen ? 'animate-pulse' : ''} />
+                    <span>App Preview</span>
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   </button>
                 </div>
               </div>
 
               {/* Chat View, Centered Watermarked / Mockup Interface */}
+<<<<<<< HEAD
               <div className="flex-1 flex flex-col justify-between overflow-hidden relative bg-[#131210]" style={{ backgroundColor: '#131210' }}>
                 <div 
                   ref={scrollRef}
                   className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar scroll-smooth"
                   style={{ backgroundColor: '#131210' }}
+=======
+              <div className="flex-1 flex flex-col justify-between overflow-hidden relative">
+                <div 
+                  ref={scrollRef}
+                  className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar scroll-smooth"
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 >
                   <div className="mx-auto space-y-6 pb-28 max-w-3xl">
                     {messages.length === 0 ? (
@@ -6100,8 +6325,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                             setActiveArtifact={handleSetActiveArtifact}
                             setIsCanvasOpen={handleSetIsCanvasOpen}
                             setCanvasView={handleSetCanvasView}
+<<<<<<< HEAD
                             onOpenInEditor={setFloatingEditFile}
                             showToast={showToast}
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                           />
                         ))}
                       </div>
@@ -6124,6 +6352,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               {isCoderRightPanelOpen && (
                 <motion.div
                   initial={{ width: 0, opacity: 0 }}
+<<<<<<< HEAD
                   animate={{ 
                     width: rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440, 
                     opacity: 1 
@@ -6208,6 +6437,19 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     </div>
 
                     <div className="flex items-center gap-1.5">
+=======
+                  animate={{ width: 480, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                  className="h-full border-l border-[#1e1e22] bg-[#141416] flex flex-col overflow-hidden shrink-0 z-10 shadow-2xl"
+                >
+                  <div className="flex items-center justify-between px-3.5 py-3.5 bg-zinc-950 border-b border-zinc-900/80 shrink-0 select-none">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="text-xs font-bold uppercase tracking-wider text-zinc-350">Live Preview Frame</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                       <button 
                         onClick={() => setIframeKey(k => k + 1)}
                         className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
@@ -6217,6 +6459,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                       </button>
                     </div>
                   </div>
+<<<<<<< HEAD
 
                   {/* Frame Container */}
                   <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-[#070606] relative">
@@ -6250,6 +6493,16 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         title="Workspace App Preview"
                       />
                     </div>
+=======
+                  <div className="flex-1 bg-white relative">
+                    <iframe
+                      key={iframeKey}
+                      src={`/coder-preview/?t=${iframeKey}`}
+                      className="w-full h-full border-none bg-white"
+                      referrerPolicy="no-referrer"
+                      title="Workspace App Preview"
+                    />
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   </div>
                 </motion.div>
               )}
@@ -6407,7 +6660,10 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     workspaceRefreshKey={workspaceRefreshKey} 
                     triggerWorkspaceRefresh={triggerWorkspaceRefresh}
                     showToast={showToast}
+<<<<<<< HEAD
                     onInsertAttachedText={insertAttachedContent}
+=======
+>>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   />
                 </div>
               )}
