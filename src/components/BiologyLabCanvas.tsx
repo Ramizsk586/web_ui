@@ -3,7 +3,8 @@ import {
   X, ZoomIn, ZoomOut, Play, Pause, RotateCcw, Flower2, RefreshCw, LineChart,
   Activity, Sliders, Heart, Wind, Droplets, Zap, Globe, Box, Orbit,
   Bug, Atom, Cloud, Brain, CircleDot, Microscope, Waves, Filter,
-  Sigma, Eye, EyeOff, Grid3x3, Layers, Compass, ChevronRight, Virus
+  Sigma, Eye, EyeOff, Grid3x3, Layers, Compass, ChevronRight, Biohazard,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -46,7 +47,7 @@ const TABS: {
   icon: React.ReactNode; color: string; subtitle: string;
 }[] = [
   { id: 'ecosystem',   label: 'Grassland Ecosystem',     category: 'ecology',     icon: <Flower2 size={12}/>,   color: 'text-emerald-500', subtitle: 'Lotka–Volterra predator–prey' },
-  { id: 'epidemic',    label: 'SIR Epidemic Model',      category: 'ecology',     icon: <Virus size={12}/>,     color: 'text-red-500',     subtitle: 'Disease transmission dynamics' },
+  { id: 'epidemic',    label: 'SIR Epidemic Model',      category: 'ecology',     icon: <Biohazard size={12}/>,     color: 'text-red-500',     subtitle: 'Disease transmission dynamics' },
   { id: 'heart',       label: 'Heart Circulatory',       category: 'anatomy',     icon: <Heart size={12}/>,     color: 'text-rose-500',    subtitle: 'Cardiac blood flow' },
   { id: 'respiratory', label: 'Respiratory Gas Cycle',   category: 'anatomy',     icon: <Wind size={12}/>,      color: 'text-sky-500',     subtitle: 'O₂ / CO₂ exchange' },
   { id: 'neuron',      label: 'Neuron Action Potential', category: 'anatomy',     icon: <Zap size={12}/>,       color: 'text-yellow-500',  subtitle: 'Voltage-gated ion channels' },

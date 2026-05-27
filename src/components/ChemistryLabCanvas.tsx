@@ -1212,7 +1212,7 @@ export const ChemistryLabCanvas: React.FC<{
         ctx.fillText(node.label, node.x, node.y + 0.3);
 
         // Draw electronic valence shell surrounding dots
-        if (node.valences > 0) {
+        if ('valences' in node && node.valences > 0) {
           ctx.fillStyle = '#fbbf24';
           const rShell = 24;
           for (let i = 0; i < node.valences; i++) {
