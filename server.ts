@@ -33,6 +33,17 @@ async function startServer() {
     res.json({ status: 'ok', server: 'Lumina Web UI Server' });
   });
 
+  // Ensure coder directory exists and serve static preview
+  try {
+    const coderPath = path.join(process.cwd(), 'coder');
+    if (!fs.existsSync(coderPath)) {
+      fs.mkdirSync(coderPath, { recursive: true });
+    }
+  } catch (err) {
+    console.error("Failed to ensure coder folder exists:", err);
+  }
+  app.use('/coder-preview', express.static(path.join(process.cwd(), 'coder')));
+
   // Search endpoint
   app.post("/api/search", async (req, res) => {
     const { query, tavilyKey, serpKey, provider: preferredProvider } = req.body;
@@ -462,6 +473,22 @@ async function startServer() {
     }
   });
 
+  app.get("/api/fs/raw", (req, res) => {
+    const { filePath } = req.query;
+    if (!filePath || typeof filePath !== 'string') {
+      return res.status(400).send("filePath is required");
+    }
+    const resolvedPath = path.resolve(filePath);
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).send("File not found");
+    }
+    try {
+      res.sendFile(resolvedPath);
+    } catch (e: any) {
+      res.status(500).send("Error reading file");
+    }
+  });
+
   app.post("/api/fs/write", (req, res) => {
     const { filePath, content } = req.body;
     if (!filePath || content === undefined) {
@@ -514,6 +541,250 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to delete", detail: e.message });
+    }
+  });
+
+  // Rename/move files and folders atomically
+  app.post("/api/fs/move", (req, res) => {
+    const { oldPath, newPath } = req.body;
+    if (!oldPath || !newPath) {
+      return res.status(400).json({ error: "oldPath and newPath are required" });
+    }
+    
+    const resolvedOld = path.resolve(oldPath);
+    const resolvedNew = path.resolve(newPath);
+    try {
+      if (!fs.existsSync(resolvedOld)) {
+        return res.status(404).json({ error: "Source path not found" });
+      }
+      fs.mkdirSync(path.dirname(resolvedNew), { recursive: true });
+      fs.renameSync(resolvedOld, resolvedNew);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to move or rename", detail: e.message });
+    }
+  });
+
+  // Analyze element endpoint using filesystem scan and optional Gemini analysis
+  app.post("/api/fs/analyze_element", async (req, res) => {
+    const { tag, id, classes, text, placeholder, src, href } = req.body;
+    
+    // 1. Scan filesystem for matches under /coder and /src
+    const allFiles = getFilesRecursively(process.cwd());
+    const textFiles = allFiles.filter(f => !f.isDirectory && /\.(html|css|js|jsx|ts|tsx|vue)$/i.test(f.name));
+    
+    let bestFile = null;
+    let bestScore = -1;
+
+    for (const file of textFiles) {
+      try {
+        const content = fs.readFileSync(file.path, 'utf8');
+        let score = 0;
+        
+        // Match ID of element
+        if (id) {
+          if (content.includes(`id="${id}"`) || content.includes(`id='${id}'`) || content.includes(`id={${id}}`) || content.includes(`id={"${id}"}`)) {
+            score += 150;
+          } else if (content.includes(id)) {
+            score += 40;
+          }
+        }
+        
+        // Match textContent of element
+        if (text && text.trim().length > 1) {
+          const trimmedText = text.trim();
+          if (content.includes(trimmedText)) {
+            score += 80;
+          } else if (content.toLowerCase().includes(trimmedText.toLowerCase())) {
+            score += 40;
+          }
+        }
+        
+        // Match src or href attributes (extremely specific for images/links)
+        if (src && content.includes(src)) {
+          score += 100;
+        }
+        if (href && content.includes(href)) {
+          score += 100;
+        }
+        
+        // Match specific class combinations
+        if (classes) {
+          const classList = classes.split(/\s+/).filter(c => c.length > 2 && !['flex', 'grid', 'hidden', 'block', 'w-full', 'h-full', 'relative', 'absolute', 'items-center', 'justify-between', 'text-center', 'cursor-pointer', 'rounded', 'border', 'shadow', 'bg-white', 'text-black', 'text-white'].includes(c));
+          let matchCount = 0;
+          for (const cls of classList) {
+            if (content.includes(cls)) {
+              matchCount++;
+            }
+          }
+          if (matchCount > 0) {
+            score += matchCount * 15;
+          }
+        }
+        
+        // Match tag
+        if (tag && (content.includes(`<${tag}`) || content.includes(`text-${tag}`))) {
+          score += 5;
+        }
+        
+        if (score > bestScore) {
+          bestScore = score;
+          bestFile = { ...file, content };
+        }
+      } catch (err) {
+        // Skip unreadable files
+      }
+    }
+
+    // Default fallbacks if no file scored above 0
+    let targetFile = bestFile;
+    if (!targetFile || bestScore <= 0) {
+      // Look for App.tsx as logical default
+      const probableFile = textFiles.find(f => f.name === 'App.tsx');
+      if (probableFile) {
+        try {
+          targetFile = {
+            ...probableFile,
+            content: fs.readFileSync(probableFile.path, 'utf8')
+          };
+        } catch {}
+      }
+    }
+
+    if (!targetFile) {
+      return res.status(404).json({ error: "No matching files or default files found in the workspace." });
+    }
+
+    // Window snippet extraction
+    let fileContentWindow = targetFile.content;
+    const fileContent = targetFile.content;
+    const filePath = targetFile.path;
+
+    if (fileContent.length > 30000) {
+      let matchIndex = -1;
+      if (id) {
+        matchIndex = fileContent.indexOf(`id="${id}"`);
+        if (matchIndex === -1) matchIndex = fileContent.indexOf(`id='${id}'`);
+        if (matchIndex === -1) matchIndex = fileContent.indexOf(`id={${id}}`);
+        if (matchIndex === -1) matchIndex = fileContent.indexOf(id);
+      }
+      if (matchIndex === -1 && text && text.length > 2) {
+        matchIndex = fileContent.toLowerCase().indexOf(text.toLowerCase());
+      }
+      if (matchIndex === -1 && classes) {
+        const classList = classes.split(/\s+/).filter(c => c.length > 2);
+        for (const c of classList) {
+          matchIndex = fileContent.indexOf(c);
+          if (matchIndex !== -1) break;
+        }
+      }
+      
+      if (matchIndex !== -1) {
+        const start = Math.max(0, matchIndex - 8000);
+        const end = Math.min(fileContent.length, matchIndex + 8000);
+        fileContentWindow = `// ... [TRUNCATED CODEBEFORE] ...\n${fileContent.substring(start, end)}\n// ... [TRUNCATED CODEAFTER] ...`;
+      } else {
+        fileContentWindow = `${fileContent.substring(0, 15000)}\n// ... [TRUNCATED REST] ...`;
+      }
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      // Local Heuristic Fallback if Google Gemini API key is missing
+      const specificSnippet = fileContentWindow.substring(0, 1000);
+      return res.json({
+        success: true,
+        analysis: {
+          fileName: targetFile.name,
+          filePath: filePath,
+          specificCode: specificSnippet,
+          connections: [],
+          elementWork: `Controls the UI view and rendering logic for selected <${tag}> element on the preview viewport.`
+        }
+      });
+    }
+
+    // Call Gemini
+    try {
+      const cssSelector = `${tag}${id ? `#${id}` : ''}${classes ? `.${classes.split(/\s+/)[0]}` : ''}`;
+      const prompt = `You are a developer tool. I have selected an HTML/JSX element from a live web preview:
+- CSS Selector: ${cssSelector}
+- Tag Name: <${tag}>
+- Classes: ${classes}
+- Text content: "${text || ''}"
+- Placeholder: "${placeholder || ''}"
+- Image src: "${src || ''}"
+- Link href: "${href || ''}"
+
+This element was traced to reside in the source file: "${targetFile.name}" (at path: "${filePath}").
+We have extracted the relevant section of that file's code:
+\`\`\`
+${fileContentWindow}
+\`\`\`
+
+Based on this content, extract/formulate the 4 parts required. Return a valid RAW JSON object matching this schema exactly (without any markdown block wrapper):
+{
+  "fileName": "The clean filename, e.g. '${targetFile.name}'",
+  "filePath": "The path to the file, e.g. '${filePath}'",
+  "specificCode": "The specific functional subset of code from the file that controls/renders this element. Include its event handlers, styling, attributes or properties. Keep it to a clean and perfectly formatted block of code.",
+  "connections": [
+    { "fileName": "Name of connected/imported/associated file", "filePath": "Path of the connected file" }
+  ],
+  "elementWork": "A highly professional, developer-focused 1-2 sentence description explaining exactly what this clicked element does, how it works, and its role in the interface."
+}
+
+Ensure the JSON is perfectly valid and matches the requested keys. Output only raw JSON text. No markdown backticks.`;
+
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 20000
+        }
+      );
+
+      let responseText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      responseText = responseText.trim();
+      if (responseText.startsWith('```json')) {
+        responseText = responseText.substring(7, responseText.length - 3).trim();
+      } else if (responseText.startsWith('```')) {
+        responseText = responseText.substring(3, responseText.length - 3).trim();
+      }
+
+      const parsed = JSON.parse(responseText);
+      return res.json({
+        success: true,
+        analysis: {
+          fileName: parsed.fileName || targetFile.name,
+          filePath: parsed.filePath || filePath,
+          specificCode: parsed.specificCode || fileContentWindow.substring(0, 1000),
+          connections: parsed.connections || [],
+          elementWork: parsed.elementWork || `Controls interaction and state updates for this selected <${tag}> element.`
+        }
+      });
+
+    } catch (err: any) {
+      console.error("Gemini inspect analysis failed, using fallback:", err.message);
+      return res.json({
+        success: true,
+        analysis: {
+          fileName: targetFile.name,
+          filePath: filePath,
+          specificCode: fileContentWindow.substring(0, 1000),
+          connections: [],
+          elementWork: `Controls state updates and visual layout representation for the selected <${tag}> element.`
+        }
+      });
     }
   });
 
