@@ -13,6 +13,9 @@ export default defineConfig(({mode}) => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'icon.svg', 'mask-icon.svg'],
+        workbox: {
+          maximumFileSizeToCacheInBytes: 50 * 1024 * 1024 // 50MB
+        },
         manifest: {
           name: 'Lumina',
           short_name: 'Lumina',

@@ -3,6 +3,21 @@
  * All tools are sourced from the bridge - no built-in tool duplication.
  */
 import type { ToolDefinition } from './types';
+import { webScrapeTool } from './tools/webScrapeTool';
+import { ALL_WIKI_TOOLS } from './tools/wikiTools';
+
+export const registeredTools: ToolDefinition[] = [];
+
+export function registerTool(tool: ToolDefinition): void {
+  const existing = registeredTools.find(t => t.function.name === tool.function.name);
+  if (!existing) {
+    registeredTools.push(tool);
+  }
+}
+
+// Register default scrape and general Wikipedia tools on startup
+registerTool(webScrapeTool);
+ALL_WIKI_TOOLS.forEach(registerTool);
 
 /**
  * Normalize a URL by removing trailing slash.
@@ -91,7 +106,7 @@ export async function fetchBridgeTools(
         id: t.function?.name || t.name || t.id,
         name: t.function?.name || t.name || t.id,
         description: t.function?.description || t.description || '',
-        enabled: true,
+        enabled: false,
         parameters: t.function?.parameters || t.parameters,
       }));
     }
@@ -114,7 +129,7 @@ export async function fetchBridgeTools(
         id: t.function?.name || t.name,
         name: t.function?.name || t.name,
         description: t.function?.description || t.description || '',
-        enabled: true,
+        enabled: false,
         parameters: t.function?.parameters || t.parameters,
       }));
     }
@@ -129,7 +144,7 @@ export async function fetchBridgeTools(
         id: t.name,
         name: t.name,
         description: t.description || '',
-        enabled: true,
+        enabled: false,
         parameters: t.parameters,
       }));
     }

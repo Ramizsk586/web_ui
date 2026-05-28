@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { FileTreeCanvas } from './FileTreeCanvas';
+import { DiagramCanvas } from './DiagramCanvas';
 import { 
   Globe, 
   Check, 
@@ -1900,6 +1902,53 @@ export const CustomCodeBlockVisualizer: React.FC<{ language: string; code: strin
   const isGeometry = language === 'geometry' || language === 'shape' || code.includes('"dimension"') || code.includes('"shape"');
   const isMath = language === 'math' || language === 'latex';
 
+  const isTree = useMemo(() => {
+    const lang = (language || '').toLowerCase();
+    if (['tree', 'filetree', 'directory', 'folders', 'structure', 'skeleton', 'project'].includes(lang)) {
+      return true;
+    }
+    const lines = code.split('\n');
+    let branches = 0;
+    for (let i = 0; i < Math.min(lines.length, 15); i++) {
+      const line = lines[i];
+      if (line.includes('├──') || line.includes('└──') || line.includes('│  ') || line.includes('└──')) {
+        branches++;
+      }
+    }
+    return branches >= 2;
+  }, [code, language]);
+
+
+  // Support smart rendering of Flowchart diagrams & transit maps
+  const isFlowchartDiagram = useMemo(() => {
+    const lang = (language || '').toLowerCase();
+    // Strictly restrict to dedicated diagram declaration languages to protect normal HTML/CSS/JS code
+    if (['diagram', 'flowchart', 'sequence', 'mermaid', 'mindmap'].includes(lang)) {
+      return true;
+    }
+    // Never auto-detect diagrams if standard programming, markup, or style language
+    if (['html', 'xml', 'css', 'scss', 'less', 'javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx', 'json', 'yaml', 'yml'].includes(lang)) {
+      return false;
+    }
+    const trimmed = code.trim().toLowerCase();
+    if (trimmed.includes('<!doctype') || trimmed.includes('<html') || trimmed.includes('<div') || trimmed.includes('</script>') || trimmed.includes('{') || trimmed.includes('[')) {
+      return false;
+    }
+    const lines = code.split('\n');
+    let arrows = 0;
+    for (let i = 0; i < Math.min(lines.length, 15); i++) {
+      const line = lines[i];
+      // Exclude HTML comments or XML segments
+      if (line.includes('-->') && (line.includes('<!--') || line.includes('<'))) {
+        continue;
+      }
+      if (line.includes('->') || line.includes('-->')) {
+        arrows++;
+      }
+    }
+    return arrows >= 2; // Require at least 2 clear arrow lines to trigger
+  }, [code, language]);
+
   // Custom ASCII art coordinates parser check
   const isAsciiPlot = useMemo(() => {
     if (language && language !== 'text' && language !== 'plain' && language !== 'fallback') return false;
@@ -1916,6 +1965,15 @@ export const CustomCodeBlockVisualizer: React.FC<{ language: string; code: strin
     }
     return pipeLinesCount >= 3 && hasXAxisLine;
   }, [code, language]);
+
+  if (isTree) {
+    return <FileTreeCanvas code={code} />;
+  }
+
+
+  if (isFlowchartDiagram) {
+    return <DiagramCanvas code={code} />;
+  }
 
   if (isChart) {
     return <InteractiveChart data={code} />;

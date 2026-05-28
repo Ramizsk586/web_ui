@@ -5,7 +5,7 @@
  * A polished, dark-native AI chat prototype built with React, Lucide-react, 
  * Motion, and Tailwind CSS v4.
  * 
- * All tools are sourced from the Llama Bridge - no built-in UI-side tool definitions.
+ * Tools are categorized into built-in "Lumina Tools" (Web Scraper & Wikipedia) and external "Llama Bridge Tools".
  */
 
 // Dependencies: react-syntax-highlighter @types/react-syntax-highlighter
@@ -36,6 +36,9 @@ import {
   Newspaper,
   Play,
   ExternalLink,
+  Maximize2,
+  Minimize2,
+  SquareTerminal,
   RefreshCw,
   X,
   Languages,
@@ -78,7 +81,6 @@ import {
   Beaker,
   Compass,
   Flower2,
-<<<<<<< HEAD
   Mic,
   Smartphone,
   Tablet,
@@ -89,9 +91,6 @@ import {
   AlignCenter,
   AlignRight,
   MousePointerClick
-=======
-  Mic
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -108,6 +107,30 @@ import { BiologyLabCanvas } from './components/BiologyLabCanvas';
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
 import { CoderLeftExplorer } from './components/CoderLeftExplorer';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
+import TerminalConsole from './components/TerminalConsole';
+import Whiteboard from './components/Whiteboard';
+
+import { scrapeUrl, ScrapeResult, ScrapeOptions } from './services/scrapingService';
+import { ScrapingResultArtifact } from './components/ScrapingResultArtifact';
+import { ScrapingProgressIndicator } from './components/ScrapingProgressIndicator';
+
+import { WikiArticleArtifact } from './components/WikiArticleArtifact';
+import { WikiSearchResultList } from './components/WikiSearchResultList';
+import { WikiToolCallIndicator } from './components/WikiToolCallIndicator';
+import { ALL_WIKI_TOOLS } from './tools/wikiTools';
+import { webScrapeTool } from './tools/webScrapeTool';
+import {
+  wikiSearch,
+  wikiGetPage,
+  wikiGetSummary,
+  wikiGetSections,
+  wikiGetCategories,
+  wikiGetLinks,
+  wikiGetImages,
+  wikiGetRelated
+} from './services/wikiService';
+
+import { useSmartPopupPosition } from './hooks/useSmartPopupPosition';
 
 interface ToolCallNode {
   id: string;
@@ -120,6 +143,9 @@ interface ToolCallNode {
   durationMs?: number;
   resultSummary?: string;
   subNodes?: ToolCallNode[];
+  filePath?: string;
+  addedCount?: number;
+  removedCount?: number;
 }
 
 interface Artifact {
@@ -147,6 +173,12 @@ interface Message {
   toolCalls?: ToolCallNode[];
   artifacts?: Artifact[];
   elementAttachments?: any[];
+  todoPlan?: {
+    title: string;
+    todos: { id: string; text: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[];
+    isConfirmed?: boolean;
+    countdown?: number;
+  };
 }
 
 interface Chat {
@@ -173,7 +205,7 @@ interface Tool {
       description: string;
       parameters: {
         type: 'object';
-        properties: Record<string, { type: string; description: string }>;
+        properties: Record<string, any>;
         required: string[];
       };
     };
@@ -229,6 +261,25 @@ const ToolCallingAnimation = () => (
   </motion.div>
 );
 
+const LuminaToolCallingAnimation = () => (
+  <motion.div
+    animate={{ 
+      y: [0, -3, 0],
+      rotate: [0, -12, 12, 0],
+      scale: [1, 1.08, 1]
+    }}
+    transition={{ 
+      repeat: Infinity, 
+      duration: 2.2, 
+      ease: "easeInOut" 
+    }}
+    className="flex items-center justify-center relative select-none pointer-events-none"
+  >
+    <div className="absolute inset-0 bg-orange-500/20 blur-xl rounded-full animate-pulse" />
+    <Hammer size={16} className="text-orange-500 relative z-10" />
+  </motion.div>
+);
+
 interface SidebarProps {
   chats: Chat[];
   currentChatId: string | null;
@@ -251,11 +302,8 @@ interface SidebarProps {
   onSelect?: () => void;
   activeProjectId?: string | null;
   setActiveProjectId?: (id: string | null) => void;
-<<<<<<< HEAD
   isSidebarOpen?: boolean;
   setIsSidebarOpen?: (open: boolean) => void;
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 }
 
 const AVAILABLE_AVATARS = [
@@ -281,19 +329,15 @@ const SidebarContent = ({
   setActiveLabTab,
   onSelect,
   activeProjectId,
-<<<<<<< HEAD
   setActiveProjectId,
   isSidebarOpen,
   setIsSidebarOpen,
-=======
-  setActiveProjectId
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 }: SidebarProps) => {
   const [labsHovered, setLabsHovered] = useState(false);
   const [isRecentChatsOpen, setIsRecentChatsOpen] = useState(true);
   const [isLabsSectionOpen, setIsLabsSectionOpen] = useState(false);
   const [isAvatarSelectorOpen, setIsAvatarSelectorOpen] = useState(false);
-  const [isProjectsOpen, setIsProjectsOpen] = useState(true);
+  const [isProjectsOpen, setIsProjectsOpen] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
@@ -644,6 +688,32 @@ const SidebarContent = ({
               transition={{ duration: 0.2, ease: "easeInOut" }}
               className="space-y-1 overflow-hidden"
             >
+        {activeLabTab && (
+          <div className="group relative">
+            <button
+              onClick={() => {
+                setCurrentChatId(null);
+                if (onSelect) onSelect();
+              }}
+              className="w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-semibold transition-colors pr-10 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/15"
+            >
+              <Activity size={16} className="text-blue-500 animate-pulse shrink-0" />
+              <span className="truncate">
+                {activeLabTab.charAt(0).toUpperCase() + activeLabTab.slice(1)} Laboratory
+              </span>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveLabTab(null);
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-md opacity-0 group-hover:opacity-100 transition-all cursor-pointer border border-transparent h-7 w-7 flex items-center justify-center hover:border-red-500/20"
+              title="Close tab"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
         {chats.filter(c => !c.projectId).map(chat => (
           <div key={chat.id} className="group relative">
             <button
@@ -1049,6 +1119,120 @@ const renderNodeIcon = (icon: any) => {
   return <FileText size={14} />;
 };
 
+const computeLineDiff = (oldContent: string, newContent: string) => {
+  const oldLines = oldContent ? oldContent.split('\n') : [];
+  const newLines = newContent ? newContent.split('\n') : [];
+  
+  let added = 0;
+  let removed = 0;
+  
+  const oldSet = new Set(oldLines.map(l => l.trim()));
+  const newSet = new Set(newLines.map(l => l.trim()));
+  
+  for (const line of newLines) {
+    if (!oldSet.has(line.trim())) {
+      added++;
+    }
+  }
+  for (const line of oldLines) {
+    if (!newSet.has(line.trim())) {
+      removed++;
+    }
+  }
+  
+  if (oldContent !== newContent && added === 0 && removed === 0) {
+    added = 1;
+  }
+  
+  return { added, removed };
+};
+
+const getFileNameOnly = (path: string) => {
+  if (!path) return 'file.ts';
+  const parts = path.split('/');
+  return parts[parts.length - 1];
+};
+
+const humanizeToolName = (toolName?: string, rawLabel?: string) => {
+  if (!toolName) return rawLabel || 'System action';
+  const lower = toolName.toLowerCase();
+  
+  if (lower === 'edit_coder_file') {
+    return 'Modify and upgrade template source file';
+  }
+  if (lower === 'create_coder_file') {
+    return 'Create new engineering component file';
+  }
+  if (lower === 'list_coder_files') {
+    return 'Query and analyze codebase project file tree';
+  }
+  if (lower === 'read_coder_file') {
+    return 'Inspect and parse file lines';
+  }
+  if (lower === 'delete_coder_file') {
+    return 'Remove deprecated files from directory';
+  }
+  if (lower === 'verify_changes') {
+    return 'Verify target changes';
+  }
+  return rawLabel || toolName;
+};
+
+const RealtimeEditCounter = ({ node }: { node: ToolCallNode }) => {
+  const [added, setAdded] = React.useState(0);
+  const [removed, setRemoved] = React.useState(0);
+  const isEditing = node.status === 'active';
+  const isComplete = node.status === 'complete';
+  
+  const targetAdded = node.addedCount ?? 45;
+  const targetRemoved = node.removedCount ?? 8;
+
+  React.useEffect(() => {
+    if (isEditing) {
+      const interval = setInterval(() => {
+        setAdded(prev => {
+          if (prev < targetAdded) {
+            return prev + Math.floor(Math.random() * 3) + 1;
+          }
+          return prev + (Math.random() > 0.6 ? 1 : Math.random() > 0.8 ? -1 : 0);
+        });
+        setRemoved(prev => {
+          if (prev < targetRemoved) {
+            return prev + Math.floor(Math.random() * 2) + 1;
+          }
+          return prev + (Math.random() > 0.6 ? 1 : Math.random() > 0.8 ? -1 : 0);
+        });
+      }, 150);
+      
+      return () => clearInterval(interval);
+    } else if (isComplete) {
+      setAdded(node.addedCount ?? 0);
+      setRemoved(node.removedCount ?? 0);
+    }
+  }, [isEditing, isComplete, targetAdded, targetRemoved, node.addedCount, node.removedCount]);
+
+  const displayAdded = isEditing ? Math.max(1, added) : (node.addedCount ?? 0);
+  const displayRemoved = isEditing ? Math.max(1, removed) : (node.removedCount ?? 0);
+
+  return (
+    <div className="flex items-center gap-2 mt-1 px-1 py-0.5 select-none font-sans flex-wrap ml-7">
+      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-700/50 font-mono text-[11px] text-zinc-650 dark:text-zinc-350">
+        <span className="opacity-70">{getFileNameOnly(node.filePath || 'file.ts')}</span>
+      </div>
+      {displayAdded > 0 && (
+        <span className="text-[11.5px] font-bold text-[#10b981] dark:text-[#34d399] font-mono">
+          +{displayAdded}
+        </span>
+      )}
+      {displayRemoved > 0 && (
+        <span className="text-[11.5px] font-bold text-rose-500 font-mono">
+          -{displayRemoved}
+        </span>
+      )}
+    </div>
+  );
+};
+
 const NodeGraph = React.memo(({ 
   nodes, 
   isStreaming,
@@ -1056,7 +1240,10 @@ const NodeGraph = React.memo(({
   isStreamingThinking,
   isSearching,
   searchQuery,
-  sources = []
+  sources = [],
+  scrapingResults = new Map(),
+  wikiResults = new Map(),
+  onSendMessage
 }: { 
   nodes: ToolCallNode[]; 
   isStreaming?: boolean;
@@ -1065,6 +1252,9 @@ const NodeGraph = React.memo(({
   isSearching?: boolean;
   searchQuery?: string;
   sources?: any[];
+  scrapingResults?: Map<string, ScrapeResult>;
+  wikiResults?: Map<string, { wikiType: string, data: any }>;
+  onSendMessage?: (msg: string) => void;
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(() => {
     return !(isStreaming || isStreamingThinking || isSearching || nodes.some(n => n.status === 'active'));
@@ -1072,6 +1262,7 @@ const NodeGraph = React.memo(({
 
   const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
   const [isSearchExpanded, setIsSearchExpanded] = useState(true);
+  const [collapsedToolNodes, setCollapsedToolNodes] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (isStreaming || isStreamingThinking || isSearching || nodes.some(n => n.status === 'active')) {
@@ -1360,34 +1551,170 @@ const NodeGraph = React.memo(({
             </div>
           )}
 
-          {displayNodes.map((node, i) => (
-            <motion.div
-              key={node.id}
-              initial={(isStreaming || isStreamingThinking) ? false : { opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="relative flex items-center gap-3 pl-8"
-            >
-              <div className="absolute left-0 top-[10px] w-4 h-[1px] bg-zinc-100 dark:bg-white/5" />
-              <div className={`transition-colors shrink-0 ${node.status === 'active' ? 'text-blue-500' : 'text-zinc-400 dark:text-zinc-500'}`}>
-                {renderNodeIcon(node.icon)}
-              </div>
-              <span className={`text-[13.5px] font-medium transition-colors ${
-                node.status === 'active'
-                  ? 'text-blue-500'
-                  : 'text-zinc-600 dark:text-zinc-400'
-              }`}>
-                {node.label}
-              </span>
-              {node.status === 'active' && (
-                <motion.div
-                  animate={{ opacity: [0.4, 1, 0.4] }}
-                  transition={{ repeat: Infinity, duration: 1.5 }}
-                  className="ml-2 w-1.5 h-1.5 rounded-full bg-blue-500"
-                />
-              )}
-            </motion.div>
-          ))}
+          {displayNodes.map((node, i) => {
+            const isEditNode = node.toolName === 'edit_coder_file' || node.toolName === 'create_coder_file';
+            const isScriptNode = node.toolName === 'verify_changes' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
+            
+            return (
+              <motion.div
+                key={node.id}
+                initial={(isStreaming || isStreamingThinking) ? false : { opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.05 }}
+                className="relative flex flex-col pl-8 py-0.5 items-start"
+              >
+                <div className="absolute left-0 top-[12px] w-4 h-[1px] bg-zinc-150 dark:bg-white/10" />
+                
+                {(() => {
+                  const isCollapsible = node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_');
+                  const isCollapsedLocally = !!collapsedToolNodes[node.id];
+                  
+                  const headerContent = (
+                    <div className="flex items-center gap-3">
+                      <div className="transition-colors shrink-0">
+                        {node.status === 'active' ? (
+                          isCollapsible ? <LuminaToolCallingAnimation /> : <ToolCallingAnimation />
+                        ) : (
+                          renderNodeIcon(node.icon)
+                        )}
+                      </div>
+                      
+                      <span className={`text-[13px] font-medium transition-colors ${
+                        node.status === 'active'
+                          ? isCollapsible ? 'text-orange-500 font-semibold' : 'text-emerald-500 font-semibold'
+                          : 'text-zinc-750 dark:text-zinc-300'
+                      }`}>
+                        {humanizeToolName(node.toolName, node.label)}
+                      </span>
+
+                      {isCollapsible && (
+                        <motion.div
+                          animate={{ rotate: isCollapsedLocally ? -90 : 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="text-zinc-400 group-hover:text-zinc-650 dark:group-hover:text-zinc-200 shrink-0"
+                        >
+                          <ChevronDown size={12} />
+                        </motion.div>
+                      )}
+                      
+                      {node.status === 'active' && (
+                        <motion.div
+                          animate={{ opacity: [0.4, 1, 0.4] }}
+                          transition={{ repeat: Infinity, duration: 1.5 }}
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isCollapsible ? 'bg-orange-500' : 'bg-emerald-500'
+                          }`}
+                        />
+                      )}
+                    </div>
+                  );
+
+                  if (isCollapsible) {
+                    return (
+                      <button
+                        onClick={() => {
+                          setCollapsedToolNodes(prev => ({
+                            ...prev,
+                            [node.id]: !prev[node.id]
+                          }));
+                        }}
+                        className="flex items-center gap-3 group focus:outline-hidden hover:opacity-90 cursor-pointer text-left"
+                      >
+                        {headerContent}
+                      </button>
+                    );
+                  }
+
+                  return headerContent;
+                })()}
+
+                {isEditNode && (
+                  <RealtimeEditCounter node={node} />
+                )}
+
+                {isScriptNode && (
+                  <div className="flex items-center gap-1.5 mt-1 ml-7">
+                    <span className="text-[10px] font-bold tracking-widest uppercase px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400 rounded border border-zinc-200/50 dark:border-zinc-700/50 font-mono">
+                      Script
+                    </span>
+                  </div>
+                )}
+
+                {node.toolName === 'web_scrape' && (
+                  <AnimatePresence initial={false}>
+                    {!collapsedToolNodes[node.id] && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                        animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
+                        exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                        className="overflow-hidden w-full ml-7"
+                      >
+                        {node.status === 'complete' ? (
+                          (() => {
+                            const scrapeResult = scrapingResults.get(node.id);
+                            if (!scrapeResult) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving scraped content assets...</div>;
+                            return (
+                              <div className="max-w-[800px] xl:max-w-[1000px] w-full">
+                                <ScrapingResultArtifact 
+                                  result={scrapeResult} 
+                                  onReScrape={(reScrapeUrl) => {
+                                    console.log('Re-scrape request:', reScrapeUrl);
+                                  }}
+                                />
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <ScrapingProgressIndicator 
+                            status={node.status} 
+                            url={node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
+                          />
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                )}
+
+                {node.toolName?.startsWith('wiki_') && (
+                  <AnimatePresence initial={false}>
+                    {!collapsedToolNodes[node.id] && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                        animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
+                        exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                        className="overflow-hidden w-full ml-7"
+                      >
+                        {node.status === 'complete' ? (
+                          (() => {
+                            const wikiRes = wikiResults.get(node.id);
+                            if (!wikiRes) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving Wikipedia knowledge assets...</div>;
+                            return (
+                              <div className="max-w-[800px] xl:max-w-[1000px] w-full">
+                                <WikiArticleArtifact 
+                                  data={wikiRes.data} 
+                                  wikiType={wikiRes.wikiType as any}
+                                  onFetchPage={(pageId) => {
+                                    onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`);
+                                  }}
+                                  onSearch={(query) => {
+                                    onSendMessage?.(`Search Wikipedia for: ${query}`);
+                                  }}
+                                />
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <WikiToolCallIndicator node={node} />
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                )}
+              </motion.div>
+            );
+          })}
           {allComplete && !isStreaming && (
             <motion.div
               initial={{ opacity: 0, x: -10 }}
@@ -1395,11 +1722,11 @@ const NodeGraph = React.memo(({
               transition={{ delay: displayNodes.length * 0.05 }}
               className="relative flex items-center gap-3 pl-8 pt-1"
             >
-              <div className="absolute left-0 top-[14px] w-4 h-[1px] bg-zinc-100 dark:bg-white/5" />
-              <div className="shrink-0 flex items-center justify-center w-4 h-4 rounded-full border border-zinc-500 text-zinc-500">
+              <div className="absolute left-0 top-[18px] w-4 h-[1px] bg-zinc-150 dark:bg-white/10" />
+              <div className="shrink-0 flex items-center justify-center w-4 h-4 rounded-full border border-zinc-400 dark:border-zinc-600 text-emerald-500 dark:text-emerald-400 bg-white dark:bg-zinc-900 z-10 shadow-xs">
                 <Check size={10} strokeWidth={3} />
               </div>
-              <span className="text-[14px] font-bold text-zinc-800 dark:text-zinc-200">Done</span>
+              <span className="text-[13.5px] font-bold text-zinc-800 dark:text-zinc-200">Done</span>
             </motion.div>
           )}
         </div>
@@ -1545,7 +1872,12 @@ const MessageItem = React.memo(({
   setIsCanvasOpen, 
   setCanvasView,
   onOpenInEditor,
-  showToast
+  showToast,
+  onUpdateTodoPlan,
+  onStartBuilding,
+  scrapingResults = new Map(),
+  wikiResults = new Map(),
+  onSendMessage
 }: { 
   message: Message; 
   markdownComponents: any; 
@@ -1559,6 +1891,11 @@ const MessageItem = React.memo(({
   setCanvasView: (v: 'code' | 'preview') => void;
   onOpenInEditor?: (filePath: string) => void;
   showToast?: (v: string) => void;
+  onUpdateTodoPlan?: (messageId: string, updatedPlan: any) => void;
+  onStartBuilding?: (messageId: string) => void;
+  scrapingResults?: Map<string, ScrapeResult>;
+  wikiResults?: Map<string, { wikiType: string, data: any }>;
+  onSendMessage?: (msg: string) => void;
 }) => {
   const [copied, setCopied] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -1643,6 +1980,36 @@ const MessageItem = React.memo(({
       code({ className, children, ...props }: any) {
         const match = /language-(\w+)/.exec(className || '');
         const codeStr = String(children).replace(/\n$/, '');
+        const isMultiLine = codeStr.includes('\n');
+        
+        const isTreeStructure = (() => {
+          const lines = codeStr.split('\n');
+          let branches = 0;
+          for (let i = 0; i < Math.min(lines.length, 15); i++) {
+            const line = lines[i];
+            if (line.includes('├──') || line.includes('└──') || line.includes('│  ') || line.includes('└──') || line.includes('║') || line.includes('╠══') || line.includes('╚══')) {
+              branches++;
+            }
+          }
+          return branches >= 1;
+        })();
+
+        if (isTreeStructure) {
+          return (
+            <CustomCodeBlockVisualizer
+              language="tree"
+              code={codeStr}
+              defaultRender={
+                <CanvasBlock 
+                  language="tree" 
+                  code={codeStr} 
+                  isStreaming={message.isStreaming} 
+                />
+              }
+            />
+          );
+        }
+
         if (match) {
           return (
             <CustomCodeBlockVisualizer
@@ -1658,6 +2025,17 @@ const MessageItem = React.memo(({
             />
           );
         }
+
+        if (isMultiLine) {
+          return (
+            <CanvasBlock 
+              language="text" 
+              code={codeStr} 
+              isStreaming={message.isStreaming} 
+            />
+          );
+        }
+
         return (
           <code className="bg-white/10 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
             {children}
@@ -1822,7 +2200,7 @@ const MessageItem = React.memo(({
           </div>
         </motion.div>
       ) : (
-        <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-3xl">
+        <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-4xl xl:max-w-[1100px]">
           {((message.toolCalls && message.toolCalls.length > 0) || (message.thinkContent !== undefined && message.thinkContent.length > 0) || message.searchQuery || message.isSearching) && (
             <NodeGraph 
               nodes={message.toolCalls || []} 
@@ -1832,6 +2210,9 @@ const MessageItem = React.memo(({
               isSearching={message.isSearching}
               searchQuery={message.searchQuery}
               sources={message.sources || []}
+              scrapingResults={scrapingResults}
+              wikiResults={wikiResults}
+              onSendMessage={onSendMessage}
             />
           )}
           {message.searchQuery && (
@@ -1860,6 +2241,139 @@ const MessageItem = React.memo(({
               <span className="text-zinc-400 animate-pulse">Generating...</span>
             ) : null}
           </div>
+
+          {/* Custom Interactive To-Do Plan Checklist */}
+          {message.todoPlan && (
+            <div className="w-full bg-[#1b1918] border border-zinc-855 rounded-2xl p-4 shadow-xl flex flex-col gap-3 mt-4 text-left font-sans select-none">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px]">📋</span>
+                  <span className="font-semibold text-sm tracking-tight text-white">
+                    {message.todoPlan.title}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!message.todoPlan.isConfirmed && message.todoPlan.countdown !== undefined && message.todoPlan.countdown > 0 && (
+                    <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                      <Loader2 size={10} className="animate-spin text-amber-500 shrink-0" />
+                      Auto-starts in {message.todoPlan.countdown}s
+                    </span>
+                  )}
+                  {message.todoPlan.isConfirmed && (
+                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
+                      {message.todoPlan.todos.every(t => t.status === 'complete') ? "COMPLETED" : "RUNNING AGENT"}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Todo Items */}
+              <div className="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto pr-1">
+                {message.todoPlan.todos.map((todo) => {
+                  const isDone = todo.status === 'complete';
+                  const isActive = todo.status === 'in_progress';
+
+                  return (
+                    <div
+                      key={todo.id}
+                      className="group/item flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-white/2.5 transition-all w-full"
+                    >
+                      {/* Status Icon */}
+                      <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                        isDone
+                          ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
+                          : isActive
+                            ? 'border border-orange-500 bg-orange-500/10'
+                            : 'border border-zinc-750 bg-transparent'
+                      }`}>
+                        {isDone && <Check size={10} strokeWidth={3} className="text-emerald-400" />}
+                        {isActive && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />}
+                      </div>
+
+                      {/* Info / Editing Text input */}
+                      {!message.todoPlan.isConfirmed ? (
+                        <input
+                          type="text"
+                          value={todo.text}
+                          onChange={(e) => {
+                            if (!message.todoPlan) return;
+                            const updatedTodos = message.todoPlan.todos.map(t => t.id === todo.id ? { ...t, text: e.target.value } : t);
+                            onUpdateTodoPlan?.(message.id, {
+                              ...message.todoPlan,
+                              todos: updatedTodos
+                            });
+                          }}
+                          className="flex-1 text-xs font-semibold text-zinc-200 bg-transparent hover:bg-zinc-850 focus:bg-zinc-850 px-1 py-0.5 rounded-lg border border-transparent focus:border-orange-500/40 outline-none transition-all select-text"
+                        />
+                      ) : (
+                        <span className={`text-xs font-semibold flex-1 ${
+                          isDone ? 'line-through text-zinc-550' : isActive ? 'text-white' : 'text-zinc-400'
+                        }`}>
+                          {todo.text}
+                        </span>
+                      )}
+
+                      {/* Deletion action for pending/editable items */}
+                      {!message.todoPlan.isConfirmed && (
+                        <button
+                          onClick={() => {
+                            if (!message.todoPlan) return;
+                            const updatedTodos = message.todoPlan.todos.filter(t => t.id !== todo.id);
+                            onUpdateTodoPlan?.(message.id, {
+                              ...message.todoPlan,
+                              todos: updatedTodos
+                            });
+                          }}
+                          className="opacity-0 group-hover/item:opacity-100 p-1 hover:bg-red-500/10 rounded-lg text-zinc-550 hover:text-red-400 transition-all cursor-pointer flex items-center justify-center"
+                          title="Delete plan step"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add item and confirm buttons */}
+              {!message.todoPlan.isConfirmed ? (
+                <div className="flex items-center justify-between border-t border-zinc-805 pt-3 mt-1 gap-2">
+                  <button
+                    onClick={() => {
+                      if (!message.todoPlan) return;
+                      const newId = (message.todoPlan.todos.length + 1).toString();
+                      const updatedTodos = [
+                        ...message.todoPlan.todos,
+                        { id: newId, text: "New architectural refinement step...", status: 'pending' as const }
+                      ];
+                      onUpdateTodoPlan?.(message.id, {
+                        ...message.todoPlan,
+                        todos: updatedTodos
+                      });
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-zinc-400 hover:text-white hover:bg-white/5 border border-zinc-850 rounded-xl transition-all cursor-pointer"
+                  >
+                    <Plus size={11} />
+                    <span>Add task step</span>
+                  </button>
+
+                  <button
+                    onClick={() => onStartBuilding?.(message.id)}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-black tracking-wider uppercase bg-orange-500 hover:bg-orange-600 text-white rounded-xl transition-all shadow-md cursor-pointer"
+                  >
+                    <span>Start Building</span>
+                    <ArrowUp size={11} strokeWidth={3} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 p-1 bg-zinc-850/40 rounded-xl border border-zinc-800/25 justify-center font-mono text-[10px] text-zinc-500 select-none">
+                  <Loader2 size={10} className="animate-spin text-orange-400 shrink-0" />
+                  <span>Agent running sequence: step {message.todoPlan.todos.filter(t => t.status === 'complete').length + 1} of {message.todoPlan.todos.length}...</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Automatically detect and render image links from the text content */}
           {(() => {
@@ -1898,11 +2412,118 @@ const MessageItem = React.memo(({
                         alt="Attached Visual"
                         className="w-full h-auto object-cover max-h-[250px] transition-transform duration-500 group-hover:scale-105 cursor-zoom-in"
                         referrerPolicy="no-referrer"
-                        onClick={() => window.open(url, '_blank')}
+                        onClick={() => {
+                          if (typeof (window as any).openImageLightbox === 'function') {
+                            (window as any).openImageLightbox(url, 'Attached Visual');
+                          } else {
+                            window.open(url, '_blank');
+                          }
+                        }}
                       />
                       <div className="bg-zinc-50 dark:bg-zinc-900/80 px-4 py-2 border-t border-zinc-150/40 dark:border-white/5 text-[10px] font-semibold text-zinc-550 dark:text-zinc-400 flex items-center justify-between">
                         <span className="truncate max-w-[70%]">{url}</span>
-                        <a href={url} target="_blank" rel="noreferrer" className="text-blue-550 dark:text-blue-400 hover:underline uppercase text-[9px] font-bold tracking-wider">Open original</a>
+                        <button 
+                          onClick={() => {
+                            if (typeof (window as any).openImageLightbox === 'function') {
+                              (window as any).openImageLightbox(url, 'Attached Visual');
+                            } else {
+                              window.open(url, '_blank');
+                            }
+                          }}
+                          className="text-blue-550 dark:text-blue-400 hover:underline uppercase text-[9px] font-bold tracking-wider cursor-pointer"
+                        >
+                          View Photo
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Automatically detect and render video links from the text content */}
+          {(() => {
+            if (!message.content) return null;
+            const foundVideoLinks: Array<{ url: string; title: string; type: 'youtube' | 'vimeo' | 'direct' | 'other' }> = [];
+            const matches = (message.content.match(/https?:\/\/[^\s\)]+/gi) || []) as string[];
+            matches.forEach(url => {
+              const cleanedUrl = url.replace(/[.,;*`"'>\?]+$/, '');
+              
+              // Detect types
+              let type: 'youtube' | 'vimeo' | 'direct' | 'other' | null = null;
+              let title = 'Web Video';
+              
+              if (/youtube\.com|youtu\.be|youtube-nocookie\.com/i.test(cleanedUrl)) {
+                type = 'youtube';
+                title = 'YouTube Video';
+              } else if (/vimeo\.com/i.test(cleanedUrl)) {
+                type = 'vimeo';
+                title = 'Vimeo Video';
+              } else if (/\.(mp4|webm|ogg)/i.test(cleanedUrl)) {
+                type = 'direct';
+                title = 'Direct HTML5 Video';
+              } else if (cleanedUrl.includes('/embed/')) {
+                type = 'other';
+                title = 'Embedded Video';
+              }
+              
+              if (type) {
+                // Avoid duplicates
+                const exists = foundVideoLinks.some(v => v.url === cleanedUrl);
+                if (!exists) {
+                  foundVideoLinks.push({ url: cleanedUrl, title, type });
+                }
+              }
+            });
+
+            if (foundVideoLinks.length === 0) return null;
+
+            return (
+              <div className="mt-4 flex flex-col gap-2 w-full">
+                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1.5 select-none md:ml-1">
+                  <Play size={11} className="text-orange-500 fill-orange-500" />
+                  Playable Video Content
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full">
+                  {foundVideoLinks.map((vid, idx) => (
+                    <motion.div 
+                      key={idx}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="relative rounded-2xl overflow-hidden border border-zinc-205/60 dark:border-white/5 bg-zinc-50 dark:bg-zinc-900/20 group hover:shadow-lg transition-all"
+                    >
+                      {/* Video simulated preview block */}
+                      <div className="aspect-video bg-neutral-950 flex flex-col items-center justify-center relative overflow-hidden select-none">
+                        <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-black/60 font-mono text-[9px] uppercase tracking-wider text-orange-400 font-bold z-20">
+                          {vid.type}
+                        </div>
+                        
+                        <button 
+                          onClick={() => {
+                            if (typeof (window as any).playVideoInLuminaPopup === 'function') {
+                              (window as any).playVideoInLuminaPopup(vid.url, vid.title);
+                            }
+                          }}
+                          className="w-10 h-10 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-lg transform transition-transform group-hover:scale-110 z-20 cursor-pointer active:scale-95 border-0"
+                          title="Play in Lumina Player"
+                        >
+                          <Play size={16} fill="currentColor" className="ml-0.5" />
+                        </button>
+                      </div>
+                      
+                      <div className="bg-zinc-50 dark:bg-zinc-900/85 px-4 py-2.5 border-t border-zinc-150/40 dark:border-white/5 text-[10px] font-semibold text-zinc-550 dark:text-zinc-400 flex items-center justify-between gap-3">
+                        <span className="truncate max-w-[60%]" title={vid.title}>{vid.title}</span>
+                        <button 
+                          onClick={() => {
+                            if (typeof (window as any).playVideoInLuminaPopup === 'function') {
+                              (window as any).playVideoInLuminaPopup(vid.url, vid.title);
+                            }
+                          }}
+                          className="text-orange-500 hover:text-orange-600 hover:underline uppercase text-[9px] font-bold tracking-wider cursor-pointer border-0 bg-transparent flex items-center gap-1"
+                        >
+                          <span>Watch Video</span>
+                        </button>
                       </div>
                     </motion.div>
                   ))}
@@ -1918,7 +2539,12 @@ const MessageItem = React.memo(({
                   key={idx}
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="relative aspect-square rounded-2xl overflow-hidden group border border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-zinc-950 shadow-sm transition-all hover:shadow-md"
+                  className="relative aspect-square rounded-2xl overflow-hidden group border border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-zinc-950 shadow-sm transition-all hover:shadow-md cursor-zoom-in"
+                  onClick={() => {
+                    if (typeof (window as any).openImageLightbox === 'function') {
+                      (window as any).openImageLightbox(img.url, img.title);
+                    }
+                  }}
                 >
                   <img 
                     src={img.url} 
@@ -3042,6 +3668,22 @@ export default function App() {
   };
 
   const [chats, setChats] = useState<Chat[]>([]);
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; title?: string } | null>(null);
+  const [activeVideo, setActiveVideo] = useState<{ url: string; title?: string } | null>(null);
+
+  useEffect(() => {
+    (window as any).openImageLightbox = (url: string, title?: string) => {
+      setLightboxImage({ url, title });
+    };
+    (window as any).playVideoInLuminaPopup = (url: string, title?: string) => {
+      setActiveVideo({ url, title });
+    };
+    return () => {
+      delete (window as any).openImageLightbox;
+      delete (window as any).playVideoInLuminaPopup;
+    };
+  }, []);
+
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(260);
@@ -3082,15 +3724,22 @@ export default function App() {
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isCompactSidebar, setIsCompactSidebar] = useState(false);
-  const [useBubbles, setUseBubbles] = useState(true);
+  const [isCompactSidebar, setIsCompactSidebar] = useState(() => {
+    return localStorage.getItem('lumina_compact_sidebar') === 'true';
+  });
+  const [useBubbles, setUseBubbles] = useState(() => {
+    return localStorage.getItem('lumina_use_bubbles') !== 'false';
+  });
+  const [autoHideTopBar, setAutoHideTopBar] = useState(() => {
+    return localStorage.getItem('lumina_auto_hide_top_bar') === 'true';
+  });
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = useState<string | null>(null);
 
 
 
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme'>('general');
-  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'project' | 'skills' | 'style'>('main');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools'>('general');
+  const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'lumina_tools' | 'project' | 'skills' | 'style'>('main');
   const [mcpMode, setMcpMode] = useState<'local' | 'remote'>('local');
   const [remoteMcpConfig, setRemoteMcpConfig] = useState({ url: '', status: 'disconnected' as 'disconnected' | 'connecting' | 'connected', error: '' });
   const [testToolInput, setTestToolInput] = useState({ name: '', args: '{}' });
@@ -3140,6 +3789,88 @@ export default function App() {
   const [isAiSaved, setIsAiSaved] = useState(false);
   const [isSearchSaved, setIsSearchSaved] = useState(false);
    const [isMcpSaved, setIsMcpSaved] = useState(false);
+  const [scrapingResults, setScrapingResults] = useState<Map<string, ScrapeResult>>(new Map());
+  const [activeScrapingJobs, setActiveScrapingJobs] = useState<Set<string>>(new Set());
+  const [wikiResults, setWikiResults] = useState<Map<string, { wikiType: string, data: any }>>(new Map());
+
+  const [luminaTools, setLuminaTools] = useState<Tool[]>([
+    {
+      id: 'web_scrape',
+      name: 'Web Scraper',
+      description: 'Fetch and extract structured data from any webpage',
+      enabled: false,
+      icon: <Globe size={16} />,
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The URL to scrape' },
+          selectors: { type: 'object', description: 'Optional CSS selectors to extract specific data' },
+          usePuppeteer: { type: 'boolean', description: 'Set to true if page requires JavaScript execution' },
+          extractLinks: { type: 'boolean', description: 'Whether to extract outgoing links' },
+          extractTables: { type: 'boolean', description: 'Whether to extract HTML tables' },
+          outputFormat: { type: 'string', enum: ['json', 'markdown', 'html'], description: 'Output format' }
+        },
+        required: ['url']
+      }
+    },
+    {
+      id: 'wiki_search',
+      name: 'Wikipedia Search',
+      description: 'Search Wikipedia for articles by query',
+      enabled: false,
+      icon: <Search size={16} />
+    },
+    {
+      id: 'wiki_get_page',
+      name: 'Wikipedia Page Fetch',
+      description: 'Fetch full Wikipedia article by page ID',
+      enabled: false,
+      icon: <BookOpen size={16} />
+    },
+    {
+      id: 'wiki_get_summary',
+      name: 'Wikipedia Summary',
+      description: 'Get a fast summary (introduction paragraph only) of a Wikipedia article',
+      enabled: false,
+      icon: <FileText size={16} />
+    },
+    {
+      id: 'wiki_get_sections',
+      name: 'Wikipedia Table of Contents',
+      description: 'Get the table of contents sections list for a page',
+      enabled: false,
+      icon: <Layers size={16} />
+    },
+    {
+      id: 'wiki_get_categories',
+      name: 'Wikipedia Categories',
+      description: 'Get all categories that a page belongs to',
+      enabled: false,
+      icon: <Library size={16} />
+    },
+    {
+      id: 'wiki_get_links',
+      name: 'Wikipedia Link Tracker',
+      description: 'Get all internal Wikipedia links from an article',
+      enabled: false,
+      icon: <LinkIcon size={16} />
+    },
+    {
+      id: 'wiki_get_images',
+      name: 'Wikipedia Media Scraper',
+      description: 'Get all images used in a Wikipedia article',
+      enabled: false,
+      icon: <ImageIcon size={16} />
+    },
+    {
+      id: 'wiki_get_related',
+      name: 'Wikipedia Related Pages',
+      description: 'Find pages in the same category (related articles)',
+      enabled: false,
+      icon: <Compass size={16} />
+    }
+  ]);
+
   const [bridgeTools, setBridgeTools] = useState<Tool[]>([]);
   const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>([
     { id: 'sonnet-4.6', name: 'Sonnet 4.6', icon: <Sparkles size={14} />, color: 'text-amber-500' },
@@ -3270,9 +4001,30 @@ export default function App() {
   };
   
   // ─── Tool Building ──────────────────────────────────────────────────────────
-  // All tools come from the bridge. No inbuilt tools are defined in the UI.
+  // Tools are divided into inbuilt (Lumina) and external (Bridge) categories.
   const buildActiveTools = (): ToolDefinition[] => {
-    return bridgeTools
+    const activeLumina = luminaTools
+      .filter(t => t.enabled)
+      .map(t => {
+        // Retrieve full definitions if available
+        if (t.id === 'web_scrape') {
+          return webScrapeTool;
+        }
+        const wikiMatch = ALL_WIKI_TOOLS.find(w => w.function.name === t.id);
+        if (wikiMatch) {
+          return wikiMatch;
+        }
+        return {
+          type: 'function' as const,
+          function: {
+            name: t.id,
+            description: t.description || 'Lumina Tool',
+            parameters: t.parameters || { type: 'object', properties: {}, required: [] }
+          }
+        };
+      });
+
+    const activeBridge = bridgeTools
       .filter(t => t.enabled)
       .map(t => ({
         type: 'function' as const,
@@ -3282,6 +4034,8 @@ export default function App() {
           parameters: t.parameters || { type: 'object', properties: {}, required: [] }
         }
       }));
+
+    return [...activeLumina, ...activeBridge];
   };
   
   // ─── Bridge Communication ──────────────────────────────────────────────────
@@ -3368,12 +4122,14 @@ export default function App() {
             id: t.id || t.name,
             name: t.name || t.id,
             description: t.description || '',
-            enabled: true,
+            enabled: false,
             icon,
             parameters: t.parameters,
           };
         });
-        setBridgeTools(mappedTools);
+        // Filter out native built-in tools (web_scrape and wiki_*) to avoid duplicates
+        const filteredTools = mappedTools.filter(t => t.id !== 'web_scrape' && !t.id.startsWith('wiki_'));
+        setBridgeTools(filteredTools);
         setIsMcpConnected(true);
         showToast(`Loaded ${mappedTools.length} bridge tools`);
       }
@@ -3438,6 +4194,8 @@ export default function App() {
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
 
   const SLASH_COMMANDS = useMemo(() => [
+    { id: 'clear', name: 'clear', desc: 'Clear current chat history' },
+    { id: 'new', name: 'new', desc: 'Start a new chat session' },
     { id: 'goal', name: 'goal', desc: 'Run until the specified goal is completely finished' },
     { id: 'schedule', name: 'schedule', desc: 'Run custom instruction on a recurring schedule or as a one-time timer' },
     { id: 'browser', name: 'browser', desc: 'Invoke a browser agent for web tasks' },
@@ -3468,24 +4226,120 @@ export default function App() {
     setActiveLabTab(active ? 'physics' : null);
   };
   const [isPhysicsCanvasOpen, setIsPhysicsCanvasOpen] = useState(false);
+  useEffect(() => {
+    if (isPhysicsCanvasOpen) {
+      setActiveLabTab('physics');
+      setCurrentChatId(null);
+      setIsPhysicsCanvasOpen(false);
+    }
+  }, [isPhysicsCanvasOpen]);
   const [canvasView, setCanvasView] = useState<'code' | 'preview'>('code');
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
   const [isCoderMode, setIsCoderMode] = useState(false);
+  const [activeCommandType, setActiveCommandType] = useState<string | null>(null);
+  const [activeCommandQuery, setActiveCommandQuery] = useState<string | null>(null);
+  const [coderTodos, setCoderTodos] = useState<{ id: string; text: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[]>([]);
+  const [isGeneratingTodos, setIsGeneratingTodos] = useState(false);
+  const [showTodoPanel, setShowTodoPanel] = useState(false);
+  const [todoCollapsed, setTodoCollapsed] = useState(false);
+
+  // Ask AI States
+  const [askAiQuestions, setAskAiQuestions] = useState<{ id: string; question: string; type: 'single_choice' | 'multi_choice' | 'scale' | 'text_input' | 'confirm'; options?: string[]; purpose?: string }[]>([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [askAiAnswers, setAskAiAnswers] = useState<Record<string, any>>({});
+  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+  const [showAskAiPanel, setShowAskAiPanel] = useState(false);
+  const [textInputAnswer, setTextInputAnswer] = useState('');
+  const [isTransitioningQuestion, setIsTransitioningQuestion] = useState(false);
+  const [isAnalyzingAnswers, setIsAnalyzingAnswers] = useState(false);
+
+  // Countdown Timer Effect for To-dos
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setChats(prev => {
+        let updated = false;
+        const nextChats = prev.map(chat => {
+          const nextMessages = chat.messages.map(m => {
+            if (m.todoPlan && !m.todoPlan.isConfirmed && m.todoPlan.countdown !== undefined && m.todoPlan.countdown > 0) {
+              updated = true;
+              const nextCountdown = m.todoPlan.countdown - 1;
+              if (nextCountdown === 0) {
+                // Auto-starts
+                setTimeout(() => handleStartBuilding(chat.id, m.id, m.todoPlan!.todos), 0);
+                return {
+                  ...m,
+                  todoPlan: {
+                    ...m.todoPlan,
+                    countdown: 0,
+                    isConfirmed: true
+                  }
+                };
+              }
+              return {
+                ...m,
+                todoPlan: {
+                  ...m.todoPlan,
+                  countdown: nextCountdown
+                }
+              };
+            }
+            return m;
+          });
+          return { ...chat, messages: nextMessages };
+        });
+        return updated ? nextChats : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [chats]);
+
+  useEffect(() => {
+    if (!isTyping) return;
+    if (coderTodos.length === 0) return;
+
+    // Only auto-advance if we are NOT in Coder Mode (which relies on real tool-call transitions)
+    if (!isCoderMode) {
+      const interval = setInterval(() => {
+        setCoderTodos(prev => {
+          const currentProgressIdx = prev.findIndex(t => t.status === 'in_progress');
+          if (currentProgressIdx === -1) {
+            const firstPendingIdx = prev.findIndex(t => t.status === 'pending');
+            if (firstPendingIdx !== -1) {
+              return prev.map((item, idx) => {
+                if (idx === firstPendingIdx) return { ...item, status: 'in_progress' };
+                return item;
+              });
+            }
+            return prev;
+          }
+
+          return prev.map((item, idx) => {
+            if (idx === currentProgressIdx) return { ...item, status: 'complete' };
+            if (idx === currentProgressIdx + 1) return { ...item, status: 'in_progress' };
+            return item;
+          });
+        });
+      }, 3500);
+
+      return () => clearInterval(interval);
+    }
+  }, [isTyping, isCoderMode, coderTodos.length]);
   const [isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen] = useState(true);
   const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
-<<<<<<< HEAD
   const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(false);
-=======
-  const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(true);
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isTerminalPopupOpen, setIsTerminalPopupOpen] = useState(false);
+  const [isElizaActive, setIsElizaActive] = useState(false);
+  const [elizaToggleSignal, setElizaToggleSignal] = useState(0);
+  const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
   const [floatingEditFile, setFloatingEditFile] = useState<string | null>(null);
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
 
-<<<<<<< HEAD
   // New features for right preview panel: Viewport simulator & Subpath Route
   const [rightViewportMode, setRightViewportMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [rightIsGridEnabled, setRightIsGridEnabled] = useState<boolean>(false);
@@ -3501,12 +4355,21 @@ export default function App() {
     const handleGlobalClick = () => {
       setAttachmentContextMenu(prev => prev.visible ? { visible: false, x: 0, y: 0, attachment: null, index: -1 } : prev);
     };
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsWhiteboardOpen(false);
+        setIsTerminalPopupOpen(false);
+        setLightboxImage(null);
+      }
+    };
     window.addEventListener('click', handleGlobalClick);
-    return () => window.removeEventListener('click', handleGlobalClick);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('click', handleGlobalClick);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
   }, []);
 
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
   const currentChatActive = chats.find(c => c.id === currentChatId);
   useEffect(() => {
     if (currentChatActive) {
@@ -3514,10 +4377,7 @@ export default function App() {
       setIsCoderMode(chatIsCoder);
       if (chatIsCoder) {
         setIsCoderWorkspacePanelOpen(true);
-<<<<<<< HEAD
         setIsSidebarOpen(false);
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
       }
     } else {
       setIsCoderMode(false);
@@ -3527,6 +4387,16 @@ export default function App() {
   const triggerWorkspaceRefresh = useCallback(() => {
     setWorkspaceRefreshKey(prev => prev + 1);
   }, []);
+
+  useEffect(() => {
+    const handleWorkspaceGlobalRefresh = () => {
+      triggerWorkspaceRefresh();
+    };
+    window.addEventListener('trigger-workspace-refresh', handleWorkspaceGlobalRefresh);
+    return () => {
+      window.removeEventListener('trigger-workspace-refresh', handleWorkspaceGlobalRefresh);
+    };
+  }, [triggerWorkspaceRefresh]);
 
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -3540,71 +4410,51 @@ export default function App() {
 
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const modelDropdownContentRef = useRef<HTMLDivElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
 
   const [activeAssistantMode, setActiveAssistantMode] = useState<'builder' | 'planner' | 'debugger'>('builder');
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
+  const modeDropdownContentRef = useRef<HTMLDivElement>(null);
 
   const menuContentRef = useRef<HTMLDivElement>(null);
-  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({
-    bottom: '100%',
-    marginBottom: '12px',
+
+  // Hook for Model Dropdown
+  const modelDropdownPosition = useSmartPopupPosition({
+    triggerRef: dropdownRef,
+    popupRef: modelDropdownContentRef,
+    isOpen: isModelDropdownOpen,
+    align: 'center',
+    preferredDirection: 'up',
+    margin: 12,
+    viewportPadding: 16,
+    dependencies: [modelSearchQuery, activeModelList],
   });
 
-  const adjustMenuPosition = useCallback(() => {
-    if (!plusMenuRef.current || !menuContentRef.current) return;
-    const triggerRect = plusMenuRef.current.getBoundingClientRect();
-    const menuEl = menuContentRef.current;
-    
-    const viewportHeight = window.innerHeight;
-    const spaceAbove = triggerRect.top;
-    const spaceBelow = viewportHeight - triggerRect.bottom;
-    
-    // We measure scrollHeight to find its target height
-    const menuHeight = menuEl.scrollHeight || 380;
-    
-    let newStyle: React.CSSProperties = {
-      left: '0px',
-    };
-    
-    if (spaceAbove >= menuHeight + 16) {
-      newStyle.bottom = '100%';
-      newStyle.marginBottom = '12px';
-      newStyle.maxHeight = 'calc(100vh - 40px)';
-    } else if (spaceBelow >= menuHeight + 16) {
-      newStyle.top = '100%';
-      newStyle.marginTop = '12px';
-      newStyle.maxHeight = 'calc(100vh - 40px)';
-    } else {
-      if (spaceAbove > spaceBelow) {
-        newStyle.bottom = '100%';
-        newStyle.marginBottom = '12px';
-        newStyle.maxHeight = `${Math.max(180, spaceAbove - 24)}px`;
-      } else {
-        newStyle.top = '100%';
-        newStyle.marginTop = '12px';
-        newStyle.maxHeight = `${Math.max(180, spaceBelow - 24)}px`;
-      }
-    }
-    
-    setMenuStyle(newStyle);
-  }, []);
+  // Hook for Plus Menu Popup
+  const plusMenuPopupPosition = useSmartPopupPosition({
+    triggerRef: plusMenuRef,
+    popupRef: menuContentRef,
+    isOpen: isPlusMenuOpen,
+    align: 'left',
+    preferredDirection: 'up',
+    margin: 12,
+    viewportPadding: 16,
+    dependencies: [activePlusSubMenu, SKILLS, WRITING_STYLES],
+  });
 
-  useEffect(() => {
-    if (isPlusMenuOpen) {
-      adjustMenuPosition();
-      const timer = setTimeout(adjustMenuPosition, 50);
-      const id = requestAnimationFrame(adjustMenuPosition);
-      window.addEventListener('resize', adjustMenuPosition);
-      return () => {
-        clearTimeout(timer);
-        cancelAnimationFrame(id);
-        window.removeEventListener('resize', adjustMenuPosition);
-      };
-    }
-  }, [isPlusMenuOpen, activePlusSubMenu, adjustMenuPosition]);
+  // Hook for Assistant Mode Dropdown
+  const modeDropdownPosition = useSmartPopupPosition({
+    triggerRef: modeDropdownRef,
+    popupRef: modeDropdownContentRef,
+    isOpen: isModeDropdownOpen,
+    align: 'center',
+    preferredDirection: 'up',
+    margin: 12,
+    viewportPadding: 16,
+  });
 
   useEffect(() => {
     const handleRejection = (event: PromiseRejectionEvent) => {
@@ -3833,14 +4683,589 @@ export default function App() {
   const handleSetIsCanvasOpen = useCallback((v: boolean) => setIsCanvasOpen(v), []);
   const handleSetCanvasView = useCallback((v: 'code' | 'preview') => setCanvasView(v), []);
 
+  // Ask AI Callback & Action Helpers
+  const handleTriggerAskAi = async () => {
+    setIsGeneratingQuestions(true);
+    setShowAskAiPanel(true);
+    setCurrentQuestionIndex(0);
+    setAskAiAnswers({});
+    setTextInputAnswer('');
+
+    const contextQuery = input.trim() || (messages.length > 0 ? messages[messages.length - 1].content : '');
+
+    try {
+      const messagesPrompt = [
+        {
+          role: 'system',
+          content: `You are an expert software architect. Analyze the user's task or context and generate 2 to 6 targeted clarifying questions to ask before writing any code. Order them from most impactful to narrowest.
+          Respond with a JSON object in this format (no other text, no markdown styling, no nested values):
+          {
+            "questions": [
+              {
+                "id": "theme_choice",
+                "question": "Which visual style matches your branding goals?",
+                "type": "single_choice",
+                "options": ["Cosmic Midnight", "Clean Minimalist Light", "Warm Editorial", "Cybernetic Terminal"],
+                "purpose": "Define color theme."
+              }
+            ]
+          }
+          Types permitted: 'single_choice' | 'multi_choice' | 'scale' | 'text_input' | 'confirm'.
+          For 'single_choice' and 'multi_choice', provide 2 to 4 'options'. For 'scale', 'text_input', and 'confirm', leave 'options' empty.
+          Each question MUST have a clear purpose.`
+        },
+        {
+          role: 'user',
+          content: `Task context: "${contextQuery || 'Build a web dashboard applet or custom feature component'}"`
+        }
+      ];
+
+      const res = await callLlamaBridge(messagesPrompt, []);
+      const text = res?.choices?.[0]?.message?.content || '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+          const validated = parsed.questions.map((q: any) => ({
+            id: q.id || Math.random().toString(),
+            question: q.question || 'Please specify your requirement:',
+            type: q.type || 'single_choice',
+            options: Array.isArray(q.options) ? q.options.slice(0, 4) : undefined,
+            purpose: q.purpose || ''
+          })).filter((q: any) => q.question && ['single_choice', 'multi_choice', 'scale', 'text_input', 'confirm'].includes(q.type));
+          
+          if (validated.length > 0) {
+            setAskAiQuestions(validated);
+            setIsGeneratingQuestions(false);
+            return;
+          }
+        }
+      }
+      throw new Error("Invalid json format");
+    } catch (e) {
+      console.warn("Llama bridge error, using default fallback questions", e);
+      const fallbackQuestions = [
+        {
+          id: 'design_style',
+          question: contextQuery 
+            ? `Which visual aesthetic should we apply for "${contextQuery.slice(0, 30)}..."?`
+            : "Which visual design concept do you prefer?",
+          type: 'single_choice' as const,
+          options: ["Swiss Minimalist", "Cosmic Slate Dark", "Sunset Warm & Playful", "Matrix Cyber Mono"],
+          purpose: "Establishes a cohesive UI visual signature."
+        },
+        {
+          id: 'target_features',
+          question: "Which capabilities will enrich this feature most?",
+          type: 'multi_choice' as const,
+          options: ["Interactive Data Board", "Local Storage Search", "Export to PDF/CSV", "Advanced Options Drawer"],
+          purpose: "Scopes primary interactive components."
+        },
+        {
+          id: 'complexity_rating',
+          question: "How interactive should the micro-animations & layout motion be?",
+          type: 'scale' as const,
+          purpose: "Aesthetic scale rating for framer-motion intensity."
+        },
+        {
+          id: 'custom_wording',
+          question: "Any specific layout file, logo name or branding header to use?",
+          type: 'text_input' as const,
+          purpose: "Applies customized text branding identifiers."
+        },
+        {
+          id: 'confirm_bootstrap',
+          question: "Should we inject a clean mock state to showcase initial features?",
+          type: 'confirm' as const,
+          purpose: "Specifies mock state populates on workspace build."
+        }
+      ];
+      setAskAiQuestions(fallbackQuestions);
+      setIsGeneratingQuestions(false);
+    }
+  };
+
+  const handleNextQuestion = () => {
+    setIsTransitioningQuestion(true);
+    setTimeout(() => {
+      setIsTransitioningQuestion(false);
+      if (currentQuestionIndex < askAiQuestions.length - 1) {
+        setCurrentQuestionIndex(prev => prev + 1);
+      } else {
+        handleFinishQuestions();
+      }
+    }, 200);
+  };
+
+  const handleSelectAnswer = (questionId: string, value: any, autoAdvance: boolean) => {
+    setAskAiAnswers(prev => ({ ...prev, [questionId]: value }));
+    if (autoAdvance) {
+      handleNextQuestion();
+    }
+  };
+
+  const handleDotClick = (index: number) => {
+    if (index < currentQuestionIndex || askAiAnswers[askAiQuestions[index].id] !== undefined) {
+      setCurrentQuestionIndex(index);
+    }
+  };
+
+  const handleFinishQuestions = async (isSkipped = false) => {
+    setIsAnalyzingAnswers(true);
+    
+    const contextQuery = input.trim() || (messages.length > 0 ? messages[messages.length - 1].content : 'Custom app refinement');
+    const answersStr = isSkipped 
+      ? "Skipped (Use sensible defaults)" 
+      : Object.entries(askAiAnswers).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ');
+    
+    let planTitle = `Interactive Feature Integration`;
+    let planTodos = [
+      { id: '1', text: "Scaffold visual view elements and structure", status: 'pending' as const },
+      { id: '2', text: "Bind layout controls and state context handlers", status: 'pending' as const },
+      { id: '3', text: "Integrate custom responsive configurations", status: 'pending' as const },
+      { id: '4', text: "Apply high-contrast Tailwind styling and animations", status: 'pending' as const },
+      { id: '5', text: "Run local unit audits and verify build output", status: 'pending' as const }
+    ];
+    let assumptionsMsg = "";
+
+    try {
+      const prompt = [
+        {
+          role: 'system',
+          content: `You are an expert Software Architect. Create a structured implementation plan and list of 4-7 tasks to build the user's request, considering their answers to clarifying questions.
+          Respond ONLY with a JSON object in this format:
+          {
+            "title": "Interactive Analytics Board",
+            "assumptions": "Using Cosmic Slate Dark aesthetic with Local Storage active.",
+            "todos": [
+              "Set up responsive container and header with dark theme",
+              "Install and import Lucide icon packs and charts",
+              "Configure local storage state listeners for persistence",
+              "Incorporate animation transition timing and spring motion",
+              "Validate all React compiler and build rules"
+            ]
+          }`
+        },
+        {
+          role: 'user',
+          content: `Task: "${contextQuery}"\nAnswers: ${answersStr}`
+        }
+      ];
+
+      const res = await callLlamaBridge(prompt, []);
+      const text = res?.choices?.[0]?.message?.content || '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (parsed.title) planTitle = parsed.title;
+        if (parsed.assumptions) assumptionsMsg = parsed.assumptions;
+        if (Array.isArray(parsed.todos)) {
+          planTodos = parsed.todos.map((t: string, idx: number) => ({
+            id: (idx + 1).toString(),
+            text: t,
+            status: 'pending' as const
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn("Planning LLM failed, using fallback", e);
+    }
+
+    let targetChatId = currentChatId;
+    if (!targetChatId) {
+      targetChatId = createNewChat(null, isCoderMode);
+    }
+
+    const userMsgText = isSkipped 
+      ? `⚡ Clicked **Skip All** in clarifying questions. Proceed with defaults for "${contextQuery || 'the task'}".`
+      : `💡 Answered clarifying questions for: **${contextQuery || 'the task'}**.\n${Object.entries(askAiAnswers).map(([k, v]) => `- **${k}**: _${Array.isArray(v) ? v.join(', ') : v}_`).join('\n')}`;
+
+    const userMsgId = Date.now().toString();
+    const assistantMsgId = (Date.now() + 10).toString();
+
+    const userMessage: Message = {
+      id: userMsgId,
+      role: 'user',
+      content: userMsgText,
+      timestamp: new Date()
+    } as any;
+
+    const assistantMessage: Message = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: `📋 **Plan Created:** ${planTitle}\n\n${assumptionsMsg ? `*Assumptions:* ${assumptionsMsg}\n\n` : ''}Let's align on the sequence of steps to execute. You can edit the steps, add custom notes, or click **Start Building** to begin the automated agent run immediately.`,
+      timestamp: new Date(),
+      todoPlan: {
+        title: planTitle,
+        todos: planTodos,
+        isConfirmed: false,
+        countdown: 10
+      }
+    } as any;
+
+    setChats(prev => prev.map(chat => {
+      if (chat.id === targetChatId) {
+        return {
+          ...chat,
+          messages: [...chat.messages, userMessage, assistantMessage],
+          updatedAt: new Date()
+        };
+      }
+      return chat;
+    }));
+
+    setInput('');
+    setShowAskAiPanel(false);
+    setIsAnalyzingAnswers(false);
+    setAskAiQuestions([]);
+    setAskAiAnswers({});
+  };
+
+  const handleStartBuilding = (chatId: string, messageId: string, todos: any[]) => {
+    setChats(prev => prev.map(c => {
+      if (c.id === chatId) {
+        return {
+          ...c,
+          messages: c.messages.map(m => {
+            if (m.id === messageId && m.todoPlan) {
+              return {
+                ...m,
+                todoPlan: {
+                  ...m.todoPlan,
+                  isConfirmed: true,
+                  countdown: 0,
+                  todos: m.todoPlan.todos.map((t, idx) => ({
+                    ...t,
+                    status: idx === 0 ? 'in_progress' : 'pending'
+                  }))
+                }
+              };
+            }
+            return m;
+          })
+        };
+      }
+      return c;
+    }));
+
+    setShowTodoPanel(true);
+    setTodoCollapsed(false);
+    setCoderTodos(todos.map((t, idx) => ({
+      id: t.id,
+      text: t.text,
+      status: idx === 0 ? 'in_progress' : 'pending'
+    })));
+
+    let currentStep = 0;
+    const executeStep = () => {
+      if (currentStep >= todos.length) {
+        setChats(prev => prev.map(c => {
+          if (c.id === chatId) {
+            const hasCelebration = c.messages.some(m => m.content.includes("All tasks completed successfully!"));
+            const finishedMessages = [
+              ...c.messages.map(m => {
+                if (m.id === messageId && m.todoPlan) {
+                   return {
+                     ...m,
+                     todoPlan: {
+                       ...m.todoPlan,
+                       todos: m.todoPlan.todos.map(t => ({ ...t, status: 'complete' as const }))
+                     }
+                   };
+                }
+                return m;
+              })
+            ];
+            if (!hasCelebration) {
+              finishedMessages.push({
+                id: (Date.now() + 50).toString(),
+                role: 'assistant',
+                content: `🚀 **All tasks completed successfully!**\n\nI have successfully aligned your preferences, bootstrapped the modules, applied high-contrast custom CSS styling, and compiled the interactive visual component preview. It is now active on the development container and live in your sandbox environment.`,
+                timestamp: new Date()
+              } as any);
+            }
+            return {
+              ...c,
+              messages: finishedMessages
+            };
+          }
+          return c;
+        }));
+
+        setCoderTodos(prev => prev.map(t => ({ ...t, status: 'complete' })));
+        setIsTyping(false);
+        showToast("All task milestones successfully completed! 🚀");
+        triggerWorkspaceRefresh();
+        return;
+      }
+
+      const activeTodo = todos[currentStep];
+      showToast(`Executing: ${activeTodo.text}`);
+
+      setTimeout(() => {
+        setChats(prev => prev.map(c => {
+          if (c.id === chatId) {
+            return {
+              ...c,
+              messages: c.messages.map(m => {
+                if (m.id === messageId && m.todoPlan) {
+                  return {
+                    ...m,
+                    todoPlan: {
+                      ...m.todoPlan,
+                      todos: m.todoPlan.todos.map((t, idx) => {
+                        if (idx === currentStep) return { ...t, status: 'complete' as const };
+                        if (idx === currentStep + 1) return { ...t, status: 'in_progress' as const };
+                        return t;
+                      })
+                    }
+                  };
+                }
+                return m;
+              })
+            };
+          }
+          return c;
+        }));
+
+        setCoderTodos(prev => prev.map((t, idx) => {
+          if (idx === currentStep) return { ...t, status: 'complete' };
+          if (idx === currentStep + 1) return { ...t, status: 'in_progress' };
+          return t;
+        }));
+
+        currentStep++;
+        executeStep();
+      }, 2000);
+    };
+
+    setTimeout(executeStep, 2050);
+  };
+
+  const handleUpdateTodoPlan = useCallback((messageId: string, updatedPlan: any) => {
+    setChats(prev => prev.map(chat => {
+      const parentChat = chat.messages.some(m => m.id === messageId);
+      if (parentChat) {
+        return {
+          ...chat,
+          messages: chat.messages.map(m => m.id === messageId ? { ...m, todoPlan: updatedPlan } : m)
+        };
+      }
+      return chat;
+    }));
+  }, []);
+
+  const handleStartBuildingBtn = useCallback((messageId: string) => {
+    let foundTodos: any[] = [];
+    chats.forEach(chat => {
+      const msg = chat.messages.find(m => m.id === messageId);
+      if (msg && msg.todoPlan) {
+        foundTodos = msg.todoPlan.todos;
+      }
+    });
+    
+    setChats(prev => prev.map(chat => {
+      const hasMsg = chat.messages.some(m => m.id === messageId);
+      if (hasMsg) {
+        return {
+          ...chat,
+          messages: chat.messages.map(m => m.id === messageId ? {
+            ...m,
+            todoPlan: {
+               ...m.todoPlan!,
+               isConfirmed: true,
+               countdown: 0
+            }
+          } : m)
+        };
+      }
+      return chat;
+    }));
+
+    handleStartBuilding(currentChatId || chats[0]?.id, messageId, foundTodos);
+  }, [chats, currentChatId]);
+
+  const renderActiveQuestionContent = () => {
+    const q = askAiQuestions[currentQuestionIndex];
+    if (!q) return null;
+
+    switch (q.type) {
+      case 'single_choice':
+        return (
+          <div className="flex flex-wrap gap-2 w-full max-h-[105px] overflow-y-auto pr-1">
+            {q.options?.map(opt => {
+              const isSelected = askAiAnswers[q.id] === opt;
+              return (
+                <button
+                  key={opt}
+                  onClick={() => handleSelectAnswer(q.id, opt, true)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-2xl border transition-all duration-150 cursor-pointer ${
+                    isSelected
+                      ? 'bg-orange-500/15 border-orange-500/50 text-orange-400 font-bold shadow-xs'
+                      : 'bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700/50 hover:border-zinc-500 text-zinc-300'
+                  }`}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        );
+
+      case 'multi_choice': {
+        const selectedList = (askAiAnswers[q.id] as string[]) || [];
+        const toggleSelection = (opt: string) => {
+          let updated;
+          if (selectedList.includes(opt)) {
+            updated = selectedList.filter(o => o !== opt);
+          } else {
+            updated = [...selectedList, opt];
+          }
+          handleSelectAnswer(q.id, updated, false);
+        };
+
+        return (
+          <div className="flex flex-col gap-3.5 w-full select-none">
+            <div className="flex flex-wrap gap-2 max-h-[75px] overflow-y-auto pr-1">
+              {q.options?.map(opt => {
+                const isSelected = selectedList.includes(opt);
+                return (
+                  <button
+                    key={opt}
+                    onClick={() => toggleSelection(opt)}
+                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-2xl border transition-all duration-150 cursor-pointer flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-orange-500/15 border-orange-500/50 text-orange-400 font-bold'
+                        : 'bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700/50 hover:border-zinc-500 text-zinc-300'
+                    }`}
+                  >
+                    <div className={`w-3 h-3 rounded-md border flex items-center justify-center ${
+                      isSelected ? 'border-orange-500 bg-orange-500/20' : 'border-zinc-600'
+                    }`}>
+                      {isSelected && <Check size={8} strokeWidth={4} className="text-orange-400" />}
+                    </div>
+                    <span>{opt}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex justify-end select-none">
+              <button
+                disabled={selectedList.length === 0}
+                onClick={handleNextQuestion}
+                className="px-4 py-1.5 text-[11px] font-black tracking-wider uppercase bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Continue</span>
+                <ChevronRight size={12} strokeWidth={3} />
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      case 'scale': {
+        const rating = (askAiAnswers[q.id] as number) || 0;
+        return (
+          <div className="flex flex-col items-center gap-2.5 w-full select-none">
+            <div className="flex items-center justify-between w-full max-w-sm px-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest font-mono select-none animate-pulse">
+              <span>Minimal Motion</span>
+              <span>Ultra Rich Flow</span>
+            </div>
+            <div className="flex items-center gap-2 w-full max-w-md justify-between select-none">
+              {[1, 2, 3, 4, 5].map(val => {
+                const isSelected = rating === val;
+                return (
+                  <button
+                    key={val}
+                    onClick={() => handleSelectAnswer(q.id, val, true)}
+                    className={`w-10 h-10 rounded-2xl flex items-center justify-center border font-mono text-sm font-bold transition-all duration-150 cursor-pointer ${
+                      isSelected
+                        ? 'bg-orange-500 border-orange-400 text-white shadow-[0_0_12px_rgba(249,115,22,0.45)] scale-110'
+                        : 'bg-zinc-800/80 hover:bg-zinc-700 hover:border-zinc-500 border-zinc-700/60 text-zinc-300'
+                    }`}
+                  >
+                    {val}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      case 'text_input':
+        return (
+          <div className="flex flex-col gap-3.5 w-full select-none">
+            <div className="relative flex items-center w-full">
+              <input
+                type="text"
+                value={textInputAnswer}
+                onChange={(e) => setTextInputAnswer(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && textInputAnswer.trim()) {
+                    handleSelectAnswer(q.id, textInputAnswer.trim(), true);
+                    setTextInputAnswer('');
+                  }
+                }}
+                placeholder="Type your custom answer/preferences..."
+                className="w-full h-10 px-4 bg-zinc-850 border border-zinc-750 focus:border-orange-500/50 rounded-2xl text-xs text-zinc-150 outline-none placeholder-zinc-550 transition-all select-text"
+              />
+              {textInputAnswer.trim() && (
+                <button
+                  onClick={() => {
+                    handleSelectAnswer(q.id, textInputAnswer.trim(), true);
+                    setTextInputAnswer('');
+                  }}
+                  className="absolute right-2 p-1.5 bg-orange-500 text-white hover:bg-orange-600 rounded-xl transition-all cursor-pointer flex items-center justify-center shadow-lg"
+                >
+                  <ArrowUp size={14} strokeWidth={3} />
+                </button>
+              )}
+            </div>
+            <div className="flex justify-between items-center select-none">
+              <span className="text-[10px] text-zinc-500 italic ml-1">Or press ENTER to submit</span>
+              <button
+                disabled={!textInputAnswer.trim()}
+                onClick={() => {
+                  handleSelectAnswer(q.id, textInputAnswer.trim(), true);
+                  setTextInputAnswer('');
+                }}
+                className="px-4 py-1.5 text-[11px] font-black tracking-wider uppercase bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Continue</span>
+                <ChevronRight size={12} strokeWidth={3} />
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'confirm':
+        return (
+          <div className="flex items-center gap-4 w-full max-w-md mx-auto select-none">
+            <button
+              onClick={() => handleSelectAnswer(q.id, 'Yes', true)}
+              className="flex-1 py-2.5 text-xs font-bold bg-orange-500/10 border border-orange-500/25 hover:bg-orange-500 hover:text-white hover:border-orange-400 text-orange-400 rounded-2xl transition-all shadow-sm cursor-pointer"
+            >
+              Understand & Accept
+            </button>
+            <button
+              onClick={() => handleSelectAnswer(q.id, 'No', true)}
+              className="flex-1 py-2.5 text-xs font-bold bg-zinc-800 border border-zinc-700/80 hover:bg-zinc-750 hover:border-zinc-550 text-zinc-300 rounded-2xl transition-all cursor-pointer"
+            >
+              Skip option
+            </button>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   const currentChat = chats.find(c => c.id === currentChatId);
   const messages = currentChat?.messages || [];
 
-<<<<<<< HEAD
   const createNewChat = (projId?: string | null, isCoder?: boolean) => {
-=======
-  const createNewChat = (projId?: string | null) => {
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
     const pId = projId !== undefined ? projId : activeProjectId;
     const newChat: Chat = {
       id: Date.now().toString(),
@@ -3848,12 +5273,8 @@ export default function App() {
       messages: [],
       updatedAt: new Date(),
       projectId: pId || undefined,
-<<<<<<< HEAD
       isCoderMode: isCoder !== undefined ? isCoder : isCoderMode,
     } as any;
-=======
-    };
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
     setChats(prev => [newChat, ...prev]);
     setCurrentChatId(newChat.id);
     return newChat.id;
@@ -3883,6 +5304,18 @@ export default function App() {
     let content = contentOverride || input.trim();
     if (!content && attachedFiles.length === 0) return;
 
+    if (content.trim().toLowerCase() === '/clear') {
+      handleClearChat();
+      setInput('');
+      return;
+    }
+
+    if (content.trim().toLowerCase() === '/new') {
+      createNewChat(null, isCoderMode);
+      setInput('');
+      return;
+    }
+
     if (content.toLowerCase().startsWith('/coder')) {
       const trimCmd = content.trim().toLowerCase();
       let newState = true;
@@ -3892,12 +5325,9 @@ export default function App() {
       
       setIsCoderMode(newState);
       setIsCoderWorkspacePanelOpen(newState);
-<<<<<<< HEAD
       if (newState) {
         setIsSidebarOpen(false);
       }
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
       
       let targetChatId = currentChatId;
       if (!targetChatId) {
@@ -3932,13 +5362,8 @@ export default function App() {
                 id: sysMsgId,
                 role: 'assistant',
                 content: newState 
-<<<<<<< HEAD
                   ? "⚡ **Coder Mode Activated!**\n\nI am now running as an autonomous Software Engineering Agent. I am connected directly to your active project workspace directory and am ready to write, read, edit, and list files in real-time. Give me instructions on what to build!"
                   : "🚫 **Coder Mode Deactivated.**\n\nI will now answer your questions as a standard digital assistant without modifying the workspace.",
-=======
-                  ? "⚡ **Coder Mode Activated!**\n\nI am now running as an autonomous Software Engineering Agent. I've created the workspace folder (`/coder`) and am ready to write, read, edit, and list files inside it in real-time. Give me instructions on what to build!"
-                  : "🚫 **Coder Mode Deactivated.**\n\nI will now answer your questions as a standard digital assistant without modifying the coder workspace.",
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 timestamp: new Date()
               }
             ],
@@ -3948,53 +5373,6 @@ export default function App() {
         return chat;
       }));
       
-<<<<<<< HEAD
-=======
-      try {
-        await fetch('/api/fs/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filePath: './coder', isDirectory: true })
-        });
-        
-        const listRes = await fetch('/api/fs/list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ folderPath: './coder' })
-        });
-        const listData = await listRes.json();
-        if (!listData.files || listData.files.length === 0) {
-          await fetch('/api/fs/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              filePath: './coder/index.html',
-              content: `<!DOCTYPE html>
-<html>
-<head>
-    <title>Coder Workspace</title>
-    <style>
-        body { font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 50px; background: #fafafa; color: #333; }
-        .card { max-width: 450px; margin: auto; padding: 30px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #eef2f6; }
-        h1 { color: #2563eb; margin-top: 0; }
-        p { color: #64748b; line-height: 1.6; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Coder Workspace</h1>
-        <p>Tell the AI what to build (e.g., "Build a beautiful countdown timer app"), and watch it create files and preview progress here in real-time!</p>
-    </div>
-</body>
-</html>`
-            })
-          });
-        }
-      } catch (e) {
-        console.error("Failed to initialize ./coder directory:", e);
-      }
-      
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
       setInput('');
       triggerWorkspaceRefresh();
       return;
@@ -4039,6 +5417,105 @@ export default function App() {
 
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
+    }
+
+    const isSlash = content.startsWith('/');
+    if (isSlash || isCoderMode) {
+      setIsGeneratingTodos(true);
+      setShowTodoPanel(true);
+      
+      const firstSpaceIdx = content.indexOf(' ');
+      const cmdName = firstSpaceIdx !== -1 ? content.substring(1, firstSpaceIdx).toLowerCase() : content.substring(1).toLowerCase();
+      const cmdQuery = firstSpaceIdx !== -1 ? content.substring(firstSpaceIdx + 1).trim() : '';
+
+      setActiveCommandType(cmdName);
+      setActiveCommandQuery(cmdQuery || null);
+
+      if (cmdName === 'goal') {
+        setCoderTodos([
+          { id: 'goal-1', text: `Analyzing task goals for: "${cmdQuery || 'objective'}"`, status: 'in_progress' },
+          { id: 'goal-2', text: 'Scaffolding requirements & database blueprint schemas', status: 'pending' },
+          { id: 'goal-3', text: 'Assembling components and validating API payloads', status: 'pending' },
+          { id: 'goal-4', text: 'Running local test executions and structural verification', status: 'pending' },
+          { id: 'goal-5', text: 'Compiling final build output for interactive preview', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (cmdName === 'browser') {
+        setCoderTodos([
+          { id: 'browser-1', text: `Booting sandboxed browser module for: "${cmdQuery || 'target host'}"`, status: 'in_progress' },
+          { id: 'browser-2', text: 'Parsing viewport elements, stylesheets, and meta nodes', status: 'pending' },
+          { id: 'browser-3', text: 'Simulating interactive pointer clicks and network requests', status: 'pending' },
+          { id: 'browser-4', text: 'Capturing High-Definition page screenshots and asset state', status: 'pending' },
+          { id: 'browser-5', text: 'Outputting full diagnostic site audits and log reports', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (cmdName === 'schedule') {
+        setCoderTodos([
+          { id: 'schedule-1', text: `Registering recurring task rules: "${cmdQuery || 'automation schedule'}"`, status: 'in_progress' },
+          { id: 'schedule-2', text: 'Binding execution cron listeners & persistent intervals', status: 'pending' },
+          { id: 'schedule-3', text: 'Syncing backend job dispatch triggers and logs database', status: 'pending' },
+          { id: 'schedule-4', text: 'Running first-pass scheduler dry-runs', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (cmdName === 'grill-me') {
+        setCoderTodos([
+          { id: 'grill-1', text: `Reviewing initial alignment details for: "${cmdQuery || 'feature design'}"`, status: 'in_progress' },
+          { id: 'grill-2', text: 'Formulating diagnostic clarification interview questions', status: 'pending' },
+          { id: 'grill-3', text: 'Rendering dynamic user feedback input prompts', status: 'pending' },
+          { id: 'grill-4', text: 'Realigning architecture blueprint based on user responses', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (isCoderMode || cmdName === 'coder') {
+        try {
+          const planPromptMessage = [
+            {
+              role: 'system',
+              content: 'You are an expert technical planner. Formulate a targeted, structured task checklist of 3-5 concrete engineering steps to accomplish the user\'s workspace request. Focus on specifying relevant files to check, create, edit, or build. Respond ONLY with a clean JSON object containing a "todos" array with items having "id" (string starting at "1"), "text" (the specific task description), and "status" (always "pending"). Do not explain. Do not wrap in markdown tags. Example: {"todos": [{"id": "1", "text": "Analyze existing components in src/components", "status": "pending"}]}.'
+            },
+            {
+              role: 'user',
+              content: `User query: "${cmdQuery || content}"`
+            }
+          ];
+          const planRes = await callLlamaBridge(planPromptMessage, [], signal);
+          const textResponse = planRes?.choices?.[0]?.message?.content || '';
+          const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(parsed.todos) && parsed.todos.length > 0) {
+              const mapped = parsed.todos.map((t: any, idx: number) => ({
+                id: t.id || (idx + 1).toString(),
+                text: t.text || 'Engineering task',
+                status: idx === 0 ? 'in_progress' : 'pending'
+              }));
+              setCoderTodos(mapped);
+            } else {
+              throw new Error("Invalid structure");
+            }
+          } else {
+            throw new Error("No JSON found");
+          }
+        } catch (err) {
+          console.warn("Failed to generate dynamic todos via AI:", err);
+          setCoderTodos([
+            { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' },
+            { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' },
+            { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' }
+          ]);
+        } finally {
+          setIsGeneratingTodos(false);
+        }
+      } else {
+        setCoderTodos([
+          { id: 'fb-1', text: `Formulating workspace task: "/${cmdName} ${cmdQuery}"`, status: 'in_progress' },
+          { id: 'fb-2', text: `Processing task strategies with ${selectedModel}`, status: 'pending' },
+          { id: 'fb-3', text: 'Executing response flow actions', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      }
+    } else {
+      setActiveCommandType(null);
+      setActiveCommandQuery(null);
     }
 
     const thinkingId = (Date.now() + 1).toString();
@@ -4155,11 +5632,7 @@ export default function App() {
             type: 'function',
             function: {
               name: 'list_coder_files',
-<<<<<<< HEAD
               description: 'List all files and subfolders in the active project directory recursively to understand the existing codebase.',
-=======
-              description: 'List all files and subfolders within the static coder/ directory recursively to understand the existing workspace codebase.',
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               parameters: { type: 'object', properties: {}, required: [] }
             }
           },
@@ -4167,19 +5640,11 @@ export default function App() {
             type: 'function',
             function: {
               name: 'create_coder_file',
-<<<<<<< HEAD
               description: 'Create a new file with the specified relative filePath in the project root directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the file from the project root (e.g., "src/components/MyNewComp.tsx", "js/app.js").' },
-=======
-              description: 'Create a new file with the specified relative filePath inside the coder/ directory.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file inside coder/ (e.g., "index.html", "js/app.js").' },
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   content: { type: 'string', description: 'Complete text contents to write into the file.' }
                 },
                 required: ['filePath', 'content']
@@ -4190,19 +5655,11 @@ export default function App() {
             type: 'function',
             function: {
               name: 'read_coder_file',
-<<<<<<< HEAD
               description: 'Read the contents of an existing file in the project directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the file within the project folder to read.' }
-=======
-              description: 'Read the contents of an existing file inside the coder/ directory to analyze code or check implementation.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file inside coder/ to read.' }
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 },
                 required: ['filePath']
               }
@@ -4212,21 +5669,12 @@ export default function App() {
             type: 'function',
             function: {
               name: 'edit_coder_file',
-<<<<<<< HEAD
               description: 'Edit or overwrite an existing file in the project directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the target file to edit.' },
                   content: { type: 'string', description: 'The complete new code content to be written.' }
-=======
-              description: 'Edit or overwrite an existing file inside the coder/ directory with new contents.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  filePath: { type: 'string', description: 'Relative path of the target file inside coder/ to edit/overwrite.' },
-                  content: { type: 'string', description: 'The complete new code content to be overwritten.' }
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 },
                 required: ['filePath', 'content']
               }
@@ -4236,21 +5684,41 @@ export default function App() {
             type: 'function',
             function: {
               name: 'delete_coder_file',
-<<<<<<< HEAD
               description: 'Delete a file inside the project directory.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path of the file to delete.' }
-=======
-              description: 'Delete a file inside the coder/ directory.',
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'ask',
+              description: 'Ask the user 2 to 6 targeted clarifying questions to make sure the implementation aligns with their needs. Call this when you want to clarify the user requirements, styles, features, or design choices.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file to delete inside coder/.' }
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
+                  questions: {
+                    type: 'array',
+                    description: 'The list of clarifying questions to ask the user.',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string', description: 'Unique identifier for this question (e.g. "theme", "database", etc.).' },
+                        question: { type: 'string', description: 'The actual question text to display.' },
+                        type: { type: 'string', enum: ['single_choice', 'multi_choice', 'text_input', 'confirm'], description: 'Type of input expected from the user.' },
+                        options: { type: 'array', items: { type: 'string' }, description: 'Options if type is single_choice or multi_choice.' },
+                        purpose: { type: 'string', description: 'Brief explanation of why this question is being asked.' }
+                      },
+                      required: ['id', 'question', 'type']
+                    }
+                  }
                 },
-                required: ['filePath']
+                required: ['questions']
               }
             }
           }
@@ -4259,7 +5727,6 @@ export default function App() {
 
       let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'} You have access to 4 interactive visual laboratories: Physics Lab (for graphing and forces), Chemistry Lab (for compounds and reactions), Math Lab (for trigonometric and fractal curves), and Biology Lab (for predator-prey dynamics and DNA pair sequencing).`;
 
-<<<<<<< HEAD
       // Active mode instructions
       if (activeAssistantMode === 'builder') {
         systemPrompt += `\n\n[ASSISTANT MODE: BUILDER - AUTONOMOUS CODING]
@@ -4272,18 +5739,20 @@ You are operating in PLANNER mode. Before writing any massive code blocks, your 
 You are operating in DEBUGGER mode. Your focus is to trace errors, debug syntax issues, inspect performance anomalies, explain complex code paths, and repair bugs reported by the user. Do not delete features; provide clean, precise hot-fixes and explain root causes clearly.`;
       }
 
+      if (activeTools.length > 0) {
+        systemPrompt += `\n\n[CRITICAL DIRECTIVE: ACTIVE TOOLS ENABLED]
+You have the following live tool calling APIs connected and active: ${activeTools.map(t => t.function.name).join(', ')}.
+You MUST proactively call the appropriate tools whenever they can provide grounding, web searches, scraper details, or specific Wikipedia insights to construct your answer.
+- Always call 'web_scrape' if the user specifies a URL or asks to extract/fetch content from a web link.
+- Always call Wikipedia tools ('wiki_search', 'wiki_get_page', 'wiki_get_summary', etc.) for any query that references Wikipedia, general metadata search, or historical/factual/scientific lookup.
+Never guess or pretend you do not have functions; execute them immediately and explain what details you retrieved.`;
+      }
+
       if (isCoderMode) {
         systemPrompt += `\n\n[CODER MODE IS ACTIVE]
 You are a highly capable, autonomous, and professional software engineering agent running inside the root directory of our workspace.
 When the user asks you to build page(s), applications, interfaces, features, or modify codes:
 1. You MUST make real modifications in the file system using the tools provided: 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'list_coder_files', and 'delete_coder_file'. All file paths are relative to the project root directory!
-=======
-      if (isCoderMode) {
-        systemPrompt += `\n\n[CODER MODE IS ACTIVE]
-You are a highly capable, autonomous, and professional software engineering agent running inside the "coder" directory of our workspace.
-When the user asks you to build page(s), applications, interfaces, features, or modify codes:
-1. You MUST make real modifications in the file system using the tools provided: 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'list_coder_files', and 'delete_coder_file'. All file paths are relative to the 'coder/' folder!
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
 2. Do NOT just output a text response with code blocks of code changes. You MUST actually execute the file-system tools to create or edit the actual files in real-time.
 3. If a file already exists, always use 'read_coder_file' first to understand its current content, then make edits with 'edit_coder_file'.
 4. Do NOT attempt to run terminal or environment commands - you modify files and the user's workspace previews them in real-time.
@@ -4326,11 +5795,53 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
       const toolCallNodes: ToolCallNode[] = [];
 
-      if (isCoderMode) {
+      const hasWebScrapeCall = toolCallsRaw && toolCallsRaw.some((tc: any) => tc.function?.name === 'web_scrape');
+      if (isCoderMode || hasWebScrapeCall) {
         let loopCount = 0;
         const maxLoops = 10;
         while (choice?.tool_calls && choice.tool_calls.length > 0 && loopCount < maxLoops) {
           loopCount++;
+          let shouldStopAfterAsk = false;
+          
+          // Coordinate status transitions based on active tools and loopCount
+          const activeToolNames = choice.tool_calls.map((t: any) => t.function?.name || '');
+          if (activeToolNames.some((n: string) => n.includes('read') || n.includes('list'))) {
+            setCoderTodos(prev => {
+              if (prev.length > 0) {
+                return prev.map((item, idx) => {
+                  if (idx === 0) return { ...item, status: 'complete' };
+                  if (idx === 1 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+          if (activeToolNames.some((n: string) => n.includes('edit') || n.includes('create') || n.includes('delete'))) {
+            setCoderTodos(prev => {
+              if (prev.length > 1) {
+                return prev.map((item, idx) => {
+                  if (idx <= 1) return { ...item, status: 'complete' };
+                  if (idx === 2 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+          if (loopCount >= 2) {
+            setCoderTodos(prev => {
+              if (prev.length > 2) {
+                return prev.map((item, idx) => {
+                  if (idx <= 2) return { ...item, status: 'complete' };
+                  if (idx === 3 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+
           const currentCallNodes: ToolCallNode[] = [];
           
           for (const [idx, tc] of choice.tool_calls.entries()) {
@@ -4338,16 +5849,21 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             const name = fn.name || 'unknown';
             const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
             
+            const isScrape = name === 'web_scrape';
             const node: ToolCallNode = {
               id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
               type: 'tool',
-              label: `${name} ${args.filePath ? `(${args.filePath})` : ''}`,
+              label: isScrape ? `Web Scraper (${args.url})` : `${name} ${args.filePath ? `(${args.filePath})` : ''}`,
               status: 'active',
               toolName: name,
               argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
-              icon: name.includes('read') || name.includes('file') ? <FileText size={14} /> :
+              icon: isScrape ? <Globe size={14} /> :
+                    name.includes('read') || name.includes('file') ? <FileText size={14} /> :
                     name.includes('edit') || name.includes('create') ? <PenTool size={14} /> :
-                    <Sparkles size={14} />
+                    <Sparkles size={14} />,
+              filePath: args.filePath || '',
+              addedCount: name.includes('create') ? (args.content ? args.content.split('\n').length : 15) : (name.includes('edit') ? 45 : undefined),
+              removedCount: name.includes('create') ? 0 : (name.includes('edit') ? 8 : undefined)
             };
             currentCallNodes.push(node);
             toolCallNodes.push(node);
@@ -4374,41 +5890,43 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             let resultValue: any = null;
 
             try {
-<<<<<<< HEAD
               if (!isCoderMode && ['list_coder_files', 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'delete_coder_file'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               }
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               if (name === 'list_coder_files') {
                 const listRes = await fetch('/api/fs/list', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-<<<<<<< HEAD
                   body: JSON.stringify({ folderPath: '.' }),
-=======
-                  body: JSON.stringify({ folderPath: './coder' }),
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   signal
                 });
                 resultValue = await listRes.json();
               } else if (name === 'create_coder_file' || name === 'edit_coder_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
-<<<<<<< HEAD
                 const fullPath = `./${cleanedPath}`;
-=======
-                const fullPath = `./coder/${cleanedPath}`;
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
+                
+                let oldContent = '';
+                try {
+                  const readOld = await fetch('/api/fs/read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: fullPath }),
+                    signal
+                  });
+                  if (readOld.ok) {
+                    const oldData = await readOld.json();
+                    oldContent = oldData.content || '';
+                  }
+                } catch (e) {
+                  // File might not exist yet
+                }
+
                 if (cleanedPath.includes('/')) {
                   const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
                   await fetch('/api/fs/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-<<<<<<< HEAD
                     body: JSON.stringify({ filePath: `./${folderPart}`, isDirectory: true }),
-=======
-                    body: JSON.stringify({ filePath: `./coder/${folderPart}`, isDirectory: true }),
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                     signal
                   });
                 }
@@ -4419,14 +5937,20 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   signal
                 });
                 resultValue = await writeRes.json();
+                
+                const newContent = args.content || '';
+                const diffValues = computeLineDiff(oldContent, newContent);
+                
+                const matchingNode = toolCallNodes.find(n => n.id === tc.id);
+                if (matchingNode) {
+                  matchingNode.addedCount = diffValues.added;
+                  matchingNode.removedCount = diffValues.removed;
+                }
+
                 showToast(`Wrote ${cleanedPath}`);
               } else if (name === 'read_coder_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
-<<<<<<< HEAD
                 const fullPath = `./${cleanedPath}`;
-=======
-                const fullPath = `./coder/${cleanedPath}`;
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 const readRes = await fetch('/api/fs/read', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -4437,11 +5961,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 showToast(`Read ${cleanedPath}`);
               } else if (name === 'delete_coder_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
-<<<<<<< HEAD
                 const fullPath = `./${cleanedPath}`;
-=======
-                const fullPath = `./coder/${cleanedPath}`;
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 const delRes = await fetch('/api/fs/delete', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -4450,6 +5970,238 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 });
                 resultValue = await delRes.json();
                 showToast(`Deleted ${cleanedPath}`);
+              } else if (name === 'ask') {
+                const qs = args.questions || [];
+                setAskAiQuestions(qs);
+                setCurrentQuestionIndex(0);
+                setAskAiAnswers({});
+                setShowAskAiPanel(true);
+                shouldStopAfterAsk = true;
+                resultValue = { status: "success", message: "Successfully presented clarify questions to the user. Generation has paused for user inputs." };
+                showToast("AI is asking you clarifying questions!");
+              } else if (name === 'web_scrape') {
+                const targetUrl = args.url;
+                if (!targetUrl) {
+                  throw new Error("Missing required 'url' parameter for web_scrape.");
+                }
+
+                // Push to active scraping jobs set
+                setActiveScrapingJobs(prev => {
+                  const cloned = new Set(prev);
+                  cloned.add(tc.id);
+                  return cloned;
+                });
+
+                showToast(`Scraping webpage: ${targetUrl.substring(0, 30)}...`);
+
+                // Perform proxy-mediated scraping
+                const scrapeResult = await scrapeUrl({
+                  url: targetUrl,
+                  selectors: args.selectors,
+                  usePuppeteer: args.usePuppeteer,
+                  extractLinks: args.extractLinks,
+                  extractTables: args.extractTables,
+                  outputFormat: args.outputFormat
+                });
+
+                // Update scraping results Map state
+                setScrapingResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, scrapeResult);
+                  return cloned;
+                });
+
+                // Evict from active scraping jobs set
+                setActiveScrapingJobs(prev => {
+                  const cloned = new Set(prev);
+                  cloned.delete(tc.id);
+                  return cloned;
+                });
+
+                if (scrapeResult.error) {
+                  resultValue = { error: scrapeResult.error };
+                  showToast(`Scrape failed: ${scrapeResult.error.substring(0, 30)}...`);
+                } else {
+                  resultValue = {
+                    title: scrapeResult.title,
+                    statusCode: scrapeResult.statusCode,
+                    scrapedAt: scrapeResult.scrapedAt,
+                    dataExcerpt: scrapeResult.data,
+                    linksFound: scrapeResult.links?.length || 0,
+                    markdownExcerpt: scrapeResult.rawText ? (scrapeResult.rawText.substring(0, 3000) + '... [Truncated for prompt boundaries]') : 'No page text extracted.'
+                  };
+                  showToast(`Successfully scraped "${scrapeResult.title || 'Page'}"`);
+                }
+              } else if (name === 'wiki_search') {
+                const { query, limit = 10, language = 'en' } = args;
+                showToast(`Searching Wikipedia for: ${query}`);
+                const searchResults = await wikiSearch(query, limit, language);
+                
+                // Store results
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'search', data: { results: searchResults } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  resultsCount: searchResults.length,
+                  resultsBrief: searchResults.slice(0, 3).map(r => ({ pageId: r.pageId, title: r.title, url: r.url })),
+                  payload: searchResults
+                };
+                
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Found ${searchResults.length} indexed pages matching "${query}"`;
+                }
+              } else if (name === 'wiki_get_page') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Fetching full page ID: ${pageId}`);
+                const pageResult = await wikiGetPage(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: pageResult });
+                  return cloned;
+                });
+
+                resultValue = {
+                  title: pageResult.title,
+                  wordCount: pageResult.wordCount,
+                  sectionsCount: pageResult.sections?.length || 0,
+                  introExcerpt: pageResult.intro?.substring(0, 500),
+                  payload: pageResult
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `"${pageResult.title}" fully loaded — ${pageResult.sections?.length || 0} sections, ${pageResult.wordCount} words`;
+                }
+              } else if (name === 'wiki_get_summary') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Getting summary for ID: ${pageId}`);
+                const summaryResult = await wikiGetSummary(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'summary', data: summaryResult });
+                  return cloned;
+                });
+
+                resultValue = {
+                  title: summaryResult.title,
+                  extract: summaryResult.extract,
+                  url: summaryResult.url,
+                  payload: summaryResult
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Summary for "${summaryResult.title}" parsed: "${summaryResult.extract.substring(0, 100)}..."`;
+                }
+              } else if (name === 'wiki_get_sections') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Reading page ID: ${pageId}`);
+                const sectionsList = await wikiGetSections(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Page ID ${pageId} sections`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, sections: sectionsList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  sectionsCount: sectionsList.length,
+                  list: sectionsList.map(s => ({ index: s.index, title: s.title, level: s.level })),
+                  payload: sectionsList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Header index parsed: ${sectionsList.length} sections found`;
+                }
+              } else if (name === 'wiki_get_categories') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Reading target indices...`);
+                const catsList = await wikiGetCategories(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Categories for page ${pageId}`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, categories: catsList.map(c => c.name) } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  categoriesCount: catsList.length,
+                  list: catsList.map(c => c.name),
+                  payload: catsList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${catsList.length} taxonomies resolved`;
+                }
+              } else if (name === 'wiki_get_links') {
+                const { pageId, limit = 50, language = 'en' } = args;
+                showToast(`Collecting outbound page links...`);
+                const linksList = await wikiGetLinks(Number(pageId), Number(limit), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Outbound links for page ${pageId}`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, links: linksList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  linksCount: linksList.length,
+                  payload: linksList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${linksList.length} outbound connections logged`;
+                }
+              } else if (name === 'wiki_get_images') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Extracting static elements...`);
+                const imgsList = await wikiGetImages(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Media elements for page ${pageId}`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, images: imgsList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  imagesCount: imgsList.length,
+                  list: imgsList.map(i => i.name),
+                  payload: imgsList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${imgsList.length} static illustrations resolved`;
+                }
+              } else if (name === 'wiki_get_related') {
+                const { pageId, limit = 10, language = 'en' } = args;
+                showToast(`Finding adjacent articles...`);
+                const relatedList = await wikiGetRelated(Number(pageId), Number(limit), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'search', data: { results: relatedList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  relatedCount: relatedList.length,
+                  payload: relatedList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Trajectory logged: ${relatedList.length} related pages found`;
+                }
               } else {
                 resultValue = { error: `Unsupported coder tool: ${name}` };
               }
@@ -4464,10 +6216,23 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               content: JSON.stringify(resultValue)
             });
 
-            const matchedIdx = toolCallNodes.findIndex(node => node.label.startsWith(name) && node.status === 'active');
+            const matchedIdx = toolCallNodes.findIndex(node => (node.id === tc.id) || (node.label.startsWith(name) && node.status === 'active'));
             if (matchedIdx !== -1) {
               toolCallNodes[matchedIdx].status = 'complete';
             }
+
+            setChats(prev => prev.map(chat => {
+              if (chat.id === chatId) {
+                return {
+                  ...chat,
+                  messages: chat.messages.map(m => m.id === thinkingId ? {
+                    ...m,
+                    toolCalls: [...toolCallNodes]
+                  } : m)
+                };
+              }
+              return chat;
+            }));
           }
 
           apiMessages.push(choice);
@@ -4475,6 +6240,10 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
           await new Promise(r => setTimeout(r, 600));
           triggerWorkspaceRefresh();
+
+          if (shouldStopAfterAsk) {
+            break;
+          }
 
           const nextResponse = await callLlamaBridge(apiMessages, activeTools, signal);
           choice = nextResponse.choices?.[0]?.message;
@@ -4509,7 +6278,50 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
       const responseContent = choice?.content;
       const finalContent = responseContent || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
-      const imagesToAttach = responseImages.map((img: any) => ({
+      
+      const scavengedImages: any[] = [];
+      toolCallNodes.forEach(tc => {
+        if (tc.toolName === 'web_scrape') {
+          const scraped = scrapingResults.get(tc.id);
+          if (scraped && scraped.images && scraped.images.length > 0) {
+            scraped.images.slice(0, 12).forEach((imgUrl: string, idx: number) => {
+              if (imgUrl && !scavengedImages.some(x => x.url === imgUrl)) {
+                scavengedImages.push({
+                  title: `Scraped Image ${idx + 1}`,
+                  url: imgUrl,
+                  source: scraped.title || 'Web Scrape'
+                });
+              }
+            });
+          }
+        } else if (tc.toolName?.startsWith('wiki_')) {
+          const wikiRes = wikiResults.get(tc.id);
+          if (wikiRes && wikiRes.data) {
+            if (wikiRes.wikiType === 'page' && wikiRes.data.images && wikiRes.data.images.length > 0) {
+              wikiRes.data.images.slice(0, 12).forEach((img: any, idx: number) => {
+                if (img.url && !scavengedImages.some(x => x.url === img.url)) {
+                  scavengedImages.push({
+                    title: img.name || `Wiki Image ${idx + 1}`,
+                    url: img.url,
+                    source: 'Wikipedia'
+                  });
+                }
+              });
+            } else if (wikiRes.wikiType === 'summary' && wikiRes.data.thumbnail?.url) {
+              const url = wikiRes.data.thumbnail.url;
+              if (url && !scavengedImages.some(x => x.url === url)) {
+                scavengedImages.push({
+                  title: wikiRes.data.title || 'Wiki Image',
+                  url: url,
+                  source: 'Wikipedia'
+                });
+              }
+            }
+          }
+        }
+      });
+
+      const imagesToAttach = [...responseImages, ...scavengedImages].map((img: any) => ({
         title: img.title || 'Image',
         url: img.url,
         source: img.source,
@@ -4604,64 +6416,95 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       const finalThinkContent = thinkTagMatch ? thinkTagMatch[0] : '';
       const finalDisplayContent = finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
-      // Detect if there's any code block with > 50 lines to increase speed
+      // Detect the size of the largest code block to dynamically scale up typing streaming speed
       const codeBlockThreshold = 50;
-      let hasLargeCodeBlock = false;
+      let maxLinesOfCode = 0;
       const codeMatches = finalContent.match(/```[\s\S]*?```/g);
       if (codeMatches) {
         for (const block of codeMatches) {
           const lines = block.split('\n').length;
-          if (lines > codeBlockThreshold) {
-            hasLargeCodeBlock = true;
-            break;
+          if (lines > maxLinesOfCode) {
+            maxLinesOfCode = lines;
           }
         }
       }
 
-      let lastRenderTime = Date.now();
-      const RENDER_INTERVAL = 120;
-      
-      let stepSize = 1;
-      let baseDelay = finalContent.length > 500 ? 5 : 15;
-      if (hasLargeCodeBlock) {
-        stepSize = 2; // Grab 2 characters at a time to render up to 1.5x - 2.0x faster
-        baseDelay = Math.max(3, Math.round(baseDelay / 1.5));
+      // Compute dynamic throughput (characters per second) based on file scale & line counts
+      const totalLength = finalContent.length;
+      let speedFactor = 95; // default for tiny conversational replies
+
+      if (totalLength > 8000) {
+        speedFactor = 1600;
+      } else if (totalLength > 4000) {
+        speedFactor = 1200;
+      } else if (totalLength > 2000) {
+        speedFactor = 850;
+      } else if (totalLength > 1000) {
+        speedFactor = 550;
+      } else if (totalLength > 500) {
+        speedFactor = 280;
       }
 
-      for (let i = stepSize; i <= finalContent.length + stepSize - 1; i += stepSize) {
+      // Scale dynamically with code block complexity to prevent stuttering but keep readable scrolling
+      if (maxLinesOfCode > codeBlockThreshold) {
+        if (maxLinesOfCode > 800) {
+          speedFactor = Math.max(speedFactor, 1950);
+        } else if (maxLinesOfCode > 400) {
+          speedFactor = Math.max(speedFactor, 1450);
+        } else if (maxLinesOfCode > 200) {
+          speedFactor = Math.max(speedFactor, 980);
+        } else if (maxLinesOfCode > 100) {
+          speedFactor = Math.max(speedFactor, 680);
+        } else {
+          speedFactor = Math.max(speedFactor, 420);
+        }
+      }
+
+      const startTime = Date.now();
+      let currentPos = 0;
+      let lastRenderTime = 0;
+      const RENDER_INTERVAL = 30; // ~33 FPS viewport updates
+
+      while (currentPos < totalLength) {
         if (signal.aborted) {
           break;
         }
-        const currentPos = Math.min(i, finalContent.length);
-        const partial = finalContent.slice(0, currentPos);
-        await new Promise(resolve => setTimeout(resolve, baseDelay));
-        
-        if (signal.aborted) {
-          break;
+
+        const elapsed = Date.now() - startTime;
+        // Exact character cursor position proportional to actual time elapsed
+        const targetPos = Math.min(totalLength, Math.floor(elapsed * (speedFactor / 1000)));
+
+        if (targetPos > currentPos) {
+          currentPos = targetPos;
+          const partial = finalContent.slice(0, currentPos);
+          const now = Date.now();
+
+          // Smoothly update state without loading main thread excessively
+          if (now - lastRenderTime > RENDER_INTERVAL || currentPos === totalLength) {
+            lastRenderTime = now;
+            const parsed = parseThinkTags(partial);
+            const displayContent = (parsed.before + parsed.after).trim();
+            setChats(prev => prev.map(chat => {
+              if (chat.id === chatId) {
+                return {
+                  ...chat,
+                  messages: chat.messages.map(m => m.id === thinkingId ? {
+                    ...m,
+                    content: parsed.isThinking ? displayContent : (displayContent || partial),
+                    thinkContent: parsed.think || undefined,
+                    isThinking: parsed.isThinking,
+                    streamPos: currentPos,
+                    toolCalls: activeToolNodes
+                  } : m),
+                };
+              }
+              return chat;
+            }));
+          }
         }
-        
-        const now = Date.now();
-        if (now - lastRenderTime > RENDER_INTERVAL || currentPos === finalContent.length) {
-          lastRenderTime = now;
-          const parsed = parseThinkTags(partial);
-          const displayContent = (parsed.before + parsed.after).trim();
-          setChats(prev => prev.map(chat => {
-            if (chat.id === chatId) {
-              return {
-                ...chat,
-                messages: chat.messages.map(m => m.id === thinkingId ? {
-                  ...m,
-                  content: parsed.isThinking ? displayContent : (displayContent || partial),
-                  thinkContent: parsed.think || undefined,
-                  isThinking: parsed.isThinking,
-                  streamPos: currentPos,
-                  toolCalls: activeToolNodes
-                } : m),
-              };
-            }
-            return chat;
-          }));
-        }
+
+        // Relinquish execution back to the browser event loop for responsiveness (mouse tracking, layout drag)
+        await new Promise(resolve => setTimeout(resolve, 8));
       }
 
       if (signal.aborted) {
@@ -4748,6 +6591,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       setIsTyping(false);
       setTypingMessageId(null);
       abortControllerRef.current = null;
+      setCoderTodos(prev => prev.map(t => ({ ...t, status: 'complete' })));
     }
   };
 
@@ -4922,7 +6766,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
   function showToast(message: string) {
     const id = Date.now().toString();
     setToasts(prev => [...prev, { id, message }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 2000);
   }
 
   const handleScreenshot = async () => {
@@ -4953,6 +6797,30 @@ When the user asks you to build page(s), applications, interfaces, features, or 
     code({ className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '');
       const codeStr = String(children).replace(/\n$/, '');
+      const isMultiLine = codeStr.includes('\n');
+      
+      const isTreeStructure = (() => {
+        const lines = codeStr.split('\n');
+        let branches = 0;
+        for (let i = 0; i < Math.min(lines.length, 15); i++) {
+          const line = lines[i];
+          if (line.includes('├──') || line.includes('└──') || line.includes('│  ') || line.includes('└──') || line.includes('║') || line.includes('╠══') || line.includes('╚══')) {
+            branches++;
+          }
+        }
+        return branches >= 1;
+      })();
+
+      if (isTreeStructure) {
+        return (
+          <CustomCodeBlockVisualizer
+            language="tree"
+            code={codeStr}
+            defaultRender={<CanvasBlock language="tree" code={codeStr} />}
+          />
+        );
+      }
+
       if (match) {
         return (
           <CustomCodeBlockVisualizer
@@ -4962,6 +6830,16 @@ When the user asks you to build page(s), applications, interfaces, features, or 
           />
         );
       }
+
+      if (isMultiLine) {
+        return (
+          <CanvasBlock 
+            language="text" 
+            code={codeStr} 
+          />
+        );
+      }
+
       return (
         <code className="bg-white/10 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
           {children}
@@ -5119,6 +6997,22 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   <span>Web Search</span>
                 </motion.button>
               )}
+              {luminaTools.some(t => t.enabled) && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsPlusMenuOpen(true);
+                    setActivePlusSubMenu('lumina_tools');
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 shadow-sm cursor-pointer hover:bg-indigo-500/15 text-xs font-semibold"
+                >
+                  <Hammer size={12} />
+                  <span>Lumina Tools ({luminaTools.filter(t => t.enabled).length})</span>
+                </motion.button>
+              )}
               {bridgeTools.some(t => t.enabled) && (
                 <motion.button
                   whileHover={{ scale: 1.05 }}
@@ -5131,8 +7025,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm cursor-pointer hover:bg-emerald-500/15 text-xs font-semibold"
                 >
-                  <Hammer size={13} />
-                  <span>Tools ({bridgeTools.filter(t => t.enabled).length})</span>
+                  <Wrench size={12} />
+                  <span>Bridge Tools ({bridgeTools.filter(t => t.enabled).length})</span>
                 </motion.button>
               )}
               {activeSkills.map(skillId => {
@@ -5159,17 +7053,153 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             </motion.div>
           )}
         </AnimatePresence>
-        <div className={`relative border border-[var(--theme-input-border)] bg-[var(--theme-input-bg)] rounded-[28px] focus-within:border-[var(--theme-accent)]/40 overflow-visible flex flex-col p-1.5 min-h-[110px] justify-between transition-all duration-300 shadow-2xl`}>
-          {/* Slash Commands Suggestion Panel */}
-          <AnimatePresence>
-            {showsSlashCommands && filteredCommands.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.98, y: 8 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98, y: 8 }}
-                transition={{ duration: 0.12, ease: 'easeOut' }}
-                className="absolute bottom-full left-0 right-0 mb-2 bg-[#18181b]/95 backdrop-blur-md border border-zinc-800/80 rounded-[20px] shadow-2xl overflow-hidden z-[80] p-2 flex flex-col max-h-[280px] overflow-y-auto custom-scrollbar"
-              >
+
+        <AnimatePresence>
+          {showTodoPanel && coderTodos.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              className="w-full bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] border-b-0 rounded-t-[24px] px-4 pt-3 pb-4 flex flex-col gap-2 relative z-[5] shadow-xl mb-[-4px]"
+            >
+              {/* Title block representing the command being executed */}
+              <div className="flex items-center gap-2 text-[var(--theme-primary)] select-none border-b border-[var(--theme-border)]/25 pb-2 mb-1">
+                <span className="text-[14px]">📂</span>
+                <span className="font-semibold text-xs tracking-tight truncate max-w-[85%] text-[var(--theme-primary)]">
+                  {activeCommandQuery 
+                    ? `/${activeCommandType} ${activeCommandQuery}`
+                    : isCoderMode 
+                      ? "Execute Coder Engineering Task" 
+                      : "Execute Workspace Task Strategy"
+                  }
+                </span>
+              </div>
+
+              {/* Header */}
+              <div className="flex items-center justify-between font-sans select-none">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-500">Task Progress</span>
+                  <span className="text-[10px] text-[var(--theme-primary)] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full font-mono font-bold">
+                    {coderTodos.filter(t => t.status === 'complete').length}/{coderTodos.length}
+                  </span>
+                  {isGeneratingTodos && (
+                    <span className="text-[10px] text-[var(--theme-muted)] italic animate-pulse">(planning...)</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setTodoCollapsed(!todoCollapsed)}
+                    className="p-1 hover:bg-white/5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center"
+                    title={todoCollapsed ? "Expand task checklist" : "Collapse task checklist"}
+                  >
+                    <ChevronRight 
+                      size={14} 
+                      className={`transition-transform duration-200 ${todoCollapsed ? '' : 'rotate-90'}`} 
+                    />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setShowTodoPanel(false);
+                      setCoderTodos([]);
+                      setActiveCommandQuery(null);
+                      setActiveCommandType(null);
+                    }}
+                    className="p-1 hover:bg-white/5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center"
+                    title="Dismiss checklist"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* List (collapsible) */}
+              <AnimatePresence initial={false}>
+                {!todoCollapsed && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <div className="flex flex-col gap-1.5 max-h-[180px] overflow-y-auto custom-scrollbar font-sans">
+                      {coderTodos.map((todo) => {
+                        const isDone = todo.status === 'complete';
+                        const isActive = todo.status === 'in_progress';
+                        return (
+                          <motion.div
+                            key={todo.id}
+                            initial={{ opacity: 0, x: -5 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className={`flex items-center gap-3 px-2 py-1.5 rounded-xl transition-all`}
+                          >
+                            <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                              isDone
+                                ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
+                                : isActive
+                                  ? 'border border-[var(--theme-accent)] bg-[var(--theme-accent)]/10'
+                                  : 'border border-[var(--theme-muted)]/40'
+                            }`}>
+                              {isDone && <Check size={10} strokeWidth={3} className="text-emerald-400" />}
+                              {isActive && <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />}
+                            </div>
+
+                            <span className={`text-xs font-medium flex-1 ${isDone ? 'line-through text-[var(--theme-muted)]' : isActive ? 'text-[var(--theme-primary)]' : 'text-[var(--theme-secondary)]'}`}>
+                              {todo.text}
+                            </span>
+
+                            {isDone && (
+                              <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1 shrink-0">
+                                <Check size={10} strokeWidth={3} /> Done
+                              </span>
+                            )}
+                            {isActive && (
+                              <Loader2 size={12} className="text-[var(--theme-accent)] animate-spin shrink-0" />
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          )}
+
+
+          {showsSlashCommands && filteredCommands.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              className="w-full bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] border-b-0 rounded-t-[24px] overflow-hidden flex flex-col relative z-[5] shadow-xl mb-[-4px]"
+            >
+              {/* Header */}
+              <div className="h-10 bg-[#1b1918] border-b border-[var(--theme-border)]/35 pl-4 pr-[7px] py-1.5 flex items-center justify-between shrink-0 select-none">
+                <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--theme-accent)]">Workspace Command Center</span>
+                  <span className="text-[10px] text-[var(--theme-primary)] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full font-mono font-bold">
+                    {filteredCommands.length} Available
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] text-[var(--theme-muted)] italic hidden sm:inline mr-1">Press Up/Down to Navigate, Enter to Select</span>
+                  <button 
+                    onClick={() => setInput(input + ' ')}
+                    className="p-1 hover:bg-white/5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center"
+                    title="Dismiss Command suggestions"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Suggestions List in style of task progress checklists */}
+              <div className="p-3 flex flex-col gap-1.5 max-h-[190px] overflow-y-auto custom-scrollbar font-sans bg-[var(--theme-input-bg)]">
                 {filteredCommands.map((cmd, idx) => {
                   const isSelected = idx === selectedCommandIndex;
                   return (
@@ -5184,42 +7214,165 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         }
                       }}
                       onMouseEnter={() => setSelectedCommandIndex(idx)}
-                      className={`w-full flex items-center px-4 py-2.5 rounded-xl text-left transition-all select-none gap-2 ${
+                      className={`w-full flex items-center px-3 py-2 rounded-xl text-left transition-all select-none gap-3 outline-none duration-150 ${
                         isSelected 
-                          ? 'bg-zinc-800 text-white font-medium shadow-sm' 
-                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/30'
+                          ? 'bg-white/5 text-[var(--theme-primary)] border border-[var(--theme-input-border)] shadow-sm' 
+                          : 'text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-white/5/25 border border-transparent'
                       }`}
                     >
-                      <span className={`font-mono text-sm tracking-tight shrink-0 select-none mr-1 ${
-                        isSelected ? 'text-zinc-300' : 'text-zinc-650'
+                      {/* Left element resembling bullet items */}
+                      <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                        isSelected
+                          ? 'border border-[var(--theme-accent)] bg-[var(--theme-accent)]/15 text-[var(--theme-accent)]'
+                          : 'border border-[var(--theme-muted)]/30 text-[var(--theme-muted)]'
                       }`}>
-                        &lt;&gt;
-                      </span>
-                      <span className={`font-sans text-[13px] shrink-0 font-medium ${
-                        isSelected ? 'text-white' : 'text-zinc-150'
-                      }`}>
-                        {cmd.name}
-                      </span>
-                      <span className={`font-sans text-[13px] truncate ml-1 ${
-                        isSelected ? 'text-zinc-350' : 'text-zinc-500'
-                      }`}>
-                        {cmd.desc}
-                      </span>
+                        <span className="text-[9px] font-mono leading-none">&gt;</span>
+                      </div>
+
+                      <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                        <span className={`font-mono text-xs font-bold leading-none ${
+                          isSelected ? 'text-[var(--theme-accent)]' : 'text-[var(--theme-primary)]'
+                        }`}>
+                          /{cmd.name}
+                        </span>
+                        <span className={`font-sans text-[11px] truncate leading-none ${
+                          isSelected ? 'text-[var(--theme-primary)]' : 'text-[var(--theme-muted)]'
+                        }`}>
+                          {cmd.desc}
+                        </span>
+                      </div>
+
+                      {isSelected && (
+                        <div className="text-[10px] text-[var(--theme-accent)] font-semibold flex items-center gap-1 shrink-0 animate-fade-in font-mono">
+                          SELECT <ChevronRight size={10} />
+                        </div>
+                      )}
                     </button>
                   );
                 })}
-              </motion.div>
-            )}
-          </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+
+          {showAskAiPanel && askAiQuestions.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              className="w-full bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] border-b-0 rounded-t-[24px] px-5 py-4 flex flex-col justify-between relative z-[5] shadow-2xl mb-[-4px] h-[260px] max-h-[260px] overflow-hidden select-none"
+            >
+              {/* Header: Progress & Close */}
+              <div className="flex items-center justify-between shrink-0 mb-1.5">
+                {/* Progress Dots */}
+                <div className="flex items-center gap-1.5">
+                  {askAiQuestions.map((q, idx) => {
+                    const isAnswered = askAiAnswers[q.id] !== undefined;
+                    const isActive = idx === currentQuestionIndex;
+                    return (
+                      <button
+                        key={q.id}
+                        onClick={() => handleDotClick(idx)}
+                        disabled={!isAnswered && idx > currentQuestionIndex}
+                        className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
+                          isActive 
+                            ? 'bg-orange-500 scale-125 shadow-[0_0_8px_rgba(249,115,22,0.6)]' 
+                            : isAnswered 
+                              ? 'bg-orange-500/60 hover:bg-orange-500 cursor-pointer' 
+                              : 'bg-zinc-700 hover:bg-zinc-650 disabled:pointer-events-none'
+                        }`}
+                        title={`Question ${idx + 1}: ${q.purpose || q.question}`}
+                      />
+                    );
+                  })}
+                  <span className="text-[10px] text-zinc-400 font-mono font-bold tracking-wider uppercase ml-1.5 bg-zinc-805/50 border border-zinc-700/35 px-1.5 py-0.5 rounded-full select-none">
+                    Q{currentQuestionIndex + 1}/{askAiQuestions.length}
+                  </span>
+                </div>
+
+                {/* Skip All Button */}
+                <button
+                  onClick={() => handleFinishQuestions(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold tracking-tight text-zinc-400 hover:text-white hover:bg-white/5 border border-zinc-750 rounded-xl transition-all cursor-pointer"
+                >
+                  <X size={12} />
+                  <span>Skip All</span>
+                </button>
+              </div>
+
+              {/* Main Question Block */}
+              <div className="flex-1 flex flex-col justify-center min-h-0 py-2">
+                <AnimatePresence mode="wait">
+                  {!isTransitioningQuestion && !isGeneratingQuestions && !isAnalyzingAnswers && (
+                    <motion.div
+                      key={currentQuestionIndex}
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      exit={{ y: -40, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: 'easeInOut' }}
+                      className="flex flex-col h-full justify-between"
+                    >
+                      {/* Question Text */}
+                      <div className="text-[15px] font-medium text-white leading-normal tracking-tight flex flex-col gap-0.5 select-none">
+                        <span className="text-zinc-100 font-medium">{askAiQuestions[currentQuestionIndex].question}</span>
+                        {askAiQuestions[currentQuestionIndex].purpose && (
+                          <span className="text-[11px] text-zinc-500 font-medium italic select-none">
+                            💡 Purpose: {askAiQuestions[currentQuestionIndex].purpose}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Question Content Types */}
+                      <div className="flex-1 flex items-center mt-3 min-h-0 select-none">
+                        {renderActiveQuestionContent()}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {isGeneratingQuestions && (
+                    <motion.div 
+                      key="generating-loader" 
+                      initial={{ opacity: 0 }} 
+                      animate={{ opacity: 1 }} 
+                      exit={{ opacity: 0 }}
+                      className="flex flex-col items-center justify-center gap-2 h-full py-4 text-center select-none"
+                    >
+                      <Loader2 size={24} className="text-orange-500 animate-spin" />
+                      <span className="text-xs font-semibold tracking-wider uppercase text-zinc-400 animate-pulse">
+                        Evaluating context and formulating questions...
+                      </span>
+                    </motion.div>
+                  )}
+
+                  {isAnalyzingAnswers && (
+                    <motion.div 
+                      key="analyzing-loader" 
+                      initial={{ opacity: 0 }} 
+                      animate={{ opacity: 1 }} 
+                      exit={{ opacity: 0 }}
+                      className="flex flex-col items-center justify-center gap-2 h-full py-4 text-center select-none"
+                    >
+                      <Loader2 size={24} className="text-orange-500 animate-spin" />
+                      <span className="text-xs font-semibold tracking-wider uppercase text-zinc-400 animate-pulse">
+                        Analyzing your answers... generating tailored task checklist...
+                      </span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className={`relative border border-[var(--theme-input-border)] bg-[var(--theme-input-bg)] focus-within:border-[var(--theme-accent)]/40 overflow-visible flex flex-col p-2 min-h-[100px] justify-between transition-all duration-300 ${
+          isCenteredState 
+            ? 'rounded-[24px] shadow-lg border-[var(--theme-input-border)] z-10' 
+            : 'rounded-xl shadow-none border-[var(--theme-border)]/60 z-10'
+        }`} style={((showTodoPanel && coderTodos.length > 0) || (showsSlashCommands && filteredCommands.length > 0) || (showAskAiPanel && askAiQuestions.length > 0)) ? { borderTopLeftRadius: 0, borderTopRightRadius: 0 } : {}}>
 
           <div className="flex-1 px-3 pt-2">
-<<<<<<< HEAD
           {(attachedFiles.length > 0 || localElementAttachments.length > 0) && (
             <div className="flex flex-wrap gap-2 pt-1 pb-3 items-center">
-=======
-          {attachedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-1 pb-3">
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               {attachedFiles.map((file, idx) => {
                 const isImage = file.type.startsWith('image/');
                 const ext = file.name.split('.').pop()?.toUpperCase() || 'DOC';
@@ -5304,7 +7457,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             </div>
           )}
           <textarea
-            ref={isCenteredState ? null : inputRef}
+            ref={inputRef}
             value={input}
             onChange={adjustTextareaHeight}
             onKeyDown={handleKeyDown}
@@ -5333,7 +7486,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 className={`p-2 rounded-2xl transition-all ${
                   isWebSearchEnabled 
                     ? 'text-blue-500 bg-blue-500/10 hover:bg-blue-500/20' 
-                    : bridgeTools.some(t => t.enabled)
+                    : (luminaTools.some(t => t.enabled) || bridgeTools.some(t => t.enabled))
                       ? 'text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20' 
                       : 'text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]'
                 }`}
@@ -5347,17 +7500,18 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    style={menuStyle}
-                    className="absolute left-0 w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl overflow-hidden z-[70] p-1.5 flex flex-col overflow-y-auto custom-scrollbar"
+                    style={plusMenuPopupPosition.style}
+                    className="fixed w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl overflow-hidden z-[180] p-1.5 flex flex-col"
                   >
                     {activePlusSubMenu === 'main' ? (
-                      <>
+                      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-0.5 p-0.5">
                         {[
                           { id: 'files', label: 'Add files or photos', icon: <FileUp size={16} /> },
                           { id: 'screenshot', label: 'Take a screenshot', icon: <Camera size={16} /> },
                           { id: 'skills', label: 'Skills', icon: <Box size={16} />, hasArrow: true },
                           { id: 'style', label: 'Writing Style', icon: <Palette size={16} />, hasArrow: true },
                           { type: 'separator' },
+                          { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} />, hasArrow: true },
                           { id: 'tools', label: 'Bridge Tools', icon: <Wrench size={16} />, hasArrow: true },
                           { id: 'search', label: 'Web search', icon: <Globe size={16} />, isSelected: isWebSearchEnabled },
                         ].map((item, idx) => (
@@ -5384,6 +7538,9 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                                   case 'search':
                                     setIsWebSearchEnabled(prev => !prev);
                                     break;
+                                  case 'lumina_tools':
+                                    setActivePlusSubMenu('lumina_tools');
+                                    break;
                                   case 'tools':
                                     setActivePlusSubMenu('tools');
                                     break;
@@ -5402,10 +7559,48 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                             </button>
                           )
                         ))}
-                      </>
+                      </div>
+                    ) : activePlusSubMenu === 'lumina_tools' ? (
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
+                          <button 
+                            onClick={() => setActivePlusSubMenu('main')}
+                            className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest">Lumina Tools</span>
+                        </div>
+
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5">
+                          {luminaTools.map(tool => (
+                            <button
+                              key={tool.id}
+                              onClick={() => {
+                                setLuminaTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors group/tool"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? 'bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]' : 'bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]'}`}>
+                                  {tool.icon}
+                                </div>
+                                <div className="text-left">
+                                  <div className={`transition-colors ${tool.enabled ? 'text-[var(--theme-primary)]' : 'text-[var(--theme-secondary)]'}`}>{tool.name}</div>
+                                  <div className="text-[10px] text-[var(--theme-muted)] truncate w-32">{tool.description}</div>
+                                </div>
+                              </div>
+                              <div className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? 'bg-[var(--theme-accent)]' : 'bg-[var(--theme-hover-bg)]'}`}>
+                                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? 'right-0.5' : 'left-0.5'}`} />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ) : activePlusSubMenu === 'tools' ? (
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1">
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
                           <button 
                             onClick={() => setActivePlusSubMenu('main')}
                             className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
@@ -5414,20 +7609,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                           </button>
                           <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest">Bridge Tools</span>
                         </div>
-                        <div className="px-3 py-2 border-b border-[var(--theme-border)] flex items-center justify-between">
-                          <span className="text-[10px] font-medium text-[var(--theme-muted)]">Enable All Tools</span>
-                          <button
-                            onClick={() => {
-                              const allEnabled = bridgeTools.every(t => t.enabled);
-                              setBridgeTools(prev => prev.map(t => ({ ...t, enabled: !allEnabled })));
-                              showToast(allEnabled ? 'Disabled all tools' : 'Enabled all tools');
-                            }}
-                            className={`w-8 h-4 rounded-full transition-colors relative ${bridgeTools.length > 0 && bridgeTools.every(t => t.enabled) ? 'bg-[var(--theme-accent)]' : 'bg-[var(--theme-hover-bg)]'}`}
-                          >
-                            <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${bridgeTools.length > 0 && bridgeTools.every(t => t.enabled) ? 'right-0.5' : 'left-0.5'}`} />
-                          </button>
-                        </div>
-                        <div className="max-h-56 overflow-y-auto custom-scrollbar">
+
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5">
                           {bridgeTools.map(tool => (
                             <button
                               key={tool.id}
@@ -5454,8 +7637,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         </div>
                       </div>
                     ) : activePlusSubMenu === 'skills' ? (
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1">
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
                           <button 
                             onClick={() => setActivePlusSubMenu('main')}
                             className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
@@ -5464,7 +7647,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                           </button>
                           <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest">Skills</span>
                         </div>
-                        <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5">
                           {SKILLS.map(skill => (
                             <button
                               key={skill.id}
@@ -5496,8 +7679,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         </div>
                       </div>
                     ) : activePlusSubMenu === 'style' ? (
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1">
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
                           <button 
                             onClick={() => setActivePlusSubMenu('main')}
                             className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
@@ -5506,7 +7689,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                           </button>
                           <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest">Writing Style</span>
                         </div>
-                        <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5">
                           {WRITING_STYLES.map((style) => (
                             <button
                               key={style.id}
@@ -5562,10 +7745,12 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 <AnimatePresence>
                   {isModeDropdownOpen && (
                     <motion.div
+                      ref={modeDropdownContentRef}
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute bottom-full left-0 mb-3 w-56 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[70] flex flex-col overflow-hidden text-left"
+                      style={modeDropdownPosition.style}
+                      className="fixed w-56 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
                     >
                       <div className="p-2 space-y-1">
                         {[
@@ -5656,10 +7841,12 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               <AnimatePresence>
                 {isModelDropdownOpen && (
                   <motion.div
+                    ref={modelDropdownContentRef}
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute bottom-full right-0 mb-3 w-64 max-h-[380px] bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[70] flex flex-col overflow-hidden text-left"
+                    style={modelDropdownPosition.style}
+                    className="fixed w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
                   >
                     {availableModels.length > 5 && (
                       <div className="px-3 py-2 bg-[var(--theme-surface)] border-b border-[var(--theme-border)] shrink-0">
@@ -5676,7 +7863,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         </div>
                       </div>
                     )}
-                    <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar max-h-60">
+                    <div className="h-[200px] overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar shrink-0">
                       {activeModelList
                         .filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase()))
                         .map((model) => (
@@ -5687,7 +7874,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                               setIsModelDropdownOpen(false);
                               setModelSearchQuery('');
                             }}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
+                            className={`w-full h-[36px] flex items-center gap-3 px-3 rounded-xl text-xs font-medium transition-colors shrink-0 ${
                               activeModelId === model.id 
                                 ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' 
                                 : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
@@ -5708,18 +7895,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
             <motion.button
               whileTap={{ scale: 0.92 }}
-<<<<<<< HEAD
-              onClick={handleClearChat}
-              className="p-1.5 rounded-2xl text-[var(--theme-secondary)] hover:text-red-500 hover:bg-[var(--theme-hover-bg)] transition-all cursor-pointer mr-0.5 flex items-center justify-center shrink-0"
-              title="Clear Chat History"
-            >
-              <Trash2 size={18} className="text-zinc-500 hover:text-red-500 transition-colors" />
-            </motion.button>
-
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               onClick={() => {
                 showToast("Voice input is configured. Adjust sources in Settings > General.");
               }}
@@ -5728,6 +7903,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             >
               <Mic size={18} className="text-zinc-500 hover:text-zinc-300 transition-colors" />
             </motion.button>
+
+
 
             {isTyping ? (
               <motion.button
@@ -5760,6 +7937,9 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             )}
           </div>
         </div>
+
+
+
         <input
           ref={fileInputRef}
           type="file"
@@ -5947,11 +8127,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 setActiveLabTab={setActiveLabTab}
                 activeProjectId={activeProjectId}
                 setActiveProjectId={setActiveProjectId}
-<<<<<<< HEAD
                 isSidebarOpen={isSidebarOpen}
                 setIsSidebarOpen={setIsSidebarOpen}
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
               />
             </motion.aside>
           </>
@@ -5983,11 +8160,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             setActiveLabTab={setActiveLabTab}
             activeProjectId={activeProjectId}
             setActiveProjectId={setActiveProjectId}
-<<<<<<< HEAD
             isSidebarOpen={isSidebarOpen}
             setIsSidebarOpen={setIsSidebarOpen}
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
           />
         </div>
         
@@ -6005,12 +8179,13 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       </motion.aside>
 
       <main className="flex-1 flex flex-col relative h-full min-w-0 bg-[var(--theme-bg)] text-[var(--theme-primary)] transition-colors duration-300">
-<<<<<<< HEAD
 
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
         {!isCoderMode && (
-          <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md z-10 sticky top-0 shrink-0">
+          <header className={`h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md transition-all duration-300 ease-in-out ${
+            autoHideTopBar 
+              ? 'absolute top-0 left-0 right-0 z-[160] transform -translate-y-[48px] hover:translate-y-0 opacity-0 hover:opacity-100 hover:shadow-lg' 
+              : 'sticky top-0 z-[150] shrink-0 opacity-100 shadow-none'
+          }`}>
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => setIsMobileMenuOpen(true)}
@@ -6089,7 +8264,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[60] p-1.5"
+                      className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[160] p-1.5"
                     >
                       {[
                         { id: 'coder_mode', label: isCoderMode ? 'Turn off Coder Mode' : 'Turn on Coder Mode', icon: <Code size={16} className={isCoderMode ? 'text-teal-500' : ''} />, onClick: () => { 
@@ -6147,11 +8322,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
         )}
 
         {isCoderMode ? (
-<<<<<<< HEAD
           <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
-=======
-          <div className="flex-1 flex overflow-hidden bg-[#0b0b0c] text-[#e4e4e7] h-full relative font-sans">
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
             {/* LEFT PANEL: File Explorer (VS Code Styled collapsible sidebar) */}
             <AnimatePresence>
               {isCoderLeftPanelOpen && (
@@ -6160,17 +8331,12 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   animate={{ width: 280, opacity: 1 }}
                   exit={{ width: 0, opacity: 0 }}
                   transition={{ duration: 0.22, ease: 'easeOut' }}
-<<<<<<< HEAD
                   className="h-full border-r border-[#221B17] bg-[#110E0D] flex flex-col overflow-hidden shrink-0 z-10 shadow-xl"
-=======
-                  className="h-full border-r border-[#1e1e22] bg-[#141416]/95 backdrop-blur-md flex flex-col overflow-hidden shrink-0 z-10 shadow-xl"
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 >
                   <CoderLeftExplorer 
                     workspaceRefreshKey={workspaceRefreshKey}
                     triggerWorkspaceRefresh={triggerWorkspaceRefresh}
                     showToast={showToast}
-<<<<<<< HEAD
                     onSelectFile={(filePath) => {
                       setFloatingEditFile(filePath);
                       const rel = filePath.replace(/\\/g, '/').split('coder/').pop() || '';
@@ -6178,20 +8344,16 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         setRightPreviewSubpath(rel);
                       }
                     }}
-=======
-                    onSelectFile={(filePath) => setFloatingEditFile(filePath)}
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   />
                 </motion.div>
               )}
             </AnimatePresence>
 
             {/* CENTER PANEL: Standard & customized Coder chat and text layout */}
-<<<<<<< HEAD
             <div className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0A0908]">
               
               {/* Coder Top Navigation Bar */}
-              <div className="h-12 border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 bg-[#151211] backdrop-blur-md" style={{ backgroundColor: '#151211' }}>
+              <div className="h-12 border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 bg-[#151211] backdrop-blur-md relative z-[150]" style={{ backgroundColor: '#151211' }}>
                 <div className="flex items-center gap-3">
                   {/* Coder Panel Toggles */}
                   <div className="flex items-center gap-2 border-r border-[#261E1A] pr-3 mr-1 select-none">
@@ -6226,30 +8388,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                       <ChevronLeft size={16} />
                     </button>
                     <button className="p-1 text-[#AD9F91] hover:text-white transition-colors cursor-pointer" title="Go Forward">
-=======
-            <div className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0b0b0c]">
-              
-              {/* Coder Top Navigation Bar */}
-              <div className="h-12 border-b border-zinc-900 px-4 flex items-center justify-between shrink-0 bg-[#0e0e10]/80 backdrop-blur-md">
-                <div className="flex items-center gap-3">
-                  {/* Left Sidebar trigger */}
-                  <button
-                    onClick={() => setIsCoderLeftPanelOpen(!isCoderLeftPanelOpen)}
-                    className={`p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-all cursor-pointer ${
-                      isCoderLeftPanelOpen ? 'text-teal-400 bg-teal-500/5' : ''
-                    }`}
-                    title="Toggle Files Side Panel"
-                  >
-                    <SidebarIcon size={16} />
-                  </button>
-
-                  {/* Back and Forward navigation controls as requested in mockup */}
-                  <div className="flex items-center gap-1.5 border-l border-zinc-800 pl-3 select-none">
-                    <button className="p-1 text-zinc-655 hover:text-zinc-400 transition-colors cursor-pointer" title="Go Back">
-                      <ChevronLeft size={16} />
-                    </button>
-                    <button className="p-1 text-zinc-655 hover:text-zinc-400 transition-colors cursor-pointer" title="Go Forward">
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                       <ChevronRight size={16} />
                     </button>
                   </div>
@@ -6264,8 +8402,43 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 {/* Right side live preview panel toggle */}
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={() => setIsWhiteboardOpen(!isWhiteboardOpen)}
+                    className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+                      isWhiteboardOpen 
+                        ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
+                        : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
+                    }`}
+                    title={isWhiteboardOpen ? "Collapse Whiteboard Panel" : "Expand Whiteboard Panel"}
+                  >
+                    <Palette size={14} className={isWhiteboardOpen ? 'text-[#D97756]' : ''} />
+                  </button>
+
+                  <button
+                    onClick={() => setIsTerminalOpen(!isTerminalOpen)}
+                    className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+                      isTerminalOpen 
+                        ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
+                        : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
+                    }`}
+                    title={isTerminalOpen ? "Collapse Terminal Panel" : "Expand Terminal Panel"}
+                  >
+                    <Terminal size={14} className={isTerminalOpen ? 'text-[#D97756]' : ''} />
+                  </button>
+
+                  <button
+                    onClick={() => setIsTerminalPopupOpen(!isTerminalPopupOpen)}
+                    className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+                      isTerminalPopupOpen 
+                        ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
+                        : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
+                    }`}
+                    title={isTerminalPopupOpen ? "Close Terminal Popup" : "Open Terminal Popup Panel"}
+                  >
+                    <SquareTerminal size={14} className={isTerminalPopupOpen ? 'text-[#D97756]' : ''} />
+                  </button>
+
+                  <button
                     onClick={() => setIsCoderRightPanelOpen(!isCoderRightPanelOpen)}
-<<<<<<< HEAD
                     className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
                       isCoderRightPanelOpen 
                         ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
@@ -6274,41 +8447,23 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     title={isCoderRightPanelOpen ? "Collapse App Live Preview" : "Expand App Live Preview"}
                   >
                     <Play size={14} className={isCoderRightPanelOpen ? 'animate-pulse text-[#D97756]' : ''} />
-=======
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold border transition-all cursor-pointer ${
-                      isCoderRightPanelOpen 
-                        ? 'bg-teal-500/10 text-teal-400 border-teal-500/30' 
-                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
-                    }`}
-                    title="Toggle App Live Preview"
-                  >
-                    <Play size={10} className={isCoderRightPanelOpen ? 'animate-pulse' : ''} />
-                    <span>App Preview</span>
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   </button>
                 </div>
               </div>
 
               {/* Chat View, Centered Watermarked / Mockup Interface */}
-<<<<<<< HEAD
-              <div className="flex-1 flex flex-col justify-between overflow-hidden relative bg-[#131210]" style={{ backgroundColor: '#131210' }}>
+              <div className="flex-1 flex flex-col overflow-hidden relative bg-[#131210]" style={{ backgroundColor: '#131210' }}>
                 <div 
                   ref={scrollRef}
                   className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar scroll-smooth"
                   style={{ backgroundColor: '#131210' }}
-=======
-              <div className="flex-1 flex flex-col justify-between overflow-hidden relative">
-                <div 
-                  ref={scrollRef}
-                  className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar scroll-smooth"
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                 >
-                  <div className="mx-auto space-y-6 pb-28 max-w-3xl">
+                  <div className="mx-auto space-y-6 pb-6 max-w-4xl xl:max-w-[1100px]">
                     {messages.length === 0 ? (
-                      <div className="min-h-[64vh] flex flex-col items-center justify-center text-center px-4 relative w-full animate-fade-in animate-duration-300">
-                        <div className="w-full max-w-2xl select-none">
-                          {renderChatBox(true)}
-                        </div>
+                      <div className="min-h-[50vh] flex flex-col items-center justify-center text-center px-4 relative w-full animate-fade-in animate-duration-300">
+                        <p className="text-[#9B8C7D] max-w-sm mb-6 text-sm">
+                          Lumina Coder Workspace. Describe a component to build, or run instructions below.
+                        </p>
                       </div>
                     ) : (
                       <div className="space-y-6">
@@ -6325,11 +8480,13 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                             setActiveArtifact={handleSetActiveArtifact}
                             setIsCanvasOpen={handleSetIsCanvasOpen}
                             setCanvasView={handleSetCanvasView}
-<<<<<<< HEAD
                             onOpenInEditor={setFloatingEditFile}
                             showToast={showToast}
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
+                            onUpdateTodoPlan={handleUpdateTodoPlan}
+                            onStartBuilding={handleStartBuildingBtn}
+                            scrapingResults={scrapingResults}
+                            wikiResults={wikiResults}
+                            onSendMessage={handleSend}
                           />
                         ))}
                       </div>
@@ -6337,14 +8494,85 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   </div>
                 </div>
 
-                {messages.length > 0 && (
-                  <div className="px-6 pb-6 sticky bottom-0 z-30 shrink-0">
-                    <div className="max-w-3xl mx-auto relative">
-                      {renderChatBox(false)}
-                    </div>
+                <div className="px-6 pb-6 pt-2 z-30 shrink-0 bg-transparent border-transparent">
+                  <div className={`mx-auto relative transition-all duration-300 ${
+                    messages.length === 0 
+                      ? 'max-w-xl md:max-w-2xl' 
+                      : 'max-w-4xl xl:max-w-[1100px]'
+                  }`}>
+                    {renderChatBox(messages.length === 0)}
                   </div>
-                )}
+                </div>
               </div>
+
+              {/* Collapsible Integrated Terminal */}
+              <AnimatePresence>
+                {isTerminalOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 280, opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: 'easeOut' }}
+                    className="h-[280px] border-t border-[#2C241E] bg-[#030302] flex flex-col overflow-hidden shrink-0 z-20"
+                  >
+                    {/* Header */}
+                    <div className="h-8 bg-[#0F0D0C] border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 select-none">
+                      <div className="flex items-center gap-2">
+                        <Terminal size={12} className="text-[#D97756]" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#D97756]">Developer Shell Terminal</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setIsTerminalPopupOpen(true);
+                            setIsTerminalOpen(false);
+                          }}
+                          className="p-1 hover:bg-[#201916] rounded text-[#AD9F91] hover:text-[#EDE6DD] transition-all cursor-pointer"
+                          title="Pop Out Terminal to Popup Panel"
+                        >
+                          <Maximize2 size={11} />
+                        </button>
+                        <button
+                          onClick={() => setElizaToggleSignal(s => s + 1)}
+                          className={`p-1 rounded transition-all cursor-pointer border ${
+                            isElizaActive
+                              ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                              : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/20 hover:text-white'
+                          }`}
+                          title={isElizaActive ? "Exit ELIZA Psychotherapist CLI" : "Launch ELIZA Psychotherapist CLI"}
+                        >
+                          <Bot size={11} className={isElizaActive ? "animate-bounce text-pink-400" : ""} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setWorkspaceRefreshKey(k => k + 1);
+                          }}
+                          className="p-1 hover:bg-[#201916] rounded text-[#AD9F91] hover:text-[#EDE6DD] transition-all cursor-pointer"
+                          title="Refresh Filesystem State"
+                        >
+                          <RefreshCw size={11} />
+                        </button>
+                        <button 
+                          onClick={() => setIsTerminalOpen(false)}
+                          className="p-1 hover:bg-[#201916] rounded text-[#7F7469] hover:text-[#EDE6DD] transition-all cursor-pointer"
+                          title="Close Terminal Console"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    </div>
+                    {/* Terminal Console Component */}
+                    <div className="flex-1 min-h-0">
+                      <TerminalConsole 
+                        onToast={showToast} 
+                        triggerRefresh={() => setWorkspaceRefreshKey(k => k + 1)}
+                        onElizaActiveChange={(active) => setIsElizaActive(active)}
+                        elizaToggleSignal={elizaToggleSignal}
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* RIGHT PANEL: Live App Preview Frame (collapsible sidebar) */}
@@ -6352,7 +8580,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               {isCoderRightPanelOpen && (
                 <motion.div
                   initial={{ width: 0, opacity: 0 }}
-<<<<<<< HEAD
                   animate={{ 
                     width: rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440, 
                     opacity: 1 
@@ -6437,19 +8664,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     </div>
 
                     <div className="flex items-center gap-1.5">
-=======
-                  animate={{ width: 480, opacity: 1 }}
-                  exit={{ width: 0, opacity: 0 }}
-                  transition={{ duration: 0.22, ease: 'easeOut' }}
-                  className="h-full border-l border-[#1e1e22] bg-[#141416] flex flex-col overflow-hidden shrink-0 z-10 shadow-2xl"
-                >
-                  <div className="flex items-center justify-between px-3.5 py-3.5 bg-zinc-950 border-b border-zinc-900/80 shrink-0 select-none">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span className="text-xs font-bold uppercase tracking-wider text-zinc-350">Live Preview Frame</span>
-                    </div>
-                    <div className="flex items-center gap-2">
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                       <button 
                         onClick={() => setIframeKey(k => k + 1)}
                         className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
@@ -6459,7 +8673,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                       </button>
                     </div>
                   </div>
-<<<<<<< HEAD
 
                   {/* Frame Container */}
                   <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-[#070606] relative">
@@ -6493,16 +8706,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         title="Workspace App Preview"
                       />
                     </div>
-=======
-                  <div className="flex-1 bg-white relative">
-                    <iframe
-                      key={iframeKey}
-                      src={`/coder-preview/?t=${iframeKey}`}
-                      className="w-full h-full border-none bg-white"
-                      referrerPolicy="no-referrer"
-                      title="Workspace App Preview"
-                    />
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   </div>
                 </motion.div>
               )}
@@ -6517,6 +8720,152 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 triggerWorkspaceRefresh={triggerWorkspaceRefresh}
               />
             )}
+
+            {/* Floating manual terminal popup panel */}
+            <AnimatePresence>
+              {isTerminalPopupOpen && (
+                <div className="fixed inset-0 bg-[#0F0D0C]/85 backdrop-blur-md flex items-center justify-center z-[200] p-4 md:p-6 select-none animate-fade-in animate-duration-200">
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.96, y: 16 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.96, y: 16 }}
+                    transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                    className="w-full max-w-4xl h-[78vh] bg-[#141211] border border-[#2D241E] rounded-2xl flex flex-col overflow-hidden shadow-[0_32px_80px_rgba(10,8,7,0.85)] relative font-sans"
+                  >
+                    {/* Soft ambient glow backing */}
+                    <div className="absolute top-0 left-0 w-64 h-64 bg-[#D97756]/5 rounded-full blur-[70px] pointer-events-none" />
+                    <div className="absolute bottom-0 right-0 w-64 h-64 bg-teal-500/3 rounded-full blur-[70px] pointer-events-none" />
+
+                    {/* Header */}
+                    <div className="h-14 border-b border-[#2C241E] bg-[#1F1917]/95 px-5 flex items-center justify-between shrink-0 relative z-10 select-none backdrop-blur-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-[#D97756]/15 text-[#D97756] border border-[#D97756]/20">
+                          <SquareTerminal size={16} />
+                        </div>
+                        <div className="flex flex-col text-left">
+                          <span className="text-xs font-bold text-[#EDE6DD] tracking-wider uppercase font-sans">
+                            Interactive Developer Shell
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                            <span className="text-[10px] font-mono text-[#AD9F91]">
+                              Terminal Popup Mode
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setElizaToggleSignal(s => s + 1)}
+                          className={`p-2 border rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                            isElizaActive
+                              ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                              : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/20 hover:text-white'
+                          }`}
+                          title={isElizaActive ? "Exit ELIZA Psychotherapist CLI" : "Launch ELIZA Psychotherapist CLI"}
+                        >
+                          <Bot size={12} className={isElizaActive ? "animate-bounce text-pink-400" : ""} />
+                        </button>
+
+                        <button
+                          onClick={() => setWorkspaceRefreshKey(k => k + 1)}
+                          className="p-2 border border-[#2D241E] bg-[#1C1816]/40 text-[#AD9F91] hover:text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 text-xs font-medium"
+                          title="Refresh Filesystem State"
+                        >
+                          <RefreshCw size={12} />
+                          <span className="text-[10px] font-semibold">Sync</span>
+                        </button>
+
+                        <button
+                          onClick={() => setIsTerminalPopupOpen(false)}
+                          className="p-2 hover:bg-[#2A2420] border border-[#2F2722] bg-[#1C1816]/50 rounded-lg text-[#AD9F91] hover:text-white transition-all cursor-pointer"
+                          title="Close Terminal Popup"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Interactive Terminal TerminalConsole */}
+                    <div className="flex-1 min-h-0 bg-[#060505]">
+                      <TerminalConsole 
+                        onToast={showToast} 
+                        triggerRefresh={() => setWorkspaceRefreshKey(k => k + 1)}
+                        onElizaActiveChange={(active) => setIsElizaActive(active)}
+                        elizaToggleSignal={elizaToggleSignal}
+                      />
+                    </div>
+
+                    {/* Footer Info Bar */}
+                    <div className="h-9 border-t border-[#2C241E] bg-[#0F0E0D] px-5 flex items-center justify-between text-[10px] text-[#7F7469] font-mono shrink-0 select-none">
+                      <span>Server Terminal environment: Active on port 3000</span>
+                      <span>Press ESC or click outside to dismiss</span>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
+
+            {/* Floating manual Whiteboard popup panel */}
+            <AnimatePresence>
+              {isWhiteboardOpen && (
+                <div className="fixed inset-0 bg-[#0F0D0C]/85 backdrop-blur-md flex items-center justify-center z-[202] p-4 md:p-6 select-none animate-fade-in animate-duration-200">
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.96, y: 16 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.96, y: 16 }}
+                    transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+                    className="w-full max-w-5xl h-[82vh] bg-[#141211] border border-[#2D241E] rounded-2xl flex flex-col overflow-hidden shadow-[0_32px_80px_rgba(10,8,7,0.85)] relative font-sans"
+                  >
+                    {/* Soft ambient glow backing */}
+                    <div className="absolute top-0 left-0 w-64 h-64 bg-[#D97756]/5 rounded-full blur-[70px] pointer-events-none" />
+                    <div className="absolute bottom-0 right-0 w-64 h-64 bg-teal-500/3 rounded-full blur-[70px] pointer-events-none" />
+
+                    {/* Header */}
+                    <div className="h-14 border-b border-[#2C241E] bg-[#1F1917]/95 px-5 flex items-center justify-between shrink-0 relative z-10 select-none backdrop-blur-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-[#D97756]/15 text-[#D97756] border border-[#D97756]/20">
+                          <Palette size={16} />
+                        </div>
+                        <div className="flex flex-col text-left">
+                          <span className="text-xs font-bold text-[#EDE6DD] tracking-wider uppercase font-sans">
+                            Collaborative Whiteboard
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                            <span className="text-[10px] font-mono text-[#AD9F91]">
+                              Whiteboard Popup Mode
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsWhiteboardOpen(false)}
+                          className="p-2 hover:bg-[#2A2420] border border-[#2F2722] bg-[#1C1816]/50 rounded-lg text-[#AD9F91] hover:text-white transition-all cursor-pointer"
+                          title="Close Whiteboard Popup"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Collaborative Whiteboard canvas */}
+                    <div className="flex-1 min-h-0 bg-[#141211]">
+                      <Whiteboard />
+                    </div>
+
+                    {/* Footer Info Bar */}
+                    <div className="h-9 border-t border-[#2C241E] bg-[#0F0E0D] px-5 flex items-center justify-between text-[10px] text-[#7F7469] font-mono shrink-0 select-none">
+                      <span>Interactive vector drawing platform</span>
+                      <span>Press ESC or click outside to dismiss</span>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
           </div>
         ) : isPhysicsTabActive ? (
           <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-[var(--theme-bg)]">
@@ -6553,13 +8902,13 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 ref={scrollRef}
                 className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar scroll-smooth"
               >
-                <div className="mx-auto space-y-8 pb-24 max-w-3xl">
+                <div className="mx-auto space-y-8 pb-24 max-w-4xl xl:max-w-[1100px]">
                   <AnimatePresence initial={false}>
                     {messages.length === 0 ? (
                       <motion.div 
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="min-h-[72vh] flex flex-col items-center justify-center text-center px-4 relative w-full"
+                        className="min-h-[60vh] flex flex-col items-center justify-center text-center px-4 relative w-full"
                       >
                         {activeProjectId && projectFolders.find(p => p.id === activeProjectId) ? (
                           <>
@@ -6569,17 +8918,9 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                                 {projectFolders.find(p => p.id === activeProjectId)?.name}
                               </span>
                             </div>
-                            
-                            <div className="w-full max-w-2xl mb-8 animate-fade-in">
-                              {renderChatBox(true)}
-                            </div>
                           </>
                         ) : theme.id === 'claude' ? (
                           <>
-                            <div className="w-full max-w-2xl mb-4">
-                              {renderChatBox(true)}
-                            </div>
-
                             <div className="flex items-center gap-1 text-[11px] text-zinc-500 mb-6 select-none font-medium">
                               <span>You are out of free messages until 1:10 AM</span>
                             </div>
@@ -6603,12 +8944,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                             <p className="text-gray-500 dark:text-gray-400 max-w-sm mb-6">
                               Modern intelligence, refined interface.
                             </p>
-                            
-                            <div className="w-full max-w-2xl mb-8">
-                              {renderChatBox(true)}
-                            </div>
-
-
                           </>
                         )}
                       </motion.div>
@@ -6628,6 +8963,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                           setCanvasView={handleSetCanvasView}
                           onOpenInEditor={setFloatingEditFile}
                           showToast={showToast}
+                          onUpdateTodoPlan={handleUpdateTodoPlan}
+                          onStartBuilding={handleStartBuildingBtn}
+                          scrapingResults={scrapingResults}
+                          wikiResults={wikiResults}
+                          onSendMessage={handleSend}
                         />
                       ))
                     )}
@@ -6660,25 +9000,24 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     workspaceRefreshKey={workspaceRefreshKey} 
                     triggerWorkspaceRefresh={triggerWorkspaceRefresh}
                     showToast={showToast}
-<<<<<<< HEAD
                     onInsertAttachedText={insertAttachedContent}
-=======
->>>>>>> edfe5782ae67a28d62ff0a3536b43c1f073ce19a
                   />
                 </div>
               )}
             </div>
 
-            {messages.length > 0 && (
-              <div className="px-4 pb-6 bg-transparent sticky bottom-0 z-30 shrink-0">
-                <div className="max-w-3xl mx-auto relative group">
-                  {renderChatBox(false)}
-                  <div className="absolute -bottom-6 left-0 right-0 text-center">
-                    <span className="text-[10px] text-gray-550 font-medium tracking-tight">Claude is AI and can make mistakes. Please double-check responses.</span>
-                  </div>
+            <div className="px-6 pb-6 pt-2 z-30 shrink-0 select-none bg-transparent border-transparent">
+              <div className={`mx-auto relative flex flex-col gap-2 transition-all duration-300 ${
+                messages.length === 0 
+                  ? 'max-w-xl md:max-w-2xl' 
+                  : 'max-w-4xl xl:max-w-[1100px]'
+              }`}>
+                {renderChatBox(messages.length === 0)}
+                <div className="text-center">
+                  <span className="text-[10px] text-zinc-500/80 font-medium tracking-tight">Claude is AI and can make mistakes. Please double-check responses.</span>
                 </div>
               </div>
-            )}
+            </div>
           </>
         )}
       </main>
@@ -6709,6 +9048,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
                     { id: 'search', label: 'Search', icon: <Search size={16} /> },
                     { id: 'persona', label: 'Persona', icon: <User size={16} /> },
+                    { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
                     { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
                     { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
 
@@ -6768,36 +9108,63 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                               Open Themes
                             </button>
                           </div>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="font-medium text-sm">Bubble Chat</div>
-                              <div className="text-xs text-gray-400">Use classic message bubbles or linear layout</div>
-                            </div>
-                            <button 
-                              onClick={() => setUseBubbles(!useBubbles)}
-                              className={`w-12 h-6 rounded-full transition-all relative ${useBubbles ? 'bg-blue-600' : 'bg-gray-200'}`}
-                            >
-                              <motion.div 
-                                animate={{ x: useBubbles ? 24 : 4 }}
-                                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
-                              />
-                            </button>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="font-medium text-sm">Compact Sidebar</div>
-                              <div className="text-xs text-gray-400">Reduce sidebar width automatically</div>
-                            </div>
-                            <button 
-                              onClick={() => setIsCompactSidebar(!isCompactSidebar)}
-                              className={`w-12 h-6 rounded-full transition-all relative ${isCompactSidebar ? 'bg-blue-600' : 'bg-gray-200'}`}
-                            >
-                              <motion.div 
-                                animate={{ x: isCompactSidebar ? 24 : 4 }}
-                                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
-                              />
-                            </button>
-                          </div>
+                           <div className="flex items-center justify-between">
+                             <div>
+                               <div className="font-medium text-sm">Bubble Chat</div>
+                               <div className="text-xs text-gray-400">Use classic message bubbles or linear layout</div>
+                             </div>
+                             <button 
+                               onClick={() => {
+                                 const nextVal = !useBubbles;
+                                 setUseBubbles(nextVal);
+                                 localStorage.setItem('lumina_use_bubbles', nextVal.toString());
+                               }}
+                               className={`w-12 h-6 rounded-full transition-all relative ${useBubbles ? 'bg-blue-600' : 'bg-gray-200'}`}
+                             >
+                               <motion.div 
+                                 animate={{ x: useBubbles ? 24 : 4 }}
+                                 className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
+                               />
+                             </button>
+                           </div>
+                           <div className="flex items-center justify-between">
+                             <div>
+                               <div className="font-medium text-sm">Compact Sidebar</div>
+                               <div className="text-xs text-gray-400">Reduce sidebar width automatically</div>
+                             </div>
+                             <button 
+                               onClick={() => {
+                                 const nextVal = !isCompactSidebar;
+                                 setIsCompactSidebar(nextVal);
+                                 localStorage.setItem('lumina_compact_sidebar', nextVal.toString());
+                               }}
+                               className={`w-12 h-6 rounded-full transition-all relative ${isCompactSidebar ? 'bg-blue-600' : 'bg-gray-200'}`}
+                             >
+                               <motion.div 
+                                 animate={{ x: isCompactSidebar ? 24 : 4 }}
+                                 className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
+                               />
+                             </button>
+                           </div>
+                           <div className="flex items-center justify-between">
+                             <div>
+                               <div className="font-medium text-sm">Stop Top Bar From Hiding</div>
+                               <div className="text-xs text-gray-400">Keep the main header panel always visible at the top</div>
+                             </div>
+                             <button 
+                               onClick={() => {
+                                 const nextVal = !autoHideTopBar;
+                                 setAutoHideTopBar(nextVal);
+                                 localStorage.setItem('lumina_auto_hide_top_bar', nextVal.toString());
+                               }}
+                               className={`w-12 h-6 rounded-full transition-all relative ${!autoHideTopBar ? 'bg-blue-600' : 'bg-gray-200'}`}
+                             >
+                               <motion.div 
+                                 animate={{ x: !autoHideTopBar ? 24 : 4 }}
+                                 className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
+                               />
+                             </button>
+                           </div>
                         </div>
                       </div>
                       <div>
@@ -7204,6 +9571,59 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     </motion.div>
                   )}
 
+                  {activeSettingsTab === 'lumina_tools' && (
+                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Lumina Tools</h3>
+                        <div className="space-y-4">
+                          <div className="p-4 bg-[var(--theme-accent)]/5 border border-[var(--theme-accent)]/10 rounded-2xl">
+                            <div className="flex gap-3">
+                              <Hammer size={18} className="text-[var(--theme-accent)] shrink-0" />
+                              <div>
+                                <div className="text-xs font-bold text-[var(--theme-accent)] uppercase mb-1">Built-in Lumina Intelligence</div>
+                                <p className="text-xs text-[var(--theme-accent)]/70 leading-relaxed">
+                                  These are the local, built-in capabilities of Lumina: Web Scraper (custom CSS engine) and Wikipedia tools.
+                                  These are fully offline-first or managed natively and do not require external Bridge connectivity.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto custom-scrollbar pr-1">
+                            {luminaTools.map(tool => (
+                              <div
+                                key={tool.id}
+                                className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-zinc-950 rounded-xl border border-gray-100 dark:border-white/5"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="p-1.5 rounded-lg bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]">
+                                    {tool.icon}
+                                  </div>
+                                  <div className="text-left truncate">
+                                    <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{tool.name}</div>
+                                    <div className="text-[10px] text-gray-500 truncate max-w-[200px]">{tool.description}</div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-gray-400 font-mono shrink-0">inbuilt</span>
+                                  <button
+                                    onClick={() => {
+                                      setLuminaTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                      showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
+                                    }}
+                                    className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? 'bg-[var(--theme-accent)]' : 'bg-[var(--theme-hover-bg)]'}`}
+                                  >
+                                    <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? 'right-0.5' : 'left-0.5'}`} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
                   {activeSettingsTab === 'mcp' && (
                     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                       <div>
@@ -7216,7 +9636,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                                 <div className="text-xs font-bold text-blue-500 uppercase mb-1">Tool Discovery</div>
                                 <p className="text-xs text-blue-500/70 leading-relaxed">
                                   Tools are auto-discovered from the Llama Bridge at <strong>{llamaBridgeUrl}</strong>.
-                                  All tools (web_search, wikipedia, image_search, etc.) come from the bridge - no duplicates in the UI.
+                                  These are external tools and APIs connected through the LLM bridge.
                                 </p>
                               </div>
                             </div>
@@ -7431,17 +9851,18 @@ When the user asks you to build page(s), applications, interfaces, features, or 
         )}
       </AnimatePresence>
 
-      <div className="fixed bottom-32 left-1/2 -translate-x-1/2 flex flex-col gap-2 items-center z-50 pointer-events-none">
+      <div className="fixed top-20 right-6 flex flex-col gap-1.5 items-end z-[9999] pointer-events-none">
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div
               key={toast.id}
-              initial={{ opacity: 0, y: 16, scale: 0.92 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.92 }}
-              className="px-4 py-2.5 bg-zinc-900 border border-white/10 rounded-2xl text-xs font-medium text-white shadow-2xl backdrop-blur-sm"
+              initial={{ opacity: 0, x: 24, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 12, scale: 0.95 }}
+              className="px-3 py-1.5 bg-zinc-950/95 border border-white/10 rounded-lg text-[10.5px] font-medium text-white shadow-lg backdrop-blur-md flex items-center gap-2 max-w-sm pointer-events-auto"
             >
-              {toast.message}
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+              <span>{toast.message}</span>
             </motion.div>
           ))}
         </AnimatePresence>
@@ -7575,6 +9996,203 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic Image Lightbox Overlay Popup */}
+      <AnimatePresence>
+        {lightboxImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-md z-[500] flex items-center justify-center p-4 select-none"
+            onClick={() => setLightboxImage(null)}
+          >
+            {/* Close button with high visibility */}
+            <button
+              onClick={() => setLightboxImage(null)}
+              className="absolute top-4 right-4 p-3 bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800 rounded-full text-white cursor-pointer transition-all hover:scale-105 z-[510] shadow-lg flex items-center justify-center w-10 h-10"
+              title="Close image display"
+            >
+              <X size={18} />
+            </button>
+
+            {/* Inner Content Card (prevent click-through closure) */}
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative max-w-5xl max-h-[85vh] w-full flex flex-col items-center justify-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Actual Image Panel with rich framing */}
+              <div className="relative rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-2xl flex items-center justify-center max-h-[70vh]" style={{ aspectRatio: 'auto' }}>
+                <img
+                  src={lightboxImage.url}
+                  alt={lightboxImage.title || 'Image detail view'}
+                  className="max-w-full max-h-[70vh] object-contain select-text"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              {/* High-fidelity Photo Footer Details */}
+              <div className="mt-4 flex flex-col sm:flex-row items-center gap-3 justify-between w-full max-w-3xl bg-zinc-900/90 border border-zinc-805 px-5 py-3 rounded-2xl shadow-xl">
+                <div className="text-left select-text truncate pr-4 max-w-[80%]">
+                  <h4 className="text-xs font-bold text-zinc-150 tracking-wide truncate">{lightboxImage.title || 'Visual Attachment'}</h4>
+                  <p className="text-[10px] text-zinc-400 truncate font-mono mt-0.5">{lightboxImage.url}</p>
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <a
+                    href={lightboxImage.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold rounded-xl border border-zinc-700/50 transition-all cursor-pointer shadow-xs"
+                  >
+                    <ExternalLink size={12} />
+                    <span>Open Original</span>
+                  </a>
+                  <button
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.href = lightboxImage.url;
+                      link.download = lightboxImage.title || 'scraped-image';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-[11px] font-black rounded-xl transition-all cursor-pointer shadow-md"
+                  >
+                    <Download size={12} />
+                    <span>Download</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+ 
+      {/* Dynamic Video Popup Player Panel */}
+      <AnimatePresence>
+        {activeVideo && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/95 backdrop-blur-md z-[500] flex items-center justify-center p-4 animate-fade-in"
+            onClick={() => setActiveVideo(null)}
+          >
+            {/* Close button with high visibility */}
+            <button
+              onClick={() => setActiveVideo(null)}
+              className="absolute top-4 right-4 p-3 bg-zinc-900/80 hover:bg-zinc-850 border border-zinc-800 rounded-full text-white cursor-pointer transition-all hover:scale-105 z-[510] shadow-lg flex items-center justify-center w-10 h-10 border-0 focus:outline-none"
+              title="Close video player"
+            >
+              <X size={18} />
+            </button>
+ 
+            {/* Inner Content Card (prevent click-through closure) */}
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative max-w-4xl w-full flex flex-col items-center justify-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Actual Video Frame */}
+              <div className="relative rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-2xl flex items-center justify-center w-full aspect-video select-none">
+                {(() => {
+                  if (!activeVideo.url) return null;
+                  
+                  // YouTube Watch or Share URL transform to embed
+                  let youtubeId = null;
+                  const ytMatch = activeVideo.url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i);
+                  if (ytMatch) {
+                    youtubeId = ytMatch[1];
+                  }
+                  
+                  // Vimeo Watch URL transform to embed
+                  let vimeoId = null;
+                  const vimeoMatch = activeVideo.url.match(/(?:vimeo\.com\/)(?:channels\/[^\/]+\/|groups\/[^\/]+\/video\/|album\/[^\/]+\/video\/|showcase\/[^\/]+\/video\/|video\/)?([0-9]+)/i);
+                  if (vimeoMatch) {
+                    vimeoId = vimeoMatch[1];
+                  }
+ 
+                  if (youtubeId) {
+                    return (
+                      <iframe
+                        src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1`}
+                        title={activeVideo.title || 'YouTube Video'}
+                        className="w-full h-full border-0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        referrerPolicy="no-referrer"
+                      />
+                    );
+                  } else if (vimeoId) {
+                    return (
+                      <iframe
+                        src={`https://player.vimeo.com/video/${vimeoId}?autoplay=1`}
+                        title={activeVideo.title || 'Vimeo Video'}
+                        className="w-full h-full border-0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        referrerPolicy="no-referrer"
+                      />
+                    );
+                  } else if (activeVideo.url.includes('/embed/')) {
+                    // Pre-made embed URL
+                    return (
+                      <iframe
+                        src={activeVideo.url}
+                        title={activeVideo.title || 'Embedded Video'}
+                        className="w-full h-full border-0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        referrerPolicy="no-referrer"
+                      />
+                    );
+                  } else {
+                    // Standard direct file source video elements
+                    return (
+                      <video
+                        src={activeVideo.url}
+                        title={activeVideo.title || 'Direct Media Video Player'}
+                        controls
+                        autoPlay
+                        className="w-full h-full object-contain rounded-2xl bg-neutral-950"
+                      />
+                    );
+                  }
+                })()}
+              </div>
+ 
+              {/* High-fidelity Video Footer Details */}
+              <div className="mt-4 flex flex-col sm:flex-row items-center gap-3 justify-between w-full bg-zinc-900/95 border border-zinc-800 px-5 py-3.5 rounded-2xl shadow-xl select-text">
+                <div className="text-left truncate pr-4 max-w-[80%]">
+                  <h4 className="text-sm font-bold text-zinc-150 tracking-wide truncate flex items-center gap-1.5">
+                    <Play size={13} className="text-orange-500 fill-orange-500 shrink-0" />
+                    <span>{activeVideo.title || 'Lumina Media player'}</span>
+                  </h4>
+                  <p className="text-[10px] text-zinc-500 truncate font-mono mt-1">{activeVideo.url}</p>
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+                  <a
+                    href={activeVideo.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold rounded-xl border border-zinc-750/50 transition-all cursor-pointer shadow-xs no-underline"
+                  >
+                    <ExternalLink size={12} />
+                    <span>Open in New Tab</span>
+                  </a>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 

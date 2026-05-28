@@ -1,6 +1,6 @@
 {
   "name": "Lumina",
-  "description": "An interactive 3D chemical compounds laboratory. Build visual molecules manually with orbital valence limits, search a directory of 100 compounds, and load template presets onto the sandbox.",
+  "description": "An interactive 3D chemical compounds laboratory. Build visual molecules, explore presets, and converse with an in-built, offline ELIZA psychotherapist chatbot in the custom multi-shell terminal console.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
