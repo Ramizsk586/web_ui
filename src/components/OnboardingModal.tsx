@@ -65,7 +65,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
           Welcome to Lumina
         </h1>
         <p className="text-sm text-zinc-400 mb-8 font-sans select-none max-w-xs">
-          Create your profile to initialize your persistent AI workspace and labs.
+          Create your profile to initialize your persistent AI workspace.
         </p>
 
         <form onSubmit={handleSubmit} className="w-full space-y-5 text-left">

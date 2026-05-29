@@ -36,7 +36,7 @@ export function useDevTools({ messages, chats, showToast }: UseDevToolsProps) {
     } else if (raw === 'ping') {
       addDevLog('Pinging Cloud ingress nodes... pong in 4ms (Port 3000 mapping secure).', 'success');
     } else if (raw === 'stats') {
-      addDevLog(`Active nodes: AI Provider Preset, Coder Panels, Sci Labs. Total active messages: ${messages.length}`, 'info');
+      addDevLog(`Active nodes: AI Provider Preset, Coder Panels. Total active messages: ${messages.length}`, 'info');
     } else if (raw === 'trigger-scans') {
       addDevLog('Triggering fresh layout elements container cache scan...', 'info');
       setTimeout(() => {

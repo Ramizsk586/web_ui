@@ -8,7 +8,7 @@ import axios from 'axios';
 import { search } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
-import { exec } from "child_process";
+import { exec, spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import Tesseract from 'tesseract.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,6 +18,11 @@ const isDev = process.env.NODE_ENV !== "production";
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  let previewProcess: ChildProcessWithoutNullStreams | null = null;
+  let previewUrl = '';
+  let previewProxyOrigin = '';
+  let previewLogs: string[] = [];
+  let activePreviewRoot = process.cwd();
 
   // Handle JSON and CORS with increased body limits for OCR image payloads
   app.use(express.json({ limit: '50mb' }));
@@ -192,23 +197,13 @@ async function startServer() {
     });
   });
 
-  // Ensure coder directory exists and serve static preview
-  try {
-    const coderPath = path.join(process.cwd(), 'coder');
-    if (!fs.existsSync(coderPath)) {
-      fs.mkdirSync(coderPath, { recursive: true });
-    }
-  } catch (err) {
-    console.error("Failed to ensure coder folder exists:", err);
-  }
-
   // Live Compiler/Transpiler Sandbox Interceptor for React / JSX / TSX and JS
   app.get('/coder-preview/*', (req, res, next) => {
     const subpath = req.params[0] || '';
     if (!subpath) {
       return next();
     }
-    const targetFilePath = path.join(process.cwd(), 'coder', subpath);
+    const targetFilePath = path.resolve(activePreviewRoot, subpath);
     if (fs.existsSync(targetFilePath) && fs.statSync(targetFilePath).isFile()) {
       const ext = path.extname(targetFilePath).toLowerCase();
       if (ext === '.jsx' || ext === '.tsx' || ext === '.js') {
@@ -355,7 +350,9 @@ async function startServer() {
     }
     next();
   });
-  app.use('/coder-preview', express.static(path.join(process.cwd(), 'coder')));
+  app.use('/coder-preview', (req, res, next) => {
+    express.static(activePreviewRoot)(req, res, next);
+  });
 
   // Search endpoint
   app.post("/api/search", async (req, res) => {
@@ -1068,14 +1065,22 @@ async function startServer() {
 
   // Universal verification proxy: checks if an endpoint responds with valid auth
   app.post("/api/provider/verify", async (req, res) => {
-    const { endpoint, apiKey } = req.body;
+    const { endpoint, apiKey, provider: providerType } = req.body;
     if (!endpoint) {
       return res.status(400).json({ error: "endpoint is required" });
     }
     try {
       const url = endpoint.replace(/\/+$/, '');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const isOpenCode = providerType === 'opencode' || url.includes('opencode.ai');
+      if (apiKey) {
+        if (isOpenCode) {
+          headers['x-api-key'] = apiKey;
+        } else {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+      }
 
       // Try fetching models to verify connectivity + auth
       const pathsToTry = [
@@ -1085,11 +1090,13 @@ async function startServer() {
       ];
 
       let verified = false;
+      let responseData: any = null;
       for (const path of pathsToTry) {
         try {
           const response = await axios.get(path, { headers, timeout: 10000 });
           if (response.status === 200) {
             verified = true;
+            responseData = response.data;
             break;
           }
         } catch {}
@@ -1107,10 +1114,45 @@ async function startServer() {
       }
 
       if (verified) {
-        res.json({ success: true, message: 'Connection verified' });
+        res.json({ success: true, message: 'Connection verified', data: responseData });
       } else {
         res.status(502).json({ error: 'Could not verify connection', message: 'Endpoint is unreachable or API key is invalid' });
       }
+    } catch (e: any) {
+      res.status(502).json({ error: 'Verification failed', detail: e.message });
+    }
+  });
+
+  // Search API key verification proxy
+  app.post("/api/provider/verify-search", async (req, res) => {
+    const { provider: searchProvider, apiKey } = req.body;
+    if (!apiKey) {
+      return res.status(400).json({ error: "API key is required" });
+    }
+    try {
+      if (searchProvider === 'serpapi') {
+        const response = await axios.post('https://google.serper.dev/search', { q: 'test', num: 1 }, {
+          headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+          timeout: 10000
+        });
+        if (response.status === 200) {
+          return res.json({ success: true, message: 'SerpAPI key verified' });
+        }
+      } else {
+        // Tavily
+        const response = await axios.post('https://api.tavily.com/search', {
+          api_key: apiKey,
+          query: 'test',
+          search_depth: 'basic',
+          include_answer: false,
+          include_raw_content: false,
+          max_results: 1
+        }, { timeout: 10000 });
+        if (response.status === 200) {
+          return res.json({ success: true, message: 'Tavily key verified' });
+        }
+      }
+      res.status(502).json({ error: 'Verification failed', message: 'API key is invalid' });
     } catch (e: any) {
       res.status(502).json({ error: 'Verification failed', detail: e.message });
     }
@@ -1205,14 +1247,36 @@ async function startServer() {
     return results;
   }
 
+  const resolveCoderPath = (inputPath?: string, workspaceRoot?: string) => {
+    const raw = (inputPath || '').trim();
+    const base = workspaceRoot || process.cwd();
+    if (!raw || raw === '.') {
+      return path.resolve(base);
+    }
+    const normalized = raw.replace(/\\/g, '/');
+    const isAbsolute = path.isAbsolute(raw) || /^[a-zA-Z]:[\\/]/.test(raw) || raw.startsWith('\\\\');
+    if (isAbsolute) {
+      return path.resolve(raw);
+    }
+    const withoutDot = normalized.replace(/^\.\/+/, '').replace(/^\/+/, '');
+    return path.resolve(base, withoutDot);
+  };
+
+  const fileExists = (filePath: string) => fs.existsSync(filePath);
+
+  const readJsonFile = (filePath: string) => {
+    try {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch {
+      return null;
+    }
+  };
+
   // Filesystem Listing Endpoints
   app.post("/api/fs/list", (req, res) => {
-    let { folderPath } = req.body;
-    if (!folderPath) {
-      folderPath = process.cwd();
-    }
+    const { folderPath, workspaceRoot } = req.body;
     
-    const resolvedPath = path.resolve(folderPath);
+    const resolvedPath = resolveCoderPath(folderPath, workspaceRoot);
     if (!fs.existsSync(resolvedPath)) {
       return res.status(404).json({ error: "Directory not found" });
     }
@@ -1222,15 +1286,37 @@ async function startServer() {
   });
 
   app.post("/api/fs/read", (req, res) => {
-    const { filePath } = req.body;
+    const { filePath, workspaceRoot, offset, limit } = req.body;
     if (!filePath) {
       return res.status(400).json({ error: "filePath is required" });
     }
     
-    const resolvedPath = path.resolve(filePath);
+    const resolvedPath = resolveCoderPath(filePath, workspaceRoot);
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({ error: "File not found", filePath: resolvedPath.replace(/\\/g, '/') });
+    }
+    if (fs.statSync(resolvedPath).isDirectory()) {
+      return res.status(400).json({ error: "Cannot read a directory as a file", filePath: resolvedPath.replace(/\\/g, '/') });
+    }
     try {
-      const content = fs.readFileSync(resolvedPath, 'utf8');
-      res.json({ content, filePath: resolvedPath.replace(/\\/g, '/'), name: path.basename(resolvedPath) });
+      const fullContent = fs.readFileSync(resolvedPath, 'utf8');
+      const lines = fullContent.split('\n');
+      const totalLines = lines.length;
+      if (offset !== undefined) {
+        const start = Math.max(0, (Number(offset) || 1) - 1);
+        const count = limit !== undefined ? Math.max(1, Number(limit) || 1) : totalLines - start;
+        const selected = lines.slice(start, start + count);
+        res.json({
+          content: selected.join('\n'),
+          filePath: resolvedPath.replace(/\\/g, '/'),
+          name: path.basename(resolvedPath),
+          offset: start + 1,
+          limit: selected.length,
+          totalLines
+        });
+      } else {
+        res.json({ content: fullContent, filePath: resolvedPath.replace(/\\/g, '/'), name: path.basename(resolvedPath), totalLines });
+      }
     } catch (e: any) {
       res.status(500).json({ error: "Failed to read file", detail: e.message });
     }
@@ -1241,7 +1327,7 @@ async function startServer() {
     if (!filePath || typeof filePath !== 'string') {
       return res.status(400).send("filePath is required");
     }
-    const resolvedPath = path.resolve(filePath);
+    const resolvedPath = resolveCoderPath(filePath);
     if (!fs.existsSync(resolvedPath)) {
       return res.status(404).send("File not found");
     }
@@ -1253,12 +1339,12 @@ async function startServer() {
   });
 
   app.post("/api/fs/write", (req, res) => {
-    const { filePath, content } = req.body;
+    const { filePath, content, workspaceRoot } = req.body;
     if (!filePath || content === undefined) {
       return res.status(400).json({ error: "filePath and content are required" });
     }
     
-    const resolvedPath = path.resolve(filePath);
+    const resolvedPath = resolveCoderPath(filePath, workspaceRoot);
     try {
       fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
       fs.writeFileSync(resolvedPath, content, 'utf8');
@@ -1269,12 +1355,12 @@ async function startServer() {
   });
 
   app.post("/api/fs/create", (req, res) => {
-    const { filePath, isDirectory } = req.body;
+    const { filePath, isDirectory, workspaceRoot } = req.body;
     if (!filePath) {
       return res.status(400).json({ error: "filePath is required" });
     }
     
-    const resolvedPath = path.resolve(filePath);
+    const resolvedPath = resolveCoderPath(filePath, workspaceRoot);
     try {
       if (isDirectory) {
         fs.mkdirSync(resolvedPath, { recursive: true });
@@ -1289,12 +1375,15 @@ async function startServer() {
   });
 
   app.post("/api/fs/delete", (req, res) => {
-    const { filePath } = req.body;
+    const { filePath, workspaceRoot } = req.body;
     if (!filePath) {
       return res.status(400).json({ error: "filePath is required" });
     }
     
-    const resolvedPath = path.resolve(filePath);
+    const resolvedPath = resolveCoderPath(filePath, workspaceRoot);
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({ error: "File or directory not found" });
+    }
     try {
       if (fs.statSync(resolvedPath).isDirectory()) {
         fs.rmSync(resolvedPath, { recursive: true, force: true });
@@ -1328,87 +1417,701 @@ async function startServer() {
     }
   });
 
+  // Detect project type in the workspace folder
+  app.post("/api/fs/detect-project", (req, res) => {
+    const { folderPath, workspaceRoot } = req.body;
+    const targetDir = folderPath
+      ? resolveCoderPath(folderPath, workspaceRoot)
+      : (workspaceRoot ? path.resolve(workspaceRoot) : process.cwd());
+    if (!fs.existsSync(targetDir)) {
+      return res.json({ type: 'empty', entryPoint: null, framework: null });
+    }
+
+    const files = getFilesRecursively(targetDir);
+    const fileNames = files.map(f => f.name.toLowerCase());
+    const filePaths = files.map(f => f.path.replace(/\\/g, '/'));
+
+    // Check for package.json (framework project)
+    const pkgPath = path.join(targetDir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+        if (deps.vite || fileNames.some(f => f.startsWith('vite.config'))) {
+          return res.json({ type: 'vite', entryPoint: 'index.html', framework: 'Vite' });
+        }
+        if (deps.next) {
+          return res.json({ type: 'next', entryPoint: null, framework: 'Next.js' });
+        }
+        if (deps.react || deps['react-dom']) {
+          const entry = fileNames.includes('index.html') ? 'index.html' : null;
+          return res.json({ type: 'react', entryPoint: entry, framework: 'React' });
+        }
+        return res.json({ type: 'node', entryPoint: null, framework: pkg.name || 'Node.js' });
+      } catch { /* fall through */ }
+    }
+
+    // Check for index.html (static site)
+    if (fileNames.includes('index.html')) {
+      return res.json({ type: 'static', entryPoint: 'index.html', framework: null });
+    }
+
+    // Check for single HTML file
+    const htmlFiles = fileNames.filter(f => f.endsWith('.html'));
+    if (htmlFiles.length === 1) {
+      return res.json({ type: 'single', entryPoint: htmlFiles[0], framework: null });
+    }
+    if (htmlFiles.length > 1) {
+      return res.json({ type: 'multi-static', entryPoint: htmlFiles[0], framework: null });
+    }
+
+    return res.json({ type: 'unknown', entryPoint: null, framework: null });
+  });
+
+  // Execute a shell command inside the workspace (for Coder Mode Bash tool)
+  app.post("/api/fs/exec", async (req, res) => {
+    const { command, workspaceRoot, cwd } = req.body;
+    if (!command) {
+      return res.status(400).json({ error: "command is required" });
+    }
+    const workDir = cwd
+      ? resolveCoderPath(cwd, workspaceRoot)
+      : (workspaceRoot ? path.resolve(workspaceRoot) : process.cwd());
+    try {
+      const { execSync } = await import('child_process');
+      const output = execSync(command, {
+        cwd: workDir,
+        timeout: 30000,
+        maxBuffer: 1024 * 1024,
+        encoding: 'utf8',
+        windowsHide: true
+      });
+      res.json({ success: true, stdout: output, stderr: '' });
+    } catch (e: any) {
+      res.json({
+        success: false,
+        stdout: e.stdout || '',
+        stderr: e.stderr || e.message,
+        exitCode: e.status || 1
+      });
+    }
+  });
+
+  // Experimental LSP endpoint: provides diagnostics & symbols for a file
+  app.post("/api/lsp/analyze", async (req, res) => {
+    const { filePath, workspaceRoot } = req.body;
+    if (!filePath) {
+      return res.status(400).json({ error: "filePath is required" });
+    }
+    const resolvedPath = resolveCoderPath(filePath, workspaceRoot);
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+    try {
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const content = fs.readFileSync(resolvedPath, 'utf8');
+      const lines = content.split('\n');
+      const imports: string[] = [];
+      const diagnostics: any[] = [];
+      const symbols: any[] = [];
+
+      // Basic static analysis by file type
+      if (['.ts', '.tsx', '.js', '.jsx', '.mjs'].includes(ext)) {
+        const importRegex = /import\s+(?:(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+)?['"]([^'"]+)['"]/g;
+        let match;
+        while ((match = importRegex.exec(content)) !== null) {
+          imports.push(match[1]);
+        }
+        const exportRegex = /export\s+(?:default\s+)?(?:function|class|const|let|var|interface|type|enum)\s+(\w+)/g;
+        while ((match = exportRegex.exec(content)) !== null) {
+          symbols.push({ name: match[1], kind: 'export', line: content.substring(0, match.index).split('\n').length });
+        }
+        const funcRegex = /(?:function|const)\s+(\w+)\s*(?:[=:]\s*(?:\([^)]*\)\s*=>|function)?)/g;
+        while ((match = funcRegex.exec(content)) !== null) {
+          if (!symbols.find(s => s.name === match[1])) {
+            symbols.push({ name: match[1], kind: 'function', line: content.substring(0, match.index).split('\n').length });
+          }
+        }
+      }
+      let lspMatch: RegExpExecArray | null;
+      if (['.css', '.scss', '.less'].includes(ext)) {
+        const classRegex = /\.([\w-]+)\s*\{/g;
+        while ((lspMatch = classRegex.exec(content)) !== null) {
+          symbols.push({ name: lspMatch[1], kind: 'class', line: content.substring(0, lspMatch.index).split('\n').length });
+        }
+      }
+      if (['.html', '.htm'].includes(ext)) {
+        const tagRegex = /<([\w-]+)(?:\s[^>]*)?>/g;
+        while ((lspMatch = tagRegex.exec(content)) !== null) {
+          symbols.push({ name: lspMatch[1], kind: 'tag', line: content.substring(0, lspMatch.index).split('\n').length });
+        }
+      }
+
+      // Basic diagnostics
+      const longLines = lines.map((l, i) => ({ line: i + 1, length: l.length })).filter(l => l.length > 200);
+      longLines.forEach(ll => diagnostics.push({
+        severity: 'warning',
+        message: `Line ${ll.line} is ${ll.length} characters long (recommended max: 200)`,
+        line: ll.line
+      }));
+      const tabLines = lines.map((l, i) => ({ line: i + 1, hasTabs: l.includes('\t') })).filter(l => l.hasTabs);
+      tabLines.forEach(tl => diagnostics.push({
+        severity: 'info',
+        message: `Line ${tl.line} contains tab characters (consider using spaces)`,
+        line: tl.line
+      }));
+
+      res.json({
+        success: true,
+        fileType: ext,
+        lineCount: lines.length,
+        imports: [...new Set(imports)],
+        symbols,
+        diagnostics,
+        language: ext.replace('.', '')
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: "LSP analysis failed", detail: e.message });
+    }
+  });
+
+  type PreviewDetection = {
+    kind: 'node' | 'static-html' | 'unknown';
+    framework: string;
+    packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun' | null;
+    devCommand: string | null;
+    previewUrl: string | null;
+    entryFile: string | null;
+    notes: string[];
+  };
+
+  const detectPackageManager = (workspaceRoot: string): PreviewDetection['packageManager'] => {
+    if (fileExists(path.join(workspaceRoot, 'pnpm-lock.yaml'))) return 'pnpm';
+    if (fileExists(path.join(workspaceRoot, 'yarn.lock'))) return 'yarn';
+    if (fileExists(path.join(workspaceRoot, 'bun.lockb')) || fileExists(path.join(workspaceRoot, 'bun.lock'))) return 'bun';
+    return 'npm';
+  };
+
+  const detectStaticEntry = (workspaceRoot: string) => {
+    const candidates = ['index.html', 'public/index.html', 'dist/index.html', 'build/index.html'];
+    for (const candidate of candidates) {
+      if (fileExists(path.join(workspaceRoot, candidate))) return candidate;
+    }
+    const htmlFiles = getFilesRecursively(workspaceRoot)
+      .filter(f => !f.isDirectory && /\.html?$/i.test(f.name))
+      .map(f => f.relativePath)
+      .sort();
+    return htmlFiles[0] || null;
+  };
+
+  const encodePreviewPath = (relativePath: string) =>
+    relativePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+
+  const detectPreviewProject = (workspaceRoot: string): PreviewDetection => {
+    const notes: string[] = [];
+    if (!fileExists(workspaceRoot)) {
+      return {
+        kind: 'unknown',
+        framework: 'No workspace',
+        packageManager: null,
+        devCommand: null,
+        previewUrl: null,
+        entryFile: null,
+        notes: ['Workspace folder does not exist.']
+      };
+    }
+
+    const pkgPath = path.join(workspaceRoot, 'package.json');
+    const pkg = readJsonFile(pkgPath);
+    if (pkg) {
+      const packageManager = detectPackageManager(workspaceRoot);
+      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      const scripts = pkg.scripts || {};
+      const scriptName = scripts.dev ? 'dev' : scripts.start ? 'start' : scripts.serve ? 'serve' : scripts.preview ? 'preview' : null;
+      let framework = pkg.name || 'Node app';
+      if (deps.vite || scripts.dev?.includes('vite')) framework = 'Vite';
+      else if (deps.next || scripts.dev?.includes('next')) framework = 'Next.js';
+      else if (deps['react-scripts']) framework = 'Create React App';
+      else if (deps.astro) framework = 'Astro';
+      else if (deps.nuxt) framework = 'Nuxt';
+      else if (deps['@sveltejs/kit'] || deps.svelte) framework = 'Svelte';
+      else if (deps.express) framework = 'Express';
+      if (!scriptName) notes.push('package.json exists but no dev/start/serve/preview script was found.');
+      return {
+        kind: 'node',
+        framework,
+        packageManager,
+        devCommand: scriptName ? `${packageManager} run ${scriptName}` : null,
+        previewUrl: null,
+        entryFile: null,
+        notes
+      };
+    }
+
+    const entryFile = detectStaticEntry(workspaceRoot);
+    if (entryFile) {
+      notes.push('Static HTML project detected. No dev server is required.');
+      return {
+        kind: 'static-html',
+        framework: 'Static HTML',
+        packageManager: null,
+        devCommand: null,
+        previewUrl: `http://localhost:${PORT}/preview-static/${encodePreviewPath(entryFile)}`,
+        entryFile,
+        notes
+      };
+    }
+
+    return {
+      kind: 'unknown',
+      framework: 'Unknown project',
+      packageManager: null,
+      devCommand: null,
+      previewUrl: null,
+      entryFile: null,
+      notes: ['Could not detect package.json or an HTML entry file.']
+    };
+  };
+
+  const stopPreviewProcess = () => {
+    if (previewProcess) {
+      if (process.platform === 'win32' && previewProcess.pid) {
+        try {
+          spawn('taskkill', ['/pid', previewProcess.pid.toString(), '/f', '/t']);
+        } catch {
+          previewProcess.kill();
+        }
+      } else {
+        previewProcess.kill();
+      }
+      previewProcess = null;
+    }
+    previewUrl = '';
+    previewProxyOrigin = '';
+  };
+
+  const pushPreviewLog = (chunk: Buffer | string) => {
+    const text = chunk.toString();
+    previewLogs.push(...text.split(/\r?\n/).filter(Boolean));
+    previewLogs = previewLogs.slice(-200);
+    const urlMatch = text.match(/https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\/?/i);
+    if (urlMatch) {
+      previewUrl = urlMatch[0].replace('[::1]', 'localhost');
+      previewProxyOrigin = new URL(previewUrl).origin;
+    }
+  };
+
+  const rewritePreviewText = (text: string) => {
+    return text
+      .replace(/<meta[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '')
+      .replace(/(["'`])\/(?!preview-proxy\/)(@vite|@react-refresh|src|node_modules|assets)\//g, '$1/preview-proxy/$2/')
+      .replace(/(href|src)=["']\/(?!\/|preview-proxy\/)([^"']*)["']/g, '$1="/preview-proxy/$2"')
+      .replace(/url\(\s*\/(?!\/|preview-proxy\/)([^)"']+)\s*\)/g, 'url(/preview-proxy/$1)');
+  };
+
+  const getSafeFrameUrl = (urlStr: string, isStaticHtml: boolean): string => {
+    if (!urlStr) return '';
+    if (isStaticHtml) {
+      try {
+        return new URL(urlStr).pathname;
+      } catch {
+        return urlStr;
+      }
+    }
+    return previewProxyOrigin ? '/preview-proxy/' : urlStr;
+  };
+
+  app.get('/api/preview/status', (req, res) => {
+    const workspaceRoot = resolveCoderPath(typeof req.query.folderPath === 'string' ? req.query.folderPath : undefined);
+    activePreviewRoot = workspaceRoot;
+    const detection = detectPreviewProject(workspaceRoot);
+    res.json({
+      running: Boolean(previewProcess),
+      url: previewUrl,
+      frameUrl: getSafeFrameUrl(previewUrl, detection.kind === 'static-html'),
+      logs: previewLogs,
+      workspacePath: workspaceRoot.replace(/\\/g, '/'),
+      detection
+    });
+  });
+
+  app.post('/api/preview/stop', (_req, res) => {
+    stopPreviewProcess();
+    previewLogs = [];
+    res.json({ success: true });
+  });
+
+  app.post('/api/preview/start', (req, res) => {
+    try {
+      const workspaceRoot = resolveCoderPath(req.body?.folderPath);
+      const samePreviewRoot = activePreviewRoot === workspaceRoot;
+      activePreviewRoot = workspaceRoot;
+      const detection = detectPreviewProject(workspaceRoot);
+
+      if (previewProcess && previewUrl && samePreviewRoot) {
+        return res.json({
+          running: true,
+          url: previewUrl,
+          frameUrl: getSafeFrameUrl(previewUrl, detection.kind === 'static-html'),
+          logs: previewLogs,
+          detection
+        });
+      }
+
+      if (detection.kind === 'static-html' && detection.previewUrl) {
+        stopPreviewProcess();
+        previewUrl = detection.previewUrl;
+        previewProxyOrigin = '';
+        previewLogs = [`Launching ${detection.entryFile}`];
+        return res.json({
+          running: false,
+          url: previewUrl,
+          frameUrl: getSafeFrameUrl(previewUrl, true),
+          logs: previewLogs,
+          detection
+        });
+      }
+
+      if (!detection.devCommand) {
+        return res.status(400).json({
+          error: detection.notes.join(' ') || 'Could not detect how to start this project.',
+          detection
+        });
+      }
+
+      stopPreviewProcess();
+      previewLogs = [`Detected ${detection.framework}`, `Running ${detection.devCommand}`];
+      const proc = spawn(detection.devCommand, {
+        cwd: workspaceRoot,
+        env: { ...process.env, BROWSER: 'none' },
+        shell: true
+      });
+      previewProcess = proc;
+
+      proc.stdout.on('data', pushPreviewLog);
+      proc.stderr.on('data', pushPreviewLog);
+      proc.on('exit', (code) => {
+        pushPreviewLog(`Preview process exited with code ${code}`);
+        previewProcess = null;
+      });
+      proc.on('error', (error) => {
+        pushPreviewLog(`Preview process failed: ${error.message}`);
+        previewProcess = null;
+      });
+
+      res.json({
+        running: true,
+        url: previewUrl,
+        frameUrl: getSafeFrameUrl(previewUrl, false),
+        logs: previewLogs,
+        detection
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/preview-static/*', (req, res) => {
+    const subpath = req.params[0] || '';
+    const resolved = path.resolve(activePreviewRoot, subpath);
+    if (resolved !== activePreviewRoot && !resolved.startsWith(activePreviewRoot + path.sep)) {
+      return res.status(403).send('Path escapes preview workspace');
+    }
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+      return res.status(404).send('Preview file not found');
+    }
+    res.sendFile(resolved);
+  });
+
+  app.use('/preview-proxy', async (req, res) => {
+    if (!previewProxyOrigin) {
+      return res.status(503).send('Preview server is not running yet');
+    }
+    try {
+      const upstreamUrl = new URL(req.originalUrl.replace(/^\/preview-proxy/, '') || '/', previewProxyOrigin);
+      const upstream = await fetch(upstreamUrl, {
+        method: req.method,
+        headers: {
+          accept: req.headers.accept || '*/*',
+          'user-agent': req.headers['user-agent'] || 'LuminaPreview'
+        } as any
+      });
+      const contentType = upstream.headers.get('content-type') || '';
+      res.status(upstream.status);
+      if (contentType) res.setHeader('content-type', contentType);
+      if (contentType.includes('text/html') || contentType.includes('javascript') || contentType.includes('text/css')) {
+        res.send(rewritePreviewText(await upstream.text()));
+      } else {
+        const buffer = Buffer.from(await upstream.arrayBuffer());
+        res.send(buffer);
+      }
+    } catch (error: any) {
+      res.status(502).send(`Preview proxy error: ${error.message}`);
+    }
+  });
+
   // Analyze element endpoint using filesystem scan and optional Gemini analysis
   app.post("/api/fs/analyze_element", async (req, res) => {
-    const { tag, id, classes, text, placeholder, src, href } = req.body;
-    
-    // 1. Scan filesystem for matches under /coder and /src
-    const allFiles = getFilesRecursively(process.cwd());
-    const textFiles = allFiles.filter(f => !f.isDirectory && /\.(html|css|js|jsx|ts|tsx|vue)$/i.test(f.name));
-    
+    const {
+      tag,
+      id,
+      classes,
+      text,
+      placeholder,
+      src,
+      href,
+      outerHTML,
+      attributes = {},
+      domPath = [],
+      sourceHint
+    } = req.body;
+
+    const normalizeText = (value = '') => String(value).replace(/\s+/g, ' ').trim();
+    const normalizePath = (value = '') => String(value).replace(/\\/g, '/');
+    const previewRoot = fs.existsSync(activePreviewRoot) ? activePreviewRoot : process.cwd();
+    const sourceExtScore = (fileName: string) => {
+      const ext = path.extname(fileName).toLowerCase();
+      if (['.tsx', '.jsx', '.vue', '.svelte'].includes(ext)) return 90;
+      if (['.ts', '.js'].includes(ext)) return 55;
+      if (['.html', '.htm'].includes(ext)) return 45;
+      if (ext === '.css' || ext === '.scss' || ext === '.less') return -40;
+      return 0;
+    };
+
+    const resolveSourceHintFile = () => {
+      const hintName = sourceHint?.fileName;
+      if (!hintName || typeof hintName !== 'string') return null;
+      const direct = path.resolve(hintName);
+      if (fs.existsSync(direct)) return direct;
+      const normalizedHint = normalizePath(hintName);
+      const srcIndex = normalizedHint.lastIndexOf('/src/');
+      if (srcIndex !== -1) {
+        const candidate = path.join(previewRoot, normalizedHint.slice(srcIndex + 1));
+        if (fs.existsSync(candidate)) return candidate;
+      }
+      const basename = path.basename(hintName);
+      const match = getFilesRecursively(previewRoot).find(f => !f.isDirectory && f.name === basename);
+      return match?.path || null;
+    };
+
+    const getLineIndex = (content: string, lineNumber?: number) => {
+      if (!lineNumber || lineNumber < 1) return -1;
+      const lines = content.split(/\r?\n/);
+      let index = 0;
+      for (let i = 0; i < Math.min(lineNumber - 1, lines.length); i++) {
+        index += lines[i].length + 1;
+      }
+      return index;
+    };
+
+    const findNeedleIndex = (content: string) => {
+      const checks: string[] = [];
+      if (id) checks.push(`id="${id}"`, `id='${id}'`, `id={${id}}`, `id={"${id}"}`, String(id));
+      if (placeholder) checks.push(String(placeholder));
+      if (href) checks.push(String(href));
+      if (src) checks.push(String(src));
+      if (text && normalizeText(text).length > 1) checks.push(normalizeText(text), String(text).trim());
+      for (const value of Object.values(attributes as Record<string, string>)) {
+        if (typeof value === 'string' && value.trim().length > 2 && value.length < 200) checks.push(value.trim());
+      }
+      const classList = String(classes || '').split(/\s+/).filter(c => c.length > 2);
+      checks.push(...classList);
+
+      for (const needle of checks.filter(Boolean)) {
+        const exactIndex = content.indexOf(needle);
+        if (exactIndex !== -1) return exactIndex;
+        const lowerIndex = content.toLowerCase().indexOf(needle.toLowerCase());
+        if (lowerIndex !== -1) return lowerIndex;
+      }
+      return -1;
+    };
+
+    const extractBalancedSnippet = (content: string, index: number) => {
+      if (index < 0) return content.substring(0, 1600);
+      const lines = content.split(/\r?\n/);
+      let charCount = 0;
+      let lineIndex = 0;
+      for (; lineIndex < lines.length; lineIndex++) {
+        if (charCount + lines[lineIndex].length + 1 > index) break;
+        charCount += lines[lineIndex].length + 1;
+      }
+
+      let startLine = Math.max(0, lineIndex - 8);
+      for (let i = lineIndex; i >= Math.max(0, lineIndex - 80); i--) {
+        const line = lines[i];
+        if (
+          /^\s*(export\s+)?(default\s+)?function\s+\w+/.test(line) ||
+          /^\s*(const|let|var)\s+\w+\s*=\s*(\([^)]*\)|[^=]*)\s*=>/.test(line) ||
+          /^\s*return\s*\(/.test(line) ||
+          /^\s*<[\w.-]+/.test(line)
+        ) {
+          startLine = i;
+          break;
+        }
+      }
+
+      let endLine = Math.min(lines.length - 1, lineIndex + 22);
+      let balance = 0;
+      let seenCode = false;
+      for (let i = startLine; i < Math.min(lines.length, startLine + 140); i++) {
+        const line = lines[i];
+        for (const char of line) {
+          if ('({['.includes(char)) balance++;
+          if (')}]'.includes(char)) balance--;
+        }
+        if (i >= lineIndex) seenCode = true;
+        if (seenCode && i > lineIndex + 6 && balance <= 0) {
+          endLine = i;
+          break;
+        }
+      }
+
+      const snippet = lines.slice(startLine, endLine + 1).join('\n').trim();
+      return snippet.length > 5000 ? snippet.slice(0, 5000) : snippet;
+    };
+
+    const allFiles = getFilesRecursively(previewRoot);
+    const textFiles = allFiles.filter(f => !f.isDirectory && /\.(html|css|scss|less|js|jsx|ts|tsx|vue|svelte)$/i.test(f.name));
+    const candidates: Array<any> = [];
+    const hintedPath = resolveSourceHintFile();
+
+    if (hintedPath && fs.existsSync(hintedPath)) {
+      try {
+        const content = fs.readFileSync(hintedPath, 'utf8');
+        candidates.push({
+          name: path.basename(hintedPath),
+          path: normalizePath(hintedPath),
+          content,
+          score: 1200 + sourceExtScore(hintedPath),
+          matchIndex: getLineIndex(content, sourceHint?.lineNumber)
+        });
+      } catch {
+        // Ignore stale React debug source hints.
+      }
+    }
+
     let bestFile = null;
     let bestScore = -1;
+    const selectedText = normalizeText(text);
+    const selectedClasses = String(classes || '').split(/\s+/).filter(c =>
+      c.length > 2 &&
+      !['flex', 'grid', 'hidden', 'block', 'w-full', 'h-full', 'relative', 'absolute', 'items-center', 'justify-between', 'text-center', 'cursor-pointer', 'rounded', 'border', 'shadow', 'bg-white', 'text-black', 'text-white'].includes(c)
+    );
 
     for (const file of textFiles) {
       try {
         const content = fs.readFileSync(file.path, 'utf8');
-        let score = 0;
-        
-        // Match ID of element
+        const lowerContent = content.toLowerCase();
+        let score = sourceExtScore(file.name);
+        let matchIndex = -1;
+
+        if (hintedPath && normalizePath(file.path) === normalizePath(hintedPath)) {
+          score += 1200;
+          matchIndex = getLineIndex(content, sourceHint?.lineNumber);
+        }
+
         if (id) {
           if (content.includes(`id="${id}"`) || content.includes(`id='${id}'`) || content.includes(`id={${id}}`) || content.includes(`id={"${id}"}`)) {
-            score += 150;
+            score += 220;
+            matchIndex = content.indexOf(id);
           } else if (content.includes(id)) {
-            score += 40;
+            score += 45;
+            if (matchIndex === -1) matchIndex = content.indexOf(id);
           }
         }
-        
-        // Match textContent of element
-        if (text && text.trim().length > 1) {
-          const trimmedText = text.trim();
-          if (content.includes(trimmedText)) {
-            score += 80;
-          } else if (content.toLowerCase().includes(trimmedText.toLowerCase())) {
-            score += 40;
+
+        if (selectedText.length > 1) {
+          if (content.includes(selectedText)) {
+            score += Math.min(220, 80 + selectedText.length);
+            if (matchIndex === -1) matchIndex = content.indexOf(selectedText);
+          } else if (lowerContent.includes(selectedText.toLowerCase())) {
+            score += Math.min(120, 40 + selectedText.length / 2);
+            if (matchIndex === -1) matchIndex = lowerContent.indexOf(selectedText.toLowerCase());
           }
         }
-        
-        // Match src or href attributes (extremely specific for images/links)
+
+        for (const [attrName, attrValue] of Object.entries(attributes as Record<string, string>)) {
+          if (!attrValue || attrValue.length > 300) continue;
+          const exactAttrDouble = `${attrName}="${attrValue}"`;
+          const exactAttrSingle = `${attrName}='${attrValue}'`;
+          if (content.includes(exactAttrDouble) || content.includes(exactAttrSingle)) {
+            score += 140;
+            if (matchIndex === -1) matchIndex = content.indexOf(attrValue);
+          } else if (attrValue.length > 2 && content.includes(attrValue)) {
+            score += 35;
+            if (matchIndex === -1) matchIndex = content.indexOf(attrValue);
+          }
+        }
+
         if (src && content.includes(src)) {
-          score += 100;
+          score += 170;
+          if (matchIndex === -1) matchIndex = content.indexOf(src);
         }
         if (href && content.includes(href)) {
-          score += 100;
+          score += 170;
+          if (matchIndex === -1) matchIndex = content.indexOf(href);
         }
-        
-        // Match specific class combinations
-        if (classes) {
-          const classList = classes.split(/\s+/).filter(c => c.length > 2 && !['flex', 'grid', 'hidden', 'block', 'w-full', 'h-full', 'relative', 'absolute', 'items-center', 'justify-between', 'text-center', 'cursor-pointer', 'rounded', 'border', 'shadow', 'bg-white', 'text-black', 'text-white'].includes(c));
-          let matchCount = 0;
-          for (const cls of classList) {
-            if (content.includes(cls)) {
-              matchCount++;
-            }
-          }
-          if (matchCount > 0) {
-            score += matchCount * 15;
+
+        let classMatches = 0;
+        for (const cls of selectedClasses) {
+          if (content.includes(cls)) {
+            classMatches++;
+            if (matchIndex === -1) matchIndex = content.indexOf(cls);
           }
         }
-        
-        // Match tag
+        if (classMatches > 0) {
+          score += classMatches * 22;
+          if (classMatches >= Math.min(3, selectedClasses.length)) score += 80;
+        }
+
+        for (const segment of domPath as string[]) {
+          const cleanSegment = String(segment).replace(/^[a-z0-9-]+/i, '').replace(/[.#]/g, '');
+          if (cleanSegment && content.includes(cleanSegment)) score += 12;
+        }
+
+        if (outerHTML && typeof outerHTML === 'string') {
+          const attrNames = Array.from(outerHTML.matchAll(/\s([\w:-]+)=/g)).map(m => m[1]).slice(0, 8);
+          for (const attrName of attrNames) {
+            if (content.includes(attrName)) score += 6;
+          }
+        }
+
         if (tag && (content.includes(`<${tag}`) || content.includes(`text-${tag}`))) {
-          score += 5;
+          score += 12;
+          if (matchIndex === -1) matchIndex = content.indexOf(`<${tag}`);
         }
-        
+
+        if (matchIndex === -1) {
+          matchIndex = findNeedleIndex(content);
+        }
+
+        candidates.push({ ...file, content, score, matchIndex });
         if (score > bestScore) {
           bestScore = score;
-          bestFile = { ...file, content };
+          bestFile = { ...file, content, matchIndex };
         }
       } catch (err) {
         // Skip unreadable files
       }
     }
 
+    const strongest = candidates.sort((a, b) => b.score - a.score)[0];
+    if (strongest && strongest.score > bestScore) {
+      bestFile = strongest;
+      bestScore = strongest.score;
+    }
+
     // Default fallbacks if no file scored above 0
     let targetFile = bestFile;
     if (!targetFile || bestScore <= 0) {
       // Look for App.tsx as logical default
-      const probableFile = textFiles.find(f => f.name === 'App.tsx');
+      const probableFile = textFiles.find(f => ['App.tsx', 'App.jsx', 'index.html'].includes(f.name));
       if (probableFile) {
         try {
           targetFile = {
             ...probableFile,
-            content: fs.readFileSync(probableFile.path, 'utf8')
+            content: fs.readFileSync(probableFile.path, 'utf8'),
+            matchIndex: -1
           };
         } catch {}
       }
@@ -1418,38 +2121,13 @@ async function startServer() {
       return res.status(404).json({ error: "No matching files or default files found in the workspace." });
     }
 
-    // Window snippet extraction
     let fileContentWindow = targetFile.content;
     const fileContent = targetFile.content;
     const filePath = targetFile.path;
+    let matchIndex = typeof targetFile.matchIndex === 'number' ? targetFile.matchIndex : -1;
+    if (matchIndex === -1) matchIndex = findNeedleIndex(fileContent);
 
-    if (fileContent.length > 30000) {
-      let matchIndex = -1;
-      if (id) {
-        matchIndex = fileContent.indexOf(`id="${id}"`);
-        if (matchIndex === -1) matchIndex = fileContent.indexOf(`id='${id}'`);
-        if (matchIndex === -1) matchIndex = fileContent.indexOf(`id={${id}}`);
-        if (matchIndex === -1) matchIndex = fileContent.indexOf(id);
-      }
-      if (matchIndex === -1 && text && text.length > 2) {
-        matchIndex = fileContent.toLowerCase().indexOf(text.toLowerCase());
-      }
-      if (matchIndex === -1 && classes) {
-        const classList = classes.split(/\s+/).filter(c => c.length > 2);
-        for (const c of classList) {
-          matchIndex = fileContent.indexOf(c);
-          if (matchIndex !== -1) break;
-        }
-      }
-      
-      if (matchIndex !== -1) {
-        const start = Math.max(0, matchIndex - 8000);
-        const end = Math.min(fileContent.length, matchIndex + 8000);
-        fileContentWindow = `// ... [TRUNCATED CODEBEFORE] ...\n${fileContent.substring(start, end)}\n// ... [TRUNCATED CODEAFTER] ...`;
-      } else {
-        fileContentWindow = `${fileContent.substring(0, 15000)}\n// ... [TRUNCATED REST] ...`;
-      }
-    }
+    fileContentWindow = extractBalancedSnippet(fileContent, matchIndex);
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -1616,6 +2294,30 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         baseUrl = 'http://localhost:1234/v1';
         apiKey = '';
       }
+      // Sarvam AI models
+      else if (modelLower.includes('sarvam')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://api.sarvam.ai/v1';
+        apiKey = process.env.SARVAM_API_KEY || '';
+      }
+      // Kilo AI models
+      else if (modelLower.includes('kilo')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://api.kilo.ai/api/gateway';
+        apiKey = process.env.KILO_API_KEY || '';
+      }
+      // OpenCode models
+      else if (modelLower.includes('opencode')) {
+        provider = 'opencode';
+        baseUrl = 'https://opencode.ai/zen';
+        apiKey = process.env.OPENCODE_API_KEY || '';
+      }
+      // Cline models
+      else if (modelLower.includes('cline')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://api.cline.bot';
+        apiKey = process.env.CLINE_API_KEY || '';
+      }
       // Default fallback to environment variable
       else {
         provider = 'openai-compatible';
@@ -1635,8 +2337,8 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     })));
 
     try {
-      if (provider === 'anthropic') {
-        // Anthropic uses a different API format
+      if (provider === 'anthropic' || provider === 'opencode') {
+        // Anthropic/OpenCode uses a different API format (x-api-key auth, /v1/messages)
         const response = await axios.post(
           `${baseUrl}/messages`,
           {

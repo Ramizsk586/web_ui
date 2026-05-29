@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Chat, Message } from '../types';
+import { Chat, Message, AskAiQuestion } from '../types';
 
 export interface UseAskAiProps {
   input: string;
@@ -26,7 +26,7 @@ export function useAskAi({
   setChats,
   setInput
 }: UseAskAiProps) {
-  const [askAiQuestions, setAskAiQuestions] = useState<any[]>([]);
+  const [askAiQuestions, setAskAiQuestions] = useState<AskAiQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [askAiAnswers, setAskAiAnswers] = useState<Record<string, any>>({});
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
@@ -77,13 +77,13 @@ export function useAskAi({
       if (match) {
         const parsed = JSON.parse(match[0]);
         if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-          const validated = parsed.questions.map((q: any) => ({
+          const validated: AskAiQuestion[] = parsed.questions.map((q: any) => ({
             id: q.id || Math.random().toString(),
             question: q.question || 'Please specify your requirement:',
-            type: q.type || 'single_choice',
+            type: ['single_choice', 'multi_choice', 'scale', 'text_input', 'confirm'].includes(q.type) ? q.type : 'single_choice',
             options: Array.isArray(q.options) ? q.options.slice(0, 4) : undefined,
             purpose: q.purpose || ''
-          })).filter((q: any) => q.question && ['single_choice', 'multi_choice', 'scale', 'text_input', 'confirm'].includes(q.type));
+          })).filter((q: any) => q.question);
           
           if (validated.length > 0) {
             setAskAiQuestions(validated);

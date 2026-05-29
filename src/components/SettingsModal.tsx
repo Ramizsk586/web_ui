@@ -89,12 +89,13 @@ interface SettingsModalProps {
     name: string;
     role: string;
     avatar: string;
+    isGeneratingAvatar: boolean;
   };
   setPersona: React.Dispatch<React.SetStateAction<{
     name: string;
     role: string;
     avatar: string;
-    isGeneratingAvatar?: boolean;
+    isGeneratingAvatar: boolean;
   }>>;
 
   // Lumina Tools Settings

@@ -101,12 +101,12 @@ function parseDiagramText(text: string): { nodes: DiagramNode[]; edges: DiagramE
         { id: 'User Web Interface', label: 'User Interface', description: 'Browser SPA application client rendering' },
         { id: 'Express Gateway', label: 'Express Proxy Gateway', description: 'Routes secure APIs & proxies request headers' },
         { id: 'Lumina LLM Model', label: 'Lumina LLM Worker', description: 'Underlying language models performing analysis' },
-        { id: 'System Sandboxes', label: 'Isolated Sandbox Labs', description: 'Runs physics, mathematics, and geometry charts' }
+        { id: 'System Sandboxes', label: 'Analysis Engine', description: 'Runs physics, mathematics, and geometry charts' }
       ],
       edges: [
         { from: 'User Web Interface', to: 'Express Gateway', label: 'https/POST' },
         { from: 'Express Gateway', to: 'Lumina LLM Model', label: 'gRPC stream' },
-        { from: 'Lumina LLM Model', to: 'System Sandboxes', label: 'evaluate coordinates' }
+        { from: 'Express Gateway', to: 'User Web Interface', label: 'response' }
       ]
     };
   }

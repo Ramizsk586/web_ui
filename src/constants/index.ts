@@ -45,6 +45,10 @@ export const CLOUD_PROVIDERS = [
   { id: 'gemini', label: 'Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'cohere', label: 'Cohere', endpoint: 'https://api.cohere.com/compatibility/v1', key: '', icon: React.createElement(Globe, { size: 13 }) },
   { id: 'deepseek', label: 'DeepSeek', endpoint: 'https://api.deepseek.com', key: '', icon: React.createElement(Box, { size: 13 }) },
+  { id: 'sarvamai', label: 'Sarvam AI', endpoint: 'https://api.sarvam.ai/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
+  { id: 'kilo', label: 'Kilo AI', endpoint: 'https://api.kilo.ai/api/gateway', key: '', icon: React.createElement(Brain, { size: 13 }) },
+  { id: 'opencode', label: 'OpenCode', endpoint: 'https://opencode.ai/zen', key: '', icon: React.createElement(Code, { size: 13 }) },
+  { id: 'cline', label: 'Cline', endpoint: 'https://api.cline.bot', key: '', icon: React.createElement(Terminal, { size: 13 }) },
 ];
 
 export const WRITING_STYLES = [

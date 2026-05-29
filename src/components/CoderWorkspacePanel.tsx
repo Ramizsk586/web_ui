@@ -28,7 +28,6 @@ import {
   Hash,
   FolderPlus,
   FilePlus,
-  Upload,
   MousePointerClick
 } from 'lucide-react';
 
@@ -44,6 +43,7 @@ interface CoderWorkspacePanelProps {
   workspaceRefreshKey: number;
   triggerWorkspaceRefresh: () => void;
   showToast: (msg: string) => void;
+  workspaceRootPath: string;
   onInsertAttachedText?: (text: string) => void;
 }
 
@@ -51,6 +51,7 @@ export const CoderWorkspacePanel: React.FC<CoderWorkspacePanelProps> = ({
   workspaceRefreshKey,
   triggerWorkspaceRefresh,
   showToast,
+  workspaceRootPath,
   onInsertAttachedText
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'preview'>('preview');
@@ -72,7 +73,14 @@ export const CoderWorkspacePanel: React.FC<CoderWorkspacePanelProps> = ({
   const [isLayoutToolOpen, setIsLayoutToolOpen] = useState<boolean>(false);
   const [previewSubpath, setPreviewSubpath] = useState<string>('');
   const [isInspectMode, setIsInspectMode] = useState<boolean>(false);
+  const [projectFramework, setProjectFramework] = useState<string | null>(null);
+  const [projectType, setProjectType] = useState<string | null>(null);
+  const [devServerUrl, setDevServerUrl] = useState<string>('');
+  const [previewLogs, setPreviewLogs] = useState<string[]>([]);
+  const [previewError, setPreviewError] = useState<string>('');
+  const [isPreviewStarting, setIsPreviewStarting] = useState<boolean>(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const previewPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -222,13 +230,13 @@ I would like to change this element to:
   const [bgPreset, setBgPreset] = useState<string>('#E08A69');
 
   // Load file structure
-  const fetchFiles = useCallback(async () => {
+  const fetchFiles = useCallback(async (folderPath: string) => {
     setIsLoadingFiles(true);
     try {
       const response = await fetch('/api/fs/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderPath: '.' })
+        body: JSON.stringify({ folderPath })
       });
       if (response.ok) {
         const data = await response.json();
@@ -252,45 +260,109 @@ I would like to change this element to:
   }, []);
 
   useEffect(() => {
-    fetchFiles();
-  }, [workspaceRefreshKey, fetchFiles]);
+    if (workspaceRefreshKey > 0 && workspaceRootPath) {
+      fetchFiles(workspaceRootPath);
+    }
+  }, [workspaceRefreshKey, fetchFiles, workspaceRootPath]);
 
-  const handleUploadFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const filesList = e.target.files;
-    if (!filesList || filesList.length === 0) return;
+  const startWorkspacePreview = useCallback(async () => {
+    setIsPreviewStarting(true);
+    setPreviewError('');
+    setPreviewLogs([]);
+    if (previewPollRef.current) {
+      clearInterval(previewPollRef.current);
+      previewPollRef.current = null;
+    }
 
-    let successCount = 0;
-    for (let i = 0; i < filesList.length; i++) {
-      const file = filesList[i];
-      const relativePath = file.webkitRelativePath || file.name;
-      const reader = new FileReader();
-      
-      reader.onload = async (event) => {
-        const fileContent = event.target?.result as string;
+    try {
+      const res = await fetch('/api/preview/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: workspaceRootPath || undefined })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPreviewError(data.error || 'Could not start preview');
+        setPreviewLogs(data.logs || []);
+        setDevServerUrl('');
+        setIsPreviewStarting(false);
+        return;
+      }
+
+      setPreviewLogs(data.logs || []);
+      if (data.detection?.framework) {
+        setProjectFramework(data.detection.framework);
+      }
+      if (data.detection?.kind) {
+        setProjectType(data.detection.kind);
+      }
+      if (data.frameUrl) {
+        setDevServerUrl(data.frameUrl);
+        setIframeKey(prev => prev + 1);
+        setIsPreviewStarting(false);
+        return;
+      }
+
+      previewPollRef.current = setInterval(async () => {
         try {
-          const response = await fetch('/api/fs/write', {
+          const statusRes = await fetch(`/api/preview/status${workspaceRootPath ? `?folderPath=${encodeURIComponent(workspaceRootPath)}` : ''}`);
+          const status = await statusRes.json();
+          setPreviewLogs(status.logs || []);
+          if (status.frameUrl) {
+            setDevServerUrl(status.frameUrl);
+            setIframeKey(prev => prev + 1);
+            setIsPreviewStarting(false);
+            if (previewPollRef.current) {
+              clearInterval(previewPollRef.current);
+              previewPollRef.current = null;
+            }
+          }
+        } catch {
+          // Keep polling while the dev server warms up.
+        }
+      }, 1200);
+    } catch (err: any) {
+      setPreviewError(err.message || 'Preview start failed');
+      setDevServerUrl('');
+      setIsPreviewStarting(false);
+    }
+  }, [workspaceRootPath]);
+
+  useEffect(() => {
+    if (activeTab === 'preview') {
+      startWorkspacePreview();
+    }
+    return () => {
+      if (previewPollRef.current) {
+        clearInterval(previewPollRef.current);
+        previewPollRef.current = null;
+      }
+    };
+  }, [activeTab, workspaceRefreshKey, workspaceRootPath, startWorkspacePreview]);
+
+  // Auto-detect project type in workspace
+  useEffect(() => {
+    if (workspaceRefreshKey > 0) {
+      const detectProject = async () => {
+        try {
+          const res = await fetch('/api/fs/detect-project', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filePath: `./${relativePath}`, content: fileContent || '' })
+            body: JSON.stringify({ folderPath: workspaceRootPath || undefined })
           });
-          if (response.ok) {
-            successCount++;
-            if (successCount === filesList.length) {
-              showToast(`Imported ${filesList.length} item(s) from device!`);
+          if (res.ok) {
+            const data = await res.json();
+            setProjectType(data.type);
+            setProjectFramework(data.framework);
+            if (data.entryPoint && !previewSubpath) {
+              setPreviewSubpath(data.entryPoint);
             }
-            triggerWorkspaceRefresh();
-            fetchFiles();
-          } else {
-            showToast(`Error writing file: ${relativePath}`);
           }
-        } catch (err) {
-          console.error(err);
-          showToast(`Upload error for: ${relativePath}`);
-        }
+        } catch { /* ignore */ }
       };
-      reader.readAsText(file);
+      detectProject();
     }
-  };
+  }, [workspaceRefreshKey, workspaceRootPath]);
 
   const handleLoadFileContent = async (filePath: string) => {
     setIsLoadingContent(true);
@@ -298,13 +370,8 @@ I would like to change this element to:
     setIsEditing(false);
     const rel = getRelativePath(filePath);
     const lowRel = rel.toLowerCase();
-    if (
-      lowRel.endsWith('.html') || 
-      lowRel.endsWith('.htm') || 
-      lowRel.endsWith('.jsx') || 
-      lowRel.endsWith('.tsx') || 
-      lowRel.endsWith('.js')
-    ) {
+    const previewableExts = ['.html', '.htm', '.jsx', '.tsx', '.js', '.css', '.svg', '.json', '.md'];
+    if (previewableExts.some(ext => lowRel.endsWith(ext))) {
       setPreviewSubpath(rel);
     }
     try {
@@ -455,8 +522,9 @@ I would like to change this element to:
           <span className="text-xs font-bold uppercase tracking-wider text-[#D97756]">Workspace Directory</span>
         </div>
         <button 
-          onClick={() => {
-            fetchFiles();
+        onClick={() => {
+            if (workspaceRootPath) fetchFiles(workspaceRootPath);
+            startWorkspacePreview();
             setIframeKey(k => k + 1);
             showToast("Workspace refreshed!");
           }}
@@ -580,6 +648,9 @@ I would like to change this element to:
               </div>
 
               <div className="flex items-center gap-2">
+                {projectFramework && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 font-mono border border-teal-500/20">{projectFramework}</span>
+                )}
                 <div className="flex items-center gap-1 bg-[#0E0C0B] px-2 py-0.5 rounded border border-[#241C18]">
                   <span className="text-[10px] text-[#7F7469] font-mono select-none">URL: /coder-preview/</span>
                   <input
@@ -600,6 +671,19 @@ I would like to change this element to:
                 </button>
               </div>
             </div>
+
+            {projectType && ['vite', 'next', 'react', 'node'].includes(projectType) && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950/80 border-b border-[#241C18] shrink-0">
+                <span className="text-[9px] text-zinc-500 font-mono whitespace-nowrap">Dev URL:</span>
+                <input
+                  type="text"
+                  value={devServerUrl}
+                  onChange={e => setDevServerUrl(e.target.value)}
+                  placeholder="http://localhost:5173"
+                  className="flex-1 bg-[#0E0C0B] border border-[#241C18] rounded px-2 py-1 text-[10px] font-mono text-[#EDE6DD] placeholder-zinc-600 outline-none focus:border-teal-500/40 transition-colors"
+                />
+              </div>
+            )}
 
             {/* Visual Box model builder design HUD if toggled */}
             {isLayoutToolOpen && (
@@ -785,14 +869,54 @@ I would like to change this element to:
                   viewportMode !== 'desktop' ? 'rounded-2xl border-4 border-[#1D1917]' : 'w-full h-full'
                 }`}
               >
-                <iframe
-                  ref={iframeRef}
-                  key={iframeKey}
-                  src={`/coder-preview/${previewSubpath ? previewSubpath.replace(/^\//, '') : ''}?t=${iframeKey}`}
-                  className="w-full h-full border-none bg-white"
-                  referrerPolicy="no-referrer"
-                  title="Workspace App Preview"
-                />
+                {devServerUrl ? (
+                  <iframe
+                    ref={iframeRef}
+                    key={iframeKey}
+                    src={devServerUrl}
+                    className="w-full h-full border-none bg-white"
+                    referrerPolicy="no-referrer"
+                    title="Workspace App Preview"
+                  />
+                ) : isPreviewStarting ? (
+                  <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
+                    <RefreshCw size={18} className="animate-spin text-[#D97756]" />
+                    <span className="text-sm font-medium text-zinc-400">Starting preview</span>
+                    <div className="max-w-md w-full rounded-lg border border-zinc-800 bg-black/30 p-3 text-left">
+                      {(previewLogs.length ? previewLogs.slice(-5) : ['Detecting project']).map((log, idx) => (
+                        <div key={idx} className="truncate text-[10px] font-mono text-zinc-500">&gt; {log}</div>
+                      ))}
+                    </div>
+                  </div>
+                ) : previewError ? (
+                  <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
+                    <span className="text-sm font-medium text-red-400">Preview could not start</span>
+                    <span className="max-w-md text-center text-xs text-zinc-600">{previewError}</span>
+                    <button
+                      onClick={startWorkspacePreview}
+                      className="mt-2 rounded-lg border border-[#D97756]/30 bg-[#D97756]/10 px-3 py-1.5 text-xs font-semibold text-[#D97756] hover:bg-[#D97756]/20"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500">
+                    <div className="w-12 h-12 rounded-xl border border-zinc-800 bg-zinc-900/50 flex items-center justify-center">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-zinc-600">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                        <path d="M8 17h8"/>
+                        <path d="M12 17v4"/>
+                      </svg>
+                    </div>
+                    <span className="text-sm font-medium text-zinc-600">No preview running</span>
+                    <button
+                      onClick={startWorkspacePreview}
+                      className="text-xs text-[#D97756] hover:underline"
+                    >
+                      Start workspace preview
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -807,39 +931,6 @@ I would like to change this element to:
                 <span className="text-[10px] uppercase font-bold text-[#AD9F91] tracking-widest">Workspace Browser</span>
                 
                 <div className="flex items-center gap-1.5">
-                  <input 
-                    type="file" 
-                    id="panel-import-file-elem" 
-                    className="hidden" 
-                    onChange={handleUploadFiles} 
-                    multiple 
-                  />
-                  <input 
-                    type="file" 
-                    id="panel-import-folder-elem" 
-                    className="hidden" 
-                    onChange={handleUploadFiles} 
-                    {...({ webkitdirectory: "", directory: "" } as any)} 
-                  />
-
-                  <button 
-                    type="button"
-                    onClick={() => document.getElementById('panel-import-file-elem')?.click()}
-                    className="p-1.5 rounded-lg text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#1D1917] transition-all cursor-pointer flex items-center justify-center animate-none"
-                    title="Import/Open Files from Device"
-                  >
-                    <Upload size={11} />
-                  </button>
-
-                  <button 
-                    type="button"
-                    onClick={() => document.getElementById('panel-import-folder-elem')?.click()}
-                    className="p-1.5 rounded-lg text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#1D1917] transition-all cursor-pointer flex items-center justify-center animate-none"
-                    title="Import/Open Folder from Device"
-                  >
-                    <FolderPlus size={11} />
-                  </button>
-
                   <div className="w-[1px] h-3 bg-[#241C18] mx-0.5" />
 
                   <button

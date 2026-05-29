@@ -10,6 +10,7 @@ export interface ToolCallNode {
   argsCount?: number;
   durationMs?: number;
   resultSummary?: string;
+  result?: string;
   subNodes?: ToolCallNode[];
   filePath?: string;
   addedCount?: number;
@@ -84,4 +85,12 @@ export interface Skill {
   label: string;
   prompt: string;
   icon: React.ReactNode;
+}
+
+export interface AskAiQuestion {
+  id: string;
+  question: string;
+  type: 'single_choice' | 'multi_choice' | 'scale' | 'text_input' | 'confirm';
+  options?: string[];
+  purpose: string;
 }

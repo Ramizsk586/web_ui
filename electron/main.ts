@@ -117,10 +117,10 @@ function startServerProcess(): Promise<string> {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 750,
-    height: 500,
-    minWidth: 500,
-    minHeight: 375,
+    width: 938,
+    height: 625,
+    minWidth: 625,
+    minHeight: 469,
     title: 'Lumina AI Chat',
     backgroundColor: '#09090b',
     frame: false,

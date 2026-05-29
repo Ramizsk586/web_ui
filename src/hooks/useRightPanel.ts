@@ -28,6 +28,16 @@ export function useRightPanel({
     placeholder: string;
     src: string;
     href: string;
+    outerHTML?: string;
+    attributes?: Record<string, string>;
+    domPath?: string[];
+    sourceHint?: {
+      fileName?: string;
+      lineNumber?: number;
+      columnNumber?: number;
+      componentName?: string;
+      ownerName?: string;
+    };
   }) => {
     setIsAnalyzingElement(true);
     showToast("Analyzing selected element...");
@@ -129,9 +139,58 @@ export function useRightPanel({
             const href = clickedEl.getAttribute('href') || '';
             const src = clickedEl.getAttribute('src') || '';
             const text = clickedEl.innerText?.substring(0, 300).trim() || clickedEl.textContent?.substring(0, 300).trim() || '';
+            const attributes = Array.from(clickedEl.attributes || []).reduce<Record<string, string>>((acc, attr) => {
+              acc[attr.name] = attr.value;
+              return acc;
+            }, {});
+            const domPath: string[] = [];
+            let pathEl: HTMLElement | null = clickedEl;
+            while (pathEl && pathEl !== doc.body && domPath.length < 8) {
+              const pathClasses = typeof pathEl.className === 'string'
+                ? pathEl.className.split(/\s+/).filter(Boolean).slice(0, 3).map(cls => `.${cls}`).join('')
+                : '';
+              domPath.unshift(`${pathEl.tagName.toLowerCase()}${pathEl.id ? `#${pathEl.id}` : pathClasses}`);
+              pathEl = pathEl.parentElement;
+            }
+
+            const getReactSourceHint = (el: HTMLElement) => {
+              let node: HTMLElement | null = el;
+              while (node) {
+                const fiberKey = Object.keys(node).find(key => key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$'));
+                const fiber = fiberKey ? (node as any)[fiberKey] : null;
+                let current = fiber;
+                while (current) {
+                  const debugSource = current._debugSource;
+                  if (debugSource?.fileName) {
+                    return {
+                      fileName: debugSource.fileName,
+                      lineNumber: debugSource.lineNumber,
+                      columnNumber: debugSource.columnNumber,
+                      componentName: typeof current.elementType === 'function' ? current.elementType.name : current.elementType,
+                      ownerName: current._debugOwner?.elementType?.name || current._debugOwner?.type?.name
+                    };
+                  }
+                  current = current.return;
+                }
+                node = node.parentElement;
+              }
+              return undefined;
+            };
 
             setRightIsInspectMode(false);
-            handleSelectedElementAnalysis({ tag, id, classes, text, placeholder, src, href });
+            handleSelectedElementAnalysis({
+              tag,
+              id,
+              classes,
+              text,
+              placeholder,
+              src,
+              href,
+              attributes,
+              domPath,
+              outerHTML: clickedEl.outerHTML?.slice(0, 4000),
+              sourceHint: getReactSourceHint(clickedEl)
+            });
           }
         };
 

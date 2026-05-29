@@ -248,7 +248,7 @@ export default function App() {
     } catch (e) {}
     return [
       { id: '1', name: 'UI Components' },
-      { id: '2', name: 'Analysis Lab' },
+      { id: '2', name: 'Analysis' },
     ];
   });
 
@@ -561,11 +561,17 @@ export default function App() {
   const handleVerifyAI = useCallback(async () => {
     setAiVerificationState('verifying');
     try {
+      const isOpenCode = selectedProvider === 'opencode';
+      const headers: Record<string, string> = {};
+      if (isOpenCode) {
+        headers['x-api-key'] = apiKey;
+      } else {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
       const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, {
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
+        headers
       });
       
       if (response.ok) {
@@ -592,7 +598,7 @@ export default function App() {
     } finally {
       setTimeout(() => setAiVerificationState('idle'), 3000);
     }
-  }, [serverUrl, apiKey]);
+  }, [serverUrl, apiKey, selectedProvider]);
 
   const handleSaveSearch = () => {
     localStorage.setItem('lumina_tavily_key', tavilyApiKey);
@@ -602,17 +608,31 @@ export default function App() {
     setTimeout(() => setIsSearchSaved(false), 2000);
   };
 
-  const handleVerifySearch = useCallback(() => {
+  const handleVerifySearch = useCallback(async () => {
     setSearchVerificationState('verifying');
-    setTimeout(() => {
+    try {
       const key = searchProvider === 'serpapi' ? serpApiKey : tavilyApiKey;
-      if (key && key.trim().length > 0) {
+      if (!key || !key.trim()) {
+        setSearchVerificationState('error');
+        setTimeout(() => setSearchVerificationState('idle'), 3000);
+        return;
+      }
+      const response = await fetch('/api/provider/verify-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: searchProvider, apiKey: key })
+      });
+      if (response.ok) {
         setSearchVerificationState('success');
       } else {
         setSearchVerificationState('error');
       }
+    } catch (error) {
+      console.error('Search verification failed:', error);
+      setSearchVerificationState('error');
+    } finally {
       setTimeout(() => setSearchVerificationState('idle'), 3000);
-    }, 1200);
+    }
   }, [searchProvider, tavilyApiKey, serpApiKey]);
 
   // Auto-verify pre-configured API keys on app boot / mount
@@ -853,6 +873,7 @@ export default function App() {
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
 
   const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
+  const [coderWorkspacePath, setCoderWorkspacePath] = useState('');
   const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isTerminalPopupOpen, setIsTerminalPopupOpen] = useState(false);
@@ -865,6 +886,13 @@ export default function App() {
 
   const [rightIsGridEnabled, setRightIsGridEnabled] = useState<boolean>(false);
   const [rightPreviewSubpath, setRightPreviewSubpath] = useState<string>('');
+  const [projectType, setProjectType] = useState<string | null>(null);
+  const [projectFramework, setProjectFramework] = useState<string | null>(null);
+  const [devServerUrl, setDevServerUrl] = useState<string>('');
+  const [rightPreviewLogs, setRightPreviewLogs] = useState<string[]>([]);
+  const [rightPreviewError, setRightPreviewError] = useState<string>('');
+  const [isRightPreviewStarting, setIsRightPreviewStarting] = useState(false);
+  const rightPreviewPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [attachmentContextMenu, setAttachmentContextMenu] = useState<{ visible: boolean, x: number, y: number, attachment: any, index: number }>({ visible: false, x: 0, y: 0, attachment: null, index: -1 });
   const [selectedModalAttachment, setSelectedModalAttachment] = useState<any | null>(null);
   const rightIframeRef = useRef<HTMLIFrameElement>(null);
@@ -1706,6 +1734,99 @@ export default function App() {
     setFloatingEditFile
   });
 
+  const startCoderPreview = useCallback(async () => {
+    setIsRightPreviewStarting(true);
+    setRightPreviewError('');
+    setRightPreviewLogs([]);
+    if (rightPreviewPollRef.current) {
+      clearInterval(rightPreviewPollRef.current);
+      rightPreviewPollRef.current = null;
+    }
+
+    try {
+      const res = await fetch('/api/preview/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: coderWorkspacePath || undefined })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRightPreviewError(data.error || 'Could not start preview');
+        setRightPreviewLogs(data.logs || []);
+        setDevServerUrl('');
+        setIsRightPreviewStarting(false);
+        return;
+      }
+
+      setRightPreviewLogs(data.logs || []);
+      if (data.detection?.kind) setProjectType(data.detection.kind);
+      if (data.detection?.framework) setProjectFramework(data.detection.framework);
+      if (data.detection?.entryFile) setRightPreviewSubpath(data.detection.entryFile);
+
+      if (data.frameUrl) {
+        setDevServerUrl(data.frameUrl);
+        setIframeKey(prev => prev + 1);
+        setIsRightPreviewStarting(false);
+        return;
+      }
+
+      rightPreviewPollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`/api/preview/status${coderWorkspacePath ? `?folderPath=${encodeURIComponent(coderWorkspacePath)}` : ''}`);
+          const status = await statusRes.json();
+          setRightPreviewLogs(status.logs || []);
+          if (status.frameUrl) {
+            setDevServerUrl(status.frameUrl);
+            setIframeKey(prev => prev + 1);
+            setIsRightPreviewStarting(false);
+            if (rightPreviewPollRef.current) {
+              clearInterval(rightPreviewPollRef.current);
+              rightPreviewPollRef.current = null;
+            }
+          }
+        } catch {
+          // The dev server can take a moment to emit its URL.
+        }
+      }, 1200);
+    } catch (err: any) {
+      setRightPreviewError(err.message || 'Preview start failed');
+      setDevServerUrl('');
+      setIsRightPreviewStarting(false);
+    }
+  }, [coderWorkspacePath]);
+
+  // Auto-detect project type in coder workspace
+  useEffect(() => {
+    if (isCoderMode && workspaceRefreshKey > 0) {
+      const detectProject = async () => {
+        try {
+          const res = await fetch('/api/fs/detect-project', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folderPath: coderWorkspacePath || undefined })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setProjectType(data.type);
+            setProjectFramework(data.framework);
+            if (data.entryPoint) {
+              setRightPreviewSubpath(data.entryPoint);
+              setIsCoderRightPanelOpen(true);
+            }
+            await startCoderPreview();
+          }
+        } catch { /* ignore */ }
+      };
+      detectProject();
+    }
+    return () => {
+      if (rightPreviewPollRef.current) {
+        clearInterval(rightPreviewPollRef.current);
+        rightPreviewPollRef.current = null;
+      }
+    };
+  }, [workspaceRefreshKey, isCoderMode, coderWorkspacePath, startCoderPreview]);
+
   const handleClearChat = () => {
     if (!currentChatId) return;
     setChats(prev => prev.map(chat => {
@@ -1911,7 +2032,7 @@ export default function App() {
           const planPromptMessage = [
             {
               role: 'system',
-              content: 'You are an expert technical planner. Formulate a targeted, structured task checklist of 3-5 concrete engineering steps to accomplish the user\'s workspace request. Focus on specifying relevant files to check, create, edit, or build. Respond ONLY with a clean JSON object containing a "todos" array with items having "id" (string starting at "1"), "text" (the specific task description), and "status" (always "pending"). Do not explain. Do not wrap in markdown tags. Example: {"todos": [{"id": "1", "text": "Analyze existing components in src/components", "status": "pending"}]}.'
+              content: 'You are an expert technical planner. Formulate a targeted, structured task checklist of 3-5 concrete engineering steps to accomplish the user\'s workspace request. Focus on specifying relevant files to check, create, edit, or build. Respond ONLY with a clean JSON object containing a "todos" array with items having "id" (string starting at "1"), "text" (the specific task description), and "status" (always "pending"). Do not explain. Do not wrap in markdown tags. Example: {"todos": [{"id": "1", "text": "Analyze existing project files for structure", "status": "pending"}]}.'
             },
             {
               role: 'user',
@@ -2072,20 +2193,27 @@ export default function App() {
           {
             type: 'function',
             function: {
-              name: 'list_coder_files',
-              description: 'List all files and subfolders in the active project directory recursively to understand the existing codebase.',
-              parameters: { type: 'object', properties: {}, required: [] }
+              name: 'Bash',
+              description: 'Executes shell commands in the project workspace. Use for running build tools, linters, tests, package managers (npm/pip/cargo), git operations, or any CLI tool.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  command: { type: 'string', description: 'Shell command to execute (e.g. "npm run build", "ls -la", "git status", "pip install -r requirements.txt").' },
+                  cwd: { type: 'string', description: 'Optional subdirectory to run the command in, relative to the workspace root.' }
+                },
+                required: ['command']
+              }
             }
           },
           {
             type: 'function',
             function: {
-              name: 'create_coder_file',
-              description: 'Create a new file with the specified relative filePath in the project root directory.',
+              name: 'Edit_and_Write',
+              description: 'Modifies or writes new files in the project directory. Creates the file if it does not exist, overwrites if it does. Always read the file first before editing existing content.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file from the project root (e.g., "src/components/MyNewComp.tsx", "js/app.js").' },
+                  filePath: { type: 'string', description: 'Relative path of the file from the project root (e.g. "src/components/Button.tsx").' },
                   content: { type: 'string', description: 'Complete text contents to write into the file.' }
                 },
                 required: ['filePath', 'content']
@@ -2095,12 +2223,14 @@ export default function App() {
           {
             type: 'function',
             function: {
-              name: 'read_coder_file',
-              description: 'Read the contents of an existing file in the project directory.',
+              name: 'Read',
+              description: 'Reads the contents of an existing file in the project directory. Optionally read a specific line range using offset (1-indexed line number) and limit (number of lines).',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file within the project folder to read.' }
+                  filePath: { type: 'string', description: 'Relative path of the file within the project folder to read.' },
+                  offset: { type: 'number', description: 'Optional 1-indexed starting line number. When set, returns content starting from this line.' },
+                  limit: { type: 'number', description: 'Optional maximum number of lines to return (default: all lines from offset).' }
                 },
                 required: ['filePath']
               }
@@ -2109,27 +2239,28 @@ export default function App() {
           {
             type: 'function',
             function: {
-              name: 'edit_coder_file',
-              description: 'Edit or overwrite an existing file in the project directory.',
+              name: 'Grep_and_Glob',
+              description: 'Searches through the codebase using regex patterns and matches file patterns. Use this to locate symbols, strings, components, styles, routes, or bugs before editing. Omit "query" to list all files by glob pattern.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the target file to edit.' },
-                  content: { type: 'string', description: 'The complete new code content to be written.' }
+                  query: { type: 'string', description: 'Optional regex or plain text pattern to search for in file contents. Omit to just list files matching the glob.' },
+                  fileGlob: { type: 'string', description: 'Optional glob/extension filter such as ".tsx", "*.css", "src/**/*.ts".' },
+                  maxResults: { type: 'number', description: 'Maximum results to return. Defaults to 30.' }
                 },
-                required: ['filePath', 'content']
+                required: []
               }
             }
           },
           {
             type: 'function',
             function: {
-              name: 'delete_coder_file',
-              description: 'Delete a file inside the project directory.',
+              name: 'LSP_Experimental',
+              description: 'Accesses Language Server Protocol features for a file: returns imports, exported symbols, function declarations, class names, diagnostics (long lines, tabs), and file metadata. Use to understand file structure before editing.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file to delete.' }
+                  filePath: { type: 'string', description: 'Relative path of the file to analyze.' }
                 },
                 required: ['filePath']
               }
@@ -2138,8 +2269,97 @@ export default function App() {
           {
             type: 'function',
             function: {
-              name: 'ask',
-              description: 'Ask the user 2 to 6 targeted clarifying questions to make sure the implementation aligns with their needs. Call this when you want to clarify the user requirements, styles, features, or design choices.',
+              name: 'Apply_patch',
+              description: 'Applies code diffs and patches to existing files. Safer than full overwrite when making targeted changes. Searches for exact text segments and replaces them.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the target file to patch.' },
+                  search: { type: 'string', description: 'Exact text segment to find and replace.' },
+                  replace: { type: 'string', description: 'Replacement text for the matched segment.' },
+                  all: { type: 'boolean', description: 'Replace all occurrences instead of only the first.' }
+                },
+                required: ['filePath', 'search', 'replace']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Skill',
+              description: 'Accesses and executes reusable custom AI skills from the skill library. Use this to apply predefined skill templates like summarizing, translating, explaining code, brainstorming, or refactoring.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  skillId: { type: 'string', description: 'The skill ID to run (e.g. "summarize", "translate", "explain", "brainstorm", "refactor").' },
+                  input: { type: 'string', description: 'The text or code to process with the selected skill.' }
+                },
+                required: ['skillId', 'input']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Todowrite',
+              description: 'Writes to and manages the task tracking todo list. Create, update, or complete todo items to track progress through multi-step tasks.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  action: { type: 'string', enum: ['create', 'update', 'complete', 'list'], description: 'Action to perform on the todo list.' },
+                  items: {
+                    type: 'array',
+                    description: 'List of todo items to create or update.',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        content: { type: 'string', description: 'Description of the task.' },
+                        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Current status of the task.' },
+                        priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Priority level.' }
+                      },
+                      required: ['content', 'status']
+                    }
+                  }
+                },
+                required: ['action', 'items']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Webfetch',
+              description: 'Fetches data from the internet by scraping a web page URL. Returns the page title, text content, links, and metadata.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  url: { type: 'string', description: 'Full URL to fetch and scrape content from.' },
+                  outputFormat: { type: 'string', enum: ['markdown', 'text', 'html'], description: 'Output format (default: markdown).' }
+                },
+                required: ['url']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Websearch',
+              description: 'Searches the web for current information. Use this when you need up-to-date data, documentation lookups, or to answer questions about recent events.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  query: { type: 'string', description: 'Search query string.' },
+                  maxResults: { type: 'number', description: 'Maximum number of search results to return (default: 5).' }
+                },
+                required: ['query']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Question',
+              description: 'Asks the user 2 to 6 targeted clarifying questions to make sure the implementation aligns with their needs. Call this when requirements are ambiguous or you need to confirm design choices.',
               parameters: {
                 type: 'object',
                 properties: {
@@ -2149,7 +2369,7 @@ export default function App() {
                     items: {
                       type: 'object',
                       properties: {
-                        id: { type: 'string', description: 'Unique identifier for this question (e.g. "theme", "database", etc.).' },
+                        id: { type: 'string', description: 'Unique identifier for this question (e.g. "theme", "database").' },
                         question: { type: 'string', description: 'The actual question text to display.' },
                         type: { type: 'string', enum: ['single_choice', 'multi_choice', 'text_input', 'confirm'], description: 'Type of input expected from the user.' },
                         options: { type: 'array', items: { type: 'string' }, description: 'Options if type is single_choice or multi_choice.' },
@@ -2166,7 +2386,7 @@ export default function App() {
         );
       }
 
-      let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'} You have access to 4 interactive visual laboratories: Physics Lab (for graphing and forces), Chemistry Lab (for compounds and reactions), Math Lab (for trigonometric and fractal curves), and Biology Lab (for predator-prey dynamics and DNA pair sequencing).`;
+      let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`;
 
       // Active mode instructions
       if (activeAssistantMode === 'builder') {
@@ -2193,11 +2413,17 @@ Never guess or pretend you do not have functions; execute them immediately and e
         systemPrompt += `\n\n[CODER MODE IS ACTIVE]
 You are a highly capable, autonomous, and professional software engineering agent running inside the root directory of our workspace.
 When the user asks you to build page(s), applications, interfaces, features, or modify codes:
-1. You MUST make real modifications in the file system using the tools provided: 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'list_coder_files', and 'delete_coder_file'. All file paths are relative to the project root directory!
-2. Do NOT just output a text response with code blocks of code changes. You MUST actually execute the file-system tools to create or edit the actual files in real-time.
-3. If a file already exists, always use 'read_coder_file' first to understand its current content, then make edits with 'edit_coder_file'.
-4. Do NOT attempt to run terminal or environment commands - you modify files and the user's workspace previews them in real-time.
-5. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
+1. You MUST make real modifications in the file system using the tools provided: 'Edit_and_Write', 'Read', 'Grep_and_Glob', 'Bash', 'Apply_patch', and 'Webfetch'. All file paths are relative to the project root directory!
+2. Do NOT just output a text response with code blocks of code changes. You MUST actually execute the tools to create or edit the actual files in real-time.
+3. If a file already exists, always use 'Read' first to understand its current content, then make edits with 'Edit_and_Write'.
+4. Use 'Grep_and_Glob' before editing when you need to find symbols, text, styles, routes, or error sources. Use 'Apply_patch' for precise snippet replacements. Use 'Bash' to run build commands, linters, tests, or git operations.
+5. Use 'Websearch' or 'Webfetch' to look up documentation, find solutions, or fetch reference code from the internet.
+6. Use 'Question' when requirements are ambiguous or you need user input on design decisions.
+7. Use 'Todowrite' to track multi-step progress through complex tasks.
+8. Use 'LSP_Experimental' to analyze file structure, symbols, and imports before making changes.
+9. Work agentically in repeated cycles: briefly reason about what you observed, call one or more tools, inspect the results, then decide the next tool call. Do not stop after a single tool batch if requirements, verification, or preview state remain incomplete.
+10. Do NOT use artifact/canvas output in Coder Mode. The right preview panel is the only app preview surface.
+11. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
       }
 
       // FIX: Inject search context into systemPrompt BEFORE building apiMessages,
@@ -2242,18 +2468,34 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       const responseImages = data.images || [];
 
       const toolCallNodes: ToolCallNode[] = [];
+      let agentTraceContent = '';
 
       const hasWebScrapeCall = toolCallsRaw && toolCallsRaw.some((tc: any) => tc.function?.name === 'web_scrape');
       if (isCoderMode || hasWebScrapeCall) {
         let loopCount = 0;
-        const maxLoops = 10;
+        const maxLoops = 20;
         while (choice?.tool_calls && choice.tool_calls.length > 0 && loopCount < maxLoops) {
           loopCount++;
           let shouldStopAfterAsk = false;
+
+          const interimThought = typeof choice.content === 'string' ? choice.content.trim() : '';
+          if (interimThought) {
+            agentTraceContent += `${agentTraceContent ? '\n\n' : ''}${interimThought}`;
+            setChats(prev => prev.map(chat => {
+              if (chat.id !== chatId) return chat;
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? {
+                  ...m,
+                  content: `${m.content || ''}${m.content ? '\n\n' : ''}${interimThought}`,
+                  thinking: `Planning next tool step ${loopCount}...`
+                } : m)
+              };
+            }));
+          }
           
-          // Coordinate status transitions based on active tools and loopCount
           const activeToolNames = choice.tool_calls.map((t: any) => t.function?.name || '');
-          if (activeToolNames.some((n: string) => n.includes('read') || n.includes('list'))) {
+          if (activeToolNames.some((n: string) => n === 'Read' || n === 'Grep_and_Glob' || n === 'LSP_Experimental')) {
             setCoderTodos(prev => {
               if (prev.length > 0) {
                 return prev.map((item, idx) => {
@@ -2265,7 +2507,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               return prev;
             });
           }
-          if (activeToolNames.some((n: string) => n.includes('edit') || n.includes('create') || n.includes('delete'))) {
+          if (activeToolNames.some((n: string) => n === 'Edit_and_Write' || n === 'Apply_patch' || n === 'Bash')) {
             setCoderTodos(prev => {
               if (prev.length > 1) {
                 return prev.map((item, idx) => {
@@ -2297,22 +2539,34 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             const name = fn.name || 'unknown';
             const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
             
-            const isScrape = name === 'web_scrape';
-            const node: ToolCallNode = {
-              id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
-              type: 'tool',
-              label: isScrape ? `Web Scraper (${args.url})` : `${name} ${args.filePath ? `(${args.filePath})` : ''}`,
-              status: 'active',
-              toolName: name,
-              argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
-              icon: isScrape ? <Globe size={14} /> :
-                    name.includes('read') || name.includes('file') ? <FileText size={14} /> :
-                    name.includes('edit') || name.includes('create') ? <PenTool size={14} /> :
-                    <Sparkles size={14} />,
-              filePath: args.filePath || '',
-              addedCount: name.includes('create') ? (args.content ? args.content.split('\n').length : 15) : (name.includes('edit') ? 45 : undefined),
-              removedCount: name.includes('create') ? 0 : (name.includes('edit') ? 8 : undefined)
-            };
+              const isScrape = name === 'web_scrape' || name === 'Webfetch';
+              const readRange = name === 'Read' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
+              const node: ToolCallNode = {
+                id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
+                type: 'tool',
+                label: isScrape ? `Web Scraper (${args.url})` : `${name} ${args.filePath ? `(${args.filePath})` : ''}${readRange}`,
+                status: 'active',
+                toolName: name,
+                argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
+                icon: isScrape ? <Globe size={14} /> :
+                      name === 'Bash' ? <Terminal size={14} /> :
+                      name === 'Websearch' ? <Search size={14} /> :
+                      name === 'Grep_and_Glob' ? <Search size={14} /> :
+                      name === 'Read' ? <FileText size={14} /> :
+                      name === 'Edit_and_Write' ? <PenTool size={14} /> :
+                      name === 'Apply_patch' ? <PenTool size={14} /> :
+                      name === 'LSP_Experimental' ? <Code size={14} /> :
+                      name === 'Skill' ? <Sparkles size={14} /> :
+                      name === 'Todowrite' ? <Wrench size={14} /> :
+                      name === 'Question' ? <Sparkles size={14} /> :
+                      name.includes('grep') || name.includes('search') || name.includes('subtask') ? <Search size={14} /> :
+                      name.includes('read') || name.includes('file') ? <FileText size={14} /> :
+                      name.includes('edit') || name.includes('create') ? <PenTool size={14} /> :
+                      <Sparkles size={14} />,
+                filePath: args.filePath || '',
+                addedCount: name === 'Edit_and_Write' ? (args.content ? args.content.split('\n').length : 15) : (name === 'Apply_patch' ? 45 : undefined),
+                removedCount: name === 'Edit_and_Write' ? 0 : (name === 'Apply_patch' ? 8 : undefined)
+              };
             currentCallNodes.push(node);
             toolCallNodes.push(node);
           }
@@ -2338,50 +2592,51 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             let resultValue: any = null;
 
             try {
-              if (!isCoderMode && ['list_coder_files', 'create_coder_file', 'edit_coder_file', 'read_coder_file', 'delete_coder_file'].includes(name)) {
+              if (!isCoderMode && ['Bash', 'Edit_and_Write', 'Read', 'Grep_and_Glob', 'LSP_Experimental', 'Apply_patch', 'Skill', 'Todowrite', 'Webfetch', 'Websearch', 'Question'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               }
-              if (name === 'list_coder_files') {
-                const listRes = await fetch('/api/fs/list', {
+              const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+              if (name === 'Bash') {
+                const execRes = await fetch('/api/fs/exec', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ folderPath: '.' }),
+                  body: JSON.stringify({ command: args.command, cwd: args.cwd || '', ...workspaceArg }),
                   signal
                 });
-                resultValue = await listRes.json();
-              } else if (name === 'create_coder_file' || name === 'edit_coder_file') {
+                resultValue = await execRes.json();
+                showToast(`Executed: ${args.command?.substring(0, 40)}`);
+              } else if (name === 'Edit_and_Write') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
-                const fullPath = `./${cleanedPath}`;
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 
                 let oldContent = '';
                 try {
                   const readOld = await fetch('/api/fs/read', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filePath: fullPath }),
+                    body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
                     signal
                   });
                   if (readOld.ok) {
                     const oldData = await readOld.json();
                     oldContent = oldData.content || '';
                   }
-                } catch (e) {
-                  // File might not exist yet
-                }
+                } catch (e) {}
 
                 if (cleanedPath.includes('/')) {
                   const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
+                  const folderFullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${folderPart}` : `./${folderPart}`;
                   await fetch('/api/fs/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filePath: `./${folderPart}`, isDirectory: true }),
+                    body: JSON.stringify({ filePath: folderFullPath, isDirectory: true, ...workspaceArg }),
                     signal
                   });
                 }
                 const writeRes = await fetch('/api/fs/write', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filePath: fullPath, content: args.content }),
+                  body: JSON.stringify({ filePath: fullPath, content: args.content, ...workspaceArg }),
                   signal
                 });
                 resultValue = await writeRes.json();
@@ -2394,31 +2649,189 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   matchingNode.addedCount = diffValues.added;
                   matchingNode.removedCount = diffValues.removed;
                 }
-
                 showToast(`Wrote ${cleanedPath}`);
-              } else if (name === 'read_coder_file') {
+              } else if (name === 'Read') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
-                const fullPath = `./${cleanedPath}`;
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const readBody: any = { filePath: fullPath, ...workspaceArg };
+                if (args.offset) readBody.offset = Number(args.offset);
+                if (args.limit) readBody.limit = Number(args.limit);
                 const readRes = await fetch('/api/fs/read', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filePath: fullPath }),
+                  body: JSON.stringify(readBody),
                   signal
                 });
                 resultValue = await readRes.json();
-                showToast(`Read ${cleanedPath}`);
-              } else if (name === 'delete_coder_file') {
-                const cleanedPath = args.filePath.replace(/^\/+/, '');
-                const fullPath = `./${cleanedPath}`;
-                const delRes = await fetch('/api/fs/delete', {
+                const range = args.offset ? ` [offset=${args.offset}${args.limit ? `, limit=${args.limit}` : ''}]` : '';
+                showToast(`Read ${cleanedPath}${range}`);
+              } else if (name === 'Grep_and_Glob') {
+                const maxResults = Math.max(1, Math.min(Number(args.maxResults || 30), 80));
+                const listRes = await fetch('/api/fs/list', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filePath: fullPath }),
+                  body: JSON.stringify({ folderPath: coderWorkspacePath || '.', ...workspaceArg }),
                   signal
                 });
-                resultValue = await delRes.json();
-                showToast(`Deleted ${cleanedPath}`);
-              } else if (name === 'ask') {
+                const listData = await listRes.json();
+                let files = listData.files || [];
+
+                const fileGlob = String(args.fileGlob || '').toLowerCase();
+                if (fileGlob) {
+                  files = files.filter((f: any) => {
+                    if (f.isDirectory) return false;
+                    const rel = String(f.relativePath || f.path || '').toLowerCase();
+                    return rel.includes(fileGlob) || rel.endsWith(fileGlob);
+                  });
+                }
+
+                const query = String(args.query || '').trim();
+                if (!query) {
+                  resultValue = { query: '', count: files.length, files: files.slice(0, maxResults).map((f: any) => ({ filePath: f.relativePath || f.path, isDirectory: f.isDirectory })) };
+                } else {
+                  files = files.filter((f: any) => {
+                    if (f.isDirectory) return false;
+                    const rel = String(f.relativePath || f.path || '').toLowerCase();
+                    return /\.(html?|css|scss|js|jsx|ts|tsx|json|md|vue|svelte|py|rs|go|php|rb|java|kt|swift)$/i.test(rel);
+                  });
+                  let regex: RegExp;
+                  try { regex = new RegExp(query, 'ig'); } catch { regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'); }
+                  const matches: any[] = [];
+                  for (const file of files) {
+                    if (matches.length >= maxResults) break;
+                    const readRes = await fetch('/api/fs/read', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ filePath: file.relativePath || file.path, ...workspaceArg }),
+                      signal
+                    });
+                    if (!readRes.ok) continue;
+                    const readData = await readRes.json();
+                    const lines = String(readData.content || '').split('\n');
+                    lines.forEach((line, idx) => {
+                      if (matches.length >= maxResults) return;
+                      regex.lastIndex = 0;
+                      if (regex.test(line)) {
+                        matches.push({ filePath: file.relativePath || file.path, line: idx + 1, text: line.trim().slice(0, 240) });
+                      }
+                    });
+                  }
+                  resultValue = { query, count: matches.length, matches };
+                  showToast(`Found ${matches.length} match${matches.length === 1 ? '' : 'es'}`);
+                }
+              } else if (name === 'LSP_Experimental') {
+                const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
+                if (!cleanedPath) throw new Error("LSP_Experimental requires filePath");
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const lspRes = await fetch('/api/lsp/analyze', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
+                  signal
+                });
+                resultValue = await lspRes.json();
+                showToast(`LSP analyzed ${cleanedPath}`);
+              } else if (name === 'Apply_patch') {
+                const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
+                const searchText = String(args.search || '');
+                const replaceText = String(args.replace ?? '');
+                if (!cleanedPath || !searchText) throw new Error("Apply_patch requires filePath and search");
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const readRes = await fetch('/api/fs/read', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
+                  signal
+                });
+                const readData = await readRes.json();
+                if (!readRes.ok) throw new Error(readData.error || readData.detail || `Could not read ${cleanedPath}`);
+                const oldContent = readData.content || '';
+                const occurrences = oldContent.split(searchText).length - 1;
+                if (occurrences === 0) throw new Error(`Exact search text was not found in ${cleanedPath}`);
+                const newContentVal = args.all ? oldContent.split(searchText).join(replaceText) : oldContent.replace(searchText, replaceText);
+                const writeRes = await fetch('/api/fs/write', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, content: newContentVal, ...workspaceArg }),
+                  signal
+                });
+                resultValue = await writeRes.json();
+                const diffValues = computeLineDiff(oldContent, newContentVal);
+                const matchingNode = toolCallNodes.find(n => n.id === tc.id);
+                if (matchingNode) {
+                  matchingNode.addedCount = diffValues.added;
+                  matchingNode.removedCount = diffValues.removed;
+                }
+                resultValue = { ...resultValue, replacements: args.all ? occurrences : 1 };
+                showToast(`Patched ${cleanedPath}`);
+              } else if (name === 'Skill') {
+                const skillId = String(args.skillId || '');
+                const input = String(args.input || '');
+                const skill = SKILLS.find((s: any) => s.id === skillId);
+                if (skill) {
+                  resultValue = { skillId, skillLabel: skill.label, prompt: skill.prompt, input, result: `${skill.prompt}${input}` };
+                } else {
+                  resultValue = { error: `Unknown skill: ${skillId}. Available: ${SKILLS.map((s: any) => s.id).join(', ')}` };
+                }
+                showToast(`Applied skill: ${skillId}`);
+              } else if (name === 'Todowrite') {
+                const action = String(args.action || '');
+                const items = args.items || [];
+                if (action === 'create' || action === 'update') {
+                  setCoderTodos(items);
+                  resultValue = { success: true, action, count: items.length, items };
+                } else if (action === 'complete') {
+                  setCoderTodos(prev => prev.map((item: any) => ({ ...item, status: 'completed' })));
+                  resultValue = { success: true, action: 'complete' };
+                } else {
+                  resultValue = { success: true, action: 'list', items: coderTodos };
+                }
+                showToast(`Todos: ${action} ${items.length} items`);
+              } else if (name === 'Webfetch') {
+                const targetUrl = args.url;
+                if (!targetUrl) throw new Error("Missing required 'url' parameter for Webfetch.");
+                setActiveScrapingJobs(prev => { const c = new Set(prev); c.add(tc.id); return c; });
+                showToast(`Fetching: ${targetUrl.substring(0, 30)}...`);
+                const scrapeResult = await scrapeUrl({
+                  url: targetUrl,
+                  outputFormat: args.outputFormat || 'markdown'
+                });
+                setScrapingResults(prev => { const c = new Map(prev); c.set(tc.id, scrapeResult); return c; });
+                setActiveScrapingJobs(prev => { const c = new Set(prev); c.delete(tc.id); return c; });
+                if (scrapeResult.error) {
+                  resultValue = { error: scrapeResult.error };
+                } else {
+                  const rawText = scrapeResult.rawText || '';
+                  const processedText = useTurboQuant
+                    ? turboQuantCompress(rawText, 4000, 'medium')
+                    : rawText.substring(0, 3000) + (rawText.length > 3000 ? '...' : '');
+                  resultValue = {
+                    title: scrapeResult.title,
+                    statusCode: scrapeResult.statusCode,
+                    linksFound: scrapeResult.links?.length || 0,
+                    content: processedText
+                  };
+                }
+              } else if (name === 'Websearch') {
+                const searchQuery = String(args.query || '');
+                const maxRes = Math.min(Number(args.maxResults || 5), 10);
+                if (!searchQuery) throw new Error("Websearch requires query");
+                showToast(`Searching: ${searchQuery.substring(0, 40)}`);
+                const key = searchProvider === 'serpapi' ? serpApiKey : tavilyApiKey;
+                if (key && key.trim()) {
+                  const searchRes = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: searchQuery, tavilyKey: tavilyApiKey, serpKey: serpApiKey, provider: searchProvider }),
+                    signal
+                  });
+                  const searchData = await searchRes.json();
+                  const sliced = (searchData.results || []).slice(0, maxRes);
+                  resultValue = { query: searchQuery, provider: searchData.provider, count: sliced.length, results: sliced };
+                } else {
+                  resultValue = { error: 'No search API key configured. Configure Tavily or SerpAPI in Settings.' };
+                }
+              } else if (name === 'Question') {
                 const qs = args.questions || [];
                 setAskAiQuestions(qs);
                 setCurrentQuestionIndex(0);
@@ -2681,17 +3094,23 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               resultValue = { error: err.message };
             }
 
+            const matchedIdx = toolCallNodes.findIndex(node => (node.id === tc.id) || (node.label.startsWith(name) && node.status === 'active'));
+            if (matchedIdx !== -1) {
+              toolCallNodes[matchedIdx].status = 'complete';
+              const resultStr = JSON.stringify(resultValue, null, 2);
+              toolCallNodes[matchedIdx].result = resultStr;
+              if (!toolCallNodes[matchedIdx].resultSummary) {
+                const preview = resultStr.length > 200 ? resultStr.slice(0, 200) + '...' : resultStr;
+                toolCallNodes[matchedIdx].resultSummary = preview;
+              }
+            }
+
             toolResultMessages.push({
               role: 'tool',
               tool_call_id: tc.id,
               name: name,
               content: JSON.stringify(resultValue)
             });
-
-            const matchedIdx = toolCallNodes.findIndex(node => (node.id === tc.id) || (node.label.startsWith(name) && node.status === 'active'));
-            if (matchedIdx !== -1) {
-              toolCallNodes[matchedIdx].status = 'complete';
-            }
 
             setChats(prev => prev.map(chat => {
               if (chat.id === chatId) {
@@ -2749,7 +3168,9 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       }
 
       const responseContent = choice?.content;
-      const finalContent = responseContent || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
+      const finalContent = [agentTraceContent, responseContent]
+        .filter((part, idx, arr) => part && (idx === 0 || part !== arr[0]))
+        .join('\n\n') || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
       
       const scavengedImages: any[] = [];
       toolCallNodes.forEach(tc => {
@@ -2983,7 +3404,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
         return;
       }
 
-      const finalArtifacts = extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
+      const finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
       if (finalArtifacts.length > 0) {
         setActiveArtifact(finalArtifacts[0]);
         setIsCanvasOpen(true);
@@ -3592,6 +4013,12 @@ When the user asks you to build page(s), applications, interfaces, features, or 
     if (!api) return;
     api.onMaximized((maximized: boolean) => setIsMaximized(maximized));
     api.isMaximized().then((maximized: boolean) => setIsMaximized(maximized));
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      api.showContextMenu();
+    };
+    window.addEventListener('contextmenu', handleContextMenu);
+    return () => window.removeEventListener('contextmenu', handleContextMenu);
   }, []);
 
 
@@ -5255,29 +5682,17 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                           setIsHeaderMenuOpen(false);
                         } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
-                        { id: 'dev_tools', label: 'DevTools', icon: <Sliders size={16} className="text-blue-500 animate-[pulse_3s_infinite]" />, onClick: () => { setIsDevToolsOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
                           key={item.id}
-                          id={item.id === 'dev_tools' ? 'devtools-trigger-btn' : undefined}
                           onClick={item.onClick}
-                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all group duration-200 ${
-                            item.id === 'dev_tools'
-                              ? 'bg-blue-500/5 dark:bg-blue-500/[0.03] border border-blue-500/15 dark:border-blue-500/10 text-blue-600 dark:text-blue-400 hover:border-blue-500/40 hover:bg-blue-500/10 dark:hover:bg-blue-500/10 font-semibold'
-                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white'
-                          }`}
+                          className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all group duration-200 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white"
                         >
                           <div className="flex items-center gap-3">
                             {item.icon}
                             <span>{item.label}</span>
                           </div>
-                          {item.id === 'dev_tools' && (
-                            <span className="flex h-2 w-2 relative">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                            </span>
-                          )}
                         </button>
                       ))}
                       <div className="my-1.5 border-t border-gray-100 dark:border-white/5" />
@@ -5312,10 +5727,12 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     workspaceRefreshKey={workspaceRefreshKey}
                     triggerWorkspaceRefresh={triggerWorkspaceRefresh}
                     showToast={showToast}
+                    workspaceRootPath={coderWorkspacePath}
+                    onWorkspaceRootPathChange={setCoderWorkspacePath}
                     onSelectFile={(filePath) => {
                       setFloatingEditFile(filePath);
                       const rel = filePath.replace(/\\/g, '/').split('coder/').pop() || '';
-                      if (rel.endsWith('.html') || rel.endsWith('.htm')) {
+                      if (rel) {
                         setRightPreviewSubpath(rel);
                       }
                     }}
@@ -5453,7 +5870,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                             setIsSourcesPanelOpen={() => {}}
                             setSourcesPanelMessageId={() => {}}
                             setActiveArtifact={handleSetActiveArtifact}
-                            setIsCanvasOpen={handleSetIsCanvasOpen}
+                            setIsCanvasOpen={() => {}}
                             setCanvasView={handleSetCanvasView}
                             onOpenInEditor={setFloatingEditFile}
                             showToast={showToast}
@@ -5564,94 +5981,117 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   className="h-full border-l border-[#1e1e22] bg-[#141416] flex flex-col overflow-hidden shrink-0 z-10 shadow-2xl transition-all duration-300"
                 >
                   {/* Top Header & Viewport Selector Bar */}
-                  <div className="flex items-center justify-between px-3.5 py-2 bg-zinc-950 border-b border-zinc-900/80 shrink-0 select-none">
-                    <div className="flex items-center gap-3">
+                  <div className="shrink-0">
+                    <div className="flex items-center justify-between px-3.5 py-2 bg-zinc-950 border-b border-zinc-900/80 select-none">
                       <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <span className="text-xs font-bold uppercase tracking-wider text-zinc-350">Live Preview</span>
+                        <span className="text-xs font-bold uppercase tracking-wider text-zinc-350 mr-1">Preview</span>
+                        {projectFramework && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 font-mono border border-teal-500/20">{projectFramework}</span>
+                        )}
+                        {projectType && !projectFramework && projectType !== 'unknown' && projectType !== 'empty' && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono border border-zinc-700/50">{projectType}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button 
+                          onClick={() => setIframeKey(k => k + 1)}
+                          className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
+                          title="Force reload preview frame"
+                        >
+                          <RefreshCw size={12} />
+                        </button>
                       </div>
                     </div>
+                    {projectType && ['vite', 'next', 'react', 'node'].includes(projectType) && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950/80 border-b border-zinc-900/40">
+                        <span className="text-[10px] text-zinc-500 font-mono whitespace-nowrap">Dev URL:</span>
+                        <input
+                          type="text"
+                          value={devServerUrl}
+                          onChange={e => setDevServerUrl(e.target.value)}
+                          placeholder="http://localhost:5173"
+                          className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[11px] font-mono text-zinc-300 placeholder-zinc-600 outline-none focus:border-teal-500/40 transition-colors"
+                        />
+                        {devServerUrl && (
+                          <button
+                            onClick={() => setIframeKey(k => k + 1)}
+                            className="text-[10px] px-2 py-1 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20 hover:bg-teal-500/20 transition-all cursor-pointer font-mono"
+                          >
+                            Go
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
-                    {/* Viewport controls */}
+                  {/* Viewport controls bar */}
+                  <div className="flex items-center gap-1 px-3 py-1.5 bg-zinc-950 border-b border-zinc-900/80 shrink-0">
                     <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
                       <button
                         onClick={() => setRightViewportMode('desktop')}
-                        className={`p-1.5 rounded-md transition-all cursor-pointer ${
+                        className={`p-1 rounded-md transition-all cursor-pointer ${
                           rightViewportMode === 'desktop'
                             ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
                             : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                         }`}
                         title="Desktop View"
                       >
-                        <Monitor size={11} />
+                        <Monitor size={10} />
                       </button>
                       <button
                         onClick={() => setRightViewportMode('tablet')}
-                        className={`p-1.5 rounded-md transition-all cursor-pointer ${
+                        className={`p-1 rounded-md transition-all cursor-pointer ${
                           rightViewportMode === 'tablet'
                             ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
                             : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                         }`}
                         title="Tablet View (768px Width)"
                       >
-                        <Tablet size={11} />
+                        <Tablet size={10} />
                       </button>
                       <button
                         onClick={() => setRightViewportMode('mobile')}
-                        className={`p-1.5 rounded-md transition-all cursor-pointer ${
+                        className={`p-1 rounded-md transition-all cursor-pointer ${
                           rightViewportMode === 'mobile'
                             ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
                             : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                         }`}
                         title="Mobile View (390px Width)"
                       >
-                        <Smartphone size={11} />
+                        <Smartphone size={10} />
                       </button>
-                      
+
                       <div className="w-[1px] h-3 bg-zinc-800 mx-1" />
 
-                      {/* Alignment Grid Overlay Toggle */}
                       <button
                         onClick={() => setRightIsGridEnabled(!rightIsGridEnabled)}
-                        className={`p-1.5 rounded-md transition-all cursor-pointer ${
+                        className={`p-1 rounded-md transition-all cursor-pointer ${
                           rightIsGridEnabled
                             ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
                             : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                         }`}
                         title="Toggle Measurement Grid Overlay"
                       >
-                        <Grid size={11} />
+                        <Grid size={10} />
                       </button>
 
-                      {/* Element Inspector Select Tool */}
                       <button
                         onClick={() => setRightIsInspectMode(!rightIsInspectMode)}
-                        className={`p-1.5 rounded-md transition-all cursor-pointer ${
+                        className={`p-1 rounded-md transition-all cursor-pointer ${
                           rightIsInspectMode
                             ? 'bg-teal-500/10 border border-teal-500/30 text-teal-400 animate-pulse'
                             : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                         }`}
-                        title={rightIsInspectMode ? "Click an element inside preview to select, or click here to cancel" : "Inspect & Select Element from Live Preview to attach to chat"}
+                        title="Inspect & Select Element from Live Preview"
                       >
-                        <MousePointerClick size={11} className={rightIsInspectMode ? "text-teal-400" : ""} />
-                      </button>
-
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button 
-                        onClick={() => setIframeKey(k => k + 1)}
-                        className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
-                        title="Force reload preview frame"
-                      >
-                        <RefreshCw size={12} />
+                        <MousePointerClick size={10} className={rightIsInspectMode ? "text-teal-400" : ""} />
                       </button>
                     </div>
                   </div>
 
                   {/* Frame Container */}
                   <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-[#070606] relative">
-                    {/* Measurement Grid Overlay */}
                     {rightIsGridEnabled && (
                       <div 
                         className="absolute inset-0 pointer-events-none z-10 opacity-30" 
@@ -5672,14 +6112,54 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         rightViewportMode !== 'desktop' ? 'rounded-2xl border-4 border-[#1D1917]' : 'w-full h-full'
                       }`}
                     >
-                      <iframe
-                        ref={rightIframeRef}
-                        key={iframeKey}
-                        src={`/coder-preview/${rightPreviewSubpath ? rightPreviewSubpath.replace(/^\//, '') : ''}?t=${iframeKey}`}
-                        className="w-full h-full border-none bg-white"
-                        referrerPolicy="no-referrer"
-                        title="Workspace App Preview"
-                      />
+                      {devServerUrl ? (
+                        <iframe
+                          ref={rightIframeRef}
+                          key={iframeKey}
+                          src={devServerUrl}
+                          className="w-full h-full border-none bg-white"
+                          referrerPolicy="no-referrer"
+                          title="Workspace App Preview"
+                        />
+                      ) : isRightPreviewStarting ? (
+                        <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
+                          <RefreshCw size={18} className="animate-spin text-[#D97756]" />
+                          <span className="text-sm font-medium text-zinc-400">Starting preview</span>
+                          <div className="max-w-md w-full rounded-lg border border-zinc-800 bg-black/30 p-3 text-left">
+                            {(rightPreviewLogs.length ? rightPreviewLogs.slice(-5) : ['Detecting project']).map((log, idx) => (
+                              <div key={idx} className="truncate text-[10px] font-mono text-zinc-500">&gt; {log}</div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : rightPreviewError ? (
+                        <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
+                          <span className="text-sm font-medium text-red-400">Preview could not start</span>
+                          <span className="max-w-md text-center text-xs text-zinc-600">{rightPreviewError}</span>
+                          <button
+                            onClick={startCoderPreview}
+                            className="mt-2 rounded-lg border border-[#D97756]/30 bg-[#D97756]/10 px-3 py-1.5 text-xs font-semibold text-[#D97756] hover:bg-[#D97756]/20"
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500">
+                          <div className="w-12 h-12 rounded-xl border border-zinc-800 bg-zinc-900/50 flex items-center justify-center">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-zinc-600">
+                              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                              <path d="M8 21h8"/>
+                              <path d="M12 17v4"/>
+                            </svg>
+                          </div>
+                          <span className="text-sm font-medium text-zinc-600">No preview running</span>
+                          <button
+                            onClick={startCoderPreview}
+                            className="text-xs text-[#D97756] hover:underline"
+                          >
+                            Start workspace preview
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -5958,6 +6438,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     workspaceRefreshKey={workspaceRefreshKey} 
                     triggerWorkspaceRefresh={triggerWorkspaceRefresh}
                     showToast={showToast}
+                    workspaceRootPath={coderWorkspacePath}
                     onInsertAttachedText={insertAttachedContent}
                   />
                 </div>
@@ -6858,7 +7339,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
       <Canvas 
         artifact={activeArtifact} 
-        isOpen={isCanvasOpen} 
+        isOpen={!isCoderMode && isCanvasOpen} 
         onClose={() => setIsCanvasOpen(false)} 
         view={canvasView}
         onSetView={setCanvasView}

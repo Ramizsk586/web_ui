@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  Folder, FolderOpen, FileText, RefreshCw, Trash2, Plus, Download, 
+  Folder, FolderOpen, FileText, RefreshCw, Trash2, 
   Code, Hash, Zap, FileCode, Braces, BookOpen, Edit3, ChevronRight, ChevronDown, 
-  FilePlus, FolderPlus, Copy, FolderTree, X, Search, FolderUp
+  FilePlus, FolderPlus, Copy, FolderTree, X, Search
 } from 'lucide-react';
 
 // ==================== TYPES ====================
@@ -36,6 +36,8 @@ interface CoderLeftExplorerProps {
   workspaceRefreshKey: number;
   triggerWorkspaceRefresh: () => void;
   showToast: (msg: string) => void;
+  workspaceRootPath: string;
+  onWorkspaceRootPathChange: (path: string) => void;
   onSelectFile: (filePath: string) => void;
 }
 
@@ -321,6 +323,8 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
   workspaceRefreshKey,
   triggerWorkspaceRefresh,
   showToast: parentShowToast,
+  workspaceRootPath,
+  onWorkspaceRootPathChange,
   onSelectFile
 }) => {
   const [flatFiles, setFlatFiles] = useState<any[]>([]);
@@ -329,7 +333,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
   
   // Selection and folder states
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['.']));
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   
   // Interactive modification states
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -352,12 +356,6 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
   // Local Lightweight Toasts
   const [toasts, setToasts] = useState<ExplorerToast[]>([]);
 
-  // Device File Integration States
-  const [isDeviceImportOpen, setIsDeviceImportOpen] = useState(false);
-  const [importProgress, setImportProgress] = useState<{ current: number; total: number; filename: string } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
-
   const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = generateUUID();
     setToasts(prev => [...prev, { id, message, type }]);
@@ -366,141 +364,15 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
     }, 2500);
   }, []);
 
-  // Device File Upload Handlers
-  const handleFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    let parentId: string | null = null;
-    if (selectedId) {
-      const selNode = visibleNodes.find(n => n.id === selectedId);
-      if (selNode) {
-        parentId = selNode.type === 'folder' ? selNode.id : selNode.parentId;
-      }
-    }
-
-    setImportProgress({ current: 0, total: files.length, filename: files[0].name });
-
-    let firstFileFullPath = '';
-    let firstFileRelPath = '';
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      setImportProgress({ current: i + 1, total: files.length, filename: file.name });
-      try {
-        const content = await file.text();
-        const targetRelPath = parentId ? `${parentId}/${file.name}` : file.name;
-        const fullPath = `./${targetRelPath}`;
-
-        if (i === 0) {
-          firstFileFullPath = fullPath;
-          firstFileRelPath = targetRelPath;
-        }
-
-        await fetch('/api/fs/write', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filePath: fullPath,
-            content: content
-          })
-        });
-      } catch (err) {
-        console.error("Failed to upload file:", file.name, err);
-      }
-    }
-
-    addToast(`Imported ${files.length} file(s) successfully!`, "success");
-    setImportProgress(null);
-    setIsDeviceImportOpen(false);
-    triggerWorkspaceRefresh();
-
-    // Work like VS Code: automatically open the newly uploaded file in the editor!
-    if (firstFileFullPath) {
-      onSelectFile(firstFileFullPath);
-      setSelectedId(firstFileRelPath);
-    }
-  };
-
-  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    let parentId: string | null = null;
-    if (selectedId) {
-      const selNode = visibleNodes.find(n => n.id === selectedId);
-      if (selNode) {
-        parentId = selNode.type === 'folder' ? selNode.id : selNode.parentId;
-      }
-    }
-
-    setImportProgress({ current: 0, total: files.length, filename: files[0].name });
-
-    let firstFileFullPath = '';
-    let firstFileRelPath = '';
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const relativePathInFolder = file.webkitRelativePath || file.name;
-      setImportProgress({ current: i + 1, total: files.length, filename: relativePathInFolder });
-
-      try {
-        const content = await file.text();
-        const targetRelPath = parentId ? `${parentId}/${relativePathInFolder}` : relativePathInFolder;
-        const fullPath = `./${targetRelPath}`;
-
-        if (i === 0) {
-          firstFileFullPath = fullPath;
-          firstFileRelPath = targetRelPath;
-        }
-
-        await fetch('/api/fs/write', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filePath: fullPath,
-            content: content
-          })
-        });
-      } catch (err) {
-        console.error("Failed to upload folder file:", file.name, err);
-      }
-    }
-
-    addToast(`Imported folder with ${files.length} file(s) successfully!`, "success");
-    setImportProgress(null);
-    setIsDeviceImportOpen(false);
-    triggerWorkspaceRefresh();
-
-    // Work like VS Code: automatically open the first file inside the uploaded folder!
-    if (firstFileFullPath) {
-      onSelectFile(firstFileFullPath);
-      setSelectedId(firstFileRelPath);
-
-      // Expand folders in the path
-      const parts = firstFileRelPath.split('/');
-      if (parts.length > 1) {
-        setExpandedPaths(prev => {
-          const next = new Set(prev);
-          let sub = '';
-          for (let pIdx = 0; pIdx < parts.length - 1; pIdx++) {
-            sub = sub ? `${sub}/${parts[pIdx]}` : parts[pIdx];
-            next.add(sub);
-          }
-          return next;
-        });
-      }
-    }
-  };
-
   // Fetch file list recursively from actual file system
   const fetchWorkspace = useCallback(async () => {
+    if (!workspaceRootPath) return;
     setIsLoading(true);
     try {
       const response = await fetch('/api/fs/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderPath: '.' })
+        body: JSON.stringify({ folderPath: workspaceRootPath })
       });
       if (response.ok) {
         const data = await response.json();
@@ -516,11 +388,13 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [addToast]);
+  }, [addToast, workspaceRootPath]);
 
   useEffect(() => {
-    fetchWorkspace();
-  }, [workspaceRefreshKey, fetchWorkspace]);
+    if (workspaceRootPath) {
+      fetchWorkspace();
+    }
+  }, [workspaceRefreshKey, fetchWorkspace, workspaceRootPath]);
 
   // Construct standard recursive Tree structure based on flat backend files
   const treeStructure = useMemo(() => {
@@ -715,7 +589,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
     }
 
     const targetRelPath = parentId ? `${parentId}/${name}` : name;
-    const fullPath = `./${targetRelPath}`;
+    const fullPath = `${workspaceRootPath}/${targetRelPath}`;
     const isFolder = type === 'folder';
 
     try {
@@ -756,7 +630,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
     } catch {
       addToast("Failed to create", "error");
     }
-  }, [inputValue, validateName, addToast, onSelectFile, triggerWorkspaceRefresh]);
+  }, [inputValue, validateName, addToast, onSelectFile, triggerWorkspaceRefresh, workspaceRootPath]);
 
   // Rename Actions
   const triggerRename = useCallback((node: TreeNode) => {
@@ -778,9 +652,9 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       return;
     }
 
-    const oldPath = `./${node.id}`;
+    const oldPath = `${workspaceRootPath}/${node.id}`;
     const targetRelPath = node.parentId ? `${node.parentId}/${name}` : name;
-    const newPath = `./${targetRelPath}`;
+    const newPath = `${workspaceRootPath}/${targetRelPath}`;
 
     try {
       const res = await fetch('/api/fs/move', {
@@ -804,7 +678,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
     } catch {
       addToast("Rename failed", "error");
     }
-  }, [inputValue, validateName, addToast, triggerWorkspaceRefresh]);
+  }, [inputValue, validateName, addToast, triggerWorkspaceRefresh, workspaceRootPath]);
 
   // Deletion Actions
   const triggerDelete = useCallback((node: TreeNode) => {
@@ -822,7 +696,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       const res = await fetch('/api/fs/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: `./${node.id}` })
+        body: JSON.stringify({ filePath: `${workspaceRootPath}/${node.id}` })
       });
 
       if (res.ok) {
@@ -848,7 +722,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       const res = await fetch('/api/fs/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: `./${node.id}` })
+        body: JSON.stringify({ filePath: `${workspaceRootPath}/${node.id}` })
       });
 
       if (res.ok) {
@@ -1033,9 +907,9 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       return;
     }
 
-    const oldPath = `./${dragSourceNode.id}`;
+    const oldPath = `${workspaceRootPath}/${dragSourceNode.id}`;
     const newRelative = targetParentId ? `${targetParentId}/${dragSourceNode.name}` : dragSourceNode.name;
-    const newPath = `./${newRelative}`;
+    const newPath = `${workspaceRootPath}/${newRelative}`;
 
     try {
       const res = await fetch('/api/fs/move', {
@@ -1122,6 +996,22 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
     addToast("Refreshed workspace file tree", "info");
   };
 
+  const handleOpenFolder = useCallback(async () => {
+    const electronAPI = (window as any).__electronAPI;
+    if (electronAPI?.openFolderDialog) {
+      const folderPath = await electronAPI.openFolderDialog();
+      if (folderPath) {
+        onWorkspaceRootPathChange(folderPath);
+        setExpandedPaths(new Set());
+        setSelectedId(null);
+        addToast(`Opened folder: ${folderPath}`, "success");
+        triggerWorkspaceRefresh();
+      }
+    } else {
+      addToast("Open Folder is only available in the desktop app", "info");
+    }
+  }, [addToast, triggerWorkspaceRefresh, onWorkspaceRootPathChange]);
+
   // ==================== FUZZY SEARCH MATCH RENDERERS ====================
   
   const searchResults = useMemo(() => {
@@ -1203,11 +1093,11 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
             <RefreshCw size={13} />
           </button>
           <button 
-            onClick={() => setIsDeviceImportOpen(true)}
-            className={`p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer ${isDeviceImportOpen ? 'bg-[#262522] text-[#EDE6DD]' : ''}`}
-            title="Open from device..."
+            onClick={handleOpenFolder}
+            className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
+            title="Open Folder (set workspace root)"
           >
-            <FolderUp size={13} />
+            <FolderOpen size={13} />
           </button>
         </div>
       </div>
@@ -1272,6 +1162,23 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
               </div>
             ))
           )
+        ) : !workspaceRootPath ? (
+          <div className="flex flex-col items-center gap-3 text-center px-4 py-8">
+            <div className="w-12 h-12 rounded-xl border border-zinc-800 bg-zinc-900/50 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-zinc-600">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+            </div>
+            <div className="text-[12px] text-[#635F59]">
+              No folder open
+            </div>
+            <button
+              onClick={handleOpenFolder}
+              className="text-[11px] px-3 py-1.5 rounded-md bg-[#D97756]/10 text-[#D97756] border border-[#D97756]/20 hover:bg-[#D97756]/20 transition-all cursor-pointer font-medium"
+            >
+              Open Folder
+            </button>
+          </div>
         ) : treeStructure.length === 0 ? (
           <div className="text-[11px] text-[#635F59] italic px-4 py-4 text-center">
             Workspace is empty.<br/>
@@ -1454,88 +1361,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
         document.body
       )}
 
-      {isDeviceImportOpen && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[250] flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#181513] border border-[#2D2420] text-[#AD9F91] p-4 w-full max-w-xs flex flex-col gap-4 shadow-2xl rounded-xl select-text">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] font-bold uppercase tracking-wider text-[#D97756] flex items-center gap-1.5">
-                <FolderUp size={14} /> Open from Device
-              </span>
-              <button 
-                onClick={() => setIsDeviceImportOpen(false)}
-                className="p-1 hover:bg-[#2C241E] rounded-md text-[#7F7469] hover:text-[#EDE6DD] transition-all cursor-pointer"
-                title="Close"
-              >
-                <X size={14} />
-              </button>
-            </div>
 
-            {/* Form / Description */}
-            <div className="text-[12px] text-[#A89F93] leading-relaxed">
-              Import a file or an entire folder structure from your local computer into the active workspace.
-              <div className="mt-2 text-[10px] text-zinc-500 italic bg-[#110E0D] p-1.5 rounded-md border border-[#231B17]">
-                Destination: <span className="font-mono text-zinc-400 break-all">{selectedId ? `./${selectedId}` : "Root (./)"}</span>
-              </div>
-            </div>
-
-            {importProgress ? (
-              <div className="flex flex-col gap-2 p-2 bg-[#1E1917] rounded-lg border border-[#3A2D27]">
-                <div className="flex justify-between text-[11px] font-semibold text-[#EDE6DD]">
-                  <span className="truncate max-w-[150px]">{importProgress.filename}</span>
-                  <span className="shrink-0">{importProgress.current} / {importProgress.total}</span>
-                </div>
-                {/* Custom Progress Bar */}
-                <div className="w-full bg-[#110E0D] h-1.5 rounded-full overflow-hidden">
-                  <div 
-                    className="bg-[#D97756] h-full transition-all duration-150" 
-                    style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
-                  />
-                </div>
-                <span className="text-[9px] text-zinc-500 animate-pulse">Reading device files...</span>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2 font-sans">
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#2D2420] hover:bg-[#3D302A] text-[#EDE6DD] text-[12px] font-semibold transition-all cursor-pointer rounded-lg border border-[#3D302A] active:scale-[0.98]"
-                >
-                  <FilePlus size={14} className="text-[#D97756]" />
-                  <span>Choose File(s)</span>
-                </button>
-                <button 
-                  onClick={() => folderInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#2D2420] hover:bg-[#3D302A] text-[#EDE6DD] text-[12px] font-semibold transition-all cursor-pointer rounded-lg border border-[#3D302A] active:scale-[0.98]"
-                >
-                  <FolderPlus size={14} className="text-[#D97756]" />
-                  <span>Choose Folder</span>
-                </button>
-              </div>
-            )}
-
-            <div className="text-[10px] text-zinc-500 leading-tight">
-              Select files or a folder to automatically configure their directories and load them inside the editor.
-            </div>
-
-            {/* Hidden Inputs */}
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              style={{ display: 'none' }} 
-              onChange={handleFilesUpload} 
-              multiple 
-            />
-            <input 
-              type="file" 
-              ref={folderInputRef} 
-              style={{ display: 'none' }} 
-              onChange={handleFolderUpload} 
-              {...({ webkitdirectory: "", directory: "", multiple: true } as any)} 
-            />
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   );
 };

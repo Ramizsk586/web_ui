@@ -439,6 +439,7 @@ export const NodeGraph = React.memo(({
           {displayNodes.map((node, i) => {
             const isEditNode = node.toolName === 'edit_coder_file' || node.toolName === 'create_coder_file';
             const isScriptNode = node.toolName === 'verify_changes' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
+            const isCollapsedLocally = collapsedToolNodes[node.id] !== false;
             
             return (
               <motion.div
@@ -451,14 +452,13 @@ export const NodeGraph = React.memo(({
                 <div className="absolute left-0 top-[12px] w-4 h-[1px] bg-zinc-150 dark:bg-white/10" />
                 
                 {(() => {
-                  const isCollapsible = node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_');
-                  const isCollapsedLocally = !!collapsedToolNodes[node.id];
-                  
                   const headerContent = (
                     <div className="flex items-center gap-3">
                       <div className="transition-colors shrink-0">
                         {node.status === 'active' ? (
-                          isCollapsible ? <LuminaToolCallingAnimation /> : <ToolCallingAnimation />
+                          node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_')
+                            ? <LuminaToolCallingAnimation />
+                            : <ToolCallingAnimation />
                         ) : (
                           renderNodeIcon(node.icon)
                         )}
@@ -466,53 +466,51 @@ export const NodeGraph = React.memo(({
                       
                       <span className={`text-[13px] font-medium transition-colors text-left ${
                         node.status === 'active'
-                          ? isCollapsible ? 'text-orange-500 font-semibold' : 'text-emerald-500 font-semibold'
+                          ? node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_')
+                            ? 'text-orange-500 font-semibold'
+                            : 'text-emerald-500 font-semibold'
                           : 'text-zinc-750 dark:text-zinc-350'
                       }`}>
                         {humanizeToolName(node.toolName, node.label)}
                       </span>
 
-                      {isCollapsible && (
-                        <motion.div
-                          animate={{ rotate: isCollapsedLocally ? -90 : 0 }}
-                          transition={{ duration: 0.15 }}
-                          className="text-zinc-400 group-hover:text-zinc-650 dark:group-hover:text-zinc-200 shrink-0"
-                        >
-                          <ChevronDown size={12} />
-                        </motion.div>
-                      )}
+                      <motion.div
+                        animate={{ rotate: isCollapsedLocally ? -90 : 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="text-zinc-400 group-hover:text-zinc-650 dark:group-hover:text-zinc-200 shrink-0"
+                      >
+                        <ChevronDown size={12} />
+                      </motion.div>
                       
                       {node.status === 'active' && (
                         <motion.div
                           animate={{ opacity: [0.4, 1, 0.4] }}
                           transition={{ repeat: Infinity, duration: 1.5 }}
                           className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                            isCollapsible ? 'bg-orange-500' : 'bg-emerald-500'
+                            node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_')
+                              ? 'bg-orange-500' : 'bg-emerald-500'
                           }`}
                         />
                       )}
                     </div>
                   );
 
-                  if (isCollapsible) {
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCollapsedToolNodes(prev => ({
-                            ...prev,
-                            [node.id]: !prev[node.id]
-                          }));
-                        }}
-                        className="flex items-center gap-3 group focus:outline-hidden hover:opacity-90 cursor-pointer text-left"
-                      >
-                        {headerContent}
-                      </button>
-                    );
-                  }
-
-                  return headerContent;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCollapsedToolNodes(prev => ({
+                          ...prev,
+                          [node.id]: !prev[node.id]
+                        }));
+                      }}
+                      className="flex items-center gap-3 group focus:outline-hidden hover:opacity-90 cursor-pointer text-left"
+                    >
+                      {headerContent}
+                    </button>
+                  );
                 })()}
+                
 
                 {isEditNode && (
                   <RealtimeEditCounter node={node} />
@@ -526,17 +524,17 @@ export const NodeGraph = React.memo(({
                   </div>
                 )}
 
-                {node.toolName === 'web_scrape' && (
-                  <AnimatePresence initial={false}>
-                    {!collapsedToolNodes[node.id] && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                        animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
-                        exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                        transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="overflow-hidden w-full ml-7"
-                      >
-                        {node.status === 'complete' ? (
+                <AnimatePresence initial={false}>
+                  {!isCollapsedLocally && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                      animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
+                      exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                      transition={{ duration: 0.25, ease: "easeInOut" }}
+                      className="overflow-hidden w-full ml-7"
+                    >
+                      {node.toolName === 'web_scrape' ? (
+                        node.status === 'complete' ? (
                           (() => {
                             const scrapeResult = scrapingResults.get(node.id);
                             if (!scrapeResult) return <div className="text-xs text-zinc-500 font-mono italic text-left">Retrieving scraped content assets...</div>;
@@ -556,23 +554,9 @@ export const NodeGraph = React.memo(({
                             status={node.status} 
                             url={node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
                           />
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                )}
-
-                {node.toolName?.startsWith('wiki_') && (
-                  <AnimatePresence initial={false}>
-                    {!collapsedToolNodes[node.id] && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                        animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
-                        exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                        transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="overflow-hidden w-full ml-7"
-                      >
-                        {node.status === 'complete' ? (
+                        )
+                      ) : node.toolName?.startsWith('wiki_') ? (
+                        node.status === 'complete' ? (
                           (() => {
                             const wikiRes = wikiResults.get(node.id);
                             if (!wikiRes) return <div className="text-xs text-zinc-500 font-mono italic text-left">Retrieving Wikipedia knowledge assets...</div>;
@@ -593,11 +577,25 @@ export const NodeGraph = React.memo(({
                           })()
                         ) : (
                           <WikiToolCallIndicator node={node} />
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                )}
+                        )
+                      ) : node.result ? (
+                        <div className="p-3 rounded-xl border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-white/[0.02] text-[12.5px] leading-relaxed text-zinc-600 dark:text-zinc-400 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar shadow-inner text-left">
+                          {node.result}
+                        </div>
+                      ) : node.filePath ? (
+                        <div className="text-xs text-zinc-500 font-mono italic text-left px-1">
+                          {node.filePath}
+                          {node.addedCount !== undefined && <span className="text-emerald-500 ml-2">+{node.addedCount}</span>}
+                          {node.removedCount !== undefined && <span className="text-red-500 ml-1">-{node.removedCount}</span>}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-zinc-500 font-mono italic text-left px-1">
+                          {node.status === 'complete' ? 'Completed' : node.status === 'failed' ? 'Failed' : 'Running...'}
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             );
           })}
