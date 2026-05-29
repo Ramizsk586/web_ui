@@ -47,6 +47,7 @@ import {
   StopCircle,
   Download,
   FileUp,
+  FileJson,
   Camera,
   FolderPlus,
   Folder,
@@ -82,6 +83,7 @@ import {
   Compass,
   Flower2,
   Mic,
+  MicOff,
   Smartphone,
   Tablet,
   Monitor,
@@ -90,7 +92,8 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  MousePointerClick
+  MousePointerClick,
+  Zap
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -100,10 +103,6 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { fetchBridgeTools, callLlamaBridge as bridgeCall, checkBridgeHealth } from './bridgeClient';
 import { useTheme } from './themes';
 import { CustomCodeBlockVisualizer, renderTextWithMath, InteractiveTableVisualizer } from './components/LuminaVisualizer';
-import { PhysicsGraphCanvas } from './components/PhysicsGraphCanvas';
-import { ChemistryLabCanvas } from './components/ChemistryLabCanvas';
-import { MathLabCanvas } from './components/MathLabCanvas';
-import { BiologyLabCanvas } from './components/BiologyLabCanvas';
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
 import { CoderLeftExplorer } from './components/CoderLeftExplorer';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
@@ -131,3421 +130,85 @@ import {
 } from './services/wikiService';
 
 import { useSmartPopupPosition } from './hooks/useSmartPopupPosition';
+import { useDevTools } from './hooks/useDevTools';
+import { useAskAi } from './hooks/useAskAi';
+import { useCoderMode } from './hooks/useCoderMode';
+import { useRightPanel } from './hooks/useRightPanel';
 
-interface ToolCallNode {
-  id: string;
-  type: 'ai' | 'tool' | 'sub-tool' | 'result' | 'error';
-  label: string;
-  status: 'pending' | 'active' | 'complete' | 'failed';
-  icon?: React.ReactNode;
-  toolName?: string;
-  argsCount?: number;
-  durationMs?: number;
-  resultSummary?: string;
-  subNodes?: ToolCallNode[];
-  filePath?: string;
-  addedCount?: number;
-  removedCount?: number;
-}
+import {
+  ToolCallNode,
+  Artifact,
+  Message,
+  Chat,
+  Tool,
+  ToolDefinition,
+  Skill
+} from './types';
 
-interface Artifact {
-  id: string;
-  title: string;
-  language: string;
-  content: string;
-  type: 'code' | 'markdown' | 'html' | 'poem' | 'report';
-}
+import {
+  DEFAULT_SERVER_URL,
+  DEFAULT_MCP_URL,
+  DEFAULT_API_KEY,
+  AVAILABLE_AVATARS,
+  CLOUD_PROVIDERS,
+  WRITING_STYLES,
+  SKILLS,
+  SLASH_COMMANDS
+} from './constants';
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  thinking?: string;
-  thinkContent?: string;
-  isThinking?: boolean;
-  sources?: { title: string; url: string; icon?: string; snippet?: string }[];
-  images?: { title: string; url: string; thumbnail?: string; source?: string }[];
-  searchQuery?: string;
-  isSearching?: boolean;
-  isStreaming?: boolean;
-  streamPos?: number;
-  toolCalls?: ToolCallNode[];
-  artifacts?: Artifact[];
-  elementAttachments?: any[];
-  todoPlan?: {
-    title: string;
-    todos: { id: string; text: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[];
-    isConfirmed?: boolean;
-    countdown?: number;
-  };
-}
+import {
+  WebSearchAnimation,
+  ToolCallingAnimation,
+  LuminaToolCallingAnimation
+} from './components/ui/Animations';
 
-interface Chat {
-   id: string;
-   title: string;
-   messages: Message[];
-   updatedAt: Date;
-   projectId?: string;
-}
+import { SidebarContent } from './components/Sidebar/SidebarContent';
 
-interface Tool {
-    id: string;
-    name: string;
-    description: string;
-    enabled: boolean;
-    icon: React.ReactNode;
-    parameters?: any;
-  }
-  
-  interface ToolDefinition {
-    type: 'function';
-    function: {
-      name: string;
-      description: string;
-      parameters: {
-        type: 'object';
-        properties: Record<string, any>;
-        required: string[];
-      };
-    };
-  }
+import {
+  RealtimeEditCounter,
+  computeLineDiff,
+  getFileNameOnly
+} from './components/NodeGraph/FileDiffNode';
 
-interface Skill {
-  id: string;
-  label: string;
-  prompt: string;
-  icon: React.ReactNode;
-}
+import { NodeGraph } from './components/NodeGraph/NodeGraph';
 
-const WebSearchAnimation = () => (
-  <motion.div
-    animate={{ 
-      rotate: 360,
-      scale: [1, 1.1, 1],
-    }}
-    transition={{ 
-      rotate: { repeat: Infinity, duration: 8, ease: "linear" },
-      scale: { repeat: Infinity, duration: 3, ease: "easeInOut" }
-    }}
-    className="flex items-center justify-center relative"
-  >
-    <div className="absolute inset-0 bg-teal-500/20 blur-xl rounded-full" />
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-teal-500 relative z-10">
-      <circle cx="12" cy="12" r="1"/>
-      <path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9c-4.54-4.52-9.87-6.54-11.9-4.5c-2.04 2.03-.02 7.36 4.5 11.9c4.54 4.52 9.87 6.54 11.9 4.5"/>
-      <path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9c-2.03-2.04-7.36-.02-11.9 4.5c-4.52 4.54-6.54 9.87-4.5 11.9c2.03 2.04 7.36.02 11.9-4.5"/>
-    </svg>
-  </motion.div>
-);
+import { CanvasBlock } from './components/Chat/CanvasBlock';
 
-const ToolCallingAnimation = () => (
-  <motion.div
-    animate={{ 
-      y: [0, -2, 0],
-      rotate: [0, 8, -8, 0],
-      scale: [1, 1.05, 1]
-    }}
-    transition={{ 
-      repeat: Infinity, 
-      duration: 2.5, 
-      ease: "easeInOut" 
-    }}
-    className="flex items-center justify-center relative"
-  >
-    <div className="absolute inset-0 bg-emerald-500/20 blur-xl rounded-full" />
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 relative z-10">
-      <path d="m14 12l-8.381 8.38a1 1 0 0 1-3.001-3L11 9"/>
-      <path d="M15 15.5a.5.5 0 0 0 .5.5A6.5 6.5 0 0 0 22 9.5a.5.5 0 0 0-.5-.5h-1.672a2 2 0 0 1-1.414-.586l-5.062-5.062a1.205 1.205 0 0 0-1.704 0L9.352 5.648a1.205 1.205 0 0 0 0 1.704l5.062 5.062A2 2 0 0 1 15 13.828z"/>
-    </svg>
-  </motion.div>
-);
+import { SearchResultsUI } from './components/Chat/SearchResultsUI';
 
-const LuminaToolCallingAnimation = () => (
-  <motion.div
-    animate={{ 
-      y: [0, -3, 0],
-      rotate: [0, -12, 12, 0],
-      scale: [1, 1.08, 1]
-    }}
-    transition={{ 
-      repeat: Infinity, 
-      duration: 2.2, 
-      ease: "easeInOut" 
-    }}
-    className="flex items-center justify-center relative select-none pointer-events-none"
-  >
-    <div className="absolute inset-0 bg-orange-500/20 blur-xl rounded-full animate-pulse" />
-    <Hammer size={16} className="text-orange-500 relative z-10" />
-  </motion.div>
-);
+import { ArtifactCard } from './components/Chat/ArtifactCard';
 
-interface SidebarProps {
-  chats: Chat[];
-  currentChatId: string | null;
-  setCurrentChatId: (id: string | null) => void;
-  createNewChat: (projId?: string | null) => void;
-  setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
-  onOpenSettings: () => void;
-  userProfile: {
-    name: string;
-    avatar: string;
-    dob: string;
-    location: string;
-    age?: number | string;
-  };
-  setUserProfile?: React.Dispatch<React.SetStateAction<any>>;
-  projectFolders?: { id: string; name: string }[];
-  setProjectFolders?: React.Dispatch<React.SetStateAction<{ id: string; name: string }[]>>;
-  activeLabTab: 'physics' | 'chemistry' | 'math' | 'biology' | null;
-  setActiveLabTab: (tab: 'physics' | 'chemistry' | 'math' | 'biology' | null) => void;
-  onSelect?: () => void;
-  activeProjectId?: string | null;
-  setActiveProjectId?: (id: string | null) => void;
-  isSidebarOpen?: boolean;
-  setIsSidebarOpen?: (open: boolean) => void;
-}
+import { MessageItem } from './components/Chat/MessageItem';
 
-const AVAILABLE_AVATARS = [
-  "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
-  "https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka",
-  "https://api.dicebear.com/7.x/avataaars/svg?seed=Sophia",
-  "https://api.dicebear.com/7.x/avataaars/svg?seed=John",
-  "https://api.dicebear.com/7.x/avataaars/svg?seed=Sasha",
+import { Canvas } from './components/Canvas/Canvas';
+
+import { ClaudeAsterisk } from './components/ui/ClaudeAsterisk';
+
+import { DevPerfCanvas } from './components/ui/DevPerfCanvas';
+
+import { parseThinkTags, turboQuantCompress } from './utils/textUtils';
+import { safeGetItem } from './utils/storageUtils';
+import { extractArtifacts } from './utils/artifactUtils';
+import { extractYouTubeId, fetchYouTubeTranscript } from './utils/youtubeUtils';
+import { OnboardingModal } from './components/OnboardingModal';
+import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
+import { SettingsModal } from './components/SettingsModal';
+import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
+
+const SUPPORTED_VOICE_LANGUAGES = [
+  { code: 'en-US', label: 'English (US)' },
+  { code: 'en-GB', label: 'English (UK)' },
+  { code: 'es-ES', label: 'Español (España)' },
+  { code: 'es-MX', label: 'Español (México)' },
+  { code: 'fr-FR', label: 'Français (France)' },
+  { code: 'de-DE', label: 'Deutsch (Deutschland)' },
+  { code: 'it-IT', label: 'Italiano (Italia)' },
+  { code: 'pt-BR', label: 'Português (Brasil)' },
+  { code: 'hi-IN', label: 'हिन्दी (भारत) / Hindi' },
+  { code: 'zh-CN', label: '中文 (简体) / Chinese' },
+  { code: 'ja-JP', label: '日本語 / Japanese' },
+  { code: 'ar-SA', label: 'العربية / Arabic' }
 ];
-
-const SidebarContent = ({ 
-  chats, 
-  currentChatId, 
-  setCurrentChatId, 
-  createNewChat, 
-  setChats,
-  onOpenSettings,
-  userProfile,
-  setUserProfile,
-  projectFolders = [],
-  setProjectFolders,
-  activeLabTab,
-  setActiveLabTab,
-  onSelect,
-  activeProjectId,
-  setActiveProjectId,
-  isSidebarOpen,
-  setIsSidebarOpen,
-}: SidebarProps) => {
-  const [labsHovered, setLabsHovered] = useState(false);
-  const [isRecentChatsOpen, setIsRecentChatsOpen] = useState(true);
-  const [isLabsSectionOpen, setIsLabsSectionOpen] = useState(false);
-  const [isAvatarSelectorOpen, setIsAvatarSelectorOpen] = useState(false);
-  const [isProjectsOpen, setIsProjectsOpen] = useState(false);
-  const [isCreatingProject, setIsCreatingProject] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
-
-  const handleSaveProject = () => {
-    if (newProjectName.trim()) {
-      const newId = Date.now().toString();
-      if (setProjectFolders) {
-        setProjectFolders(prev => [
-          ...prev,
-          { id: newId, name: newProjectName.trim() }
-        ]);
-      }
-      setExpandedFolders(prev => ({ ...prev, [newId]: true }));
-      setNewProjectName('');
-      setIsCreatingProject(false);
-    }
-  };
-
-  const isPhysicsTabActive = activeLabTab !== null;
-  const setIsPhysicsTabActive = (active: boolean) => {
-    setActiveLabTab(active ? 'physics' : null);
-  };
-
-  return (
-    <>
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-black dark:bg-white flex items-center justify-center text-white dark:text-black">
-            <Sparkles size={18} />
-          </div>
-          <span className="font-display font-semibold tracking-tight">Lumina</span>
-        </div>
-        {setIsSidebarOpen && (
-          <button
-            onClick={() => setIsSidebarOpen(false)}
-            className="p-1.5 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg text-gray-500 hover:text-black dark:hover:text-white transition-colors cursor-pointer hidden md:block"
-            title="Collapse sidebar"
-          >
-            <ChevronLeft size={16} />
-          </button>
-        )}
-      </div>
-
-      <button 
-        onClick={() => {
-          if (setActiveProjectId) {
-            setActiveProjectId(null);
-          }
-          createNewChat(null);
-          setActiveLabTab(null);
-        }}
-        className="flex items-center gap-3 p-3 mb-6 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-white/5 rounded-xl shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-white/10 transition-all text-sm font-medium dark:text-white"
-      >
-        <Plus size={18} />
-        New chat
-      </button>
-
-      <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
-        {/* Projects Category */}
-        <div className="space-y-1">
-          <button
-            onClick={() => setIsProjectsOpen(!isProjectsOpen)}
-            className="w-full flex items-center justify-between text-xs font-semibold text-zinc-400 dark:text-zinc-500 hover:text-zinc-300 dark:hover:text-zinc-300 mb-1.5 px-2.5 py-1 transition-colors cursor-pointer text-left animate-focus-target"
-            id="projects-category-header"
-          >
-            <span>Projects</span>
-            <ChevronDown size={11} className={`transition-transform duration-200 text-zinc-400 dark:text-zinc-500 ${isProjectsOpen ? '' : '-rotate-90'}`} />
-          </button>
-
-          <AnimatePresence initial={false}>
-            {isProjectsOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="space-y-0.5 overflow-hidden"
-              >
-                {!isCreatingProject ? (
-                  <button
-                    onClick={() => setIsCreatingProject(true)}
-                    className="w-full py-1 px-2.5 rounded-md flex items-center gap-2.5 text-xs font-medium bg-transparent text-zinc-450 hover:text-zinc-200 hover:bg-zinc-800/20 transition-all cursor-pointer select-none"
-                  >
-                    <FolderPlus size={15} className="shrink-0 text-zinc-500" />
-                    <span>New Project</span>
-                  </button>
-                ) : (
-                  <div className="px-2 py-0.5 mb-0.5">
-                    <div className="flex items-center gap-2 bg-transparent border border-zinc-800 rounded-md p-1">
-                      <Folder size={14} className="text-zinc-500 ml-1 shrink-0" />
-                      <input
-                        type="text"
-                        value={newProjectName}
-                        onChange={(e) => setNewProjectName(e.target.value)}
-                        placeholder="Folder name..."
-                        className="bg-transparent border-none text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-0 w-full font-medium"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleSaveProject();
-                          } else if (e.key === 'Escape') {
-                            setIsCreatingProject(false);
-                            setNewProjectName('');
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={handleSaveProject}
-                        className="p-0.5 text-emerald-400 hover:bg-zinc-800/40 rounded cursor-pointer shrink-0"
-                      >
-                        <Check size={11} />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsCreatingProject(false);
-                          setNewProjectName('');
-                        }}
-                        className="p-0.5 text-rose-450 hover:bg-zinc-800/40 rounded cursor-pointer shrink-0"
-                      >
-                        <X size={11} />
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {projectFolders.map(folder => {
-                  const isSelected = activeProjectId === folder.id;
-                  const isFolderExpanded = expandedFolders[folder.id] ?? true;
-                  const folderChats = chats.filter(c => c.projectId === folder.id);
-
-                  return (
-                    <div key={folder.id} className="space-y-0.5">
-                      <div className="group/folder relative">
-                        <div
-                          onClick={() => {
-                            setExpandedFolders(prev => ({ ...prev, [folder.id]: !isFolderExpanded }));
-                            if (setActiveProjectId) {
-                              setActiveProjectId(folder.id);
-                            }
-                            setCurrentChatId(null);
-                          }}
-                          className={`w-full py-1 px-2.5 rounded-md flex items-center justify-between transition-all select-none cursor-pointer ${
-                            isSelected 
-                              ? 'bg-zinc-800/25 text-zinc-100 font-medium' 
-                              : 'bg-transparent text-zinc-400 hover:bg-zinc-800/20 hover:text-zinc-200'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                            <Folder size={15} className={`shrink-0 ${isSelected ? 'text-zinc-350' : 'text-zinc-500'}`} />
-                            <span className="truncate text-xs">{folder.name}</span>
-                            {folderChats.length > 0 && (
-                              <span className="text-[9px] px-1.2 py-0.2 rounded-full font-bold leading-none bg-zinc-800/40 text-zinc-500 border border-zinc-850/40">
-                                {folderChats.length}
-                              </span>
-                            )}
-                          </div>
-                          
-                          <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/folder:opacity-100 transition-opacity">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setExpandedFolders(prev => ({ ...prev, [folder.id]: true }));
-                                createNewChat(folder.id);
-                              }}
-                              className="p-0.5 hover:bg-zinc-800 rounded-md text-zinc-500 hover:text-zinc-300 transition-colors"
-                              title="New Chat in this folder"
-                            >
-                              <Plus size={10} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (setProjectFolders) {
-                                  setProjectFolders(prev => prev.filter(f => f.id !== folder.id));
-                                }
-                                if (activeProjectId === folder.id && setActiveProjectId) {
-                                  setActiveProjectId(null);
-                                }
-                              }}
-                              className="p-0.5 text-zinc-550 hover:text-red-400 hover:bg-zinc-800 rounded-md transition-colors"
-                              title="Delete folder"
-                            >
-                              <Trash2 size={10} />
-                            </button>
-                          </div>
-
-                          <ChevronDown size={10} className={`ml-1 text-zinc-500 shrink-0 transition-transform duration-200 ${isFolderExpanded ? '' : '-rotate-90 group-hover/folder:opacity-0'}`} />
-                        </div>
-                      </div>
-
-                      <AnimatePresence initial={false}>
-                        {isFolderExpanded && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.15, ease: "easeInOut" }}
-                            className="pl-4 pr-1 py-0.5 space-y-0.5 overflow-hidden border-l border-zinc-800/40 ml-4"
-                          >
-                            {folderChats.map(chat => (
-                              <div key={chat.id} className="group/chat relative">
-                                <button
-                                  onClick={() => {
-                                    setCurrentChatId(chat.id);
-                                    setIsPhysicsTabActive(false);
-                                    if (onSelect) onSelect();
-                                  }}
-                                  className={`w-full py-1 px-2 rounded-md flex items-center gap-2 text-xs transition-colors pr-8 ${
-                                    (!isPhysicsTabActive && currentChatId === chat.id)
-                                      ? 'text-zinc-200 bg-zinc-800/20 font-medium pl-1.5 border-l border-zinc-600' 
-                                      : 'text-zinc-500 hover:bg-zinc-800/20 hover:text-zinc-350'
-                                  }`}
-                                >
-                                  <MessageSquare size={13} className={(!isPhysicsTabActive && currentChatId === chat.id) ? 'text-zinc-400' : 'text-zinc-500'} />
-                                  <span className="truncate text-left flex-1">{chat.title}</span>
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setChats(prev => prev.filter(c => c.id !== chat.id));
-                                    if (currentChatId === chat.id) setCurrentChatId(null);
-                                  }}
-                                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded opacity-0 group-hover/chat:opacity-100 transition-all cursor-pointer"
-                                  title="Delete chat"
-                                >
-                                  <Trash2 size={10} />
-                                </button>
-                              </div>
-                            ))}
-                            {folderChats.length === 0 && (
-                              <button
-                                onClick={() => createNewChat(folder.id)}
-                                className="w-full py-1.5 px-2 rounded-md flex items-center gap-2 text-[10px] text-zinc-550 hover:bg-zinc-800/20 border border-dashed border-zinc-800/60 hover:text-zinc-400 text-left transition-all"
-                              >
-                                <Plus size={11} className="text-zinc-550" />
-                                <span>Empty folder</span>
-                              </button>
-                            )}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
-                {projectFolders.length === 0 && !isCreatingProject && (
-                  <div className="px-3 py-2 text-xs text-zinc-500 italic">No projects created</div>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        <div 
-          className="space-y-1 relative"
-          onMouseEnter={() => setLabsHovered(true)}
-          onMouseLeave={() => setLabsHovered(false)}
-        >
-          <button
-            onClick={() => setIsLabsSectionOpen(!isLabsSectionOpen)}
-            className="w-full flex items-center justify-between text-[11px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 px-3 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 transition-colors rounded-lg cursor-pointer text-left"
-          >
-            <span>Laboratories</span>
-            <ChevronDown size={12} className={`transition-transform duration-200 text-gray-400 dark:text-zinc-500 ${isLabsSectionOpen ? '' : '-rotate-90'}`} />
-          </button>
-
-          <AnimatePresence initial={false}>
-            {isLabsSectionOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="space-y-1 overflow-hidden"
-              >
-                <button
-                  onClick={() => {
-                    if (!activeLabTab) {
-                      setActiveLabTab('physics');
-                      setCurrentChatId(null);
-                    }
-                  }}
-                  className={`w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors ${
-                    isPhysicsTabActive 
-                      ? 'bg-gray-200/50 dark:bg-white/10 text-black dark:text-white font-bold' 
-                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/5 dark:hover:text-zinc-300'
-                  }`}
-                >
-                  <Beaker size={16} className={isPhysicsTabActive ? 'text-blue-500 animate-pulse' : 'text-gray-450'} />
-                  <span className="truncate">Labs</span>
-                  <ChevronDown size={14} className={`ml-auto transition-transform duration-200 text-gray-450 ${labsHovered ? 'rotate-180 text-blue-505 dark:text-white' : ''}`} />
-                </button>
-
-                <AnimatePresence>
-                  {(labsHovered || isPhysicsTabActive) && (
-                    <motion.div
-                      initial={isPhysicsTabActive ? { opacity: 1, height: 'auto' } : { opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="pl-3 pr-1 py-1 space-y-1 overflow-hidden border-l border-zinc-200/50 dark:border-white/5 ml-4"
-                    >
-                      {[
-                        { id: 'physics' as const, name: 'Physics Tab', icon: <Activity size={14} className="text-blue-500" /> },
-                        { id: 'chemistry' as const, name: 'Chemistry Tab', icon: <Beaker size={14} className="text-emerald-500" /> },
-                        { id: 'math' as const, name: 'Math Tab', icon: <Compass size={14} className="text-purple-500" /> },
-                        { id: 'biology' as const, name: 'Biology Tab', icon: <Flower2 size={14} className="text-rose-500" /> }
-                      ].map(lab => (
-                        <button
-                          key={lab.id}
-                          onClick={() => {
-                            setActiveLabTab(lab.id);
-                            setCurrentChatId(null);
-                            if (onSelect) onSelect();
-                          }}
-                          className={`w-full p-2 rounded-md flex items-center gap-2.5 text-xs font-medium transition-all ${
-                            activeLabTab === lab.id
-                              ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold'
-                              : 'text-gray-500 hover:bg-gray-100 hover:text-gray-805 dark:hover:bg-white/5 dark:hover:text-zinc-200'
-                          }`}
-                        >
-                          {lab.icon}
-                          <span className="truncate">{lab.name}</span>
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-      <div className="space-y-1">
-        <button
-          onClick={() => setIsRecentChatsOpen(!isRecentChatsOpen)}
-          className="w-full flex items-center justify-between text-[11px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2 px-3 py-1.5 hover:text-gray-800 dark:hover:text-zinc-200 transition-colors rounded-lg cursor-pointer text-left"
-        >
-          <span>Recent Chats</span>
-          <ChevronDown size={12} className={`transition-transform duration-200 text-gray-400 dark:text-zinc-500 ${isRecentChatsOpen ? '' : '-rotate-90'}`} />
-        </button>
-        <AnimatePresence initial={false}>
-          {isRecentChatsOpen && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2, ease: "easeInOut" }}
-              className="space-y-1 overflow-hidden"
-            >
-        {activeLabTab && (
-          <div className="group relative">
-            <button
-              onClick={() => {
-                setCurrentChatId(null);
-                if (onSelect) onSelect();
-              }}
-              className="w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-semibold transition-colors pr-10 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/15"
-            >
-              <Activity size={16} className="text-blue-500 animate-pulse shrink-0" />
-              <span className="truncate">
-                {activeLabTab.charAt(0).toUpperCase() + activeLabTab.slice(1)} Laboratory
-              </span>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveLabTab(null);
-              }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-md opacity-0 group-hover:opacity-100 transition-all cursor-pointer border border-transparent h-7 w-7 flex items-center justify-center hover:border-red-500/20"
-              title="Close tab"
-            >
-              <X size={13} />
-            </button>
-          </div>
-        )}
-        {chats.filter(c => !c.projectId).map(chat => (
-          <div key={chat.id} className="group relative">
-            <button
-              onClick={() => {
-                setCurrentChatId(chat.id);
-                setIsPhysicsTabActive(false);
-                if (onSelect) onSelect();
-              }}
-              className={`w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors pr-10 ${
-                (!isPhysicsTabActive && currentChatId === chat.id)
-                  ? 'bg-gray-200/50 text-black dark:text-white' 
-                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:text-zinc-300'
-              }`}
-            >
-              <MessageSquare size={16} className={(!isPhysicsTabActive && currentChatId === chat.id) ? 'text-black dark:text-white' : 'text-gray-400'} />
-              <span className="truncate">{chat.title}</span>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setChats(prev => prev.filter(c => c.id !== chat.id));
-                if (currentChatId === chat.id) setCurrentChatId(null);
-              }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100 transition-all"
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
-              {chats.filter(c => !c.projectId).length === 0 && (
-                <div className="px-3 py-4 text-xs text-gray-400 dark:text-zinc-500 italic">No recent chats</div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      </div>
-
-    <div className="mt-auto pt-4 border-t border-gray-200 space-y-1">
-      <button 
-        onClick={onOpenSettings}
-        className="flex items-center gap-3 w-full p-2.5 hover:bg-gray-200/50 rounded-lg text-sm text-gray-600 transition-colors"
-      >
-        <Settings size={18} />
-        Settings
-      </button>
-      <div className="p-2.5 flex items-center gap-3 relative">
-        <div 
-          onClick={() => setIsAvatarSelectorOpen(!isAvatarSelectorOpen)}
-          className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-500/50 transition-all duration-200 relative group"
-          title="Change profile avatar"
-        >
-          {userProfile.avatar ? (
-            <img src={userProfile.avatar} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform" referrerPolicy="no-referrer" />
-          ) : (
-            userProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
-          )}
-          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <Camera size={10} className="text-white" />
-          </div>
-        </div>
-        <div className="flex-1 text-xs">
-          <div className="font-semibold truncate">{userProfile.name}</div>
-          <div className="text-gray-400">{userProfile.location || 'Pro Plan'}</div>
-        </div>
-
-        {/* Dynamic Avatar Picker Popover */}
-        <AnimatePresence>
-          {isAvatarSelectorOpen && (
-            <>
-              <div 
-                className="fixed inset-0 z-40 bg-transparent" 
-                onClick={() => setIsAvatarSelectorOpen(false)} 
-              />
-              <motion.div
-                initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                transition={{ duration: 0.15 }}
-                className="absolute bottom-12 left-0 w-56 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl p-2.5 shadow-xl z-50 flex flex-col gap-2"
-              >
-                <div className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-widest px-1">
-                  Select avatar
-                </div>
-                <div className="grid grid-cols-5 gap-1.5 justify-items-center">
-                  {AVAILABLE_AVATARS.map((avatarUrl, idx) => {
-                    const isSelected = userProfile.avatar === avatarUrl;
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          if (setUserProfile) {
-                            setUserProfile((prev: any) => ({ ...prev, avatar: avatarUrl }));
-                          }
-                          setIsAvatarSelectorOpen(false);
-                        }}
-                        className={`w-8 h-8 rounded-full overflow-hidden transition-all duration-200 border-2 hover:scale-110 active:scale-95 ${
-                          isSelected 
-                            ? "border-blue-500 scale-105 ring-2 ring-blue-500/10" 
-                            : "border-transparent hover:border-gray-200 dark:hover:border-zinc-700"
-                        }`}
-                      >
-                        <img 
-                          src={avatarUrl} 
-                          alt="" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  </>
-  );
-};
-
-const CanvasBlock = React.memo(({ language, code, isStreaming }: { language: string; code: string; isStreaming?: boolean }) => {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className={`bg-[#0d0d0d] border rounded-2xl overflow-hidden shadow-xl my-4 transition-all duration-300 ${isStreaming ? 'border-blue-500/30 ring-1 ring-blue-500/15 shadow-md shadow-blue-500/5' : 'border-white/8'}`}>
-      <div className={`flex items-center justify-between px-4 py-2.5 border-b transition-all duration-300 relative overflow-hidden ${isStreaming ? 'bg-[#151a24] border-blue-500/20' : 'bg-[#161616] border-white/5'}`}>
-        {isStreaming && (
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/[0.04] to-blue-500/0 animate-pulse pointer-events-none" />
-        )}
-        <div className="flex items-center gap-2.5 z-10">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full flex items-center gap-1.5 font-sans">
-            {isStreaming && (
-              <Loader2 size={11} className="animate-spin text-blue-450" />
-            )}
-            {language || 'code'}
-          </span>
-          {isStreaming && (
-            <span className="text-[10px] text-blue-400/80 font-medium animate-pulse uppercase tracking-wider font-sans">
-              Generating code...
-            </span>
-          )}
-        </div>
-        <button
-          onClick={handleCopy}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all z-10 ${
-            copied
-              ? 'text-emerald-400 bg-emerald-500/10'
-              : 'text-gray-500 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          {copied ? 'Copied!' : 'Copy'}
-        </button>
-      </div>
-      <div className="overflow-x-auto p-5 custom-scrollbar">
-        {typeof SyntaxHighlighter === 'function' ? (
-          <SyntaxHighlighter
-            language={language}
-            style={oneDark}
-            customStyle={{ 
-              background: 'transparent', 
-              backgroundColor: 'transparent',
-              fontSize: '13px', 
-              lineHeight: '1.6', 
-              margin: 0,
-              padding: 0,
-              border: 'none',
-              boxShadow: 'none',
-              textDecoration: 'none'
-            }}
-            codeTagProps={{
-              style: {
-                background: 'transparent',
-                backgroundColor: 'transparent',
-                border: 'none',
-                textDecoration: 'none',
-                boxShadow: 'none'
-              }
-            }}
-            showLineNumbers
-            lineNumberStyle={{ 
-              color: '#3f3f46', 
-              minWidth: '2.5em',
-              background: 'transparent',
-              backgroundColor: 'transparent',
-              paddingRight: '1em',
-              textAlign: 'right',
-              userSelect: 'none',
-              borderRight: 'none',
-              textDecoration: 'none'
-            }}
-          >
-            {code}
-          </SyntaxHighlighter>
-        ) : (
-          <pre className="text-gray-300 text-[13px] leading-relaxed font-mono whitespace-pre">
-            <code>{code}</code>
-          </pre>
-        )}
-      </div>
-    </div>
-  );
-});
-
-const CLOUD_PROVIDERS = [
-  { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: <Terminal size={13} /> },
-  { id: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1', key: '', icon: <Sparkles size={13} /> },
-  { id: 'anthropic', label: 'Anthropic', endpoint: 'https://api.anthropic.com/v1', key: '', icon: <Brain size={13} /> },
-  { id: 'groq', label: 'Groq', endpoint: 'https://api.groq.com/openai/v1', key: '', icon: <Terminal size={13} /> },
-  { id: 'openrouter', label: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', key: '', icon: <Box size={13} /> },
-  { id: 'together', label: 'Together AI', endpoint: 'https://api.together.xyz/v1', key: '', icon: <Sparkles size={13} /> },
-  { id: 'mistral', label: 'Mistral', endpoint: 'https://api.mistral.ai/v1', key: '', icon: <Sparkles size={13} /> },
-  { id: 'ollama_cloud', label: 'Ollama Cloud', endpoint: 'https://ollama.com', key: '', icon: <CloudSun size={13} /> },
-  { id: 'ollama_local', label: 'Ollama Local', endpoint: 'http://127.0.0.1:11434/v1', key: '', icon: <Terminal size={13} /> },
-  { id: 'lm_studio', label: 'LM Studio', endpoint: 'http://127.0.0.1:1234/v1', key: '', icon: <HardDrive size={13} /> },
-  { id: 'nvidia_nim', label: 'NVIDIA NIM', endpoint: 'https://integrate.api.nvidia.com/v1', key: '', icon: <Sparkles size={13} /> },
-  { id: 'gemini', label: 'Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', key: '', icon: <Sparkles size={13} /> },
-  { id: 'cohere', label: 'Cohere', endpoint: 'https://api.cohere.com/compatibility/v1', key: '', icon: <Globe size={13} /> },
-  { id: 'deepseek', label: 'DeepSeek', endpoint: 'https://api.deepseek.com', key: '', icon: <Box size={13} /> },
-  { id: 'sarvamai', label: 'Sarvam AI', endpoint: 'https://api.sarvam.ai/v1', key: '', icon: <Globe size={13} /> },
-  { id: 'kilo', label: 'Kilo Code', endpoint: 'https://api.kilo.ai/api/gateway', key: '', icon: <Terminal size={13} /> },
-  { id: 'opencode', label: 'OpenCode', endpoint: 'https://opencode.ai/zen', key: '', icon: <Box size={13} /> },
-  { id: 'cline', label: 'Cline', endpoint: 'https://api.cline.bot', key: '', icon: <Terminal size={13} /> },
-];
-
-const getDomain = (url: string) => {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-};
-
-const getFavicon = (url: string) => {
-  try {
-    const domain = new URL(url).hostname;
-    return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
-  } catch {
-    return null;
-  }
-};
-
-function parseThinkTags(content: string): { before: string; think: string; after: string; isThinking: boolean } {
-  const openTag = '<think>';
-  const closeTag = '</think>';
-  const startIdx = content.indexOf(openTag);
-  
-  if (startIdx === -1) {
-    return { before: content, think: '', after: '', isThinking: false };
-  }
-  
-  const endIdx = content.indexOf(closeTag, startIdx + openTag.length);
-  if (endIdx === -1) {
-    // We are currently in the middle of thinking
-    const before = content.slice(0, startIdx);
-    const think = content.slice(startIdx + openTag.length);
-    return { before, think, after: '', isThinking: true };
-  }
-  
-  // Thinking has completed
-  const before = content.slice(0, startIdx);
-  const think = content.slice(startIdx + openTag.length, endIdx);
-  const after = content.slice(endIdx + closeTag.length);
-  return { before, think, after, isThinking: false };
-}
-
-const SearchResultsUI = React.memo(({ query, sources }: { query: string; sources: any[]; isSearching?: boolean }) => {
-  const [isOpen, setIsOpen] = useState(true);
-
-  return (
-    <div className="my-6 space-y-4">
-      <div className="flex items-center justify-between text-[13px] font-medium text-zinc-500 dark:text-zinc-400 pl-1">
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 rounded-lg border shadow-xs bg-zinc-50 border-zinc-100 dark:bg-white/5 dark:border-white/10 text-blue-500">
-            <Globe size={14} />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-zinc-850 dark:text-zinc-200 font-semibold">{query}</span>
-            <span className="text-[10px] text-zinc-400 dark:text-zinc-550 uppercase tracking-widest">{sources.length} sources found</span>
-          </div>
-        </div>
-
-        {/* Collapsible Area Trigger named Web Source */}
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-zinc-200/50 dark:border-white/5 bg-zinc-50/50 dark:bg-zinc-900/30 hover:bg-zinc-100 dark:hover:bg-zinc-900/50 text-zinc-700 dark:text-zinc-300 cursor-pointer transition-all hover:border-zinc-300 dark:hover:border-white/10 shadow-3xs"
-        >
-          <span className="font-bold">Web Source</span>
-          <motion.div
-            animate={{ rotate: isOpen ? 0 : -90 }}
-            transition={{ duration: 0.15 }}
-            className="text-zinc-400"
-          >
-            <ChevronDown size={11} />
-          </motion.div>
-        </button>
-      </div>
-
-      <AnimatePresence initial={false}>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
-            className="overflow-hidden"
-          >
-            <div className="bg-zinc-50/50 dark:bg-white/[0.02] border border-zinc-100 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm mt-1">
-              <div className="p-1 space-y-0.5">
-                {sources.map((source, i) => (
-                  <motion.a
-                    key={i}
-                    href={source.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    initial={{ opacity: 0, x: -5 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    className="flex items-center justify-between p-3 hover:bg-white dark:hover:bg-white/10 rounded-xl transition-all group cursor-pointer block"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-6 h-6 rounded-md bg-white dark:bg-zinc-800 border border-zinc-100 dark:border-white/10 flex items-center justify-center p-1 shrink-0 bg-white/50 backdrop-blur-sm">
-                        {getFavicon(source.url) ? (
-                          <img src={getFavicon(source.url)!} alt="" className="w-full h-full object-contain filter dark:brightness-90 truncate" referrerPolicy="no-referrer" />
-                        ) : (
-                          <Globe size={12} className="text-zinc-400" />
-                        )}
-                      </div>
-                      <span className="text-[13px] font-medium text-zinc-650 dark:text-zinc-350 group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate transition-colors underline-offset-2 group-hover:underline">
-                        {source.title || source.url}
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-zinc-450 dark:text-zinc-500 font-mono tracking-tight shrink-0 pl-4 opacity-60 group-hover:opacity-100 transition-opacity">
-                      {getDomain(source.url)}
-                    </span>
-                  </motion.a>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-});
-
-const renderNodeIcon = (icon: any) => {
-  if (!icon) return <FileText size={14} />;
-  
-  if (React.isValidElement(icon)) {
-    return icon;
-  }
-  
-  if (typeof icon === 'string') {
-    const name = icon.toLowerCase();
-    if (name.includes('search') || name.includes('research')) return <Search size={14} />;
-    if (name.includes('wikipedia') || name.includes('globe')) return <Globe size={14} />;
-    if (name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs')) return <FileText size={14} />;
-    if (name.includes('write') || name.includes('edit')) return <PenTool size={14} />;
-    if (name.includes('github') || name.includes('box')) return <Box size={14} />;
-    if (name.includes('weather') || name.includes('cloud')) return <CloudMoon size={14} />;
-    if (name.includes('shell') || name.includes('terminal')) return <Terminal size={14} />;
-    if (name.includes('sparkles') || name.includes('ai')) return <Sparkles size={14} />;
-    if (name.includes('check') || name.includes('success')) return <Check size={14} />;
-    return <FileText size={14} />;
-  }
-
-  if (typeof icon === 'object') {
-    let typeName = '';
-    if (icon.type) {
-      if (typeof icon.type === 'string') {
-        typeName = icon.type;
-      } else if (typeof icon.type === 'object') {
-        typeName = icon.type.name || icon.type.displayName || '';
-      } else if (typeof icon.type === 'function') {
-        typeName = icon.type.name || icon.type.displayName || '';
-      }
-    }
-    
-    const name = typeName.toLowerCase();
-    if (name.includes('search') || name.includes('research')) return <Search size={14} />;
-    if (name.includes('wikipedia') || name.includes('globe')) return <Globe size={14} />;
-    if (name.includes('file') || name.includes('text')) return <FileText size={14} />;
-    if (name.includes('pen') || name.includes('write') || name.includes('edit')) return <PenTool size={14} />;
-    if (name.includes('github') || name.includes('box')) return <Box size={14} />;
-    if (name.includes('weather') || name.includes('cloud')) return <CloudMoon size={14} />;
-    if (name.includes('shell') || name.includes('terminal')) return <Terminal size={14} />;
-    if (name.includes('sparkles') || name.includes('ai')) return <Sparkles size={14} />;
-    if (name.includes('check') || name.includes('success')) return <Check size={14} />;
-    
-    return <FileText size={14} />;
-  }
-
-  return <FileText size={14} />;
-};
-
-const computeLineDiff = (oldContent: string, newContent: string) => {
-  const oldLines = oldContent ? oldContent.split('\n') : [];
-  const newLines = newContent ? newContent.split('\n') : [];
-  
-  let added = 0;
-  let removed = 0;
-  
-  const oldSet = new Set(oldLines.map(l => l.trim()));
-  const newSet = new Set(newLines.map(l => l.trim()));
-  
-  for (const line of newLines) {
-    if (!oldSet.has(line.trim())) {
-      added++;
-    }
-  }
-  for (const line of oldLines) {
-    if (!newSet.has(line.trim())) {
-      removed++;
-    }
-  }
-  
-  if (oldContent !== newContent && added === 0 && removed === 0) {
-    added = 1;
-  }
-  
-  return { added, removed };
-};
-
-const getFileNameOnly = (path: string) => {
-  if (!path) return 'file.ts';
-  const parts = path.split('/');
-  return parts[parts.length - 1];
-};
-
-const humanizeToolName = (toolName?: string, rawLabel?: string) => {
-  if (!toolName) return rawLabel || 'System action';
-  const lower = toolName.toLowerCase();
-  
-  if (lower === 'edit_coder_file') {
-    return 'Modify and upgrade template source file';
-  }
-  if (lower === 'create_coder_file') {
-    return 'Create new engineering component file';
-  }
-  if (lower === 'list_coder_files') {
-    return 'Query and analyze codebase project file tree';
-  }
-  if (lower === 'read_coder_file') {
-    return 'Inspect and parse file lines';
-  }
-  if (lower === 'delete_coder_file') {
-    return 'Remove deprecated files from directory';
-  }
-  if (lower === 'verify_changes') {
-    return 'Verify target changes';
-  }
-  return rawLabel || toolName;
-};
-
-const RealtimeEditCounter = ({ node }: { node: ToolCallNode }) => {
-  const [added, setAdded] = React.useState(0);
-  const [removed, setRemoved] = React.useState(0);
-  const isEditing = node.status === 'active';
-  const isComplete = node.status === 'complete';
-  
-  const targetAdded = node.addedCount ?? 45;
-  const targetRemoved = node.removedCount ?? 8;
-
-  React.useEffect(() => {
-    if (isEditing) {
-      const interval = setInterval(() => {
-        setAdded(prev => {
-          if (prev < targetAdded) {
-            return prev + Math.floor(Math.random() * 3) + 1;
-          }
-          return prev + (Math.random() > 0.6 ? 1 : Math.random() > 0.8 ? -1 : 0);
-        });
-        setRemoved(prev => {
-          if (prev < targetRemoved) {
-            return prev + Math.floor(Math.random() * 2) + 1;
-          }
-          return prev + (Math.random() > 0.6 ? 1 : Math.random() > 0.8 ? -1 : 0);
-        });
-      }, 150);
-      
-      return () => clearInterval(interval);
-    } else if (isComplete) {
-      setAdded(node.addedCount ?? 0);
-      setRemoved(node.removedCount ?? 0);
-    }
-  }, [isEditing, isComplete, targetAdded, targetRemoved, node.addedCount, node.removedCount]);
-
-  const displayAdded = isEditing ? Math.max(1, added) : (node.addedCount ?? 0);
-  const displayRemoved = isEditing ? Math.max(1, removed) : (node.removedCount ?? 0);
-
-  return (
-    <div className="flex items-center gap-2 mt-1 px-1 py-0.5 select-none font-sans flex-wrap ml-7">
-      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-700/50 font-mono text-[11px] text-zinc-650 dark:text-zinc-350">
-        <span className="opacity-70">{getFileNameOnly(node.filePath || 'file.ts')}</span>
-      </div>
-      {displayAdded > 0 && (
-        <span className="text-[11.5px] font-bold text-[#10b981] dark:text-[#34d399] font-mono">
-          +{displayAdded}
-        </span>
-      )}
-      {displayRemoved > 0 && (
-        <span className="text-[11.5px] font-bold text-rose-500 font-mono">
-          -{displayRemoved}
-        </span>
-      )}
-    </div>
-  );
-};
-
-const NodeGraph = React.memo(({ 
-  nodes, 
-  isStreaming,
-  thinkContent,
-  isStreamingThinking,
-  isSearching,
-  searchQuery,
-  sources = [],
-  scrapingResults = new Map(),
-  wikiResults = new Map(),
-  onSendMessage
-}: { 
-  nodes: ToolCallNode[]; 
-  isStreaming?: boolean;
-  thinkContent?: string;
-  isStreamingThinking?: boolean;
-  isSearching?: boolean;
-  searchQuery?: string;
-  sources?: any[];
-  scrapingResults?: Map<string, ScrapeResult>;
-  wikiResults?: Map<string, { wikiType: string, data: any }>;
-  onSendMessage?: (msg: string) => void;
-}) => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    return !(isStreaming || isStreamingThinking || isSearching || nodes.some(n => n.status === 'active'));
-  });
-
-  const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
-  const [isSearchExpanded, setIsSearchExpanded] = useState(true);
-  const [collapsedToolNodes, setCollapsedToolNodes] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    if (isStreaming || isStreamingThinking || isSearching || nodes.some(n => n.status === 'active')) {
-      setIsCollapsed(false);
-    }
-  }, [nodes, isStreaming, isStreamingThinking, isSearching]);
-
-  useEffect(() => {
-    if (isStreamingThinking) {
-      setIsThinkingExpanded(true);
-    }
-  }, [isStreamingThinking]);
-
-  useEffect(() => {
-    if (isSearching) {
-      setIsSearchExpanded(true);
-    }
-  }, [isSearching]);
-
-  const hasThoughts = thinkContent !== undefined && thinkContent.length > 0;
-  const hasTools = nodes.filter(n => n.id !== 'thinking-node').length > 0;
-  const hasSearch = !!(isSearching || searchQuery || (sources && sources.length > 0));
-  
-  const headerText = useMemo(() => {
-    if (hasThoughts && hasTools && hasSearch) {
-      return 'Thoughts, search & system actions';
-    } else if (hasThoughts && hasSearch) {
-      return 'Thought process & web search';
-    } else if (hasThoughts && hasTools) {
-      return 'Thought process & system actions';
-    } else if (hasSearch && hasTools) {
-      return 'Web search & system actions';
-    } else if (hasThoughts) {
-      return isStreamingThinking ? 'Thinking...' : 'Thought process';
-    } else if (hasSearch) {
-      return isSearching ? 'Searching the web...' : 'Search completed';
-    } else if (hasTools) {
-      const toolNodes = nodes.filter(n => n.id !== 'thinking-node');
-      return toolNodes.length > 1 ? `System actions (${toolNodes.length})` : 'System action';
-    }
-    return 'Lumina thoughts';
-  }, [hasThoughts, hasTools, hasSearch, nodes, isStreamingThinking, isSearching]);
-
-  const allComplete = nodes.every(n => n.status === 'complete') && !isStreamingThinking && !isSearching;
-
-  const displayNodes = useMemo(() => {
-    if (hasThoughts) {
-      return nodes.filter(n => n.id !== 'thinking-node');
-    }
-    return nodes;
-  }, [nodes, hasThoughts]);
-
-  return (
-    <div className="my-5 w-full pl-2">
-      <button
-        onClick={() => setIsCollapsed(!isCollapsed)}
-        className="flex items-center gap-2 text-[14px] font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300 transition-all group px-1 rounded-lg cursor-pointer"
-      >
-        <span>{headerText}</span>
-        <motion.div
-          animate={{ rotate: isCollapsed ? 0 : 180 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-        >
-          <ChevronDown size={14} className="text-zinc-500 opacity-60" />
-        </motion.div>
-      </button>
-      <motion.div
-        initial={false}
-        animate={{ 
-          height: isCollapsed ? 0 : 'auto',
-          opacity: isCollapsed ? 0 : 1,
-          marginTop: isCollapsed ? 0 : 16
-        }}
-        transition={{ 
-          height: { duration: (isStreaming || isStreamingThinking || isSearching) ? 0 : 0.25, ease: "easeInOut" },
-          opacity: { duration: 0.2 }
-        }}
-        className="overflow-hidden"
-      >
-        <div className="ml-[7px] border-l border-zinc-100 dark:border-white/10 space-y-5 relative py-1">
-          {/* Collapsible search step inside timeline */}
-          {hasSearch && (
-            <div className="relative pl-8">
-              <div className="absolute left-0 top-[10px] w-4 h-[1px] bg-zinc-100 dark:bg-white/5" />
-              <button
-                onClick={() => setIsSearchExpanded(!isSearchExpanded)}
-                className="flex items-center gap-2 group/btn cursor-pointer text-left focus:outline-hidden"
-              >
-                <div className={`transition-colors shrink-0 ${isSearching ? 'text-blue-500' : 'text-zinc-400'}`}>
-                  <Globe size={14} className={isSearching ? "animate-spin-slow text-blue-500" : "text-emerald-500"} />
-                </div>
-                <span className={`text-[13px] font-semibold transition-colors ${
-                  isSearching ? 'text-blue-500' : 'text-zinc-650 dark:text-zinc-400'
-                }`}>
-                  {isSearching ? 'Analyzing and scraping web sources...' : `Searched the web for "${searchQuery || 'information'}"`}
-                </span>
-                <motion.div
-                  animate={{ rotate: isSearchExpanded ? 0 : -90 }}
-                  transition={{ duration: 0.15 }}
-                  className="text-zinc-400 group-hover/btn:text-zinc-650 dark:group-hover/btn:text-zinc-200"
-                >
-                  <ChevronDown size={12} />
-                </motion.div>
-                {isSearching && (
-                  <span className="flex gap-0.5 ml-1">
-                    <span className="w-1 h-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1 h-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1 h-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </span>
-                )}
-              </button>
-
-              <AnimatePresence initial={false}>
-                {isSearchExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                    animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
-                    exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                    transition={{ duration: 0.25, ease: "easeInOut" }}
-                    className="overflow-hidden"
-                  >
-                    <div className="relative border border-zinc-100 dark:border-white/5 bg-zinc-50/40 dark:bg-white/[0.01] rounded-xl p-3.5 space-y-3 shadow-inner max-w-2xl">
-                      {/* Sub-header or indicator */}
-                      <div className="flex items-center justify-between text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
-                        <span className="uppercase tracking-widest flex items-center gap-1.5 font-bold">
-                          {isSearching ? (
-                            <>
-                              <span className="relative flex h-2 w-2">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                              </span>
-                              LUMINA SEARCH AGENT RUNNING
-                            </>
-                          ) : (
-                            <>
-                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500"></span>
-                              SEARCH COMPLETED
-                            </>
-                          )}
-                        </span>
-                        <span className="tracking-widest font-mono font-bold">
-                          {sources.length === 1 ? '1 SOURCE FOUND' : `${sources.length} SOURCES BOUND`}
-                        </span>
-                      </div>
-
-                      {/* Animated Real-time scraping list */}
-                      <div className="space-y-2">
-                        {/* Render actual sources retrieved */}
-                        {sources.map((source, idx) => {
-                          const domain = getDomain(source.url);
-                          return (
-                            <motion.a 
-                              key={source.url + '-' + idx}
-                              href={source.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              initial={{ opacity: 0, y: 5 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ duration: 0.2, delay: idx * 0.04 }}
-                              className="flex items-start justify-between text-xs p-2.5 rounded-lg border border-zinc-205 dark:border-white/5 bg-white dark:bg-zinc-950/20 font-sans group/src shadow-xs hover:border-zinc-300 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0 pr-4">
-                                <div className="p-1 rounded bg-zinc-50 dark:bg-white/5 border border-zinc-150 dark:border-white/10 shrink-0">
-                                  {getFavicon(source.url) ? (
-                                    <img src={getFavicon(source.url)!} alt="" className="w-3.5 h-3.5 object-contain" referrerPolicy="no-referrer" />
-                                  ) : (
-                                    <Globe size={11} className="text-zinc-400" />
-                                  )}
-                                </div>
-                                <div className="flex flex-col min-w-0">
-                                  <span className="font-semibold text-zinc-700 dark:text-zinc-350 truncate">
-                                    {source.title || domain}
-                                  </span>
-                                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">
-                                    {source.url}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="shrink-0 flex items-center gap-1.5 pt-0.5">
-                                {isSearching ? (
-                                  <>
-                                    <span className="text-[10px] text-blue-500 font-mono animate-pulse font-medium">scraping...</span>
-                                    <span className="relative flex h-1.5 w-1.5 font-bold">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
-                                    </span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="text-[10px] text-emerald-555 dark:text-emerald-500 font-mono font-medium">100% parsed</span>
-                                    <Check size={11} className="text-emerald-500" strokeWidth={3} />
-                                  </>
-                                )}
-                              </div>
-                            </motion.a>
-                          );
-                        })}
-
-                        {/* Scraper loader during search before any sources load */}
-                        {isSearching && sources.length === 0 && (
-                          <div className="space-y-1.5">
-                            {[
-                              { label: `Establishing search connection...`, status: 'connecting' },
-                              { label: `Querying global content graphs for "${searchQuery || 'query'}"...`, status: 'querying' },
-                              { label: `Allocating virtual scrape nodes...`, status: 'running' }
-                            ].map((step, sIdx) => (
-                              <motion.div
-                                key={sIdx}
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: [1, 0.5, 1] }}
-                                transition={{ repeat: Infinity, duration: 2, delay: sIdx * 0.3 }}
-                                className="flex items-center justify-between text-xs p-2 rounded-lg border border-dashed border-zinc-200 dark:border-white/5 bg-white/50 dark:bg-zinc-950/20"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Loader2 size={12} className="text-blue-500 animate-spin" />
-                                  <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[11px]">{step.label}</span>
-                                </div>
-                                <span className="text-[9px] font-mono font-bold text-blue-500 uppercase tracking-widest animate-pulse">connecting</span>
-                              </motion.div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
-
-          {/* Collapsible thoughts step inside timeline */}
-          {hasThoughts && (
-            <div className="relative pl-8">
-              <div className="absolute left-0 top-[10px] w-4 h-[1px] bg-zinc-100 dark:bg-white/5" />
-              <button
-                onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
-                className="flex items-center gap-2 group/btn cursor-pointer text-left focus:outline-hidden"
-              >
-                <div className={`transition-colors shrink-0 ${isStreamingThinking ? 'text-blue-500' : 'text-zinc-400 dark:text-zinc-500'}`}>
-                  <Brain size={14} className={isStreamingThinking ? "animate-pulse" : ""} />
-                </div>
-                <span className={`text-[13.5px] font-medium transition-colors ${
-                  isStreamingThinking ? 'text-blue-500' : 'text-zinc-600 dark:text-zinc-400'
-                }`}>
-                  Thought process
-                </span>
-                <motion.div
-                  animate={{ rotate: isThinkingExpanded ? 0 : -90 }}
-                  transition={{ duration: 0.15 }}
-                  className="text-zinc-400 group-hover/btn:text-zinc-600 dark:group-hover/btn:text-zinc-200"
-                >
-                  <ChevronDown size={12} />
-                </motion.div>
-                {isStreamingThinking && (
-                  <span className="flex gap-0.5 ml-1">
-                    <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </span>
-                )}
-              </button>
-              <AnimatePresence initial={false}>
-                {isThinkingExpanded && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                    animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
-                    exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                    transition={{ duration: 0.25, ease: "easeInOut" }}
-                    className="overflow-hidden"
-                  >
-                    <div className="p-3.5 rounded-xl border border-blue-500/10 bg-blue-500/5 dark:bg-blue-500/[0.02] text-[12.5px] leading-relaxed text-blue-400/80 dark:text-blue-400/80 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar italic shadow-inner">
-                      {thinkContent}
-                      {isStreamingThinking && (
-                        <motion.span
-                          animate={{ opacity: [1, 0] }}
-                          transition={{ repeat: Infinity, duration: 0.6 }}
-                          className="inline-block w-1.5 h-3 bg-blue-400 ml-0.5 rounded-sm align-middle"
-                        />
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
-
-          {displayNodes.map((node, i) => {
-            const isEditNode = node.toolName === 'edit_coder_file' || node.toolName === 'create_coder_file';
-            const isScriptNode = node.toolName === 'verify_changes' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
-            
-            return (
-              <motion.div
-                key={node.id}
-                initial={(isStreaming || isStreamingThinking) ? false : { opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
-                className="relative flex flex-col pl-8 py-0.5 items-start"
-              >
-                <div className="absolute left-0 top-[12px] w-4 h-[1px] bg-zinc-150 dark:bg-white/10" />
-                
-                {(() => {
-                  const isCollapsible = node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_');
-                  const isCollapsedLocally = !!collapsedToolNodes[node.id];
-                  
-                  const headerContent = (
-                    <div className="flex items-center gap-3">
-                      <div className="transition-colors shrink-0">
-                        {node.status === 'active' ? (
-                          isCollapsible ? <LuminaToolCallingAnimation /> : <ToolCallingAnimation />
-                        ) : (
-                          renderNodeIcon(node.icon)
-                        )}
-                      </div>
-                      
-                      <span className={`text-[13px] font-medium transition-colors ${
-                        node.status === 'active'
-                          ? isCollapsible ? 'text-orange-500 font-semibold' : 'text-emerald-500 font-semibold'
-                          : 'text-zinc-750 dark:text-zinc-300'
-                      }`}>
-                        {humanizeToolName(node.toolName, node.label)}
-                      </span>
-
-                      {isCollapsible && (
-                        <motion.div
-                          animate={{ rotate: isCollapsedLocally ? -90 : 0 }}
-                          transition={{ duration: 0.15 }}
-                          className="text-zinc-400 group-hover:text-zinc-650 dark:group-hover:text-zinc-200 shrink-0"
-                        >
-                          <ChevronDown size={12} />
-                        </motion.div>
-                      )}
-                      
-                      {node.status === 'active' && (
-                        <motion.div
-                          animate={{ opacity: [0.4, 1, 0.4] }}
-                          transition={{ repeat: Infinity, duration: 1.5 }}
-                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                            isCollapsible ? 'bg-orange-500' : 'bg-emerald-500'
-                          }`}
-                        />
-                      )}
-                    </div>
-                  );
-
-                  if (isCollapsible) {
-                    return (
-                      <button
-                        onClick={() => {
-                          setCollapsedToolNodes(prev => ({
-                            ...prev,
-                            [node.id]: !prev[node.id]
-                          }));
-                        }}
-                        className="flex items-center gap-3 group focus:outline-hidden hover:opacity-90 cursor-pointer text-left"
-                      >
-                        {headerContent}
-                      </button>
-                    );
-                  }
-
-                  return headerContent;
-                })()}
-
-                {isEditNode && (
-                  <RealtimeEditCounter node={node} />
-                )}
-
-                {isScriptNode && (
-                  <div className="flex items-center gap-1.5 mt-1 ml-7">
-                    <span className="text-[10px] font-bold tracking-widest uppercase px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400 rounded border border-zinc-200/50 dark:border-zinc-700/50 font-mono">
-                      Script
-                    </span>
-                  </div>
-                )}
-
-                {node.toolName === 'web_scrape' && (
-                  <AnimatePresence initial={false}>
-                    {!collapsedToolNodes[node.id] && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                        animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
-                        exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                        transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="overflow-hidden w-full ml-7"
-                      >
-                        {node.status === 'complete' ? (
-                          (() => {
-                            const scrapeResult = scrapingResults.get(node.id);
-                            if (!scrapeResult) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving scraped content assets...</div>;
-                            return (
-                              <div className="max-w-[800px] xl:max-w-[1000px] w-full">
-                                <ScrapingResultArtifact 
-                                  result={scrapeResult} 
-                                  onReScrape={(reScrapeUrl) => {
-                                    console.log('Re-scrape request:', reScrapeUrl);
-                                  }}
-                                />
-                              </div>
-                            );
-                          })()
-                        ) : (
-                          <ScrapingProgressIndicator 
-                            status={node.status} 
-                            url={node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
-                          />
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                )}
-
-                {node.toolName?.startsWith('wiki_') && (
-                  <AnimatePresence initial={false}>
-                    {!collapsedToolNodes[node.id] && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0, marginTop: 0 }}
-                        animate={{ height: 'auto', opacity: 1, marginTop: 10 }}
-                        exit={{ height: 0, opacity: 0, marginTop: 0 }}
-                        transition={{ duration: 0.25, ease: "easeInOut" }}
-                        className="overflow-hidden w-full ml-7"
-                      >
-                        {node.status === 'complete' ? (
-                          (() => {
-                            const wikiRes = wikiResults.get(node.id);
-                            if (!wikiRes) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving Wikipedia knowledge assets...</div>;
-                            return (
-                              <div className="max-w-[800px] xl:max-w-[1000px] w-full">
-                                <WikiArticleArtifact 
-                                  data={wikiRes.data} 
-                                  wikiType={wikiRes.wikiType as any}
-                                  onFetchPage={(pageId) => {
-                                    onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`);
-                                  }}
-                                  onSearch={(query) => {
-                                    onSendMessage?.(`Search Wikipedia for: ${query}`);
-                                  }}
-                                />
-                              </div>
-                            );
-                          })()
-                        ) : (
-                          <WikiToolCallIndicator node={node} />
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                )}
-              </motion.div>
-            );
-          })}
-          {allComplete && !isStreaming && (
-            <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: displayNodes.length * 0.05 }}
-              className="relative flex items-center gap-3 pl-8 pt-1"
-            >
-              <div className="absolute left-0 top-[18px] w-4 h-[1px] bg-zinc-150 dark:bg-white/10" />
-              <div className="shrink-0 flex items-center justify-center w-4 h-4 rounded-full border border-zinc-400 dark:border-zinc-600 text-emerald-500 dark:text-emerald-400 bg-white dark:bg-zinc-900 z-10 shadow-xs">
-                <Check size={10} strokeWidth={3} />
-              </div>
-              <span className="text-[13.5px] font-bold text-zinc-800 dark:text-zinc-200">Done</span>
-            </motion.div>
-          )}
-        </div>
-      </motion.div>
-    </div>
-  );
-});
-
-const ArtifactCard = React.memo(({ artifact, onOpen }: { artifact: Artifact; onOpen: (a: Artifact) => void }) => {
-  const downloadFile = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const typeMap = {
-      code: 'text/plain',
-      markdown: 'text/markdown',
-      html: 'text/html',
-      poem: 'text/plain',
-      report: 'text/markdown'
-    };
-    const blob = new Blob([artifact.content], { type: typeMap[artifact.type] || 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const ext = artifact.type === 'poem' ? 'txt' : artifact.type === 'report' ? 'md' : artifact.language === 'javascript' ? 'js' : artifact.language === 'typescript' ? 'ts' : artifact.language === 'markdown' ? 'md' : artifact.language;
-    a.download = `${artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      onClick={() => onOpen(artifact)}
-      className="flex items-center gap-4 p-4 bg-zinc-50 dark:bg-white/5 border border-zinc-100 dark:border-white/10 rounded-2xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-white/10 transition-all group my-4 shadow-sm"
-    >
-      <div className="w-12 h-12 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-100 dark:border-white/5 flex items-center justify-center text-zinc-400 group-hover:text-blue-500 transition-colors shadow-sm">
-        {artifact.type === 'html' ? <Layout size={24} /> : 
-         artifact.type === 'markdown' ? <FileText size={24} className="text-zinc-500" /> : 
-         artifact.type === 'poem' ? <PenTool size={24} className="text-amber-550 dark:text-amber-400" /> :
-         artifact.type === 'report' ? <FileText size={24} className="text-blue-550 dark:text-blue-400 animate-pulse" /> :
-         <Terminal size={24} />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <h4 className="text-[14px] font-semibold text-zinc-800 dark:text-zinc-200 truncate">{artifact.title}</h4>
-        <p className="text-[11px] text-zinc-400 font-medium uppercase tracking-wider">
-          {artifact.language} • {artifact.type}
-        </p>
-      </div>
-      <button
-        onClick={downloadFile}
-        className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-xl text-xs font-bold transition-all hover:scale-105 active:scale-95 shadow-lg"
-      >
-        Download
-      </button>
-    </motion.div>
-  );
-});
-
-const renderLabSuggestions = (content: string) => {
-  const text = (content || '').toLowerCase();
-  const suggestions = [];
-
-  if (text.includes('physics') || text.includes('velocity') || text.includes('gravity') || text.includes('oscillation') || text.includes('trajectory')) {
-    suggestions.push({
-      id: 'physics' as const,
-      name: 'Physics Lab Grapher',
-      icon: <Activity size={12} className="text-blue-500 animate-pulse" />,
-      desc: 'Simulate vector forces and graph trajectories'
-    });
-  }
-  if (text.includes('chemical') || text.includes('bonding') || text.includes('reaction') || text.includes('ph level') || text.includes('acid') || text.includes('base') || text.includes('atom') || text.includes('molecule') || text.includes('compound') || text.includes('sodium') || text.includes('beaker')) {
-    suggestions.push({
-      id: 'chemistry' as const,
-      name: 'Chemistry Simulation Lab',
-      icon: <Beaker size={12} className="text-emerald-500 animate-pulse" />,
-      desc: 'Form complex molecules, heat mixtures, and check pH'
-    });
-  }
-  if (text.includes('sine') || text.includes('polar') || text.includes('cardioid') || text.includes('fourier') || text.includes('spiral') || text.includes('math') || text.includes('equation') || text.includes('graph function') || text.includes('curve') || text.includes('trigonometric')) {
-    suggestions.push({
-      id: 'math' as const,
-      name: 'Math Function Plotter',
-      icon: <Compass size={12} className="text-purple-500 animate-pulse" />,
-      desc: 'Graph cardioids, spirals, and Fourier approximations'
-    });
-  }
-  if (text.includes('rabbit') || text.includes('wolf') || text.includes('wolves') || text.includes('predator') || text.includes('prey') || text.includes('ecosystem') || text.includes('dna') || text.includes('biology') || text.includes('carrying capacity') || text.includes('gene')) {
-    suggestions.push({
-      id: 'biology' as const,
-      name: 'Biology Ecosystem Simulator',
-      icon: <Flower2 size={12} className="text-rose-500 animate-pulse" />,
-      desc: 'Run Lotka-Volterra models or decode DNA pairs'
-    });
-  }
-
-  if (suggestions.length === 0) return null;
-
-  return (
-    <div className="mt-4 p-3.5 bg-zinc-500/[0.02] dark:bg-zinc-400/[0.02] border border-zinc-250/20 dark:border-white/5 rounded-2xl flex flex-col gap-3.5 select-none my-3 max-w-2xl text-left">
-      <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 shrink-0 select-none">
-        <Sparkles size={11} className="text-blue-500 animate-pulse" />
-        Interactive Lab Companions Detected
-      </div>
-      <div className="flex flex-col gap-2.5">
-        {suggestions.map(sug => (
-          <div key={sug.id} className="flex items-center justify-between gap-3 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-200/50 dark:border-white/5 rounded-xl transition-all">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="p-1.5 rounded-lg bg-zinc-150/40 dark:bg-zinc-800">
-                {sug.icon}
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 leading-normal">{sug.name}</p>
-                <p className="text-[10px] text-zinc-400 truncate leading-snug">{sug.desc}</p>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                const event = new CustomEvent(`open-${sug.id}-canvas`);
-                window.dispatchEvent(event);
-              }}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg cursor-pointer transition-colors text-[10px] whitespace-nowrap"
-            >
-              Launch Lab
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const MessageItem = React.memo(({ 
-  message, 
-  markdownComponents, 
-  userProfile, 
-  persona, 
-  isSourcesPanelOpen, 
-  setIsSourcesPanelOpen, 
-  setSourcesPanelMessageId,
-  setActiveArtifact, 
-  setIsCanvasOpen, 
-  setCanvasView,
-  onOpenInEditor,
-  showToast,
-  onUpdateTodoPlan,
-  onStartBuilding,
-  scrapingResults = new Map(),
-  wikiResults = new Map(),
-  onSendMessage
-}: { 
-  message: Message; 
-  markdownComponents: any; 
-  userProfile: any; 
-  persona: any; 
-  isSourcesPanelOpen: boolean; 
-  setIsSourcesPanelOpen: (v: boolean) => void;
-  setSourcesPanelMessageId: (v: string | null) => void;
-  setActiveArtifact: (v: any) => void;
-  setIsCanvasOpen: (v: boolean) => void;
-  setCanvasView: (v: 'code' | 'preview') => void;
-  onOpenInEditor?: (filePath: string) => void;
-  showToast?: (v: string) => void;
-  onUpdateTodoPlan?: (messageId: string, updatedPlan: any) => void;
-  onStartBuilding?: (messageId: string) => void;
-  scrapingResults?: Map<string, ScrapeResult>;
-  wikiResults?: Map<string, { wikiType: string, data: any }>;
-  onSendMessage?: (msg: string) => void;
-}) => {
-  const [copied, setCopied] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(message.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const messageComponents = useMemo(() => {
-    return {
-      ...markdownComponents,
-      a({ href, children, ...props }: any) {
-        const isImgUrl = href && /\.(png|jpe?g|gif|webp|svg|bmp)(\?.*)?$/i.test(href);
-        if (isImgUrl) {
-          return markdownComponents.a({ href, children, ...props });
-        }
-        
-        const childText = String(children || '').trim();
-        const hrefMatches = href ? href.match(/\d+/) : null;
-        const isHrefCitation = href && /^[#\d\s\[\]\(\)]+$/.test(href) && hrefMatches;
-        const isChildCitation = /^\d+$/.test(childText) || /^\[\d+\]$/.test(childText) || /^\(\d+\)$/.test(childText) || childText === '.' || childText === 'source' || childText === '' || childText === '[.]';
-
-        if (isHrefCitation || isChildCitation) {
-          let numStr = '';
-          if (isHrefCitation && hrefMatches) {
-            numStr = hrefMatches[0];
-          } else {
-            const childMatches = childText.match(/\d+/);
-            if (childMatches) {
-              numStr = childMatches[0];
-            } else if (hrefMatches) {
-              numStr = hrefMatches[0];
-            }
-          }
-          
-          const num = numStr ? parseInt(numStr, 10) : NaN;
-          
-          if (!isNaN(num) && num > 0) {
-            let resolvedHref = href;
-            let siteTitle = '';
-            
-            if (message.sources && message.sources.length > 0 && num <= message.sources.length) {
-              const matchedSource = message.sources[num - 1];
-              if (matchedSource && matchedSource.url) {
-                resolvedHref = matchedSource.url;
-                siteTitle = matchedSource.title || matchedSource.url;
-              }
-            } else if (href && message.sources && message.sources.length > 0) {
-              const foundSource = message.sources.find((s: any) => s.url === href);
-              if (foundSource) {
-                siteTitle = foundSource.title || foundSource.url;
-              }
-            }
-            
-            const isPlaceholderText = isChildCitation;
-            const displayChildren = isPlaceholderText ? `[${num}]` : children;
-
-            const isValidWebUrl = resolvedHref && /^https?:\/\//i.test(resolvedHref);
-            if (!isValidWebUrl && href && !href.startsWith('http')) {
-              resolvedHref = '#';
-            }
-
-            return (
-              <a
-                href={resolvedHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 font-bold hover:underline mx-0.5 cursor-pointer inline"
-                title={siteTitle || (resolvedHref !== '#' ? resolvedHref : undefined)}
-                {...props}
-              >
-                {displayChildren}
-              </a>
-            );
-          }
-        }
-        
-        return markdownComponents.a({ href, children, ...props });
-      },
-      code({ className, children, ...props }: any) {
-        const match = /language-(\w+)/.exec(className || '');
-        const codeStr = String(children).replace(/\n$/, '');
-        const isMultiLine = codeStr.includes('\n');
-        
-        const isTreeStructure = (() => {
-          const lines = codeStr.split('\n');
-          let branches = 0;
-          for (let i = 0; i < Math.min(lines.length, 15); i++) {
-            const line = lines[i];
-            if (line.includes('├──') || line.includes('└──') || line.includes('│  ') || line.includes('└──') || line.includes('║') || line.includes('╠══') || line.includes('╚══')) {
-              branches++;
-            }
-          }
-          return branches >= 1;
-        })();
-
-        if (isTreeStructure) {
-          return (
-            <CustomCodeBlockVisualizer
-              language="tree"
-              code={codeStr}
-              defaultRender={
-                <CanvasBlock 
-                  language="tree" 
-                  code={codeStr} 
-                  isStreaming={message.isStreaming} 
-                />
-              }
-            />
-          );
-        }
-
-        if (match) {
-          return (
-            <CustomCodeBlockVisualizer
-              language={match[1]}
-              code={codeStr}
-              defaultRender={
-                <CanvasBlock 
-                  language={match[1]} 
-                  code={codeStr} 
-                  isStreaming={message.isStreaming} 
-                />
-              }
-            />
-          );
-        }
-
-        if (isMultiLine) {
-          return (
-            <CanvasBlock 
-              language="text" 
-              code={codeStr} 
-              isStreaming={message.isStreaming} 
-            />
-          );
-        }
-
-        return (
-          <code className="bg-white/10 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
-            {children}
-          </code>
-        );
-      },
-      p({ children, ...props }: any) {
-        return (
-          <p className="leading-relaxed my-2" {...props}>
-            {renderTextWithMath(children, message.sources)}
-          </p>
-        );
-      },
-      li({ children, ...props }: any) {
-        return (
-          <li className="leading-relaxed my-1" {...props}>
-            {renderTextWithMath(children, message.sources)}
-          </li>
-        );
-      },
-      h1({ children, ...props }: any) {
-        return <h1 className="text-2xl font-bold my-4" {...props}>{renderTextWithMath(children, message.sources)}</h1>;
-      },
-      h2({ children, ...props }: any) {
-        return <h2 className="text-xl font-bold my-3" {...props}>{renderTextWithMath(children, message.sources)}</h2>;
-      },
-      h3({ children, ...props }: any) {
-        return <h3 className="text-lg font-bold my-2" {...props}>{renderTextWithMath(children, message.sources)}</h3>;
-      },
-      h4({ children, ...props }: any) {
-        return <h4 className="text-base font-bold my-2" {...props}>{renderTextWithMath(children, message.sources)}</h4>;
-      },
-      blockquote({ children, ...props }: any) {
-        return (
-          <blockquote className="border-l-4 border-zinc-200 dark:border-white/10 pl-4 my-2 italic text-zinc-650 dark:text-zinc-450" {...props}>
-            {renderTextWithMath(children, message.sources)}
-          </blockquote>
-        );
-      }
-    };
-  }, [markdownComponents, message.sources, message.isStreaming]);
-
-  return (
-    <motion.div
-      layout
-      className={`flex flex-col w-full ${message.role === 'user' ? 'items-end mb-8' : 'items-start mb-12'}`}
-    >
-      {message.role === 'user' ? (
-        <motion.div className="flex flex-col max-w-[85%] items-end">
-          <div className="user-message-bubble px-5 py-3 rounded-2xl text-[15px] leading-relaxed shadow-sm bg-zinc-50 dark:bg-[var(--theme-surface-alt)] text-gray-800 dark:text-[var(--theme-primary)] rounded-tr-none border border-zinc-200/50 dark:border-[var(--theme-border)]">
-            <div className="markdown-body text-left">
-              <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
-            </div>
-          </div>
-
-          {(message as any).elementAttachments && (message as any).elementAttachments.length > 0 && (
-            <div className="flex flex-col gap-3 w-full mt-3">
-              {(message as any).elementAttachments.map((att: any) => (
-                <div
-                  key={att.id}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onOpenInEditor?.(att.filePath);
-                    showToast?.(`Opening ${att.fileName} in code editor...`);
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onOpenInEditor?.(att.filePath);
-                    showToast?.(`Opening ${att.fileName} in code editor...`);
-                  }}
-                  className="group relative bg-[#1E1917] border border-[#2D241E] p-4 rounded-xl shadow-xl hover:border-teal-500/30 hover:shadow-[0_4px_30px_rgba(20,184,166,0.06)] transition-all flex flex-col gap-3.5 select-none w-full text-left"
-                  title="Click or right-click to open in Editor"
-                >
-                  <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.2 bg-zinc-900 border border-teal-500/30 text-teal-400 text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full shadow-sm">
-                    <Code size={11} />
-                    <span>Click / Right-click to Edit</span>
-                  </div>
-
-                  {/* Part 1: File Name */}
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
-                      <MousePointerClick size={16} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider leading-none">Source File</div>
-                      <div className="text-sm font-semibold text-zinc-150 leading-none mt-1.5 truncate">
-                        {att.fileName}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Part 4: Element Work */}
-                  {att.elementWork && (
-                    <div className="bg-[#171412] border border-[#231E1B] rounded-lg px-3 py-2 text-xs text-zinc-400">
-                      <span className="font-semibold text-zinc-350 mr-1.5 uppercase text-[9px] tracking-wider text-teal-400 block mb-1">Functional Description</span>
-                      {att.elementWork}
-                    </div>
-                  )}
-
-                  {/* Part 2: Specific Code Section */}
-                  {att.specificCode && (
-                    <div 
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex flex-col rounded-lg border border-[#2D241E] bg-[#14110F] overflow-hidden leading-relaxed font-mono"
-                    >
-                      <div className="bg-[#1C1816] px-3 py-1.5 border-b border-[#2D241E] flex items-center justify-between select-none">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Code Segment</span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenInEditor?.(att.filePath);
-                          }}
-                          className="text-teal-400 hover:text-teal-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer"
-                        >
-                          <Code size={11} />
-                          Open Code
-                        </button>
-                      </div>
-                      <pre className="max-h-56 overflow-y-auto p-3 text-xs text-zinc-350 custom-scrollbar whitespace-pre-wrap word-break tab-4 font-mono select-text leading-tight bg-[#0f0d0c]">
-                        {att.specificCode}
-                      </pre>
-                    </div>
-                  )}
-
-                  {/* Part 3: Connections */}
-                  {att.connections && att.connections.length > 0 && (
-                    <div 
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex flex-col gap-1.5"
-                    >
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">File Connections</span>
-                      <div className="flex flex-wrap gap-1.5 pt-0.5">
-                        {att.connections.map((c: any, index: number) => (
-                          <button
-                            key={index}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenInEditor?.(c.filePath || c.name || '');
-                            }}
-                            className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900 border border-[#2D241E] hover:border-teal-500/40 text-xs text-zinc-400 hover:text-teal-400 rounded-lg transition-all cursor-pointer"
-                            title={`Open ${c.fileName} in editor`}
-                          >
-                            <FileText size={11} className="text-zinc-650" />
-                            <span className="font-semibold">{c.fileName}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-2 text-[10px] text-gray-400 px-1 font-medium uppercase tracking-tight flex items-center gap-2">
-            {userProfile.avatar && (
-              <img src={userProfile.avatar} alt="" className="w-3 h-3 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
-            )}
-            {userProfile.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </div>
-        </motion.div>
-      ) : (
-        <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-4xl xl:max-w-[1100px]">
-          {((message.toolCalls && message.toolCalls.length > 0) || (message.thinkContent !== undefined && message.thinkContent.length > 0) || message.searchQuery || message.isSearching) && (
-            <NodeGraph 
-              nodes={message.toolCalls || []} 
-              isStreaming={message.isStreaming} 
-              thinkContent={message.thinkContent}
-              isStreamingThinking={message.isThinking}
-              isSearching={message.isSearching}
-              searchQuery={message.searchQuery}
-              sources={message.sources || []}
-              scrapingResults={scrapingResults}
-              wikiResults={wikiResults}
-              onSendMessage={onSendMessage}
-            />
-          )}
-          {message.searchQuery && (
-            <SearchResultsUI 
-              query={message.searchQuery} 
-              sources={message.sources || []} 
-            />
-          )}
-          <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined }}>
-            {message.content ? (
-              message.isStreaming ? (
-                <span className="streaming-content">
-                  <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
-                  <motion.span
-                    animate={{ opacity: [1, 0] }}
-                    transition={{ repeat: Infinity, duration: 0.6 }}
-                    className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle"
-                  />
-                </span>
-              ) : (
-                <>
-                  <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
-                </>
-              )
-            ) : message.isStreaming ? (
-              <span className="text-zinc-400 animate-pulse">Generating...</span>
-            ) : null}
-          </div>
-
-          {/* Custom Interactive To-Do Plan Checklist */}
-          {message.todoPlan && (
-            <div className="w-full bg-[#1b1918] border border-zinc-855 rounded-2xl p-4 shadow-xl flex flex-col gap-3 mt-4 text-left font-sans select-none">
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px]">📋</span>
-                  <span className="font-semibold text-sm tracking-tight text-white">
-                    {message.todoPlan.title}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!message.todoPlan.isConfirmed && message.todoPlan.countdown !== undefined && message.todoPlan.countdown > 0 && (
-                    <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                      <Loader2 size={10} className="animate-spin text-amber-500 shrink-0" />
-                      Auto-starts in {message.todoPlan.countdown}s
-                    </span>
-                  )}
-                  {message.todoPlan.isConfirmed && (
-                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
-                      {message.todoPlan.todos.every(t => t.status === 'complete') ? "COMPLETED" : "RUNNING AGENT"}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Todo Items */}
-              <div className="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto pr-1">
-                {message.todoPlan.todos.map((todo) => {
-                  const isDone = todo.status === 'complete';
-                  const isActive = todo.status === 'in_progress';
-
-                  return (
-                    <div
-                      key={todo.id}
-                      className="group/item flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-white/2.5 transition-all w-full"
-                    >
-                      {/* Status Icon */}
-                      <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                        isDone
-                          ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
-                          : isActive
-                            ? 'border border-orange-500 bg-orange-500/10'
-                            : 'border border-zinc-750 bg-transparent'
-                      }`}>
-                        {isDone && <Check size={10} strokeWidth={3} className="text-emerald-400" />}
-                        {isActive && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />}
-                      </div>
-
-                      {/* Info / Editing Text input */}
-                      {!message.todoPlan.isConfirmed ? (
-                        <input
-                          type="text"
-                          value={todo.text}
-                          onChange={(e) => {
-                            if (!message.todoPlan) return;
-                            const updatedTodos = message.todoPlan.todos.map(t => t.id === todo.id ? { ...t, text: e.target.value } : t);
-                            onUpdateTodoPlan?.(message.id, {
-                              ...message.todoPlan,
-                              todos: updatedTodos
-                            });
-                          }}
-                          className="flex-1 text-xs font-semibold text-zinc-200 bg-transparent hover:bg-zinc-850 focus:bg-zinc-850 px-1 py-0.5 rounded-lg border border-transparent focus:border-orange-500/40 outline-none transition-all select-text"
-                        />
-                      ) : (
-                        <span className={`text-xs font-semibold flex-1 ${
-                          isDone ? 'line-through text-zinc-550' : isActive ? 'text-white' : 'text-zinc-400'
-                        }`}>
-                          {todo.text}
-                        </span>
-                      )}
-
-                      {/* Deletion action for pending/editable items */}
-                      {!message.todoPlan.isConfirmed && (
-                        <button
-                          onClick={() => {
-                            if (!message.todoPlan) return;
-                            const updatedTodos = message.todoPlan.todos.filter(t => t.id !== todo.id);
-                            onUpdateTodoPlan?.(message.id, {
-                              ...message.todoPlan,
-                              todos: updatedTodos
-                            });
-                          }}
-                          className="opacity-0 group-hover/item:opacity-100 p-1 hover:bg-red-500/10 rounded-lg text-zinc-550 hover:text-red-400 transition-all cursor-pointer flex items-center justify-center"
-                          title="Delete plan step"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Add item and confirm buttons */}
-              {!message.todoPlan.isConfirmed ? (
-                <div className="flex items-center justify-between border-t border-zinc-805 pt-3 mt-1 gap-2">
-                  <button
-                    onClick={() => {
-                      if (!message.todoPlan) return;
-                      const newId = (message.todoPlan.todos.length + 1).toString();
-                      const updatedTodos = [
-                        ...message.todoPlan.todos,
-                        { id: newId, text: "New architectural refinement step...", status: 'pending' as const }
-                      ];
-                      onUpdateTodoPlan?.(message.id, {
-                        ...message.todoPlan,
-                        todos: updatedTodos
-                      });
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-zinc-400 hover:text-white hover:bg-white/5 border border-zinc-850 rounded-xl transition-all cursor-pointer"
-                  >
-                    <Plus size={11} />
-                    <span>Add task step</span>
-                  </button>
-
-                  <button
-                    onClick={() => onStartBuilding?.(message.id)}
-                    className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-black tracking-wider uppercase bg-orange-500 hover:bg-orange-600 text-white rounded-xl transition-all shadow-md cursor-pointer"
-                  >
-                    <span>Start Building</span>
-                    <ArrowUp size={11} strokeWidth={3} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1 p-1 bg-zinc-850/40 rounded-xl border border-zinc-800/25 justify-center font-mono text-[10px] text-zinc-500 select-none">
-                  <Loader2 size={10} className="animate-spin text-orange-400 shrink-0" />
-                  <span>Agent running sequence: step {message.todoPlan.todos.filter(t => t.status === 'complete').length + 1} of {message.todoPlan.todos.length}...</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Automatically detect and render image links from the text content */}
-          {(() => {
-            if (!message.content) return null;
-            const foundImageUrls: string[] = [];
-            const matches = (message.content.match(/https?:\/\/[^\s\)]+/gi) || []) as string[];
-            matches.forEach(url => {
-              const cleanedUrl = url.replace(/[.,;*`"'>\?]+$/, '');
-              const isLikelyImage = /\.(png|jpe?g|gif|webp|svg|bmp)/i.test(cleanedUrl) || 
-                                    /(\/images?\/|\/img\/|photo|visual|attachment)/i.test(cleanedUrl);
-              // Avoid duplicate rendering if already specifically rendered in message.images
-              const isAlreadyInImages = message.images && message.images.some(img => img.url === cleanedUrl);
-              if (isLikelyImage && !isAlreadyInImages && !foundImageUrls.includes(cleanedUrl)) {
-                foundImageUrls.push(cleanedUrl);
-              }
-            });
-
-            if (foundImageUrls.length === 0) return null;
-
-            return (
-              <div className="mt-4 flex flex-col gap-2">
-                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1.5 select-none">
-                  <ImageIcon size={11} className="text-blue-500" />
-                  Visual Attachment
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-                  {foundImageUrls.map((url, idx) => (
-                    <motion.div 
-                      key={idx}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="relative rounded-2xl overflow-hidden border border-zinc-200/50 dark:border-white/5 bg-zinc-50 dark:bg-zinc-900/20 group hover:shadow-lg transition-all"
-                    >
-                      <img 
-                        src={url} 
-                        alt="Attached Visual"
-                        className="w-full h-auto object-cover max-h-[250px] transition-transform duration-500 group-hover:scale-105 cursor-zoom-in"
-                        referrerPolicy="no-referrer"
-                        onClick={() => {
-                          if (typeof (window as any).openImageLightbox === 'function') {
-                            (window as any).openImageLightbox(url, 'Attached Visual');
-                          } else {
-                            window.open(url, '_blank');
-                          }
-                        }}
-                      />
-                      <div className="bg-zinc-50 dark:bg-zinc-900/80 px-4 py-2 border-t border-zinc-150/40 dark:border-white/5 text-[10px] font-semibold text-zinc-550 dark:text-zinc-400 flex items-center justify-between">
-                        <span className="truncate max-w-[70%]">{url}</span>
-                        <button 
-                          onClick={() => {
-                            if (typeof (window as any).openImageLightbox === 'function') {
-                              (window as any).openImageLightbox(url, 'Attached Visual');
-                            } else {
-                              window.open(url, '_blank');
-                            }
-                          }}
-                          className="text-blue-550 dark:text-blue-400 hover:underline uppercase text-[9px] font-bold tracking-wider cursor-pointer"
-                        >
-                          View Photo
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Automatically detect and render video links from the text content */}
-          {(() => {
-            if (!message.content) return null;
-            const foundVideoLinks: Array<{ url: string; title: string; type: 'youtube' | 'vimeo' | 'direct' | 'other' }> = [];
-            const matches = (message.content.match(/https?:\/\/[^\s\)]+/gi) || []) as string[];
-            matches.forEach(url => {
-              const cleanedUrl = url.replace(/[.,;*`"'>\?]+$/, '');
-              
-              // Detect types
-              let type: 'youtube' | 'vimeo' | 'direct' | 'other' | null = null;
-              let title = 'Web Video';
-              
-              if (/youtube\.com|youtu\.be|youtube-nocookie\.com/i.test(cleanedUrl)) {
-                type = 'youtube';
-                title = 'YouTube Video';
-              } else if (/vimeo\.com/i.test(cleanedUrl)) {
-                type = 'vimeo';
-                title = 'Vimeo Video';
-              } else if (/\.(mp4|webm|ogg)/i.test(cleanedUrl)) {
-                type = 'direct';
-                title = 'Direct HTML5 Video';
-              } else if (cleanedUrl.includes('/embed/')) {
-                type = 'other';
-                title = 'Embedded Video';
-              }
-              
-              if (type) {
-                // Avoid duplicates
-                const exists = foundVideoLinks.some(v => v.url === cleanedUrl);
-                if (!exists) {
-                  foundVideoLinks.push({ url: cleanedUrl, title, type });
-                }
-              }
-            });
-
-            if (foundVideoLinks.length === 0) return null;
-
-            return (
-              <div className="mt-4 flex flex-col gap-2 w-full">
-                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1.5 select-none md:ml-1">
-                  <Play size={11} className="text-orange-500 fill-orange-500" />
-                  Playable Video Content
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl w-full">
-                  {foundVideoLinks.map((vid, idx) => (
-                    <motion.div 
-                      key={idx}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="relative rounded-2xl overflow-hidden border border-zinc-205/60 dark:border-white/5 bg-zinc-50 dark:bg-zinc-900/20 group hover:shadow-lg transition-all"
-                    >
-                      {/* Video simulated preview block */}
-                      <div className="aspect-video bg-neutral-950 flex flex-col items-center justify-center relative overflow-hidden select-none">
-                        <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-black/60 font-mono text-[9px] uppercase tracking-wider text-orange-400 font-bold z-20">
-                          {vid.type}
-                        </div>
-                        
-                        <button 
-                          onClick={() => {
-                            if (typeof (window as any).playVideoInLuminaPopup === 'function') {
-                              (window as any).playVideoInLuminaPopup(vid.url, vid.title);
-                            }
-                          }}
-                          className="w-10 h-10 rounded-full bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center shadow-lg transform transition-transform group-hover:scale-110 z-20 cursor-pointer active:scale-95 border-0"
-                          title="Play in Lumina Player"
-                        >
-                          <Play size={16} fill="currentColor" className="ml-0.5" />
-                        </button>
-                      </div>
-                      
-                      <div className="bg-zinc-50 dark:bg-zinc-900/85 px-4 py-2.5 border-t border-zinc-150/40 dark:border-white/5 text-[10px] font-semibold text-zinc-550 dark:text-zinc-400 flex items-center justify-between gap-3">
-                        <span className="truncate max-w-[60%]" title={vid.title}>{vid.title}</span>
-                        <button 
-                          onClick={() => {
-                            if (typeof (window as any).playVideoInLuminaPopup === 'function') {
-                              (window as any).playVideoInLuminaPopup(vid.url, vid.title);
-                            }
-                          }}
-                          className="text-orange-500 hover:text-orange-600 hover:underline uppercase text-[9px] font-bold tracking-wider cursor-pointer border-0 bg-transparent flex items-center gap-1"
-                        >
-                          <span>Watch Video</span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {message.images && message.images.length > 0 && (
-            <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 gap-3">
-              {message.images.map((img, idx) => (
-                <motion.div 
-                  key={idx}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="relative aspect-square rounded-2xl overflow-hidden group border border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-zinc-950 shadow-sm transition-all hover:shadow-md cursor-zoom-in"
-                  onClick={() => {
-                    if (typeof (window as any).openImageLightbox === 'function') {
-                      (window as any).openImageLightbox(img.url, img.title);
-                    }
-                  }}
-                >
-                  <img 
-                    src={img.url} 
-                    alt={img.title}
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
-                    <p className="text-[10px] text-white font-medium truncate mb-1">{img.title}</p>
-                    <div className="flex items-center justify-between">
-                      <a 
-                        href={img.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        className="text-[9px] text-blue-400 hover:underline truncate mr-2"
-                      >
-                        {img.source || 'Original Source'}
-                      </a>
-                      <button 
-                        onClick={() => {
-                          const link = document.createElement('a');
-                          link.href = img.url;
-                          link.download = `image-${idx}`;
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                        }}
-                        className="p-1.5 bg-white/20 hover:bg-white/40 rounded-xl text-white transition-colors"
-                        title="Download Image"
-                      >
-                        <Download size={12} />
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          )}
-          {message.artifacts && message.artifacts.length > 0 && (
-            <div className="w-full space-y-2 mt-4">
-              {message.artifacts.map(art => (
-                <ArtifactCard 
-                  key={art.id} 
-                  artifact={art} 
-                  onOpen={(a) => {
-                    setActiveArtifact(a);
-                    setIsCanvasOpen(true);
-                    setCanvasView(a.type === 'html' ? 'preview' : 'code');
-                  }} 
-                />
-              ))}
-            </div>
-          )}
-          {!message.thinking && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="mt-6 flex flex-col gap-4 border-t border-zinc-100 dark:border-white/5 pt-4 pl-1"
-            >
-              <div className="flex items-center gap-4">
-                {message.sources && message.sources.length > 0 && (
-                  <button 
-                    onClick={() => {
-                      setSourcesPanelMessageId(message.id);
-                      setIsSourcesPanelOpen(true);
-                    }}
-                    className="flex items-center gap-2 text-[11px] font-bold text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors uppercase tracking-wider"
-                  >
-                    <Layout size={14} />
-                    {message.sources.length} Sources
-                  </button>
-                )}
-                <div className="text-[10px] text-zinc-400 font-medium uppercase tracking-tight flex items-center gap-2">
-                  {persona.avatar && (
-                    <img src={persona.avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover grayscale opacity-60" referrerPolicy="no-referrer" />
-                  )}
-                  {persona.name} • {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={handleCopy}
-                  className={`p-1.5 transition-colors rounded-lg flex items-center gap-1.5 ${
-                    copied ? 'text-green-500 bg-green-500/10' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200'
-                  }`}
-                  title={copied ? "Copied!" : "Copy message"}
-                >
-                  {copied ? <Check size={14} /> : <Copy size={16} />}
-                  {copied && <span className="text-[10px] font-bold uppercase tracking-widest">Copied</span>}
-                </button>
-                <div className="relative">
-                  <button 
-                    onClick={() => setShowHistory(!showHistory)}
-                    className={`p-1.5 transition-colors rounded-lg ${
-                      showHistory ? 'text-blue-500 bg-blue-500/10' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200'
-                    }`}
-                    title="Message history"
-                  >
-                    <History size={16} />
-                  </button>
-                  <AnimatePresence>
-                    {showHistory && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10, scale: 0.9 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.9 }}
-                        className="absolute bottom-full left-0 mb-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 rounded-xl shadow-xl z-50 p-3 overflow-hidden"
-                      >
-                        <div className="space-y-2">
-                          <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest border-b border-zinc-100 dark:border-white/5 pb-1 mb-2">Metadata</h4>
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] text-zinc-500 font-medium italic">ID</span>
-                            <span className="text-[10px] text-zinc-400 font-mono truncate max-w-[80px]">{message.id}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] text-zinc-500 font-medium italic">Sent</span>
-                            <span className="text-[10px] text-zinc-400 font-mono italic">{message.timestamp.toLocaleTimeString()}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] text-zinc-500 font-medium italic">Chars</span>
-                            <span className="text-[10px] text-zinc-400 font-bold">{message.content.length}</span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </motion.div>
-      )}
-    </motion.div>
-  );
-});
-
-function getArtifactFilename(art: Artifact): string {
-  if (art.title && /[\w\.-]+\.\w+/.test(art.title)) {
-    return art.title.trim();
-  }
-  
-  const firstLine = art.content.split('\n')[0] || '';
-  const commentMatch = firstLine.match(/^(?:\/\*|<!--|\/\/)\s*(?:File:\s*)?([\w\.-]+\.\w+)\s*(?:\*\/|-->)?/i);
-  if (commentMatch && commentMatch[1]) {
-    return commentMatch[1].trim();
-  }
-  
-  if (art.language === 'css') return 'style.css';
-  if (['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx'].includes(art.language)) return 'script.js';
-  if (art.language === 'html' || art.type === 'html') return 'index.html';
-  
-  return '';
-}
-
-function getCombinedSrcDoc(htmlContent: string, allArtifacts: Artifact[]): string {
-  let doc = htmlContent;
-  
-  const artifactMap = new Map<string, Artifact>();
-  allArtifacts.forEach(art => {
-    const filename = getArtifactFilename(art);
-    if (filename) {
-      artifactMap.set(filename.toLowerCase(), art);
-    }
-  });
-
-  const inlinedIds = new Set<string>();
-
-  const linkRegex = /<link\s+[^>]*href=["']([^"']+)["'][^>]*>/gi;
-  doc = doc.replace(linkRegex, (match, href) => {
-    const filename = href.split('/').pop()?.toLowerCase();
-    if (filename && artifactMap.has(filename)) {
-      const cssArt = artifactMap.get(filename)!;
-      inlinedIds.add(cssArt.id);
-      return `<style data-filename="${filename}">\n/* Inlined from ${filename} */\n${cssArt.content}\n</style>`;
-    }
-    return match;
-  });
-
-  const scriptRegex = /<script\s+[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi;
-  doc = doc.replace(scriptRegex, (match, src) => {
-    const filename = src.split('/').pop()?.toLowerCase();
-    if (filename && artifactMap.has(filename)) {
-      const jsArt = artifactMap.get(filename)!;
-      inlinedIds.add(jsArt.id);
-      return `<script data-filename="${filename}">\n// Inlined from ${filename}\n${jsArt.content}\n</script>`;
-    }
-    return match;
-  });
-
-  const leftoverCss: string[] = [];
-  const leftoverJs: string[] = [];
-
-  allArtifacts.forEach(art => {
-    if (inlinedIds.has(art.id)) return;
-    
-    if (art.language === 'css') {
-      leftoverCss.push(art.content);
-      inlinedIds.add(art.id);
-    } else if (['javascript', 'typescript', 'js', 'ts', 'jsx', 'tsx'].includes(art.language)) {
-      leftoverJs.push(art.content);
-      inlinedIds.add(art.id);
-    }
-  });
-
-  if (leftoverCss.length > 0) {
-    const stylesBlock = leftoverCss.map(content => `<style>\n${content}\n</style>`).join('\n');
-    if (doc.includes('</head>')) {
-      doc = doc.replace('</head>', `${stylesBlock}\n</head>`);
-    } else {
-      doc = stylesBlock + '\n' + doc;
-    }
-  }
-
-  if (leftoverJs.length > 0) {
-    const scriptsBlock = leftoverJs.map(content => `<script>\n${content}\n</script>`).join('\n');
-    if (doc.includes('</body>')) {
-      doc = doc.replace('</body>', `${scriptsBlock}\n</body>`);
-    } else {
-      doc = doc + '\n' + scriptsBlock;
-    }
-  }
-
-  return doc;
-}
-
-const Canvas = ({ 
-  artifact, 
-  isOpen, 
-  onClose, 
-  view, 
-  onSetView,
-  allArtifacts = []
-}: { 
-  artifact: Artifact | null; 
-  isOpen: boolean; 
-  onClose: () => void;
-  view: 'code' | 'preview';
-  onSetView: (v: 'code' | 'preview') => void;
-  allArtifacts?: Artifact[];
-}) => {
-  const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false);
-
-  if (!artifact) return null;
-
-  const handleDownload = (format: 'txt' | 'md' | 'html' | 'print') => {
-    setIsDownloadDropdownOpen(false);
-
-    if (format === 'print') {
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) return;
-      
-      const isPoem = artifact.type === 'poem';
-      const cleanTitle = artifact.title.replace(/"/g, '&quot;');
-      const htmlContent = isPoem ? `
-        <div style="text-align: center; max-width: 600px; margin: 40px auto; padding: 20px; font-family: Georgia, serif;">
-          <div style="color: #f59e0b; font-size: 1.5rem; margin-bottom: 20px;">✦ ❁ ✦</div>
-          <h1 style="font-size: 2.2rem; margin-bottom: 8px; color: #111827;">${cleanTitle}</h1>
-          <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.15em; color: #9ca3af; margin-bottom: 40px; font-family: sans-serif; font-weight: 600;">By Lumina AI • Verse</div>
-          <div style="font-size: 1.25rem; line-height: 2; color: #374151; white-space: pre-wrap; font-style: italic;">${artifact.content}</div>
-          <div style="color: #f59e0b; font-size: 1.5rem; margin-top: 40px;">❦</div>
-        </div>
-      ` : `
-        <div style="max-width: 800px; margin: 40px auto; padding: 40px; font-family: -apple-system, system-ui, sans-serif; line-height: 1.6; color: #1f2937;">
-          <div style="font-size: 0.65rem; font-weight: 800; color: #2563eb; text-transform: uppercase; letter-spacing: 0.2em; margin-bottom: 4px;">Lumina Intel Report</div>
-          <h1 style="font-size: 2.5rem; font-weight: 800; color: #111827; margin-top: 0; margin-bottom: 20px; line-height: 1.15;">${cleanTitle}</h1>
-          <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #e5e7eb; padding-bottom: 24px; margin-bottom: 40px; font-size: 0.8rem; color: #6b7280;">
-            <div><strong>Date:</strong> ${new Date().toLocaleDateString()}</div>
-            <div><strong>Author:</strong> Lumina Professional Engine</div>
-            <div><strong>Doc ID:</strong> LUM-${(Math.random() * 100000).toFixed(0)}</div>
-          </div>
-          <div style="font-size: 1rem; color: #1f2937;">
-            ${artifact.content
-              .replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-              .replace(/^#{3}\s+(.+)$/gm, '<h3>$1</h3>')
-              .replace(/^#{2}\s+(.+)$/gm, '<h2>$1</h2>')
-              .replace(/^#{1}\s+(.+)$/gm, '<h1>$1</h1>')
-              .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-              .replace(/^\>\s+(.+)$/gm, '<blockquote style="border-left: 4px solid #3b82f6; background-color: #eff6ff; padding: 12px 20px; margin: 1.5rem 0; border-radius: 0 8px 8px 0;">$1</blockquote>')
-              .replace(/^\-\s+(.+)$/gm, '<li>$1</li>')
-              .replace(/^\*\s+(.+)$/gm, '<li>$1</li>')
-              .replace(/\`(.+?)\`/g, '<code style="font-family: monospace; background-color: #f3f4f6; padding: 2px 6px; border-radius: 4px;">$1</code>')
-              .split('\n\n')
-              .map(p => {
-                const trimmed = p.trim();
-                if (!trimmed) return '';
-                if (trimmed.startsWith('<h') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<li')) {
-                  return trimmed;
-                }
-                if (trimmed.includes('<li>')) {
-                  return '<ul>' + trimmed + '</ul>';
-                }
-                return '<p>' + trimmed.replace(/\n/g, '<br>') + '</p>';
-              })
-              .join('\n')
-            }
-          </div>
-          <div style="margin-top: 60px; border-top: 1px solid #e5e7eb; padding-top: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: #9ca3af;">
-            <div>Lumina Professional Publication. All rights reserved.</div>
-            <div style="text-align: center;">
-              <div style="width: 160px; border-bottom: 1px solid #d1d5db; margin-bottom: 6px; height: 30px;"></div>
-              <div>Authorized Representative</div>
-            </div>
-          </div>
-        </div>
-      `;
-
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>${cleanTitle}</title>
-            <style>
-              @media print {
-                .no-print { display: none !important; }
-              }
-            </style>
-          </head>
-          <body style="margin: 0; padding: 0; background: white;">
-            ${htmlContent}
-            <script>
-              setTimeout(() => {
-                window.print();
-                window.close();
-              }, 500);
-            </script>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      return;
-    }
-
-    let fileContent = '';
-    let fileExtension = '';
-    let mimeType = '';
-
-    if (format === 'txt') {
-      fileExtension = 'txt';
-      mimeType = 'text/plain;charset=utf-8';
-      if (artifact.type === 'poem') {
-        fileContent = `${artifact.title}\nBy Lumina AI\n\n${artifact.content}`;
-      } else if (artifact.type === 'report') {
-        fileContent = `${artifact.title}\nDate: ${new Date().toLocaleDateString()}\nAuthor: Lumina Professional Engine\n\n${artifact.content}`;
-      } else {
-        fileContent = artifact.content;
-      }
-    } else if (format === 'md') {
-      fileExtension = 'md';
-      mimeType = 'text/markdown;charset=utf-8';
-      if (artifact.type === 'poem') {
-        fileContent = `# ${artifact.title}\n*By Lumina AI*\n\n---\n\n${artifact.content}\n\n---\n*Generated using Lumina AI Canvas*`;
-      } else {
-        fileContent = `# ${artifact.title}\n\n**Date:** ${new Date().toLocaleDateString()}\n**Author:** Lumina Professional Engine\n\n---\n\n${artifact.content}`;
-      }
-    } else if (format === 'html') {
-      fileExtension = 'html';
-      mimeType = 'text/html;charset=utf-8';
-      const isPoem = artifact.type === 'poem';
-      const cleanTitle = artifact.title.replace(/"/g, '&quot;');
-      fileContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${cleanTitle}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,400&family=JetBrains+Mono&display=swap" rel="stylesheet">
-  <style>
-    body {
-      background-color: ${isPoem ? '#f6f5f0' : '#fcfcfc'};
-      color: #1f2937;
-      font-family: 'Inter', -apple-system, sans-serif;
-      margin: 0;
-      padding: 40px 20px;
-      display: flex;
-      justify-content: center;
-      min-height: 100vh;
-      box-sizing: border-box;
-    }
-    .paper {
-      background-color: #ffffff;
-      border: 1px solid #e5e7eb;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-      width: 100%;
-      max-width: 800px;
-      padding: ${isPoem ? '60px 40px' : '80px 60px'};
-      box-sizing: border-box;
-      border-radius: ${isPoem ? '24px' : '12px'};
-      position: relative;
-    }
-    ${isPoem ? `
-    .paper {
-      background-color: #fafcf9;
-      border-color: #e2e8df;
-      max-width: 600px;
-      font-family: 'Playfair Display', Georgia, serif;
-      text-align: center;
-    }
-    .paper::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 6px;
-      background: linear-gradient(to right, #fbbf24, #f472b6, #f43f5e);
-      border-radius: 24px 24px 0 0;
-    }
-    .poem-title {
-      font-size: 2.2rem;
-      font-weight: 700;
-      color: #111827;
-      margin-bottom: 8px;
-    }
-    .poem-meta {
-      font-family: 'Inter', sans-serif;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      color: #9ca3af;
-      margin-bottom: 40px;
-      font-weight: 600;
-    }
-    .poem-divider {
-      color: #f59e0b;
-      font-size: 1.5rem;
-      margin: 30px 0;
-    }
-    .content {
-      font-size: 1.25rem;
-      line-height: 2;
-      color: #374151;
-      white-space: pre-wrap;
-      font-style: italic;
-    }
-    ` : `
-    .report-logo {
-      font-size: 0.65rem;
-      font-weight: 800;
-      color: #2563eb;
-      text-transform: uppercase;
-      letter-spacing: 0.2em;
-      margin-bottom: 4px;
-    }
-    .report-title {
-      font-size: 2.5rem;
-      font-weight: 800;
-      color: #111827;
-      line-height: 1.15;
-      margin-top: 0;
-      margin-bottom: 20px;
-    }
-    .report-meta {
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 2px solid #e5e7eb;
-      padding-bottom: 24px;
-      margin-bottom: 40px;
-      font-size: 0.8rem;
-      color: #6b7280;
-    }
-    .report-meta-item strong {
-      color: #374151;
-    }
-    .content {
-      font-size: 1rem;
-      line-height: 1.7;
-      color: #1f2937;
-    }
-    .content p {
-      margin-top: 0;
-      margin-bottom: 1.5rem;
-    }
-    .content h2 {
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: #111827;
-      margin-top: 2rem;
-      margin-bottom: 1rem;
-      border-bottom: 1px solid #f3f4f6;
-      padding-bottom: 6px;
-    }
-    .content h3 {
-      font-size: 1.15rem;
-      font-weight: 600;
-      color: #1f2937;
-      margin-top: 1.5rem;
-      margin-bottom: 0.75rem;
-    }
-    .content ul, .content ol {
-      margin-top: 0;
-      margin-bottom: 1.5rem;
-      padding-left: 1.5rem;
-    }
-    .content li {
-      margin-bottom: 0.5rem;
-    }
-    .content blockquote {
-      border-left: 4px solid #3b82f6;
-      background-color: #eff6ff;
-      padding: 12px 20px;
-      margin: 1.5rem 0;
-      border-radius: 0 8px 8px 0;
-    }
-    .content strong {
-      color: #111827;
-    }
-    .content code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85em;
-      background-color: #f3f4f6;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-    .report-footer {
-      margin-top: 60px;
-      border-top: 1px solid #e5e7eb;
-      padding-top: 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.75rem;
-      color: #9ca3af;
-    }
-    .signature-block {
-      text-align: center;
-    }
-    .signature-line {
-      width: 160px;
-      border-bottom: 1px solid #d1d5db;
-      margin-bottom: 6px;
-      height: 30px;
-    }
-    `}
-    
-    @media print {
-      body {
-        background-color: #ffffff;
-        padding: 0;
-      }
-      .paper {
-        border: none;
-        box-shadow: none;
-        padding: 40px;
-      }
-      .no-print {
-        display: none !important;
-      }
-    }
-    
-    .print-btn {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      background-color: #1f2937;
-      color: #ffffff;
-      border: none;
-      border-radius: 50px;
-      padding: 12px 24px;
-      font-family: 'Inter', sans-serif;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      transition: all 0.2s;
-    }
-    .print-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-      background-color: #111827;
-    }
-  </style>
-</head>
-<body>
-  <div class="paper">
-    ${isPoem ? `
-      <div class="poem-divider">✦ ❁ ✦</div>
-      <div class="poem-title">${cleanTitle}</div>
-      <div class="poem-meta">By Lumina AI • Verse</div>
-      <div class="content">${artifact.content}</div>
-      <div class="poem-divider" style="margin-top: 40px;">❦</div>
-    ` : `
-      <div class="report-logo">Lumina Intel Report</div>
-      <h1 class="report-title">${cleanTitle}</h1>
-      <div class="report-meta">
-        <div class="report-meta-item"><strong>Date:</strong> ${new Date().toLocaleDateString()}</div>
-        <div class="report-meta-item"><strong>Author:</strong> Lumina Engine</div>
-        <div class="report-meta-item"><strong>Doc ID:</strong> LUM-${(Math.random() * 100000).toFixed(0)}</div>
-      </div>
-      <div class="content">
-        ${
-          artifact.content
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/^#{3}\s+(.+)$/gm, '<h3>$1</h3>')
-            .replace(/^#{2}\s+(.+)$/gm, '<h2>$1</h2>')
-            .replace(/^#{1}\s+(.+)$/gm, '<h1 class="report-title" style="font-size: 2rem;">$1</h1>')
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/^\>\s+(.+)$/gm, '<blockquote>$1</blockquote>')
-            .replace(/^\-\s+(.+)$/gm, '<li>$1</li>')
-            .replace(/^\*\s+(.+)$/gm, '<li>$1</li>')
-            .replace(/\`(.+?)\`/g, '<code>$1</code>')
-            .split('\n\n')
-            .map(p => {
-              const trimmed = p.trim();
-              if (!trimmed) return '';
-              if (trimmed.startsWith('<h') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<li')) {
-                return trimmed;
-              }
-              if (trimmed.includes('<li>')) {
-                return '<ul>' + trimmed + '</ul>';
-              }
-              return '<p>' + trimmed.replace(/\n/g, '<br>') + '</p>';
-            })
-            .join('\n')
-        }
-      </div>
-      <div class="report-footer">
-        <div>Lumina Professional Publication. All rights reserved.</div>
-        <div class="signature-block">
-          <div class="signature-line"></div>
-          <div>Authorized Representative</div>
-        </div>
-      </div>
-    `}
-  </div>
-  
-  <button class="print-btn no-print" onclick="window.print()">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-    <span>Print Document</span>
-  </button>
-</body>
-</html>`;
-    }
-
-    const blob = new Blob([fileContent], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.${fileExtension}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ x: '100%' }}
-          animate={{ x: 0 }}
-          exit={{ x: '100%' }}
-          transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-          className="fixed inset-y-0 right-0 w-full lg:w-[45vw] bg-white dark:bg-[#0a0a0a] border-l border-zinc-100 dark:border-white/5 z-[200] flex flex-col shadow-2xl"
-        >
-          <div className="h-16 border-b border-zinc-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0 bg-white/80 dark:bg-black/80 backdrop-blur-xl sticky top-0 z-10">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-zinc-100 dark:bg-white/5 rounded-lg text-zinc-500">
-                  {artifact.type === 'html' ? <Layout size={18} /> : 
-                   artifact.type === 'markdown' ? <FileText size={18} /> : 
-                   artifact.type === 'poem' ? <PenTool size={18} className="text-amber-500" /> : 
-                   artifact.type === 'report' ? <FileText size={18} className="text-blue-500" /> : 
-                   <Terminal size={18} />}
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 uppercase tracking-tighter">
-                    {artifact.title}
-                  </h3>
-                  <p className="text-[10px] text-zinc-400 font-medium uppercase tracking-widest">{artifact.language}</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {(artifact.type === 'html' || artifact.type === 'markdown' || artifact.type === 'poem' || artifact.type === 'report') && (
-                <div className="flex items-center p-1 bg-zinc-100 dark:bg-white/5 rounded-xl border border-zinc-200/50 dark:border-white/5">
-                  <button
-                    onClick={() => onSetView('code')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      view === 'code' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm font-semibold' : 'text-zinc-500 font-normal'
-                    }`}
-                  >
-                    Code
-                  </button>
-                  <button
-                    onClick={() => onSetView('preview')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      view === 'preview' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm font-semibold' : 'text-zinc-500 font-normal'
-                    }`}
-                  >
-                    Preview
-                  </button>
-                </div>
-              )}
-              <div className="relative">
-                <button
-                  onClick={() => setIsDownloadDropdownOpen(!isDownloadDropdownOpen)}
-                  className="px-2.5 py-1.5 bg-zinc-150 dark:bg-white/5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded-xl text-zinc-700 dark:text-zinc-300 transition-all flex items-center gap-1 text-xs font-bold shadow-xs cursor-pointer"
-                  title="Download / Export Options"
-                >
-                  <Download size={14} strokeWidth={2.5} />
-                  <ChevronDown size={11} className={`transition-transform duration-200 ${isDownloadDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-                <AnimatePresence>
-                  {isDownloadDropdownOpen && (
-                    <>
-                      <div 
-                        className="fixed inset-0 z-40 bg-transparent" 
-                        onClick={() => setIsDownloadDropdownOpen(false)} 
-                      />
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                        className="absolute right-0 mt-2 w-52 rounded-2xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-white/10 shadow-2xl py-2 z-50 flex flex-col"
-                      >
-                        <div className="px-3.5 py-1 text-[9px] font-extrabold uppercase tracking-widest text-zinc-400 dark:text-zinc-500 select-none">
-                          File Format Options
-                        </div>
-                        <button
-                          onClick={() => handleDownload('txt')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer"
-                        >
-                          <span className="w-5 h-5 bg-zinc-100 dark:bg-white/10 rounded-md flex items-center justify-center text-[9px] font-bold text-zinc-500 shrink-0">TXT</span>
-                          <span className="truncate">Plain Text (.txt)</span>
-                        </button>
-                        <button
-                          onClick={() => handleDownload('md')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer"
-                        >
-                          <span className="w-5 h-5 bg-blue-50 dark:bg-blue-950/40 rounded-md flex items-center justify-center text-[9px] font-bold text-blue-500 shrink-0">MD</span>
-                          <span className="truncate">Markdown (.md)</span>
-                        </button>
-                        <button
-                          onClick={() => handleDownload('html')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer"
-                        >
-                          <span className="w-5 h-5 bg-emerald-50 dark:bg-emerald-950/40 rounded-md flex items-center justify-center text-[9px] font-bold text-emerald-500 shrink-0">HTML</span>
-                          <span className="truncate">Offline Page (.html)</span>
-                        </button>
-                        <div className="w-full h-px bg-zinc-100 dark:bg-white/5 my-1" />
-                        <button
-                          onClick={() => handleDownload('print')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer"
-                        >
-                          <div className="w-5 h-5 bg-amber-50 dark:bg-amber-950/40 rounded-md flex items-center justify-center text-amber-500 shrink-0">
-                            <FileText size={10} />
-                          </div>
-                          <span className="font-bold text-amber-600 dark:text-amber-400 truncate">Save PDF / Print</span>
-                        </button>
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
-              </div>
-              <div className="w-px h-4 bg-zinc-200 dark:bg-white/10 mx-1" />
-              <button
-                onClick={onClose}
-                className="p-2 hover:bg-zinc-100 dark:hover:bg-white/5 rounded-xl text-zinc-500 transition-colors cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-hidden relative">
-            <AnimatePresence mode="wait">
-              {view === 'code' ? (
-                <motion.div
-                  key="code"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto custom-scrollbar bg-transparent"
-                >
-                  <SyntaxHighlighter
-                    language={artifact.language}
-                    style={oneDark}
-                    customStyle={{ 
-                      background: 'transparent', 
-                      backgroundColor: 'transparent',
-                      fontSize: '14px', 
-                      lineHeight: '1.7', 
-                      margin: 0,
-                      padding: '24px',
-                      border: 'none',
-                      boxShadow: 'none',
-                      textDecoration: 'none'
-                    }}
-                    codeTagProps={{
-                      style: {
-                        background: 'transparent',
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        textDecoration: 'none',
-                        boxShadow: 'none'
-                      }
-                    }}
-                    showLineNumbers
-                    lineNumberStyle={{ 
-                      color: '#3f3f46', 
-                      minWidth: '3.5em',
-                      background: 'transparent',
-                      backgroundColor: 'transparent',
-                      paddingRight: '1em',
-                      textAlign: 'right',
-                      userSelect: 'none',
-                      borderRight: 'none',
-                      textDecoration: 'none'
-                    }}
-                  >
-                    {artifact.content}
-                  </SyntaxHighlighter>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="preview"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto bg-[var(--theme-bg)] custom-scrollbar"
-                >
-                  {artifact.type === 'poem' ? (
-                    <div className="flex flex-col min-h-full bg-[#030303] text-zinc-300 font-mono select-none">
-                      {/* IDE Title and Tabs */}
-                      <div className="flex items-center justify-between px-5 py-2.5 bg-[#0a0a0c] border-b border-zinc-900 text-xs text-zinc-400 shrink-0 select-none">
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1">
-                            <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
-                          </div>
-                          <div className="w-px h-3.5 bg-zinc-800 mx-2" />
-                          <div className="flex items-center gap-1.5 bg-[#121215] text-zinc-100 px-3 py-1.5 rounded-t-lg border-t border-x border-zinc-900 text-[10px] font-bold">
-                            <PenTool size={12} className="text-amber-500 animate-pulse" />
-                            <span>{artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'verse'}.poetry</span>
-                          </div>
-                        </div>
-                        <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-extrabold flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping" />
-                          LUMINA VERSE ENGINE
-                        </div>
-                      </div>
-
-                      {/* Code Canvas Container */}
-                      <div className="flex-1 flex overflow-y-auto bg-[#030303] custom-scrollbar">
-                        {/* Gutter */}
-                        <div className="py-6 border-r border-zinc-900/60 flex flex-col items-end pr-4 text-[11px] text-zinc-700 font-mono select-none bg-[#030205] w-14 shrink-0">
-                          {artifact.content.split('\n').map((_, idx) => (
-                            <div key={idx} className="h-7 flex items-center justify-end font-medium">
-                              {idx + 1}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Poem Body */}
-                        <div className="flex-1 py-6 px-8 font-mono text-[13px] md:text-[14px] leading-relaxed text-zinc-100 select-text overflow-x-auto">
-                          {/* File Docstring Comment Block */}
-                          <div className="text-zinc-600 select-none mb-6 font-mono italic">
-                            <div>/**</div>
-                            <div>&nbsp;* @file {artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'verse'}.poetry</div>
-                            <div>&nbsp;* @title {artifact.title}</div>
-                            <div>&nbsp;* @author Lumina Core Synthesizer</div>
-                            <div>&nbsp;* @synthesized {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                            <div>&nbsp;*/</div>
-                          </div>
-
-                          {/* Verses with hover-focused lines */}
-                          <div className="space-y-0.5">
-                            {artifact.content.split('\n').map((line, idx) => {
-                              const isComment = line.trim().startsWith('//') || line.trim().startsWith('/*') || line.trim().startsWith('*');
-                              const isEmpty = line.trim().length === 0;
-                              return (
-                                <div 
-                                  key={idx} 
-                                  className={`h-7 flex items-center px-2 -mx-2 hover:bg-zinc-900/40 rounded transition-colors group cursor-text ${
-                                    isEmpty ? 'h-4' : ''
-                                  }`}
-                                >
-                                  <span className={
-                                    isComment ? 'text-zinc-500 italic' :
-                                    isEmpty ? 'text-zinc-700' :
-                                    'text-amber-100/90 dark:text-amber-50 font-medium'
-                                  }>
-                                    {line || '\u00A0'}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Workspace Status Bar */}
-                      <div className="px-4 py-1.5 bg-[#0a0a0c] border-t border-zinc-900 text-[10px] text-zinc-500 font-mono flex justify-between select-none shrink-0">
-                        <div className="flex items-center gap-4">
-                          <span>UTF-8</span>
-                          <span>LF</span>
-                          <span className="text-amber-500 font-semibold">Poetry Visualizer</span>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <span>Lines: {artifact.content.split('\n').length}</span>
-                          <span>Words: {artifact.content.trim().split(/\s+/).filter(Boolean).length}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : artifact.type === 'report' || artifact.type === 'markdown' ? (
-                    <div className="flex flex-col min-h-full bg-[#030303] text-zinc-300 font-mono select-none">
-                      {/* IDE Title and Tabs */}
-                      <div className="flex items-center justify-between px-5 py-2.5 bg-[#0a0a0c] border-b border-zinc-900 text-xs text-zinc-400 shrink-0 select-none">
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1">
-                            <span className="w-2.5 h-2.5 rounded-full bg-red-400/70" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400/70" />
-                            <span className="w-2.5 h-2.5 rounded-full bg-green-400/70" />
-                          </div>
-                          <div className="w-px h-3.5 bg-zinc-800 mx-2" />
-                          <div className="flex items-center gap-1.5 bg-[#121215] text-zinc-100 px-3 py-1.5 rounded-t-lg border-t border-x border-zinc-900 text-[10px] font-bold">
-                            <FileText size={12} className="text-blue-500 animate-pulse" />
-                            <span>{artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'document'}.md</span>
-                          </div>
-                        </div>
-                        <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-extrabold flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
-                          LUMINA DOCS ENGINE
-                        </div>
-                      </div>
-
-                      {/* Code Canvas Container */}
-                      <div className="flex-1 flex overflow-y-auto bg-[#030303] custom-scrollbar">
-                        {/* Gutter */}
-                        <div className="py-8 border-r border-zinc-900/65 flex flex-col items-end pr-4 text-[11px] text-zinc-700 font-mono select-none bg-[#030205] w-14 shrink-0">
-                          {Array.from({ length: Math.max(12, Math.ceil(artifact.content.split('\n').length * 1.05)) }).map((_, idx) => (
-                            <div key={idx} className="h-6 flex items-center justify-end font-medium">
-                              {idx + 1}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Rich Document with Code Vibe */}
-                        <div className="flex-1 py-8 px-8 select-text overflow-x-hidden">
-                          {/* Markdown Meta Comment Block / Frontmatter */}
-                          <div className="text-zinc-600 select-none mb-6 font-mono text-[13px] md:text-[14px] italic border-b border-zinc-900 pb-4">
-                            <div>---</div>
-                            <div>document: {artifact.title}</div>
-                            <div>author: Lumina Core</div>
-                            <div>synthesized: {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                            <div>document_id: LUM-{(Math.random() * 100000).toFixed(0)}</div>
-                            <div>type: {artifact.type}</div>
-                            <div>---</div>
-                          </div>
-
-                          {/* Markdown rendering nested beautifully inside the IDE shell */}
-                          <div className="markdown-body prose dark:prose-invert max-w-none prose-zinc dark:prose-zinc text-zinc-200 leading-relaxed text-sm md:text-base font-sans pb-12">
-                            <Markdown remarkPlugins={[remarkGfm]}>{artifact.content}</Markdown>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Workspace Status Bar */}
-                      <div className="px-4 py-1.5 bg-[#0a0a0c] border-t border-zinc-900 text-[10px] text-zinc-500 font-mono flex justify-between select-none shrink-0">
-                        <div className="flex items-center gap-4">
-                          <span>UTF-8</span>
-                          <span>LF</span>
-                          <span className="text-blue-400 font-semibold">Markdown Live Preview</span>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <span>Lines: {artifact.content.split('\n').length}</span>
-                          <span>Words: {artifact.content.trim().split(/\s+/).filter(Boolean).length}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-full bg-[var(--theme-surface)] overflow-hidden">
-                      <iframe
-                        title="Preview"
-                        srcDoc={artifact.language === 'html' || artifact.type === 'html' ? getCombinedSrcDoc(artifact.content, allArtifacts) : artifact.content}
-                        className="w-full h-full border-none bg-white"
-                        sandbox="allow-scripts"
-                      />
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-};
-
-const ClaudeAsterisk = () => (
-  <svg viewBox="0 0 24 24" className="w-8 h-8 text-[#e05c38] shrink-0 animate-[spin_10s_linear_infinite]" fill="currentColor">
-    <path d="M12,2 C12.55,2 13,2.45 13,3 L13,6.1 C14.3,5.1 15.9,4.6 17.5,4.6 C18.05,4.6 18.5,5.05 18.5,5.6 C18.5,6.15 18.05,6.6 17.5,6.6 C16.4,6.6 15.3,7.1 14.5,7.9 C15.8,7.3 17.3,7.1 18.8,7.3 C19.33,7.39 19.7,7.87 19.7,8.4 C19.7,8.93 19.33,9.41 18.8,9.5 C17.3,9.7 15.8,10.1 14.5,10.8 C15.6,11.3 16.5,12.1 17.1,13.1 C17.41,13.57 17.31,14.19 16.85,14.5 C16.39,14.81 15.77,14.71 15.45,14.25 C14.8,13.2 13.7,12.4 12.5,12.1 L12.5,18.5 C12.5,19.05 12.05,19.5 11.5,19.5 C10.95,19.5 10.5,19.05 10.5,18.5 L10.5,12.1 C9.3,12.1 8.2,12.9 7.55,13.95 C7.23,14.41 6.61,14.51 6.15,14.2 C5.69,13.89 5.59,13.27 5.9,12.81 C6.5,11.81 7.4,11.01 8.5,10.51 C7.2,9.81 5.7,9.41 4.2,9.21 C3.67,9.12 3.3,8.64 3.3,8.11 C3.3,7.58 3.67,7.1 4.2,7.01 C5.7,6.81 7.2,7.01 8.5,7.61 C7.7,6.81 6.6,6.31 5.5,6.31 C4.95,6.31 4.5,5.86 4.5,5.31 C4.5,4.76 4.95,4.31 5.5,4.31 C7.1,4.31 8.7,4.81 10,5.81 L10,2.71 C10,2.16 10.45,1.71 11,1.71 Z" />
-  </svg>
-);
 
 export default function App() {
   const { isDark: isDarkMode, theme } = useTheme();
@@ -3733,6 +396,9 @@ export default function App() {
   const [autoHideTopBar, setAutoHideTopBar] = useState(() => {
     return localStorage.getItem('lumina_auto_hide_top_bar') === 'true';
   });
+  const [useTurboQuant, setUseTurboQuant] = useState(() => {
+    return localStorage.getItem('lumina_turboquant') === 'true';
+  });
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = useState<string | null>(null);
 
@@ -3753,18 +419,6 @@ export default function App() {
     avatar: '',
     isGeneratingAvatar: false
   });
-  const DEFAULT_SERVER_URL = '/api';
-  const DEFAULT_MCP_URL = '/api';
-  const DEFAULT_API_KEY = 'llama';
-
-  const safeGetItem = (key: string, fallback: string) => {
-    try {
-      return localStorage.getItem(key) || fallback;
-    } catch (error) {
-      return fallback;
-    }
-  };
-
   const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', DEFAULT_SERVER_URL));
   const [apiKey, setApiKey] = useState(() => safeGetItem('lumina_api_key', DEFAULT_API_KEY));
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
@@ -3895,23 +549,6 @@ export default function App() {
     }
     setIsAiSaved(false);
   };
-
-  const WRITING_STYLES = [
-    { id: 'default', label: 'Default', icon: <PenTool size={14} /> },
-    { id: 'poem', label: 'Poem', icon: <Music size={14} /> },
-    { id: 'story', label: 'Story', icon: <History size={14} /> },
-    { id: 'letter', label: 'Letter', icon: <Mail size={14} /> },
-    { id: 'essay', label: 'Essay', icon: <FileText size={14} /> },
-    { id: 'script', label: 'Script', icon: <TypeIcon size={14} /> },
-  ];
-
-  const SKILLS: Skill[] = [
-    { id: 'summarize', label: 'Summarize', prompt: 'Summarize the following: ', icon: <FileText size={16} /> },
-    { id: 'translate', label: 'Translate', prompt: 'Translate the following to English: ', icon: <Globe size={16} /> },
-    { id: 'explain', label: 'Explain Code', prompt: 'Explain this code step by step: ', icon: <Code size={16} /> },
-    { id: 'brainstorm', label: 'Brainstorm', prompt: 'Brainstorm 5 creative ideas for: ', icon: <Sparkles size={16} /> },
-    { id: 'refactor', label: 'Refactor', prompt: 'Refactor and improve this code: ', icon: <Wrench size={16} /> },
-  ];
 
   const handleSaveAI = () => {
     localStorage.setItem('lumina_server_url', serverUrl);
@@ -4193,17 +830,6 @@ export default function App() {
   const [input, setInput] = useState('');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
 
-  const SLASH_COMMANDS = useMemo(() => [
-    { id: 'clear', name: 'clear', desc: 'Clear current chat history' },
-    { id: 'new', name: 'new', desc: 'Start a new chat session' },
-    { id: 'goal', name: 'goal', desc: 'Run until the specified goal is completely finished' },
-    { id: 'schedule', name: 'schedule', desc: 'Run custom instruction on a recurring schedule or as a one-time timer' },
-    { id: 'browser', name: 'browser', desc: 'Invoke a browser agent for web tasks' },
-    { id: 'grill-me', name: 'grill-me', desc: 'Interview me to align on a plan' },
-    { id: 'coder', name: 'coder', desc: 'Activate autonomous Software Engineering Agent mode' },
-    { id: 'coder_off', name: 'coder off', desc: 'Deactivate autonomous Software Engineering Agent mode' }
-  ], []);
-
   const showsSlashCommands = input.startsWith('/') && !input.substring(1).includes(' ');
   const slashQuery = showsSlashCommands ? input.substring(1).toLowerCase() : '';
   const filteredCommands = useMemo(() => {
@@ -4220,115 +846,12 @@ export default function App() {
   const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
   const [isCanvasOpen, setIsCanvasOpen] = useState(false);
-  const [activeLabTab, setActiveLabTab] = useState<'physics' | 'chemistry' | 'math' | 'biology' | null>(null);
-  const isPhysicsTabActive = activeLabTab !== null;
-  const setIsPhysicsTabActive = (active: boolean) => {
-    setActiveLabTab(active ? 'physics' : null);
-  };
-  const [isPhysicsCanvasOpen, setIsPhysicsCanvasOpen] = useState(false);
-  useEffect(() => {
-    if (isPhysicsCanvasOpen) {
-      setActiveLabTab('physics');
-      setCurrentChatId(null);
-      setIsPhysicsCanvasOpen(false);
-    }
-  }, [isPhysicsCanvasOpen]);
   const [canvasView, setCanvasView] = useState<'code' | 'preview'>('code');
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
-  const [isCoderMode, setIsCoderMode] = useState(false);
-  const [activeCommandType, setActiveCommandType] = useState<string | null>(null);
-  const [activeCommandQuery, setActiveCommandQuery] = useState<string | null>(null);
-  const [coderTodos, setCoderTodos] = useState<{ id: string; text: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[]>([]);
-  const [isGeneratingTodos, setIsGeneratingTodos] = useState(false);
-  const [showTodoPanel, setShowTodoPanel] = useState(false);
-  const [todoCollapsed, setTodoCollapsed] = useState(false);
 
-  // Ask AI States
-  const [askAiQuestions, setAskAiQuestions] = useState<{ id: string; question: string; type: 'single_choice' | 'multi_choice' | 'scale' | 'text_input' | 'confirm'; options?: string[]; purpose?: string }[]>([]);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [askAiAnswers, setAskAiAnswers] = useState<Record<string, any>>({});
-  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
-  const [showAskAiPanel, setShowAskAiPanel] = useState(false);
-  const [textInputAnswer, setTextInputAnswer] = useState('');
-  const [isTransitioningQuestion, setIsTransitioningQuestion] = useState(false);
-  const [isAnalyzingAnswers, setIsAnalyzingAnswers] = useState(false);
-
-  // Countdown Timer Effect for To-dos
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setChats(prev => {
-        let updated = false;
-        const nextChats = prev.map(chat => {
-          const nextMessages = chat.messages.map(m => {
-            if (m.todoPlan && !m.todoPlan.isConfirmed && m.todoPlan.countdown !== undefined && m.todoPlan.countdown > 0) {
-              updated = true;
-              const nextCountdown = m.todoPlan.countdown - 1;
-              if (nextCountdown === 0) {
-                // Auto-starts
-                setTimeout(() => handleStartBuilding(chat.id, m.id, m.todoPlan!.todos), 0);
-                return {
-                  ...m,
-                  todoPlan: {
-                    ...m.todoPlan,
-                    countdown: 0,
-                    isConfirmed: true
-                  }
-                };
-              }
-              return {
-                ...m,
-                todoPlan: {
-                  ...m.todoPlan,
-                  countdown: nextCountdown
-                }
-              };
-            }
-            return m;
-          });
-          return { ...chat, messages: nextMessages };
-        });
-        return updated ? nextChats : prev;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [chats]);
-
-  useEffect(() => {
-    if (!isTyping) return;
-    if (coderTodos.length === 0) return;
-
-    // Only auto-advance if we are NOT in Coder Mode (which relies on real tool-call transitions)
-    if (!isCoderMode) {
-      const interval = setInterval(() => {
-        setCoderTodos(prev => {
-          const currentProgressIdx = prev.findIndex(t => t.status === 'in_progress');
-          if (currentProgressIdx === -1) {
-            const firstPendingIdx = prev.findIndex(t => t.status === 'pending');
-            if (firstPendingIdx !== -1) {
-              return prev.map((item, idx) => {
-                if (idx === firstPendingIdx) return { ...item, status: 'in_progress' };
-                return item;
-              });
-            }
-            return prev;
-          }
-
-          return prev.map((item, idx) => {
-            if (idx === currentProgressIdx) return { ...item, status: 'complete' };
-            if (idx === currentProgressIdx + 1) return { ...item, status: 'in_progress' };
-            return item;
-          });
-        });
-      }, 3500);
-
-      return () => clearInterval(interval);
-    }
-  }, [isTyping, isCoderMode, coderTodos.length]);
-  const [isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen] = useState(true);
   const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
   const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -4340,15 +863,10 @@ export default function App() {
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
 
-  // New features for right preview panel: Viewport simulator & Subpath Route
-  const [rightViewportMode, setRightViewportMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [rightIsGridEnabled, setRightIsGridEnabled] = useState<boolean>(false);
   const [rightPreviewSubpath, setRightPreviewSubpath] = useState<string>('');
-  const [rightIsInspectMode, setRightIsInspectMode] = useState<boolean>(false);
-  const [localElementAttachments, setLocalElementAttachments] = useState<any[]>([]);
   const [attachmentContextMenu, setAttachmentContextMenu] = useState<{ visible: boolean, x: number, y: number, attachment: any, index: number }>({ visible: false, x: 0, y: 0, attachment: null, index: -1 });
   const [selectedModalAttachment, setSelectedModalAttachment] = useState<any | null>(null);
-  const [isAnalyzingElement, setIsAnalyzingElement] = useState<boolean>(false);
   const rightIframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -4370,20 +888,6 @@ export default function App() {
     };
   }, []);
 
-  const currentChatActive = chats.find(c => c.id === currentChatId);
-  useEffect(() => {
-    if (currentChatActive) {
-      const chatIsCoder = !!(currentChatActive as any).isCoderMode;
-      setIsCoderMode(chatIsCoder);
-      if (chatIsCoder) {
-        setIsCoderWorkspacePanelOpen(true);
-        setIsSidebarOpen(false);
-      }
-    } else {
-      setIsCoderMode(false);
-    }
-  }, [currentChatId, currentChatActive]);
-
   const triggerWorkspaceRefresh = useCallback(() => {
     setWorkspaceRefreshKey(prev => prev + 1);
   }, []);
@@ -4399,7 +903,218 @@ export default function App() {
   }, [triggerWorkspaceRefresh]);
 
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+
+  // Advanced Voice Input State Engine
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voiceInterimText, setVoiceInterimText] = useState('');
+  const [voiceLanguage, setVoiceLanguage] = useState('en-US');
+  const [voiceContinuous, setVoiceContinuous] = useState(false);
+  const [voiceAppendMode, setVoiceAppendMode] = useState(true);
+  const [voiceAutoSend, setVoiceAutoSend] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [micVolume, setMicVolume] = useState<number>(0);
+  const [showVoiceControlPanel, setShowVoiceControlPanel] = useState(false);
+
+  const recognitionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    return () => {
+      // Cleanup all voice dictation resources on component dispose
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch {}
+      }
+      if (micStreamRef.current) {
+        try { micStreamRef.current.getTracks().forEach((track: any) => track.stop()); } catch {}
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
+  const startVoiceDictation = async () => {
+    setVoiceError(null);
+    setVoiceInterimText('');
+    const RecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!RecognitionConstructor) {
+      setVoiceError("Your browser doesn't support the Web Speech API. Please use Google Chrome, Edge, or Safari.");
+      showToast("Speech recognition not supported in this browser.");
+      return;
+    }
+
+    try {
+      const rec = new RecognitionConstructor();
+      // Use continuous to let users pause organically and talk back without self-closing
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = voiceLanguage;
+
+      rec.onstart = () => {
+        setIsVoiceListening(true);
+        showToast("🎙️ Voice listening active! Speak now...");
+      };
+
+      rec.onresult = (event: any) => {
+        let finalTrans = '';
+        let interimTrans = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTrans += event.results[i][0].transcript;
+          } else {
+            interimTrans += event.results[i][0].transcript;
+          }
+        }
+
+        if (interimTrans) {
+          setVoiceInterimText(interimTrans);
+        }
+
+        if (finalTrans) {
+          const added = finalTrans.trim();
+          if (added) {
+            setInput(prev => {
+              if (voiceAppendMode) {
+                return prev ? (prev.endsWith(' ') ? prev + added : prev + ' ' + added) : added;
+              } else {
+                return added;
+              }
+            });
+            setVoiceInterimText('');
+          }
+        }
+      };
+
+      rec.onerror = (e: any) => {
+        console.error("Speech recognition error:", e);
+        if (e.error !== 'no-speech') {
+          setVoiceError(`Error: ${e.error}`);
+        }
+      };
+
+      rec.onend = () => {
+        setIsVoiceListening(false);
+        setVoiceInterimText('');
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+
+      // Start Web Audio tracking for beautiful real visual soundwaves
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          micStreamRef.current = stream;
+          
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          audioContextRef.current = audioCtx;
+          
+          const source = audioCtx.createMediaStreamSource(stream);
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 64;
+          source.connect(analyser);
+          analyserRef.current = analyser;
+
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+
+          const updateVolume = () => {
+            if (!analyserRef.current) return;
+            analyserRef.current.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < bufferLength; i++) {
+              sum += dataArray[i];
+            }
+            const average = sum / bufferLength;
+            // Scale and map to a readable volume range (0 - 100)
+            setMicVolume(Math.min(100, Math.round((average / 128) * 100)));
+            animationFrameRef.current = requestAnimationFrame(updateVolume);
+          };
+
+          updateVolume();
+        } catch (mediaErr) {
+          console.warn("Could not initialize mic volume tracking for animations: ", mediaErr);
+        }
+      }
+
+    } catch (err: any) {
+      console.error("Failed to start speech recognition:", err);
+      setVoiceError(err?.message || String(err));
+      setIsVoiceListening(false);
+    }
+  };
+
+  const stopVoiceDictation = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null; // Prevent end callback firing duplicate triggers
+        recognitionRef.current.stop();
+      } catch (err) {
+        console.error("Error stopping recognition:", err);
+      }
+      recognitionRef.current = null;
+    }
+
+    if (micStreamRef.current) {
+      try {
+        micStreamRef.current.getTracks().forEach((track: any) => track.stop());
+      } catch {}
+      micStreamRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    setIsVoiceListening(false);
+    setMicVolume(0);
+    setVoiceInterimText('');
+    
+    // Activate Auto submission if enabled
+    if (voiceAutoSend) {
+      setTimeout(() => {
+        handleSend();
+      }, 400);
+    }
+  };
+
+  const toggleVoiceDictation = () => {
+    if (isVoiceListening) {
+      stopVoiceDictation();
+    } else {
+      startVoiceDictation();
+    }
+  };
+
+
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [isUrlToolOpen, setIsUrlToolOpen] = useState(false);
+  const [urlToolInput, setUrlToolInput] = useState('');
+  const [urlToolLoading, setUrlToolLoading] = useState(false);
+  const [urlToolError, setUrlToolError] = useState<string | null>(null);
+  const [attachedUrlDocs, setAttachedUrlDocs] = useState<
+    Array<{ id: string; url: string; title: string; content: string; favicon?: string; segments?: any[]; videoId?: string; isOcr?: boolean }>
+  >([]);
+  const [isTranscriptToolOpen, setIsTranscriptToolOpen] = useState(false);
+  const [transcriptToolInput, setTranscriptToolInput] = useState('');
+  const [transcriptToolLoading, setTranscriptToolLoading] = useState(false);
+  const [transcriptToolError, setTranscriptToolError] = useState<string | null>(null);
+  const [selectedTranscriptDoc, setSelectedTranscriptDoc] = useState<any | null>(null);
+  const [transcriptionOptionsDoc, setTranscriptionOptionsDoc] = useState<any | null>(null);
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -4513,413 +1228,12 @@ export default function App() {
     });
   }, []);
 
-  const handleSelectedElementAnalysis = useCallback(async (metadata: {
-    tag: string;
-    id: string;
-    classes: string;
-    text: string;
-    placeholder: string;
-    src: string;
-    href: string;
-  }) => {
-    setIsAnalyzingElement(true);
-    showToast("Analyzing selected element...");
-    try {
-      const response = await fetch('/api/fs/analyze_element', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(metadata)
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.analysis) {
-          const newAtt = {
-            id: Date.now().toString(),
-            fileName: data.analysis.fileName,
-            filePath: data.analysis.filePath,
-            specificCode: data.analysis.specificCode,
-            connections: data.analysis.connections || [],
-            elementWork: data.analysis.elementWork
-          };
-          setLocalElementAttachments(prev => [...prev, newAtt]);
-          showToast(`Attached selected element as a visual document badge`);
-        } else {
-          showToast("Automated element source trace returned an error.");
-        }
-      } else {
-        showToast("Error communicating with source analysis API.");
-      }
-    } catch (err) {
-      console.error(err);
-      showToast("Network error tracing element source code.");
-    } finally {
-      setIsAnalyzingElement(false);
-    }
-  }, [showToast]);
 
-  useEffect(() => {
-    const iframe = rightIframeRef.current;
-    if (!iframe) return;
-
-    let docCleanup: (() => void) | null = null;
-
-    const attachInspectListeners = () => {
-      try {
-        const doc = iframe.contentDocument || iframe.contentWindow?.document;
-        if (!doc) return;
-
-        if (docCleanup) {
-          docCleanup();
-          docCleanup = null;
-        }
-
-        let hoveredEl: HTMLElement | null = null;
-        let originalOutline = '';
-        let originalTransition = '';
-
-        const handleMouseOver = (e: MouseEvent) => {
-          if (!rightIsInspectMode) return;
-          e.stopPropagation();
-
-          if (hoveredEl && hoveredEl !== e.target) {
-            hoveredEl.style.outline = originalOutline;
-            hoveredEl.style.transition = originalTransition;
-          }
-
-          hoveredEl = e.target as HTMLElement;
-          if (hoveredEl) {
-            originalOutline = hoveredEl.style.outline;
-            originalTransition = hoveredEl.style.transition;
-
-            hoveredEl.style.transition = 'outline 0.1s ease';
-            hoveredEl.style.outline = '2px dashed #0D9488';
-          }
-        };
-
-        const handleMouseOut = (e: MouseEvent) => {
-          if (!rightIsInspectMode) return;
-          if (hoveredEl) {
-            hoveredEl.style.outline = originalOutline;
-            hoveredEl.style.transition = originalTransition;
-            hoveredEl = null;
-          }
-        };
-
-        const handleElementClick = (e: MouseEvent) => {
-          if (!rightIsInspectMode) return;
-          e.preventDefault();
-          e.stopPropagation();
-
-          const clickedEl = e.target as HTMLElement;
-          if (clickedEl) {
-            clickedEl.style.outline = originalOutline;
-            clickedEl.style.transition = originalTransition;
-
-            const classes = clickedEl.className && typeof clickedEl.className === 'string' ? clickedEl.className : '';
-            const tag = clickedEl.tagName.toLowerCase();
-            const id = clickedEl.id || '';
-            const placeholder = clickedEl.getAttribute('placeholder') || '';
-            const href = clickedEl.getAttribute('href') || '';
-            const src = clickedEl.getAttribute('src') || '';
-            const text = clickedEl.innerText?.substring(0, 300).trim() || clickedEl.textContent?.substring(0, 300).trim() || '';
-
-            setRightIsInspectMode(false);
-            handleSelectedElementAnalysis({ tag, id, classes, text, placeholder, src, href });
-          }
-        };
-
-        if (rightIsInspectMode) {
-          doc.addEventListener('mouseover', handleMouseOver, true);
-          doc.addEventListener('mouseout', handleMouseOut, true);
-          doc.addEventListener('click', handleElementClick, true);
-
-          let style = doc.getElementById('inspect-mode-cursor-style');
-          if (!style) {
-            style = doc.createElement('style');
-            style.id = 'inspect-mode-cursor-style';
-            style.innerHTML = `
-              * {
-                cursor: crosshair !important;
-              }
-            `;
-            doc.head.appendChild(style);
-          }
-        } else {
-          doc.getElementById('inspect-mode-cursor-style')?.remove();
-        }
-
-        docCleanup = () => {
-          try {
-            doc.removeEventListener('mouseover', handleMouseOver, true);
-            doc.removeEventListener('mouseout', handleMouseOut, true);
-            doc.removeEventListener('click', handleElementClick, true);
-            doc.getElementById('inspect-mode-cursor-style')?.remove();
-            if (hoveredEl) {
-              (hoveredEl as HTMLElement).style.outline = originalOutline;
-              (hoveredEl as HTMLElement).style.transition = originalTransition;
-            }
-          } catch (err) {
-            console.warn("Error cleaning up inspect listeners:", err);
-          }
-        };
-      } catch (err) {
-        console.warn("Iframe same-origin inspection warning:", err);
-      }
-    };
-
-    attachInspectListeners();
-
-    iframe.addEventListener('load', attachInspectListeners);
-    return () => {
-      iframe.removeEventListener('load', attachInspectListeners);
-      if (docCleanup) {
-        docCleanup();
-      }
-    };
-  }, [rightIsInspectMode, iframeKey, rightPreviewSubpath, handleSelectedElementAnalysis]);
 
   const handleSetIsSourcesPanelOpen = useCallback((v: boolean) => setIsSourcesPanelOpen(v), []);
   const handleSetActiveArtifact = useCallback((v: any) => setActiveArtifact(v), []);
   const handleSetIsCanvasOpen = useCallback((v: boolean) => setIsCanvasOpen(v), []);
   const handleSetCanvasView = useCallback((v: 'code' | 'preview') => setCanvasView(v), []);
-
-  // Ask AI Callback & Action Helpers
-  const handleTriggerAskAi = async () => {
-    setIsGeneratingQuestions(true);
-    setShowAskAiPanel(true);
-    setCurrentQuestionIndex(0);
-    setAskAiAnswers({});
-    setTextInputAnswer('');
-
-    const contextQuery = input.trim() || (messages.length > 0 ? messages[messages.length - 1].content : '');
-
-    try {
-      const messagesPrompt = [
-        {
-          role: 'system',
-          content: `You are an expert software architect. Analyze the user's task or context and generate 2 to 6 targeted clarifying questions to ask before writing any code. Order them from most impactful to narrowest.
-          Respond with a JSON object in this format (no other text, no markdown styling, no nested values):
-          {
-            "questions": [
-              {
-                "id": "theme_choice",
-                "question": "Which visual style matches your branding goals?",
-                "type": "single_choice",
-                "options": ["Cosmic Midnight", "Clean Minimalist Light", "Warm Editorial", "Cybernetic Terminal"],
-                "purpose": "Define color theme."
-              }
-            ]
-          }
-          Types permitted: 'single_choice' | 'multi_choice' | 'scale' | 'text_input' | 'confirm'.
-          For 'single_choice' and 'multi_choice', provide 2 to 4 'options'. For 'scale', 'text_input', and 'confirm', leave 'options' empty.
-          Each question MUST have a clear purpose.`
-        },
-        {
-          role: 'user',
-          content: `Task context: "${contextQuery || 'Build a web dashboard applet or custom feature component'}"`
-        }
-      ];
-
-      const res = await callLlamaBridge(messagesPrompt, []);
-      const text = res?.choices?.[0]?.message?.content || '';
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-          const validated = parsed.questions.map((q: any) => ({
-            id: q.id || Math.random().toString(),
-            question: q.question || 'Please specify your requirement:',
-            type: q.type || 'single_choice',
-            options: Array.isArray(q.options) ? q.options.slice(0, 4) : undefined,
-            purpose: q.purpose || ''
-          })).filter((q: any) => q.question && ['single_choice', 'multi_choice', 'scale', 'text_input', 'confirm'].includes(q.type));
-          
-          if (validated.length > 0) {
-            setAskAiQuestions(validated);
-            setIsGeneratingQuestions(false);
-            return;
-          }
-        }
-      }
-      throw new Error("Invalid json format");
-    } catch (e) {
-      console.warn("Llama bridge error, using default fallback questions", e);
-      const fallbackQuestions = [
-        {
-          id: 'design_style',
-          question: contextQuery 
-            ? `Which visual aesthetic should we apply for "${contextQuery.slice(0, 30)}..."?`
-            : "Which visual design concept do you prefer?",
-          type: 'single_choice' as const,
-          options: ["Swiss Minimalist", "Cosmic Slate Dark", "Sunset Warm & Playful", "Matrix Cyber Mono"],
-          purpose: "Establishes a cohesive UI visual signature."
-        },
-        {
-          id: 'target_features',
-          question: "Which capabilities will enrich this feature most?",
-          type: 'multi_choice' as const,
-          options: ["Interactive Data Board", "Local Storage Search", "Export to PDF/CSV", "Advanced Options Drawer"],
-          purpose: "Scopes primary interactive components."
-        },
-        {
-          id: 'complexity_rating',
-          question: "How interactive should the micro-animations & layout motion be?",
-          type: 'scale' as const,
-          purpose: "Aesthetic scale rating for framer-motion intensity."
-        },
-        {
-          id: 'custom_wording',
-          question: "Any specific layout file, logo name or branding header to use?",
-          type: 'text_input' as const,
-          purpose: "Applies customized text branding identifiers."
-        },
-        {
-          id: 'confirm_bootstrap',
-          question: "Should we inject a clean mock state to showcase initial features?",
-          type: 'confirm' as const,
-          purpose: "Specifies mock state populates on workspace build."
-        }
-      ];
-      setAskAiQuestions(fallbackQuestions);
-      setIsGeneratingQuestions(false);
-    }
-  };
-
-  const handleNextQuestion = () => {
-    setIsTransitioningQuestion(true);
-    setTimeout(() => {
-      setIsTransitioningQuestion(false);
-      if (currentQuestionIndex < askAiQuestions.length - 1) {
-        setCurrentQuestionIndex(prev => prev + 1);
-      } else {
-        handleFinishQuestions();
-      }
-    }, 200);
-  };
-
-  const handleSelectAnswer = (questionId: string, value: any, autoAdvance: boolean) => {
-    setAskAiAnswers(prev => ({ ...prev, [questionId]: value }));
-    if (autoAdvance) {
-      handleNextQuestion();
-    }
-  };
-
-  const handleDotClick = (index: number) => {
-    if (index < currentQuestionIndex || askAiAnswers[askAiQuestions[index].id] !== undefined) {
-      setCurrentQuestionIndex(index);
-    }
-  };
-
-  const handleFinishQuestions = async (isSkipped = false) => {
-    setIsAnalyzingAnswers(true);
-    
-    const contextQuery = input.trim() || (messages.length > 0 ? messages[messages.length - 1].content : 'Custom app refinement');
-    const answersStr = isSkipped 
-      ? "Skipped (Use sensible defaults)" 
-      : Object.entries(askAiAnswers).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ');
-    
-    let planTitle = `Interactive Feature Integration`;
-    let planTodos = [
-      { id: '1', text: "Scaffold visual view elements and structure", status: 'pending' as const },
-      { id: '2', text: "Bind layout controls and state context handlers", status: 'pending' as const },
-      { id: '3', text: "Integrate custom responsive configurations", status: 'pending' as const },
-      { id: '4', text: "Apply high-contrast Tailwind styling and animations", status: 'pending' as const },
-      { id: '5', text: "Run local unit audits and verify build output", status: 'pending' as const }
-    ];
-    let assumptionsMsg = "";
-
-    try {
-      const prompt = [
-        {
-          role: 'system',
-          content: `You are an expert Software Architect. Create a structured implementation plan and list of 4-7 tasks to build the user's request, considering their answers to clarifying questions.
-          Respond ONLY with a JSON object in this format:
-          {
-            "title": "Interactive Analytics Board",
-            "assumptions": "Using Cosmic Slate Dark aesthetic with Local Storage active.",
-            "todos": [
-              "Set up responsive container and header with dark theme",
-              "Install and import Lucide icon packs and charts",
-              "Configure local storage state listeners for persistence",
-              "Incorporate animation transition timing and spring motion",
-              "Validate all React compiler and build rules"
-            ]
-          }`
-        },
-        {
-          role: 'user',
-          content: `Task: "${contextQuery}"\nAnswers: ${answersStr}`
-        }
-      ];
-
-      const res = await callLlamaBridge(prompt, []);
-      const text = res?.choices?.[0]?.message?.content || '';
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        if (parsed.title) planTitle = parsed.title;
-        if (parsed.assumptions) assumptionsMsg = parsed.assumptions;
-        if (Array.isArray(parsed.todos)) {
-          planTodos = parsed.todos.map((t: string, idx: number) => ({
-            id: (idx + 1).toString(),
-            text: t,
-            status: 'pending' as const
-          }));
-        }
-      }
-    } catch (e) {
-      console.warn("Planning LLM failed, using fallback", e);
-    }
-
-    let targetChatId = currentChatId;
-    if (!targetChatId) {
-      targetChatId = createNewChat(null, isCoderMode);
-    }
-
-    const userMsgText = isSkipped 
-      ? `⚡ Clicked **Skip All** in clarifying questions. Proceed with defaults for "${contextQuery || 'the task'}".`
-      : `💡 Answered clarifying questions for: **${contextQuery || 'the task'}**.\n${Object.entries(askAiAnswers).map(([k, v]) => `- **${k}**: _${Array.isArray(v) ? v.join(', ') : v}_`).join('\n')}`;
-
-    const userMsgId = Date.now().toString();
-    const assistantMsgId = (Date.now() + 10).toString();
-
-    const userMessage: Message = {
-      id: userMsgId,
-      role: 'user',
-      content: userMsgText,
-      timestamp: new Date()
-    } as any;
-
-    const assistantMessage: Message = {
-      id: assistantMsgId,
-      role: 'assistant',
-      content: `📋 **Plan Created:** ${planTitle}\n\n${assumptionsMsg ? `*Assumptions:* ${assumptionsMsg}\n\n` : ''}Let's align on the sequence of steps to execute. You can edit the steps, add custom notes, or click **Start Building** to begin the automated agent run immediately.`,
-      timestamp: new Date(),
-      todoPlan: {
-        title: planTitle,
-        todos: planTodos,
-        isConfirmed: false,
-        countdown: 10
-      }
-    } as any;
-
-    setChats(prev => prev.map(chat => {
-      if (chat.id === targetChatId) {
-        return {
-          ...chat,
-          messages: [...chat.messages, userMessage, assistantMessage],
-          updatedAt: new Date()
-        };
-      }
-      return chat;
-    }));
-
-    setInput('');
-    setShowAskAiPanel(false);
-    setIsAnalyzingAnswers(false);
-    setAskAiQuestions([]);
-    setAskAiAnswers({});
-  };
 
   const handleStartBuilding = (chatId: string, messageId: string, todos: any[]) => {
     setChats(prev => prev.map(c => {
@@ -5092,20 +1406,24 @@ export default function App() {
     switch (q.type) {
       case 'single_choice':
         return (
-          <div className="flex flex-wrap gap-2 w-full max-h-[105px] overflow-y-auto pr-1">
-            {q.options?.map(opt => {
+          <div className="flex flex-wrap gap-2.5 w-full overflow-y-auto max-h-[125px] pr-1.5 custom-scrollbar">
+            {q.options?.map((opt, i) => {
               const isSelected = askAiAnswers[q.id] === opt;
               return (
                 <button
                   key={opt}
+                  type="button"
                   onClick={() => handleSelectAnswer(q.id, opt, true)}
-                  className={`px-4 py-2 text-xs font-semibold rounded-2xl border transition-all duration-150 cursor-pointer ${
+                  className={`group px-3.5 py-2 text-xs font-semibold rounded-xl border transition-all duration-200 cursor-pointer flex items-center gap-2 ${
                     isSelected
-                      ? 'bg-orange-500/15 border-orange-500/50 text-orange-400 font-bold shadow-xs'
-                      : 'bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700/50 hover:border-zinc-500 text-zinc-300'
+                      ? 'bg-[var(--theme-accent)]/15 border-[var(--theme-accent)] text-[var(--theme-accent)] shadow-[0_0_12px_rgba(59,130,246,0.15)] font-bold'
+                      : 'bg-[var(--theme-surface-alt)]/65 hover:bg-[var(--theme-bg)]/80 border-[var(--theme-border)]/45 hover:border-[var(--theme-accent)]/50 text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:translate-y-[-1px]'
                   }`}
                 >
-                  {opt}
+                  <span className={`w-1.5 h-1.5 rounded-full transition-transform duration-200 ${
+                    isSelected ? 'bg-[var(--theme-accent)] scale-125 shadow-[0_0_8px_var(--theme-accent)]' : 'bg-[var(--theme-muted)]/30 group-hover:bg-[var(--theme-muted)]/60'
+                  }`} />
+                  <span>{opt}</span>
                 </button>
               );
             })}
@@ -5126,23 +1444,26 @@ export default function App() {
 
         return (
           <div className="flex flex-col gap-3.5 w-full select-none">
-            <div className="flex flex-wrap gap-2 max-h-[75px] overflow-y-auto pr-1">
+            <div className="flex flex-wrap gap-2.5 max-h-[95px] overflow-y-auto pr-1.5 custom-scrollbar">
               {q.options?.map(opt => {
                 const isSelected = selectedList.includes(opt);
                 return (
                   <button
                     key={opt}
+                    type="button"
                     onClick={() => toggleSelection(opt)}
-                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-2xl border transition-all duration-150 cursor-pointer flex items-center gap-1.5 ${
+                    className={`px-3.5 py-2 text-xs font-semibold rounded-xl border transition-all duration-200 cursor-pointer flex items-center gap-2.5 ${
                       isSelected
-                        ? 'bg-orange-500/15 border-orange-500/50 text-orange-400 font-bold'
-                        : 'bg-zinc-800/60 hover:bg-zinc-800 border-zinc-700/50 hover:border-zinc-500 text-zinc-300'
+                        ? 'bg-[var(--theme-accent)]/15 border-[var(--theme-accent)] text-[var(--theme-accent)] font-bold shadow-[0_0_12px_rgba(59,130,246,0.15)]'
+                        : 'bg-[var(--theme-surface-alt)]/65 hover:bg-[var(--theme-bg)]/80 border-[var(--theme-border)]/45 hover:border-[var(--theme-accent)]/50 text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:translate-y-[-1px]'
                     }`}
                   >
-                    <div className={`w-3 h-3 rounded-md border flex items-center justify-center ${
-                      isSelected ? 'border-orange-500 bg-orange-500/20' : 'border-zinc-600'
+                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
+                      isSelected 
+                        ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-white' 
+                        : 'border-[var(--theme-muted)]/50 bg-transparent'
                     }`}>
-                      {isSelected && <Check size={8} strokeWidth={4} className="text-orange-400" />}
+                      {isSelected && <Check size={10} strokeWidth={4} className="text-[var(--theme-input-bg)] dark:text-white" />}
                     </div>
                     <span>{opt}</span>
                   </button>
@@ -5151,9 +1472,10 @@ export default function App() {
             </div>
             <div className="flex justify-end select-none">
               <button
+                type="button"
                 disabled={selectedList.length === 0}
                 onClick={handleNextQuestion}
-                className="px-4 py-1.5 text-[11px] font-black tracking-wider uppercase bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 text-[11px] font-black tracking-wider uppercase bg-[var(--theme-accent)] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl transition-all shadow-[0_4px_12px_rgba(0,0,0,0.15)] flex items-center gap-1.5 cursor-pointer hover:translate-y-[-1px]"
               >
                 <span>Continue</span>
                 <ChevronRight size={12} strokeWidth={3} />
@@ -5166,22 +1488,23 @@ export default function App() {
       case 'scale': {
         const rating = (askAiAnswers[q.id] as number) || 0;
         return (
-          <div className="flex flex-col items-center gap-2.5 w-full select-none">
-            <div className="flex items-center justify-between w-full max-w-sm px-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest font-mono select-none animate-pulse">
-              <span>Minimal Motion</span>
-              <span>Ultra Rich Flow</span>
+          <div className="flex flex-col items-center gap-3.5 w-full select-none">
+            <div className="flex items-center justify-between w-full max-w-sm px-1.5 text-[10px] font-bold text-[var(--theme-muted)] uppercase tracking-widest font-mono select-none">
+              <span className="flex items-center gap-1.5">⚡ Minimal Focus</span>
+              <span className="flex items-center gap-1.5">🔥 Deep Precision</span>
             </div>
-            <div className="flex items-center gap-2 w-full max-w-md justify-between select-none">
+            <div className="flex items-center gap-3 w-full max-w-md justify-between select-none">
               {[1, 2, 3, 4, 5].map(val => {
                 const isSelected = rating === val;
                 return (
                   <button
                     key={val}
+                    type="button"
                     onClick={() => handleSelectAnswer(q.id, val, true)}
-                    className={`w-10 h-10 rounded-2xl flex items-center justify-center border font-mono text-sm font-bold transition-all duration-150 cursor-pointer ${
+                    className={`w-11 h-11 rounded-xl flex items-center justify-center border font-mono text-sm font-bold transition-all duration-200 cursor-pointer ${
                       isSelected
-                        ? 'bg-orange-500 border-orange-400 text-white shadow-[0_0_12px_rgba(249,115,22,0.45)] scale-110'
-                        : 'bg-zinc-800/80 hover:bg-zinc-700 hover:border-zinc-500 border-zinc-700/60 text-zinc-300'
+                        ? 'bg-[var(--theme-accent)] border-[var(--theme-accent)] text-white shadow-[0_0_15px_rgba(59,130,246,0.35)] scale-110'
+                        : 'bg-[var(--theme-surface-alt)]/65 hover:bg-[var(--theme-bg)]/80 hover:border-[var(--theme-accent)]/50 border-[var(--theme-border)]/45 text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:scale-105'
                     }`}
                   >
                     {val}
@@ -5208,29 +1531,33 @@ export default function App() {
                   }
                 }}
                 placeholder="Type your custom answer/preferences..."
-                className="w-full h-10 px-4 bg-zinc-850 border border-zinc-750 focus:border-orange-500/50 rounded-2xl text-xs text-zinc-150 outline-none placeholder-zinc-550 transition-all select-text"
+                className="w-full h-11 px-4 pr-11 bg-[var(--theme-surface-alt)]/65 border border-[var(--theme-border)]/55 focus:border-[var(--theme-accent)] focus:bg-[var(--theme-bg)] rounded-xl text-xs text-[var(--theme-primary)] outline-none placeholder-[var(--theme-muted)]/75 transition-all select-text"
               />
               {textInputAnswer.trim() && (
                 <button
+                  type="button"
                   onClick={() => {
                     handleSelectAnswer(q.id, textInputAnswer.trim(), true);
                     setTextInputAnswer('');
                   }}
-                  className="absolute right-2 p-1.5 bg-orange-500 text-white hover:bg-orange-600 rounded-xl transition-all cursor-pointer flex items-center justify-center shadow-lg"
+                  className="absolute right-1.5 p-1.5 bg-[var(--theme-accent)] text-white hover:brightness-110 rounded-lg transition-all cursor-pointer flex items-center justify-center shadow-md animate-fade-in"
                 >
                   <ArrowUp size={14} strokeWidth={3} />
                 </button>
               )}
             </div>
             <div className="flex justify-between items-center select-none">
-              <span className="text-[10px] text-zinc-500 italic ml-1">Or press ENTER to submit</span>
+              <span className="text-[10px] text-[var(--theme-muted)] italic ml-1 flex items-center gap-1.5">
+                <span>⌨️ Press ENTER to submit</span>
+              </span>
               <button
+                type="button"
                 disabled={!textInputAnswer.trim()}
                 onClick={() => {
                   handleSelectAnswer(q.id, textInputAnswer.trim(), true);
                   setTextInputAnswer('');
                 }}
-                className="px-4 py-1.5 text-[11px] font-black tracking-wider uppercase bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 text-[11px] font-black tracking-wider uppercase bg-[var(--theme-accent)] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl transition-all shadow-[0_4px_12px_rgba(0,0,0,0.15)] flex items-center gap-1.5 cursor-pointer hover:translate-y-[-1px]"
               >
                 <span>Continue</span>
                 <ChevronRight size={12} strokeWidth={3} />
@@ -5243,14 +1570,16 @@ export default function App() {
         return (
           <div className="flex items-center gap-4 w-full max-w-md mx-auto select-none">
             <button
+              type="button"
               onClick={() => handleSelectAnswer(q.id, 'Yes', true)}
-              className="flex-1 py-2.5 text-xs font-bold bg-orange-500/10 border border-orange-500/25 hover:bg-orange-500 hover:text-white hover:border-orange-400 text-orange-400 rounded-2xl transition-all shadow-sm cursor-pointer"
+              className="flex-1 py-3 text-xs font-bold bg-[var(--theme-accent)]/10 border border-[var(--theme-accent)]/30 hover:bg-[var(--theme-accent)] hover:text-white hover:border-[var(--theme-accent)] text-[var(--theme-accent)] rounded-xl transition-all shadow-sm cursor-pointer hover:scale-[1.02]"
             >
               Understand & Accept
             </button>
             <button
+              type="button"
               onClick={() => handleSelectAnswer(q.id, 'No', true)}
-              className="flex-1 py-2.5 text-xs font-bold bg-zinc-800 border border-zinc-700/80 hover:bg-zinc-750 hover:border-zinc-550 text-zinc-300 rounded-2xl transition-all cursor-pointer"
+              className="flex-1 py-3 text-xs font-bold bg-[var(--theme-surface-alt)] hover:bg-[var(--theme-bg)] border border-[var(--theme-border)]/55 hover:border-[var(--theme-muted)] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] rounded-xl transition-all cursor-pointer hover:scale-[1.02]"
             >
               Skip option
             </button>
@@ -5280,6 +1609,103 @@ export default function App() {
     return newChat.id;
   };
 
+  const {
+    isDevToolsOpen,
+    setIsDevToolsOpen,
+    activeDevTab,
+    setActiveDevTab,
+    simLatency,
+    setSimLatency,
+    retroFilter,
+    setRetroFilter,
+    verboseDebug,
+    setVerboseDebug,
+    devLogs,
+    setDevLogs,
+    addDevLog,
+    handleExecMockCommand
+  } = useDevTools({ messages, chats, showToast });
+
+  const {
+    isCoderMode,
+    setIsCoderMode,
+    isCoderWorkspacePanelOpen,
+    setIsCoderWorkspacePanelOpen,
+    activeCommandType,
+    setActiveCommandType,
+    activeCommandQuery,
+    setActiveCommandQuery,
+    coderTodos,
+    setCoderTodos,
+    isGeneratingTodos,
+    setIsGeneratingTodos,
+    showTodoPanel,
+    setShowTodoPanel,
+    todoCollapsed,
+    setTodoCollapsed
+  } = useCoderMode({
+    currentChatId,
+    chats,
+    setChats,
+    isSidebarOpen,
+    setIsSidebarOpen,
+    handleStartBuilding,
+    isTyping
+  });
+
+  const {
+    askAiQuestions,
+    setAskAiQuestions,
+    currentQuestionIndex,
+    setCurrentQuestionIndex,
+    askAiAnswers,
+    setAskAiAnswers,
+    isGeneratingQuestions,
+    setIsGeneratingQuestions,
+    showAskAiPanel,
+    setShowAskAiPanel,
+    textInputAnswer,
+    setTextInputAnswer,
+    isTransitioningQuestion,
+    setIsTransitioningQuestion,
+    isAnalyzingAnswers,
+    setIsAnalyzingAnswers,
+    handleTriggerAskAi,
+    handleNextQuestion,
+    handleSelectAnswer,
+    handleDotClick,
+    handleFinishQuestions
+  } = useAskAi({
+    input,
+    messages,
+    callLlamaBridge,
+    createNewChat,
+    currentChatId,
+    isCoderMode,
+    handleStartBuilding,
+    showToast,
+    setChats,
+    setInput
+  });
+
+  const {
+    rightViewportMode,
+    setRightViewportMode,
+    rightIsInspectMode,
+    setRightIsInspectMode,
+    isAnalyzingElement,
+    setIsAnalyzingElement,
+    localElementAttachments,
+    setLocalElementAttachments,
+    handleSelectedElementAnalysis
+  } = useRightPanel({
+    rightIframeRef,
+    iframeKey,
+    rightPreviewSubpath,
+    showToast,
+    setFloatingEditFile
+  });
+
   const handleClearChat = () => {
     if (!currentChatId) return;
     setChats(prev => prev.map(chat => {
@@ -5296,13 +1722,16 @@ export default function App() {
   };
 
   const handleSend = async (contentOverride?: string) => {
+    if (isVoiceListening) {
+      stopVoiceDictation();
+    }
     if (isTyping) return;
     const controller = new AbortController();
     abortControllerRef.current = controller;
     const signal = controller.signal;
 
     let content = contentOverride || input.trim();
-    if (!content && attachedFiles.length === 0) return;
+    if (!content && attachedFiles.length === 0 && attachedUrlDocs.length === 0) return;
 
     if (content.trim().toLowerCase() === '/clear') {
       handleClearChat();
@@ -5383,6 +1812,17 @@ export default function App() {
       content = skillPrompts.join('') + content;
     }
 
+    // Inject attached URL documents into content
+    if (attachedUrlDocs.length > 0) {
+      const docBlocks = attachedUrlDocs.map(doc => {
+        const processedContent = useTurboQuant
+          ? turboQuantCompress(doc.content, 5000, 'medium')
+          : doc.content;
+        return `\n\n[ATTACHED URL DOCUMENT${useTurboQuant ? ' — TurboQuant Compressed' : ''}]\nSource: ${doc.url}\nTitle: ${doc.title}\nContent:\n${processedContent}\n[END DOCUMENT]`;
+      }).join('');
+      content = content + docBlocks;
+    }
+
     let chatId = currentChatId;
     if (!chatId) {
       chatId = createNewChat(null, isCoderMode);
@@ -5397,6 +1837,7 @@ export default function App() {
     } as any;
 
     setAttachedFiles([]);
+    setAttachedUrlDocs([]);
     setLocalElementAttachments([]);
 
     setChats(prev => prev.map(chat => {
@@ -5762,8 +2203,15 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       // FIX: Inject search context into systemPrompt BEFORE building apiMessages,
       // so the AI actually receives the web search results.
       if (searchResults.length > 0) {
-        const contextString = searchResults.slice(0, 8).map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`).join('\n\n');
-        systemPrompt += `\n\nWeb Search Results:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
+        const rawContextString = searchResults.slice(0, 8)
+          .map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`)
+          .join('\n\n');
+        
+        const contextString = useTurboQuant
+          ? turboQuantCompress(rawContextString, 5000, 'medium')
+          : rawContextString;
+
+        systemPrompt += `\n\nWeb Search Results${useTurboQuant ? ' (TurboQuant compressed)' : ''}:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
       }
 
       const apiMessages = [
@@ -6022,13 +2470,19 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   resultValue = { error: scrapeResult.error };
                   showToast(`Scrape failed: ${scrapeResult.error.substring(0, 30)}...`);
                 } else {
+                  const rawMarkdown = scrapeResult.rawText || '';
+                  const processedMarkdown = useTurboQuant
+                    ? turboQuantCompress(rawMarkdown, 4000, 'medium')
+                    : (rawMarkdown.substring(0, 3000) + (rawMarkdown.length > 3000 ? '... [Truncated for prompt boundaries]' : ''));
+
                   resultValue = {
                     title: scrapeResult.title,
                     statusCode: scrapeResult.statusCode,
                     scrapedAt: scrapeResult.scrapedAt,
                     dataExcerpt: scrapeResult.data,
                     linksFound: scrapeResult.links?.length || 0,
-                    markdownExcerpt: scrapeResult.rawText ? (scrapeResult.rawText.substring(0, 3000) + '... [Truncated for prompt boundaries]') : 'No page text extracted.'
+                    markdownExcerpt: processedMarkdown || 'No page text extracted.',
+                    turboQuantApplied: useTurboQuant,
                   };
                   showToast(`Successfully scraped "${scrapeResult.title || 'Page'}"`);
                 }
@@ -6065,11 +2519,25 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   return cloned;
                 });
 
+                const rawIntro = pageResult.intro || '';
+                const rawSections = pageResult.sections
+                  ? pageResult.sections.map((s: any) => `## ${s.title}\n${s.content || ''}`).join('\n\n')
+                  : '';
+                const fullWikiText = rawIntro + '\n\n' + rawSections;
+
+                const compressedWikiText = useTurboQuant
+                  ? turboQuantCompress(fullWikiText, 5000, 'medium')
+                  : fullWikiText.substring(0, 5000);
+
                 resultValue = {
                   title: pageResult.title,
                   wordCount: pageResult.wordCount,
                   sectionsCount: pageResult.sections?.length || 0,
-                  introExcerpt: pageResult.intro?.substring(0, 500),
+                  introExcerpt: useTurboQuant
+                    ? turboQuantCompress(rawIntro, 600, 'light')
+                    : rawIntro.substring(0, 500),
+                  compressedContent: compressedWikiText,
+                  turboQuantApplied: useTurboQuant,
                   payload: pageResult
                 };
 
@@ -6088,10 +2556,14 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   return cloned;
                 });
 
+                const rawExtract = summaryResult.extract || '';
                 resultValue = {
                   title: summaryResult.title,
-                  extract: summaryResult.extract,
+                  extract: useTurboQuant
+                    ? turboQuantCompress(rawExtract, 1500, 'light')
+                    : rawExtract,
                   url: summaryResult.url,
+                  turboQuantApplied: useTurboQuant,
                   payload: summaryResult
                 };
 
@@ -6511,7 +2983,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
         return;
       }
 
-      const finalArtifacts = extractArtifacts(finalDisplayContent);
+      const finalArtifacts = extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
       if (finalArtifacts.length > 0) {
         setActiveArtifact(finalArtifacts[0]);
         setIsCanvasOpen(true);
@@ -6639,130 +3111,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
     });
   };
 
-  function extractArtifacts(content: string): Artifact[] {
-    // Strip the <think>...</think> portion from the content analyzed for artifacts
-    const cleanContent = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-    const artifacts: Artifact[] = [];
-    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-    let match;
-    const seenCode = new Set<string>();
-    
-    while ((match = codeBlockRegex.exec(cleanContent)) !== null) {
-      const lang = (match[1] || 'text').toLowerCase();
-      const code = match[2].trim();
-      seenCode.add(code);
-      
-      let type: 'code' | 'markdown' | 'html' | 'poem' | 'report' = 'code';
-      let title = 'Code Snippet';
-
-      if (lang === 'html') {
-        type = 'html';
-        title = 'Web Preview';
-      } else if (lang === 'markdown' || lang === 'md') {
-        type = 'markdown';
-        title = 'Document';
-      } else if (lang === 'poem' || lang === 'poetry' || lang === 'verse') {
-        type = 'poem';
-        const lines = code.split('\n');
-        const firstLine = lines[0].replace(/^#+\s*/, '').replace(/title/i, '').replace(/[:\-]/, '').trim();
-        title = firstLine.length < 40 ? firstLine : 'Poetic Verse';
-      } else if (lang === 'report' || lang === 'document' || lang === 'letter' || lang === 'memo') {
-        type = 'report';
-        const lines = code.split('\n');
-        const firstLine = lines[0].replace(/^#+\s*/, '').replace(/title/i, '').replace(/[:\-]/, '').trim();
-        title = firstLine.length < 40 ? firstLine : 'Professional Document';
-      } else if (['javascript', 'typescript', 'tsx', 'jsx'].includes(lang)) {
-        title = 'React Component';
-      } else if (lang === 'python') {
-        title = 'Python Script';
-      } else if (lang === 'css') {
-        title = 'Styles';
-      }
-      
-      if (code.length > 30) {
-        artifacts.push({
-          id: 'art-' + Math.random().toString(36).substring(7),
-          title,
-          language: lang,
-          content: code,
-          type
-        });
-      }
-    }
-
-    // Heuristics fallback if no document, poem or report artifacts were detected
-    if (artifacts.filter(a => ['poem', 'report', 'markdown'].includes(a.type)).length === 0) {
-      const lowerContent = cleanContent.toLowerCase();
-      const stanzas = cleanContent.split('\n\n').filter(s => s.trim().length > 0);
-      
-      // Get last user prompt to detect intent
-      const currentChat = chats.find(c => c.id === currentChatId);
-      const userMessages = currentChat ? currentChat.messages.filter(m => m.role === 'user') : [];
-      const lastUserMessage = userMessages[userMessages.length - 1];
-      const userPromptLower = lastUserMessage ? lastUserMessage.content.toLowerCase() : '';
-
-      // Check current writing style first
-      if (writingStyle === 'poem' && cleanContent.length > 30) {
-        const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
-        const titleCand = lines[0]?.replace(/^#+\s*/, '') || 'A Beautiful Poem';
-        artifacts.push({
-          id: 'art-' + Math.random().toString(36).substring(7),
-          title: titleCand.length < 40 ? titleCand : 'A Beautiful Poem',
-          language: 'poetry',
-          content: cleanContent,
-          type: 'poem'
-        });
-      } else if (['letter', 'story', 'essay', 'script'].includes(writingStyle) && cleanContent.length > 30) {
-        const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
-        const titleCand = lines[0]?.replace(/^#+\s*/, '') || (writingStyle.charAt(0).toUpperCase() + writingStyle.slice(1));
-        artifacts.push({
-          id: 'art-' + Math.random().toString(36).substring(7),
-          title: titleCand.length < 40 ? titleCand : (writingStyle.charAt(0).toUpperCase() + writingStyle.slice(1)),
-          language: 'markdown',
-          content: cleanContent,
-          type: 'report'
-        });
-      } else {
-        // Fallback checks using keywords from either content or user prompt
-        const poemKeywords = ['poem', 'poetry', 'sonnet', 'verse', 'haiku', 'rhyme', 'ode', 'ballad', 'stanzas', 'strophes'];
-        const hasPoemIndicator = poemKeywords.some(kw => lowerContent.includes(kw)) || poemKeywords.some(kw => userPromptLower.includes(kw));
-        
-        const docKeywords = ['report', 'summary', 'executive', 'proposal', 'document', 'analysis', 'memo', 'letter', 'essay', 'story', 'script', 'paragraph'];
-        const hasDocIndicator = docKeywords.some(kw => lowerContent.includes(kw)) || docKeywords.some(kw => userPromptLower.includes(kw));
-
-        const hasShortRhythmicLines = stanzas.length >= 2 && stanzas.slice(0, 3).every(s => {
-          const lines = s.split('\n').map(l => l.trim()).filter(Boolean);
-          return lines.length >= 2 && lines.length <= 10 && lines.every(l => l.length < 90);
-        });
-
-        if (hasShortRhythmicLines && hasPoemIndicator && cleanContent.length < 5000) {
-          const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
-          const titleCand = lines[0]?.replace(/^#+\s*/, '') || 'A Beautiful Poem';
-          artifacts.push({
-            id: 'art-' + Math.random().toString(36).substring(7),
-            title: titleCand.length < 40 ? titleCand : 'A Beautiful Poem',
-            language: 'poetry',
-            content: cleanContent,
-            type: 'poem'
-          });
-        }
-        else if (hasDocIndicator && cleanContent.length > 300) {
-          const lines = cleanContent.split('\n').map(l => l.trim()).filter(Boolean);
-          const titleCand = lines[0]?.replace(/^#+\s*/, '') || 'Executive Document';
-          artifacts.push({
-            id: 'art-' + Math.random().toString(36).substring(7),
-            title: titleCand.length < 40 ? titleCand : 'Executive Document',
-            language: 'markdown',
-            content: cleanContent,
-            type: 'report'
-          });
-        }
-      }
-    }
-    
-    return artifacts;
-  }
-
   function showToast(message: string) {
     const id = Date.now().toString();
     setToasts(prev => [...prev, { id, message }]);
@@ -6784,12 +3132,336 @@ When the user asks you to build page(s), applications, interfaces, features, or 
       canvas.toBlob((blob) => {
         if (blob) {
           const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' });
-          setAttachedFiles(prev => [...prev, file]);
-          showToast('Screenshot captured!');
+          handleFileAttach([file]);
         }
       });
     } catch {
       showToast('Screenshot cancelled or not supported.');
+    }
+  };
+
+  const ensureScrapedFilesOnDisk = async (doc: any) => {
+    if (!doc.id) return;
+    const docId = doc.id;
+    const isOcr = !!doc.isOcr;
+    const title = doc.title;
+    const url = doc.url;
+    const text = doc.content;
+    
+    const rawTitle = isOcr ? url.replace(/^\[OCR Image Attachment\]:\s*/, '') : title;
+    const safeTitle = rawTitle.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
+
+    const folder = isOcr ? 'ocr_transcripts' : 'scraped_pages';
+    const prefix = isOcr ? 'ocr_' : '';
+    const markdownPath = `${folder}/${prefix}${safeTitle}_${docId}.md`;
+    const jsonPath = `${folder}/${prefix}${safeTitle}_${docId}.json`;
+
+    const markdownContent = isOcr ? (
+      `# OCR Image Transcript: ${rawTitle}\n\n` +
+      `- **Source Image:** ${rawTitle}\n` +
+      `- **Captured/Uploaded On:** ${new Date().toLocaleString()}\n` +
+      `- **OCR Parser Confidence:** 100%\n` +
+      `- **Extracted Char Count:** ${text.length}\n\n` +
+      `---\n\n` +
+      `## Transcribed Text Extracted by Node.js OCR Engine\n\n` +
+      `${text || '*[No textual content found in image background]*'}`
+    ) : (
+      `# Scraped Page: ${title}\n\n` +
+      `- **URL:** ${url}\n` +
+      `- **Attached On:** ${new Date().toLocaleString()}\n` +
+      `- **Char Count:** ${text.length}\n\n` +
+      `## Full Scraped Content\n\n` +
+      `${text}`
+    );
+
+    try {
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
+      });
+
+      const jsonContent = isOcr ? JSON.stringify({
+        id: docId,
+        sourceFile: rawTitle,
+        processedAt: new Date().toISOString(),
+        extractedText: text
+      }, null, 2) : JSON.stringify({
+        id: docId,
+        url,
+        title,
+        scrapedAt: new Date().toISOString(),
+        content: text
+      }, null, 2);
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: jsonPath, content: jsonContent })
+      });
+
+      triggerWorkspaceRefresh();
+    } catch (err) {
+      console.error("Error creating files on disk:", err);
+    }
+  };
+
+  const processOcrForJoinedImage = async (file: File) => {
+    setIsOcrProcessing(true);
+    showToast(`🔍 Background OCR started for: ${file.name}...`);
+    
+    try {
+      // 1. Read file as Base64 helper
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+      });
+
+      // 2. POST to our custom backend
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Data })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server returned error: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      const extractedText = data.text || '';
+      const confidence = data.confidence || 0;
+
+      if (!extractedText.trim()) {
+        showToast(`⚠️ OCR scan completed, but no readable characters were extracted from ${file.name}.`);
+      } else {
+        showToast(`✨ OCR transcribed ${file.name} successfully (${Math.round(confidence)}% confidence)!`);
+      }
+
+      const docId = Date.now().toString();
+      const safeTitle = file.name.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
+      const markdownPath = `ocr_transcripts/ocr_${safeTitle}_${docId}.md`;
+      const jsonPath = `ocr_transcripts/ocr_${safeTitle}_${docId}.json`;
+
+      // Formulate detailed layout markdown
+      const markdownContent = `# OCR Image Transcript: ${file.name}\n\n` +
+        `- **Source Image:** ${file.name}\n` +
+        `- **Captured/Uploaded On:** ${new Date().toLocaleString()}\n` +
+        `- **OCR Parser Confidence:** ${Math.round(confidence)}%\n` +
+        `- **Extracted Words:** ${data.words?.length || 0}\n\n` +
+        `---\n\n` +
+        `## Transcribed Text Extracted by Node.js OCR Engine\n\n` +
+        `${extractedText || '*[No textual content found in image background]*'}\n\n` +
+        `---\n\n` +
+        `## Character Positioning Matrix\n\n` +
+        `| Text Element | Confidence | Layout Bounding Box |\n` +
+        `| :--- | :--- | :--- |\n` +
+        (data.words?.slice(0, 100).map((w: any) => `| **${w.text}** | ${w.confidence}% | x0: ${w.bbox.x0}, y0: ${w.bbox.y0}, x1: ${w.bbox.x1}, y1: ${w.bbox.y1} |`).join('\n') || '| N/A | N/A | N/A |') +
+        (data.words?.length > 100 ? `\n| ... and ${data.words.length - 100} more words | | |` : '');
+
+      // Write files in background
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
+      });
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filePath: jsonPath,
+          content: JSON.stringify({
+            id: docId,
+            sourceFile: file.name,
+            fileSize: file.size,
+            fileType: file.type,
+            processedAt: new Date().toISOString(),
+            confidence,
+            extractedText,
+            words: data.words || []
+          }, null, 2)
+        })
+      });
+
+      // 4. Create and attach document
+      const newDoc = {
+        id: docId,
+        url: `[OCR Image Attachment]: ${file.name}`,
+        title: `OCR Data: ${file.name}`,
+        content: extractedText,
+        favicon: base64Data, // Show real thumbnail preview
+        isOcr: true
+      };
+
+      setAttachedUrlDocs(prev => [...prev, newDoc]);
+      setTranscriptionOptionsDoc(newDoc); // Prompt options to edit/view right away!
+      triggerWorkspaceRefresh();
+    } catch (err: any) {
+      console.error("OCR background execution error: ", err);
+      showToast(`❌ OCR processing failed: ${err?.message || err}`);
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  };
+
+  const handleFileAttach = async (files: File[]) => {
+    const images = files.filter(f => f.type.startsWith('image/'));
+    const nonImages = files.filter(f => !f.type.startsWith('image/'));
+
+    // Attach non-images as regular files
+    if (nonImages.length > 0) {
+      setAttachedFiles(prev => [...prev, ...nonImages]);
+      showToast(`${nonImages.length} file(s) attached successfully!`);
+    }
+
+    // Process images sequentially with OCR of Node.js Server in background
+    for (const img of images) {
+      await processOcrForJoinedImage(img);
+    }
+  };
+
+  const handleAttachUrl = async () => {
+    const url = urlToolInput.trim();
+    if (!url) return;
+    setUrlToolLoading(true);
+    setUrlToolError(null);
+    try {
+      // Use the existing scrapeUrl service
+      const result: ScrapeResult = await scrapeUrl({ url, extractLinks: false, extractImages: false });
+      
+      // Compress: strip HTML, collapse whitespace, cap at 8000 chars
+      let text = '';
+      if (result.rawText) {
+        text = result.rawText;
+      } else if (result.data) {
+        text = result.data.text || result.data.content || result.data.markdown || JSON.stringify(result.data);
+      }
+      text = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (text.length > 8000) text = text.slice(0, 8000) + '...[truncated]';
+      
+      if (!text && result.error) {
+        throw new Error(result.error);
+      }
+      
+      const title = result.title || url;
+      const favicon = `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=32`;
+      
+      const newDoc = { id: Date.now().toString(), url, title, content: text, favicon };
+      
+      setAttachedUrlDocs(prev => [
+        ...prev,
+        newDoc
+      ]);
+      
+      // Auto save on disk & refresh workspace
+      await ensureScrapedFilesOnDisk(newDoc);
+      setTranscriptionOptionsDoc(newDoc); // Prompt options right away!
+      
+      setUrlToolInput('');
+      setIsUrlToolOpen(false);
+      showToast(`✅ Attached and written to workspace folder!`);
+    } catch (err: any) {
+      setUrlToolError(err?.message || 'Failed to fetch URL. Make sure it is accessible and try again.');
+    } finally {
+      setUrlToolLoading(false);
+    }
+  };
+
+  const ensureTranscriptFilesOnDisk = async (doc: any) => {
+    if (!doc.videoId || !doc.segments) return;
+    const videoId = doc.videoId;
+    const title = doc.title;
+    const url = doc.url;
+    const segments = doc.segments;
+    const transcript = doc.content;
+
+    const markdownPath = `transcripts/transcript_${videoId}.md`;
+    const markdownContent = `# YouTube Video Transcript\n\n` +
+      `**Video Title:** ${title}\n` +
+      `**Video URL:** ${url}\n` +
+      `**Video ID:** ${videoId}\n` +
+      `**Total Segment Milestones:** ${segments.length}\n\n` +
+      `---\n\n` +
+      `## Fully Assembled Text\n\n` +
+      `${transcript}\n\n` +
+      `---\n\n` +
+      `## Timestamped Collected Segments\n\n` +
+      `| Timestamp | Caption Line |\n` +
+      `| :--- | :--- |\n` +
+      segments.map((s: any) => `| **${s.timeStr}** | ${s.text} |`).join('\n');
+
+    try {
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
+      });
+
+      const jsonPath = `transcripts/transcript_${videoId}.json`;
+      const jsonContent = JSON.stringify({
+        videoId,
+        videoUrl: url,
+        videoTitle: title,
+        totalSegments: segments.length,
+        fullText: transcript,
+        segments: segments
+      }, null, 2);
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: jsonPath, content: jsonContent })
+      });
+
+      triggerWorkspaceRefresh();
+    } catch (err) {
+      console.error("Error creating files on the fly:", err);
+    }
+  };
+
+  const handleFetchTranscript = async () => {
+    const url = transcriptToolInput.trim();
+    if (!url) return;
+    setTranscriptToolLoading(true);
+    setTranscriptToolError(null);
+    
+    try {
+      const videoId = extractYouTubeId(url);
+      if (!videoId) throw new Error('Could not detect a valid YouTube video ID from this URL.');
+      
+      const transcriptRes = await fetchYouTubeTranscript(videoId);
+      const transcript = transcriptRes.text;
+      const segments = transcriptRes.segments;
+      const title = `YouTube Transcript – ${videoId}`;
+      const truncated = transcript.length > 12000 ? transcript.slice(0, 12000) + '...[truncated]' : transcript;
+      
+      const newDoc = {
+        id: Date.now().toString(),
+        url,
+        title,
+        content: truncated,
+        favicon: `https://www.google.com/s2/favicons?domain=youtube.com&sz=32`,
+        segments,
+        videoId
+      };
+      
+      setAttachedUrlDocs(prev => [...prev, newDoc]);
+      
+      // Auto save on disk & refresh workspace
+      await ensureTranscriptFilesOnDisk(newDoc);
+      
+      setTranscriptionOptionsDoc(newDoc); // Prompt with option choices!
+      
+      setTranscriptToolInput('');
+      setIsTranscriptToolOpen(false);
+      showToast(`✅ Transcript attached and written to workspace transcripts folder!`);
+    } catch (err: any) {
+      setTranscriptToolError(err?.message || 'Failed to fetch transcript. This video may not have captions enabled.');
+    } finally {
+      setTranscriptToolLoading(false);
     }
   };
 
@@ -6922,43 +3594,14 @@ When the user asks you to build page(s), applications, interfaces, features, or 
     api.isMaximized().then((maximized: boolean) => setIsMaximized(maximized));
   }, []);
 
-  useEffect(() => {
-    const handleOpenPhysics = () => {
-      setActiveLabTab('physics');
-      setCurrentChatId(null);
-    };
-    const handleOpenChemistry = () => {
-      setActiveLabTab('chemistry');
-      setCurrentChatId(null);
-    };
-    const handleOpenMath = () => {
-      setActiveLabTab('math');
-      setCurrentChatId(null);
-    };
-    const handleOpenBiology = () => {
-      setActiveLabTab('biology');
-      setCurrentChatId(null);
-    };
 
-    window.addEventListener('open-physics-canvas', handleOpenPhysics);
-    window.addEventListener('open-chemistry-canvas', handleOpenChemistry);
-    window.addEventListener('open-math-canvas', handleOpenMath);
-    window.addEventListener('open-biology-canvas', handleOpenBiology);
-
-    return () => {
-      window.removeEventListener('open-physics-canvas', handleOpenPhysics);
-      window.removeEventListener('open-chemistry-canvas', handleOpenChemistry);
-      window.removeEventListener('open-math-canvas', handleOpenMath);
-      window.removeEventListener('open-biology-canvas', handleOpenBiology);
-    };
-  }, []);
 
   const renderChatBox = (isCenteredState: boolean = false) => {
     const isClaude = theme.id === 'claude';
     return (
       <div className="w-full flex flex-col text-left">
         <AnimatePresence mode="popLayout">
-          {(writingStyle !== 'default' || isWebSearchEnabled || bridgeTools.some(t => t.enabled) || activeSkills.length > 0) && (
+          {(writingStyle !== 'default' || isWebSearchEnabled || bridgeTools.some(t => t.enabled) || activeSkills.length > 0 || useTurboQuant) && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -7050,316 +3693,17 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   </motion.button>
                 );
               })}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <AnimatePresence>
-          {showTodoPanel && coderTodos.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-              className="w-full bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] border-b-0 rounded-t-[24px] px-4 pt-3 pb-4 flex flex-col gap-2 relative z-[5] shadow-xl mb-[-4px]"
-            >
-              {/* Title block representing the command being executed */}
-              <div className="flex items-center gap-2 text-[var(--theme-primary)] select-none border-b border-[var(--theme-border)]/25 pb-2 mb-1">
-                <span className="text-[14px]">📂</span>
-                <span className="font-semibold text-xs tracking-tight truncate max-w-[85%] text-[var(--theme-primary)]">
-                  {activeCommandQuery 
-                    ? `/${activeCommandType} ${activeCommandQuery}`
-                    : isCoderMode 
-                      ? "Execute Coder Engineering Task" 
-                      : "Execute Workspace Task Strategy"
-                  }
-                </span>
-              </div>
-
-              {/* Header */}
-              <div className="flex items-center justify-between font-sans select-none">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-500">Task Progress</span>
-                  <span className="text-[10px] text-[var(--theme-primary)] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full font-mono font-bold">
-                    {coderTodos.filter(t => t.status === 'complete').length}/{coderTodos.length}
-                  </span>
-                  {isGeneratingTodos && (
-                    <span className="text-[10px] text-[var(--theme-muted)] italic animate-pulse">(planning...)</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setTodoCollapsed(!todoCollapsed)}
-                    className="p-1 hover:bg-white/5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center"
-                    title={todoCollapsed ? "Expand task checklist" : "Collapse task checklist"}
-                  >
-                    <ChevronRight 
-                      size={14} 
-                      className={`transition-transform duration-200 ${todoCollapsed ? '' : 'rotate-90'}`} 
-                    />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setShowTodoPanel(false);
-                      setCoderTodos([]);
-                      setActiveCommandQuery(null);
-                      setActiveCommandType(null);
-                    }}
-                    className="p-1 hover:bg-white/5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center"
-                    title="Dismiss checklist"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-
-              {/* List (collapsible) */}
-              <AnimatePresence initial={false}>
-                {!todoCollapsed && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.18, ease: 'easeInOut' }}
-                    className="overflow-hidden"
-                  >
-                    <div className="flex flex-col gap-1.5 max-h-[180px] overflow-y-auto custom-scrollbar font-sans">
-                      {coderTodos.map((todo) => {
-                        const isDone = todo.status === 'complete';
-                        const isActive = todo.status === 'in_progress';
-                        return (
-                          <motion.div
-                            key={todo.id}
-                            initial={{ opacity: 0, x: -5 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className={`flex items-center gap-3 px-2 py-1.5 rounded-xl transition-all`}
-                          >
-                            <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                              isDone
-                                ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
-                                : isActive
-                                  ? 'border border-[var(--theme-accent)] bg-[var(--theme-accent)]/10'
-                                  : 'border border-[var(--theme-muted)]/40'
-                            }`}>
-                              {isDone && <Check size={10} strokeWidth={3} className="text-emerald-400" />}
-                              {isActive && <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />}
-                            </div>
-
-                            <span className={`text-xs font-medium flex-1 ${isDone ? 'line-through text-[var(--theme-muted)]' : isActive ? 'text-[var(--theme-primary)]' : 'text-[var(--theme-secondary)]'}`}>
-                              {todo.text}
-                            </span>
-
-                            {isDone && (
-                              <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1 shrink-0">
-                                <Check size={10} strokeWidth={3} /> Done
-                              </span>
-                            )}
-                            {isActive && (
-                              <Loader2 size={12} className="text-[var(--theme-accent)] animate-spin shrink-0" />
-                            )}
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          )}
-
-
-          {showsSlashCommands && filteredCommands.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-              className="w-full bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] border-b-0 rounded-t-[24px] overflow-hidden flex flex-col relative z-[5] shadow-xl mb-[-4px]"
-            >
-              {/* Header */}
-              <div className="h-10 bg-[#1b1918] border-b border-[var(--theme-border)]/35 pl-4 pr-[7px] py-1.5 flex items-center justify-between shrink-0 select-none">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--theme-accent)]">Workspace Command Center</span>
-                  <span className="text-[10px] text-[var(--theme-primary)] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full font-mono font-bold">
-                    {filteredCommands.length} Available
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] text-[var(--theme-muted)] italic hidden sm:inline mr-1">Press Up/Down to Navigate, Enter to Select</span>
-                  <button 
-                    onClick={() => setInput(input + ' ')}
-                    className="p-1 hover:bg-white/5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center"
-                    title="Dismiss Command suggestions"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Suggestions List in style of task progress checklists */}
-              <div className="p-3 flex flex-col gap-1.5 max-h-[190px] overflow-y-auto custom-scrollbar font-sans bg-[var(--theme-input-bg)]">
-                {filteredCommands.map((cmd, idx) => {
-                  const isSelected = idx === selectedCommandIndex;
-                  return (
-                    <button
-                      key={cmd.id}
-                      type="button"
-                      onClick={() => {
-                        setInput(`/${cmd.name} `);
-                        setSelectedCommandIndex(0);
-                        if (inputRef && 'current' in inputRef && inputRef.current) {
-                          inputRef.current.focus();
-                        }
-                      }}
-                      onMouseEnter={() => setSelectedCommandIndex(idx)}
-                      className={`w-full flex items-center px-3 py-2 rounded-xl text-left transition-all select-none gap-3 outline-none duration-150 ${
-                        isSelected 
-                          ? 'bg-white/5 text-[var(--theme-primary)] border border-[var(--theme-input-border)] shadow-sm' 
-                          : 'text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-white/5/25 border border-transparent'
-                      }`}
-                    >
-                      {/* Left element resembling bullet items */}
-                      <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                        isSelected
-                          ? 'border border-[var(--theme-accent)] bg-[var(--theme-accent)]/15 text-[var(--theme-accent)]'
-                          : 'border border-[var(--theme-muted)]/30 text-[var(--theme-muted)]'
-                      }`}>
-                        <span className="text-[9px] font-mono leading-none">&gt;</span>
-                      </div>
-
-                      <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:gap-3">
-                        <span className={`font-mono text-xs font-bold leading-none ${
-                          isSelected ? 'text-[var(--theme-accent)]' : 'text-[var(--theme-primary)]'
-                        }`}>
-                          /{cmd.name}
-                        </span>
-                        <span className={`font-sans text-[11px] truncate leading-none ${
-                          isSelected ? 'text-[var(--theme-primary)]' : 'text-[var(--theme-muted)]'
-                        }`}>
-                          {cmd.desc}
-                        </span>
-                      </div>
-
-                      {isSelected && (
-                        <div className="text-[10px] text-[var(--theme-accent)] font-semibold flex items-center gap-1 shrink-0 animate-fade-in font-mono">
-                          SELECT <ChevronRight size={10} />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-
-          {showAskAiPanel && askAiQuestions.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-              className="w-full bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] border-b-0 rounded-t-[24px] px-5 py-4 flex flex-col justify-between relative z-[5] shadow-2xl mb-[-4px] h-[260px] max-h-[260px] overflow-hidden select-none"
-            >
-              {/* Header: Progress & Close */}
-              <div className="flex items-center justify-between shrink-0 mb-1.5">
-                {/* Progress Dots */}
-                <div className="flex items-center gap-1.5">
-                  {askAiQuestions.map((q, idx) => {
-                    const isAnswered = askAiAnswers[q.id] !== undefined;
-                    const isActive = idx === currentQuestionIndex;
-                    return (
-                      <button
-                        key={q.id}
-                        onClick={() => handleDotClick(idx)}
-                        disabled={!isAnswered && idx > currentQuestionIndex}
-                        className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
-                          isActive 
-                            ? 'bg-orange-500 scale-125 shadow-[0_0_8px_rgba(249,115,22,0.6)]' 
-                            : isAnswered 
-                              ? 'bg-orange-500/60 hover:bg-orange-500 cursor-pointer' 
-                              : 'bg-zinc-700 hover:bg-zinc-650 disabled:pointer-events-none'
-                        }`}
-                        title={`Question ${idx + 1}: ${q.purpose || q.question}`}
-                      />
-                    );
-                  })}
-                  <span className="text-[10px] text-zinc-400 font-mono font-bold tracking-wider uppercase ml-1.5 bg-zinc-805/50 border border-zinc-700/35 px-1.5 py-0.5 rounded-full select-none">
-                    Q{currentQuestionIndex + 1}/{askAiQuestions.length}
-                  </span>
-                </div>
-
-                {/* Skip All Button */}
-                <button
-                  onClick={() => handleFinishQuestions(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold tracking-tight text-zinc-400 hover:text-white hover:bg-white/5 border border-zinc-750 rounded-xl transition-all cursor-pointer"
+              {useTurboQuant && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20 text-xs font-semibold shadow-sm shrink-0 select-none cursor-default font-sans"
+                  title="TurboQuant context compression is active — large tool outputs will be compressed before being sent to AI"
                 >
-                  <X size={12} />
-                  <span>Skip All</span>
-                </button>
-              </div>
-
-              {/* Main Question Block */}
-              <div className="flex-1 flex flex-col justify-center min-h-0 py-2">
-                <AnimatePresence mode="wait">
-                  {!isTransitioningQuestion && !isGeneratingQuestions && !isAnalyzingAnswers && (
-                    <motion.div
-                      key={currentQuestionIndex}
-                      initial={{ y: 20, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      exit={{ y: -40, opacity: 0 }}
-                      transition={{ duration: 0.2, ease: 'easeInOut' }}
-                      className="flex flex-col h-full justify-between"
-                    >
-                      {/* Question Text */}
-                      <div className="text-[15px] font-medium text-white leading-normal tracking-tight flex flex-col gap-0.5 select-none">
-                        <span className="text-zinc-100 font-medium">{askAiQuestions[currentQuestionIndex].question}</span>
-                        {askAiQuestions[currentQuestionIndex].purpose && (
-                          <span className="text-[11px] text-zinc-500 font-medium italic select-none">
-                            💡 Purpose: {askAiQuestions[currentQuestionIndex].purpose}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Question Content Types */}
-                      <div className="flex-1 flex items-center mt-3 min-h-0 select-none">
-                        {renderActiveQuestionContent()}
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {isGeneratingQuestions && (
-                    <motion.div 
-                      key="generating-loader" 
-                      initial={{ opacity: 0 }} 
-                      animate={{ opacity: 1 }} 
-                      exit={{ opacity: 0 }}
-                      className="flex flex-col items-center justify-center gap-2 h-full py-4 text-center select-none"
-                    >
-                      <Loader2 size={24} className="text-orange-500 animate-spin" />
-                      <span className="text-xs font-semibold tracking-wider uppercase text-zinc-400 animate-pulse">
-                        Evaluating context and formulating questions...
-                      </span>
-                    </motion.div>
-                  )}
-
-                  {isAnalyzingAnswers && (
-                    <motion.div 
-                      key="analyzing-loader" 
-                      initial={{ opacity: 0 }} 
-                      animate={{ opacity: 1 }} 
-                      exit={{ opacity: 0 }}
-                      className="flex flex-col items-center justify-center gap-2 h-full py-4 text-center select-none"
-                    >
-                      <Loader2 size={24} className="text-orange-500 animate-spin" />
-                      <span className="text-xs font-semibold tracking-wider uppercase text-zinc-400 animate-pulse">
-                        Analyzing your answers... generating tailored task checklist...
-                      </span>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+                  <Zap size={12} className="fill-violet-400" />
+                  <span>TurboQuant</span>
+                </motion.div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -7368,10 +3712,382 @@ When the user asks you to build page(s), applications, interfaces, features, or 
           isCenteredState 
             ? 'rounded-[24px] shadow-lg border-[var(--theme-input-border)] z-10' 
             : 'rounded-xl shadow-none border-[var(--theme-border)]/60 z-10'
-        }`} style={((showTodoPanel && coderTodos.length > 0) || (showsSlashCommands && filteredCommands.length > 0) || (showAskAiPanel && askAiQuestions.length > 0)) ? { borderTopLeftRadius: 0, borderTopRightRadius: 0 } : {}}>
+        }`}>
+
+          {/* Nested Panel: Todo Checklist Strategy */}
+          <AnimatePresence>
+            {showTodoPanel && coderTodos.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -10 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -10 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                className="overflow-hidden w-full border-b border-[var(--theme-border)]/45 pb-3.5 mb-3 flex flex-col gap-2.5 shrink-0"
+              >
+                <div className="flex flex-col gap-3 bg-[var(--theme-surface-alt)]/35 hover:bg-[var(--theme-surface-alt)]/55 backdrop-blur-md transition-all p-4 rounded-2xl border border-[var(--theme-border)]/45 text-left mx-1 mt-1 shadow-md">
+                  {/* Title block representing the command being executed */}
+                  <div className="flex items-center justify-between border-b border-[var(--theme-border)]/25 pb-2 mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="flex items-center justify-center w-5 h-5 rounded-lg bg-[var(--theme-accent)]/10 text-[var(--theme-accent)] text-xs font-mono">📂</span>
+                      <span className="font-semibold text-xs tracking-tight truncate max-w-[280px] sm:max-w-md text-[var(--theme-primary)]">
+                        {activeCommandQuery 
+                          ? `/${activeCommandType} ${activeCommandQuery}`
+                          : isCoderMode 
+                            ? "Execute Coder Engineering Task" 
+                            : "Execute Workspace Task Strategy"}
+                      </span>
+                    </div>
+                    {/* Progress Percentage Badge */}
+                    <span className="text-[10px] font-mono font-bold text-[var(--theme-accent)] bg-[var(--theme-accent)]/10 border border-[var(--theme-accent)]/20 px-2 py-0.5 rounded-full select-none">
+                      {Math.round((coderTodos.filter(t => t.status === 'complete').length / coderTodos.length) * 100)}% COMPLETE
+                    </span>
+                  </div>
+
+                  {/* Header */}
+                  <div className="flex items-center justify-between font-sans select-none">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
+                      <span className="text-[11px] font-extrabold uppercase tracking-widest text-[var(--theme-primary)]">Active Runbook</span>
+                      <span className="text-[10px] text-[var(--theme-muted)] bg-[var(--theme-border)]/15 border border-[var(--theme-border)]/25 px-2 py-0.5 rounded-full font-mono font-bold">
+                        {coderTodos.filter(t => t.status === 'complete').length}/{coderTodos.length} Tasks
+                      </span>
+                      {isGeneratingTodos && (
+                        <span className="text-[10px] text-[var(--theme-muted)] italic animate-pulse flex items-center gap-1">
+                          <Loader2 size={10} className="animate-spin text-[var(--theme-accent)]" /> (planning...)
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setTodoCollapsed(!todoCollapsed)}
+                        className="p-1 hover:bg-[var(--theme-border)]/25 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center w-6 h-6 border border-transparent"
+                        title={todoCollapsed ? "Expand task checklist" : "Collapse task checklist"}
+                      >
+                        <ChevronRight 
+                          size={14} 
+                          className={`transition-transform duration-200 ${todoCollapsed ? '' : 'rotate-90 text-[var(--theme-accent)]'}`} 
+                        />
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setShowTodoPanel(false);
+                          setCoderTodos([]);
+                          setActiveCommandQuery(null);
+                          setActiveCommandType(null);
+                        }}
+                        className="p-1 hover:bg-red-500/10 hover:text-red-400 rounded-lg text-[var(--theme-muted)] transition-all cursor-pointer flex items-center justify-center w-6 h-6 border border-transparent"
+                        title="Dismiss checklist"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Redesign: Real-time progress line */}
+                  <div className="w-full bg-[var(--theme-border)]/25 h-1.5 rounded-full overflow-hidden select-none">
+                    <div 
+                      className="bg-emerald-500 h-full transition-all duration-300 ease-out rounded-full shadow-[0_0_6px_#10b981]" 
+                      style={{ width: `${(coderTodos.filter(t => t.status === 'complete').length / coderTodos.length) * 100}%` }}
+                    />
+                  </div>
+
+                  {/* List (collapsible) */}
+                  <AnimatePresence initial={false}>
+                    {!todoCollapsed && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.18, ease: 'easeInOut' }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex flex-col gap-1.5 max-h-[175px] overflow-y-auto custom-scrollbar font-sans pr-1">
+                          {coderTodos.map((todo) => {
+                            const isDone = todo.status === 'complete';
+                            const isActive = todo.status === 'in_progress';
+                            return (
+                              <motion.div
+                                key={todo.id}
+                                initial={{ opacity: 0, x: -5 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${
+                                  isActive 
+                                    ? 'bg-[var(--theme-accent)]/5 border border-[var(--theme-accent)]/20' 
+                                    : 'border border-transparent hover:bg-[var(--theme-border)]/15'
+                                }`}
+                              >
+                                <div className={`w-[18px] h-[18px] rounded-full flex items-center justify-center shrink-0 transition-all duration-200 ${
+                                  isDone
+                                    ? 'bg-emerald-500/15 border border-emerald-500 text-emerald-400'
+                                    : isActive
+                                      ? 'border-2 border-[var(--theme-accent)] bg-[var(--theme-accent)]/10 shadow-[0_0_8px_var(--theme-accent)]'
+                                      : 'border border-[var(--theme-muted)]/40 bg-transparent'
+                                }`}>
+                                  {isDone && <Check size={11} strokeWidth={3.5} className="text-emerald-400" />}
+                                  {isActive && <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-ping" />}
+                                </div>
+
+                                <span className={`text-xs font-medium flex-1 transition-colors ${
+                                  isDone 
+                                    ? 'line-through text-[var(--theme-muted)]/75' 
+                                    : isActive 
+                                      ? 'text-[var(--theme-primary)] font-semibold' 
+                                      : 'text-[var(--theme-secondary)]'
+                                }`}>
+                                  {todo.text}
+                                </span>
+
+                                {isDone && (
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-1 shrink-0 bg-emerald-500/10 px-2 py-0.5 rounded-md">
+                                    <Check size={10} strokeWidth={3} /> Done
+                                  </span>
+                                )}
+                                {isActive && (
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-[var(--theme-accent)] flex items-center gap-1.5 shrink-0 bg-[var(--theme-accent)]/15 px-2 py-0.5 rounded-md animate-pulse">
+                                    <Loader2 size={10} className="text-[var(--theme-accent)] animate-spin" /> In Progress
+                                  </span>
+                                )}
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Nested Panel: Workspace Command Center */}
+          <AnimatePresence>
+            {showsSlashCommands && filteredCommands.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -10 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -10 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                className="overflow-hidden w-full border-b border-[var(--theme-border)]/45 pb-3.5 mb-3 flex flex-col gap-2.5 shrink-0"
+              >
+                <div className="flex flex-col gap-2.5 bg-[var(--theme-surface-alt)]/35 hover:bg-[var(--theme-surface-alt)]/55 backdrop-blur-md transition-all p-3.5 rounded-2xl border border-[var(--theme-border)]/45 mx-1 mt-1 shadow-md">
+                  {/* Header */}
+                  <div className="h-10 border-b border-[var(--theme-border)]/25 pl-2 pr-1 py-1.5 flex items-center justify-between shrink-0 select-none font-sans">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-pulse" />
+                      <span className="text-[11px] font-extrabold uppercase tracking-wider text-[var(--theme-accent)]">Workspace Command Center</span>
+                      <span className="text-[10px] text-[var(--theme-primary)] bg-[var(--theme-border)]/15 border border-[var(--theme-border)]/25 px-2 py-0.5 rounded-full font-mono font-bold">
+                        {filteredCommands.length} Found
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] text-[var(--theme-muted)] italic hidden sm:inline mr-1">Press Up/Down to Navigate, Enter to Select</span>
+                      <button 
+                        type="button"
+                        onClick={() => setInput(input + ' ')}
+                        className="p-1 hover:bg-white/5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] transition-all cursor-pointer flex items-center justify-center w-6 h-6"
+                        title="Dismiss Command suggestions"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Suggestions List */}
+                  <div className="p-1.5 flex flex-col gap-1 max-h-[195px] overflow-y-auto custom-scrollbar font-sans">
+                    {filteredCommands.map((cmd, idx) => {
+                      const isSelected = idx === selectedCommandIndex;
+                      return (
+                        <button
+                          key={cmd.id}
+                          type="button"
+                          onClick={() => {
+                            setInput(`/${cmd.name} `);
+                            setSelectedCommandIndex(0);
+                            if (inputRef && 'current' in inputRef && inputRef.current) {
+                              inputRef.current.focus();
+                            }
+                          }}
+                          onMouseEnter={() => setSelectedCommandIndex(idx)}
+                          className={`w-full flex items-center px-3 py-2.5 rounded-xl text-left transition-all select-none gap-3 outline-none duration-200 border cursor-pointer relative overflow-hidden ${
+                            isSelected 
+                              ? 'bg-[var(--theme-accent)]/[0.07] text-[var(--theme-primary)] border-[var(--theme-accent)]/40 shadow-sm' 
+                              : 'text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-border)]/10 border-transparent'
+                          }`}
+                        >
+                          {/* Active Slide Accent highlight */}
+                          {isSelected && (
+                            <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-[var(--theme-accent)]" />
+                          )}
+
+                          {/* Left icon badge or dynamic type */}
+                          <div className={`w-[22px] h-[22px] rounded-lg flex items-center justify-center shrink-0 transition-transform ${
+                            isSelected
+                              ? 'bg-[var(--theme-accent)]/15 text-[var(--theme-accent)] scale-105'
+                              : 'bg-[var(--theme-border)]/20 text-[var(--theme-muted)]/70'
+                          }`}>
+                            <span className="text-xs font-mono font-bold">/</span>
+                          </div>
+
+                          <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                            <span className={`font-mono text-xs font-bold leading-none ${
+                              isSelected ? 'text-[var(--theme-accent)]' : 'text-[var(--theme-primary)]'
+                            }`}>
+                              /{cmd.name}
+                            </span>
+                            <span className={`font-sans text-[11px] truncate leading-none ${
+                              isSelected ? 'text-[var(--theme-primary)]' : 'text-[var(--theme-muted)]'
+                            }`}>
+                              {cmd.desc}
+                            </span>
+                          </div>
+
+                          {isSelected && (
+                            <div className="text-[9px] text-[var(--theme-accent)] bg-[var(--theme-accent)]/10 px-2 py-0.5 rounded-md font-bold flex items-center gap-1 shrink-0 animate-fade-in font-mono tracking-wider">
+                              ENTER <ChevronRight size={8} strokeWidth={3} />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Nested Panel: Ask AI Clarification Quiz */}
+          <AnimatePresence>
+            {showAskAiPanel && askAiQuestions.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -10 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -10 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                className="overflow-hidden w-full border-b border-[var(--theme-border)]/45 pb-3.5 mb-3 flex flex-col gap-2.5 shrink-0"
+              >
+                <div className="flex flex-col bg-[var(--theme-surface-alt)]/35 hover:bg-[var(--theme-surface-alt)]/55 backdrop-blur-md transition-all p-4.5 rounded-2xl border border-[var(--theme-border)]/45 text-left min-h-[250px] max-h-[380px] h-auto overflow-hidden select-none mx-1 mt-1 shadow-md">
+                  {/* Header: Progress & Close */}
+                  <div className="flex items-center justify-between shrink-0 mb-3 font-sans">
+                    {/* Progress Dots */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 bg-[var(--theme-border)]/15 px-2 py-1 rounded-xl">
+                        {askAiQuestions.map((q, idx) => {
+                          const isAnswered = askAiAnswers[q.id] !== undefined;
+                          const isActive = idx === currentQuestionIndex;
+                          return (
+                            <button
+                              key={q.id}
+                              type="button"
+                              onClick={() => handleDotClick(idx)}
+                              disabled={!isAnswered && idx > currentQuestionIndex}
+                              className={`w-2.5 h-2.5 rounded-full transition-all duration-350 cursor-pointer ${
+                                isActive 
+                                  ? 'bg-[var(--theme-accent)] scale-110 shadow-[0_0_10px_var(--theme-accent)]' 
+                                  : isAnswered 
+                                    ? 'bg-[var(--theme-accent)]/55 hover:bg-[var(--theme-accent)]' 
+                                    : 'bg-[var(--theme-border)] hover:bg-[var(--theme-secondary)]/30 disabled:pointer-events-none'
+                              }`}
+                              title={`Question ${idx + 1}: ${q.purpose || q.question}`}
+                            />
+                          );
+                        })}
+                      </div>
+                      <span className="text-[10px] text-[var(--theme-accent)] font-mono font-bold tracking-widest uppercase bg-[var(--theme-accent)]/10 border border-[var(--theme-accent)]/20 px-2 py-0.5 rounded-full select-none">
+                        Q{currentQuestionIndex + 1}/{askAiQuestions.length}
+                      </span>
+                    </div>
+
+                    {/* Skip All Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleFinishQuestions(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold tracking-tight text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-border)]/20 border border-[var(--theme-border)]/25 rounded-xl transition-all cursor-pointer"
+                    >
+                      <X size={12} />
+                      <span>Skip Quiz</span>
+                    </button>
+                  </div>
+
+                  {/* Main Question Block */}
+                  <div className="flex-1 flex flex-col justify-center min-h-0 py-1.5">
+                    <AnimatePresence mode="wait">
+                      {!isTransitioningQuestion && !isGeneratingQuestions && !isAnalyzingAnswers && (
+                        <motion.div
+                          key={currentQuestionIndex}
+                          initial={{ y: 15, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          exit={{ y: -20, opacity: 0 }}
+                          transition={{ duration: 0.2, ease: 'easeInOut' }}
+                          className="flex flex-col h-full justify-between gap-3.5"
+                        >
+                          {/* Question Text */}
+                          <div className="text-[14px] leading-normal tracking-tight flex flex-col gap-1 select-none font-sans">
+                            <span className="text-[var(--theme-primary)] font-semibold text-sm sm:text-base">{askAiQuestions[currentQuestionIndex].question}</span>
+                            {askAiQuestions[currentQuestionIndex].purpose && (
+                              <span className="text-[11px] text-[var(--theme-muted)] font-medium select-none font-sans flex items-center gap-1">
+                                <span className="text-[12px] shrink-0">💡</span>
+                                <span className="italic">Purpose: {askAiQuestions[currentQuestionIndex].purpose}</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Question Content Types */}
+                          <div className="flex-1 flex items-center min-h-0 select-none">
+                            {renderActiveQuestionContent()}
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {isGeneratingQuestions && (
+                        <motion.div 
+                          key="generating-loader" 
+                          initial={{ opacity: 0 }} 
+                          animate={{ opacity: 1 }} 
+                          exit={{ opacity: 0 }}
+                          className="flex flex-col items-center justify-center gap-3.5 h-full py-8 text-center select-none font-sans"
+                        >
+                          <Loader2 size={28} className="text-[var(--theme-accent)] animate-spin" />
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs font-extrabold tracking-widest uppercase text-[var(--theme-accent)] animate-pulse">
+                              Cognitive Appraisal
+                            </span>
+                            <span className="text-[11px] text-[var(--theme-muted)]">
+                              Formulating clarification questions for your workspace session...
+                            </span>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {isAnalyzingAnswers && (
+                        <motion.div 
+                          key="analyzing-loader" 
+                          initial={{ opacity: 0 }} 
+                          animate={{ opacity: 1 }} 
+                          exit={{ opacity: 0 }}
+                          className="flex flex-col items-center justify-center gap-3.5 h-full py-8 text-center select-none font-sans"
+                        >
+                          <Loader2 size={28} className="text-[var(--theme-accent)] animate-spin" />
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs font-extrabold tracking-widest uppercase text-[var(--theme-accent)] animate-pulse">
+                              Synthesizing Intent
+                            </span>
+                            <span className="text-[11px] text-[var(--theme-muted)]">
+                              Weaving answers into a high-fidelity engineer task blueprint...
+                            </span>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div className="flex-1 px-3 pt-2">
-          {(attachedFiles.length > 0 || localElementAttachments.length > 0) && (
+          {(attachedFiles.length > 0 || localElementAttachments.length > 0 || attachedUrlDocs.length > 0 || isOcrProcessing) && (
             <div className="flex flex-wrap gap-2 pt-1 pb-3 items-center">
               {attachedFiles.map((file, idx) => {
                 const isImage = file.type.startsWith('image/');
@@ -7454,13 +4170,318 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   </div>
                 </motion.div>
               ))}
+
+              {attachedUrlDocs.map((doc) => (
+                <motion.div
+                  key={doc.id}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  onClick={() => {
+                    setTranscriptionOptionsDoc(doc);
+                  }}
+                  className="relative flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 active:scale-95 border border-blue-500/30 text-blue-300 text-xs font-semibold shrink-0 max-w-[210px] font-sans transition-all cursor-pointer animate-fade-in"
+                  title={doc.isOcr ? `Click to view or edit OCR text for: ${doc.title}` : "Click to open or view in virtual code editor"}
+                >
+                  {doc.isOcr ? (
+                    doc.favicon ? (
+                      <img src={doc.favicon} alt="" className="w-5 h-5 rounded object-cover shrink-0 border border-blue-500/40" />
+                    ) : (
+                      <Sparkles size={11} className="shrink-0 text-blue-400 animate-pulse" />
+                    )
+                  ) : doc.favicon ? (
+                    <img src={doc.favicon} alt="" className="w-4 h-4 rounded-sm shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  ) : null}
+                  {!doc.isOcr && <LinkIcon size={12} className="shrink-0 text-blue-400" />}
+                  <span className="truncate">{doc.title.slice(0, 30) || doc.url}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAttachedUrlDocs(prev => prev.filter(d => d.id !== doc.id));
+                    }}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-zinc-900 border border-blue-500/50 text-blue-300 hover:text-white flex items-center justify-center transition-all z-10 cursor-pointer animate-fade-in"
+                  >
+                    <X size={9} />
+                  </button>
+                </motion.div>
+              ))}
+
+              {isOcrProcessing && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-blue-500/30 bg-blue-500/5 text-blue-300 h-10 shadow-sm shrink-0 animate-pulse font-sans"
+                >
+                  <Sparkles size={13} className="animate-spin text-blue-400" />
+                  <div className="flex flex-col text-left">
+                    <span className="text-[10px] font-bold">OCR Transcribing...</span>
+                  </div>
+                </motion.div>
+              )}
             </div>
           )}
+
+          {/* Advanced Voice Dictation & Ambient Soundboard Control Pane */}
+          <AnimatePresence>
+            {showVoiceControlPanel && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -7 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -7 }}
+                className="overflow-hidden w-full border-b border-[var(--theme-border)]/55 pb-3 mb-3 flex flex-col gap-2.5 shrink-0"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--theme-surface-alt)]/45 hover:bg-[var(--theme-bg)]/60 transition-all p-3 rounded-2xl border border-[var(--theme-border)]/55 shadow-inner">
+                  {/* Left: Interactive Mic Controller */}
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      {isVoiceListening ? (
+                        <>
+                          <span className="absolute -inset-1.5 rounded-full bg-red-500/25 animate-ping" style={{ animationDuration: '1.4s' }}></span>
+                          <span className="absolute -inset-3.5 rounded-full bg-red-500/10 animate-ping" style={{ animationDuration: '2.4s' }}></span>
+                          <div 
+                            className="w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer relative z-10 transition-all active:scale-90 shadow-md shadow-red-500/20"
+                            onClick={stopVoiceDictation}
+                            title="Deactivate Voice Input"
+                          >
+                            <MicOff size={16} className="animate-pulse" />
+                          </div>
+                        </>
+                      ) : (
+                        <div 
+                          className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center cursor-pointer relative z-10 transition-all active:scale-90 shadow-md shadow-blue-500/20"
+                          onClick={startVoiceDictation}
+                          title="Activate Voice Input"
+                        >
+                          <Mic size={16} />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-left select-none">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10.5px] font-extrabold tracking-widest uppercase ${isVoiceListening ? 'text-red-500 animate-pulse' : 'text-[var(--theme-secondary)]'}`}>
+                          {isVoiceListening ? 'Recording Live Transcripts' : 'Voice Dictation'}
+                        </span>
+                        {isVoiceListening && (
+                          <span className="text-[9px] font-mono bg-red-500/15 text-red-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
+                            {voiceLanguage}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-[var(--theme-muted)] mt-0.5 max-w-[210px] sm:max-w-xs truncate">
+                        {isVoiceListening 
+                          ? (voiceInterimText ? 'Transcribing speech stream...' : 'Start speaking to formulate message...') 
+                          : 'Dictate custom prompts and codes organically'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Center: Web Audio Level Waveform representation */}
+                  <div className="flex items-center gap-1 h-5 min-w-[70px] justify-center">
+                    {isVoiceListening ? (
+                      Array.from({ length: 12 }).map((_, i) => {
+                        // Dynamic organic heights with responsive microphone amplitude
+                        const volScale = micVolume > 0 ? (micVolume / 100) : 0.15;
+                        const minH = 3;
+                        const maxH = 20;
+                        const individualOffset = Math.sin(Date.now() / 140 + i * 40) * 0.45 + 0.55;
+                        const height = Math.max(minH, Math.min(maxH, maxH * volScale * individualOffset));
+                        
+                        return (
+                          <motion.span
+                            key={i}
+                            className="w-[3px] rounded-full bg-gradient-to-t from-red-500 via-orange-500 to-yellow-400"
+                            animate={{ height }}
+                            transition={{ type: 'spring', stiffness: 350, damping: 20 }}
+                          />
+                        );
+                      })
+                    ) : (
+                      Array.from({ length: 8 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="w-[3px] h-1.5 rounded-full bg-[var(--theme-border)]/50"
+                        />
+                      ))
+                    )}
+                  </div>
+
+                  {/* Right: Fine-grain Customization parameters */}
+                  <div className="flex items-center gap-3.5 flex-wrap">
+                    {/* Locale targets */}
+                    <div className="flex flex-col text-left">
+                      <label className="text-[9px] font-mono uppercase tracking-widest text-[var(--theme-secondary)]/70 font-bold mb-0.5 select-none">Locale language</label>
+                      <select
+                        value={voiceLanguage}
+                        onChange={(e) => {
+                          const code = e.target.value;
+                          setVoiceLanguage(code);
+                          showToast(`Acoustic language swapped: ${SUPPORTED_VOICE_LANGUAGES.find(s=>s.code===code)?.label}`);
+                          if (isVoiceListening) {
+                            stopVoiceDictation();
+                            setTimeout(() => {
+                              const RecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                              if (RecognitionConstructor) {
+                                const rec = new RecognitionConstructor();
+                                rec.continuous = true;
+                                rec.interimResults = true;
+                                rec.lang = code;
+                                rec.onstart = () => { setIsVoiceListening(true); };
+                                rec.onerror = (err_e: any) => { if (err_e.error !== 'no-speech') setVoiceError(`Error: ${err_e.error}`); };
+                                rec.onend = () => { setIsVoiceListening(false); };
+                                rec.onresult = (res_e: any) => {
+                                  let finalTrans = '';
+                                  let interimTrans = '';
+                                  for (let idx = res_e.resultIndex; idx < res_e.results.length; ++idx) {
+                                    if (res_e.results[idx].isFinal) finalTrans += res_e.results[idx][0].transcript;
+                                    else interimTrans += res_e.results[idx][0].transcript;
+                                  }
+                                  if (interimTrans) setVoiceInterimText(interimTrans);
+                                  if (finalTrans) {
+                                    setInput(prev => {
+                                      const added = finalTrans.trim();
+                                      if (!added) return prev;
+                                      return voiceAppendMode ? (prev ? (prev.endsWith(' ') ? prev + added : prev + ' ' + added) : added) : added;
+                                    });
+                                    setVoiceInterimText('');
+                                  }
+                                };
+                                recognitionRef.current = rec;
+                                rec.start();
+                              }
+                            }, 250);
+                          }
+                        }}
+                        className="h-7 bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] text-[10px] rounded-lg px-2.5 outline-none cursor-pointer focus:border-[var(--theme-accent)] transition-all shrink-0 max-w-[125px] font-sans"
+                      >
+                        {SUPPORTED_VOICE_LANGUAGES.map(lang => (
+                          <option key={lang.code} value={lang.code}>{lang.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Mode (overwrite vs append) */}
+                    <div className="flex flex-col text-left">
+                      <span className="text-[9px] font-mono uppercase tracking-widest text-[var(--theme-secondary)]/70 font-bold mb-0.5 select-none font-bold">Write Target</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceAppendMode(!voiceAppendMode);
+                          showToast(voiceAppendMode ? "Direct text Overwrite mode active" : "Concatenate Append text mode active");
+                        }}
+                        className={`h-7 px-2.5 rounded-lg text-[10px] border font-bold transition-all flex items-center justify-center gap-1 cursor-pointer font-sans ${
+                          voiceAppendMode 
+                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/25 hover:bg-blue-500/20' 
+                            : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/25 hover:bg-indigo-500/20'
+                        }`}
+                        title={voiceAppendMode ? "Speech is appended" : "Speech replaces input text"}
+                      >
+                        {voiceAppendMode ? '📝 Append' : '🔄 Replace'}
+                      </button>
+                    </div>
+
+                    {/* Auto Submission */}
+                    <div className="flex flex-col text-left">
+                      <span className="text-[9px] font-mono uppercase tracking-widest text-[var(--theme-secondary)]/70 font-bold mb-0.5 select-none font-bold">Auto submission</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVoiceAutoSend(!voiceAutoSend);
+                          showToast(voiceAutoSend ? "Semi-auto submission mode disabled" : "Voice stop submission mode enabled!");
+                        }}
+                        className={`h-7 px-2.5 rounded-lg text-[10px] border font-bold transition-all flex items-center justify-center gap-1 cursor-pointer font-sans ${
+                          voiceAutoSend 
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25 shadow-inner' 
+                            : 'bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)] border-[var(--theme-border)]/70 hover:bg-[var(--theme-border)]/20'
+                        }`}
+                        title="Submit message instantly upon voice completion"
+                      >
+                        {voiceAutoSend ? '🚀 Auto-Send' : '⏸️ Manual'}
+                      </button>
+                    </div>
+
+                    {/* Quick Sweep clear */}
+                    <div className="flex flex-col text-left justify-end">
+                      <span className="text-[9px] h-2 leading-0 select-none"></span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInput('');
+                          setVoiceInterimText('');
+                          showToast("Workspace draft cleared.");
+                        }}
+                        disabled={!input && !voiceInterimText}
+                        className="h-7 w-7 rounded-lg text-[var(--theme-secondary)] hover:text-red-500 hover:bg-red-500/10 transition-colors flex items-center justify-center border border-[var(--theme-border)] cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Clear Workspace Text"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Real-time Subtitle translation stream feedback */}
+                {isVoiceListening && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.99, y: 3 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.99, y: 3 }}
+                    className="p-3 bg-gradient-to-r from-red-500/5 via-amber-500/5 to-transparent border border-red-500/15 hover:border-red-500/35 transition-all rounded-2xl flex items-start gap-2.5 text-left relative overflow-hidden"
+                  >
+                    <Sparkles size={13} className="text-amber-500 animate-spin shrink-0 mt-0.5" />
+                    <div className="flex-1 text-xs leading-relaxed select-none font-sans">
+                      <span className="text-[var(--theme-secondary)] font-semibold font-sans">Interim Speech Chunk: </span>
+                      <span className="text-amber-400 italic font-bold font-sans">
+                        {voiceInterimText || 'Awaiting live voice stream inputs...'}
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Error Alerts */}
+                {voiceError && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.97 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="p-2.5 bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] rounded-xl text-left font-sans flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                      <span>{voiceError}</span>
+                    </div>
+                    <button 
+                      onClick={() => setVoiceError(null)}
+                      className="text-red-400 hover:text-white pb-0.5 cursor-pointer font-bold leading-none text-sm px-1.5 transition-colors"
+                    >
+                      ×
+                    </button>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <textarea
             ref={inputRef}
             value={input}
             onChange={adjustTextareaHeight}
             onKeyDown={handleKeyDown}
+            onPaste={(e) => {
+              const items = e.clipboardData.items;
+              const files: File[] = [];
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                  const blob = items[i].getAsFile();
+                  if (blob) {
+                    files.push(new File([blob], `pasted-image-${Date.now()}.png`, { type: blob.type }));
+                  }
+                }
+              }
+              if (files.length > 0) {
+                e.preventDefault();
+                handleFileAttach(files);
+              }
+            }}
             placeholder={
               activeAssistantMode === 'builder'
                 ? "Describe the feature or component you want me to build autonomously..."
@@ -7507,6 +4528,8 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-0.5 p-0.5">
                         {[
                           { id: 'files', label: 'Add files or photos', icon: <FileUp size={16} /> },
+                          { id: 'attach_url', label: 'Attach URL', icon: <LinkIcon size={16} /> },
+                          { id: 'transcript', label: 'Video Transcript', icon: <Video size={16} /> },
                           { id: 'screenshot', label: 'Take a screenshot', icon: <Camera size={16} /> },
                           { id: 'skills', label: 'Skills', icon: <Box size={16} />, hasArrow: true },
                           { id: 'style', label: 'Writing Style', icon: <Palette size={16} />, hasArrow: true },
@@ -7525,6 +4548,14 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                                   case 'files':
                                     fileInputRef.current?.click();
                                     setIsPlusMenuOpen(false);
+                                    break;
+                                  case 'attach_url':
+                                    setIsPlusMenuOpen(false);
+                                    setIsUrlToolOpen(true);
+                                    break;
+                                  case 'transcript':
+                                    setIsPlusMenuOpen(false);
+                                    setIsTranscriptToolOpen(true);
                                     break;
                                   case 'screenshot':
                                     handleScreenshot();
@@ -7896,12 +4927,29 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={() => {
-                showToast("Voice input is configured. Adjust sources in Settings > General.");
+                const nextOpenState = !showVoiceControlPanel;
+                setShowVoiceControlPanel(nextOpenState);
+                if (isVoiceListening) {
+                  stopVoiceDictation();
+                } else if (nextOpenState) {
+                  // Pre-start speech recognition automatically when panel opens for a frictionless UI!
+                  startVoiceDictation();
+                }
               }}
-              className="p-1.5 rounded-2xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-all cursor-pointer mr-0.5 flex items-center justify-center shrink-0"
-              title="Voice Input"
+              className={`p-2 rounded-2xl transition-all cursor-pointer mr-0.5 flex items-center justify-center shrink-0 border ${
+                isVoiceListening 
+                  ? 'bg-red-500/10 text-red-500 border-red-500/30 shadow-sm shadow-red-500/10 animate-pulse' 
+                  : showVoiceControlPanel
+                    ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                    : 'text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] border-transparent'
+              }`}
+              title="Advanced Speech Transcription"
             >
-              <Mic size={18} className="text-zinc-500 hover:text-zinc-300 transition-colors" />
+              {isVoiceListening ? (
+                <MicOff size={18} className="text-red-500 animate-pulse" />
+              ) : (
+                <Mic size={18} className={showVoiceControlPanel ? 'text-blue-400' : 'text-zinc-500 hover:text-zinc-300 transition-colors'} />
+              )}
             </motion.button>
 
 
@@ -7923,10 +4971,10 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               <motion.button
                 whileTap={{ scale: 0.92 }}
                 onClick={() => handleSend()}
-                disabled={!input.trim() && attachedFiles.length === 0}
+                disabled={!input.trim() && attachedFiles.length === 0 && attachedUrlDocs.length === 0}
                 className={`
                   w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-sm cursor-pointer
-                  ${input.trim() || attachedFiles.length > 0
+                  ${input.trim() || attachedFiles.length > 0 || attachedUrlDocs.length > 0
                     ? 'bg-[var(--theme-accent)] text-white hover:scale-105 active:scale-95'
                     : 'bg-[var(--theme-hover-bg)] text-[var(--theme-muted)]'
                   }
@@ -7947,7 +4995,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
           multiple
           className="hidden"
           onChange={(e) => {
-            setAttachedFiles(prev => [...prev, ...Array.from(e.target.files || [])]);
+            handleFileAttach(Array.from(e.target.files || []));
             e.target.value = '';
           }}
         />
@@ -7958,89 +5006,16 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
   if (showLogin) {
     return (
-      <div id="login-page-container" className="flex flex-col items-center justify-center min-h-screen bg-[#060608] text-white p-6 relative overflow-hidden font-sans select-none w-full">
-        {/* Glow Effects */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-[100px] pointer-events-none animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-[100px] pointer-events-none animate-pulse" style={{ animationDelay: '2s' }} />
-
-        {/* Floating particles background */}
-        <div className="absolute inset-0 z-0 pointer-events-none opacity-40">
-          <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="10%" cy="20%" r="2" fill="#3b82f6" className="animate-pulse" style={{ animationDuration: '3s' }} />
-            <circle cx="85%" cy="15%" r="1.5" fill="#a855f7" className="animate-pulse" style={{ animationDuration: '4s' }} />
-            <circle cx="75%" cy="80%" r="2" fill="#3b82f6" className="animate-pulse" style={{ animationDuration: '5s' }} />
-            <circle cx="20%" cy="75%" r="1" fill="#c084fc" className="animate-pulse" style={{ animationDuration: '3s' }} />
-          </svg>
-        </div>
-
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4 }}
-          className="w-full max-w-md bg-zinc-900/60 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl p-8 shadow-2xl relative z-10 flex flex-col items-center text-center"
-        >
-          {/* Logo */}
-          <div className="w-14 h-14 rounded-2xl !bg-[#ffffff] !text-[#09090b] flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(255,255,255,0.15)]">
-            <Sparkles size={28} className="!text-[#09090b]" />
-          </div>
-
-          <h1 className="text-2xl font-semibold tracking-tight text-white mb-2 font-sans select-none">
-            Welcome to Lumina
-          </h1>
-          <p className="text-sm text-zinc-400 mb-8 font-sans select-none max-w-xs">
-            Create your profile to initialize your persistent AI workspace and labs.
-          </p>
-
-          <form onSubmit={handleOnboardingSubmit} className="w-full space-y-5 text-left">
-            <div className="space-y-2">
-              <label htmlFor="login-name-input" className="text-xs font-semibold text-zinc-400 uppercase tracking-widest pl-1">
-                Name
-              </label>
-              <input
-                id="login-name-input"
-                type="text"
-                required
-                value={loginName}
-                onChange={(e) => setLoginName(e.target.value)}
-                placeholder="Enter your name"
-                className="w-full h-12 px-4 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 rounded-xl text-sm outline-none transition-all focus:ring-4 focus:ring-zinc-800/40 text-white placeholder-zinc-500"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="login-age-input" className="text-xs font-semibold text-zinc-400 uppercase tracking-widest pl-1">
-                Age
-              </label>
-              <input
-                id="login-age-input"
-                type="number"
-                required
-                min="1"
-                max="120"
-                value={loginAge}
-                onChange={(e) => setLoginAge(e.target.value)}
-                placeholder="Enter your age"
-                className="w-full h-12 px-4 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 rounded-xl text-sm outline-none transition-all focus:ring-4 focus:ring-zinc-800/40 text-white placeholder-zinc-500"
-              />
-            </div>
-
-            {errorText && (
-              <div className="text-xs text-rose-500 font-medium pl-1 animate-pulse">
-                {errorText}
-              </div>
-            )}
-
-            <button
-              id="login-submit-button"
-              type="submit"
-              className="w-full h-12 mt-4 !bg-[#ffffff] !text-[#09090b] hover:!bg-[#e4e4e7] active:scale-[0.98] transition-all rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-[0_4px_20px_rgba(255,255,255,0.08)]"
-            >
-              Initialize Profile
-              <ArrowRight size={16} strokeWidth={2.5} className="!text-[#09090b]" />
-            </button>
-          </form>
-        </motion.div>
-      </div>
+      <OnboardingModal
+        onComplete={(updatedProfile) => {
+          setUserProfile(updatedProfile);
+          try {
+            localStorage.setItem('lumina_user_profile', JSON.stringify(updatedProfile));
+            localStorage.setItem('lumina_profile_created', 'true');
+          } catch (err) {}
+          setShowLogin(false);
+        }}
+      />
     );
   }
 
@@ -8123,8 +5098,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 setUserProfile={setUserProfile}
                 projectFolders={projectFolders}
                 setProjectFolders={setProjectFolders}
-                activeLabTab={activeLabTab}
-                setActiveLabTab={setActiveLabTab}
                 activeProjectId={activeProjectId}
                 setActiveProjectId={setActiveProjectId}
                 isSidebarOpen={isSidebarOpen}
@@ -8156,8 +5129,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             setUserProfile={setUserProfile}
             projectFolders={projectFolders}
             setProjectFolders={setProjectFolders}
-            activeLabTab={activeLabTab}
-            setActiveLabTab={setActiveLabTab}
             activeProjectId={activeProjectId}
             setActiveProjectId={setActiveProjectId}
             isSidebarOpen={isSidebarOpen}
@@ -8201,15 +5172,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 <SidebarIcon size={20} />
               </button>
               <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-400 truncate ml-2">
-                {isPhysicsTabActive 
-                  ? `${activeLabTab ? activeLabTab.charAt(0).toUpperCase() + activeLabTab.slice(1) : 'Physics'} Laboratory`
-                  : 'Lumina Intelligence'
-                }
+                Lumina Intelligence
               </h2>
             </div>
             <div className="flex items-center gap-4">
-              {!isPhysicsTabActive && (
-                <div className="relative flex items-center">
+              <div className="relative flex items-center">
                   <AnimatePresence>
                     {isSearchOpen && (
                       <motion.div
@@ -8236,7 +5203,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     <Search size={18} />
                   </button>
                 </div>
-              )}
               {isCoderMode && (
                 <button
                   onClick={() => setIsCoderWorkspacePanelOpen(!isCoderWorkspacePanelOpen)}
@@ -8288,21 +5254,30 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                           }
                           setIsHeaderMenuOpen(false);
                         } },
-                        { id: 'physics_lab', label: 'Physics Lab', icon: <Activity size={16} className="text-blue-500 animate-pulse" />, onClick: () => { setActiveLabTab('physics'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
-                        { id: 'chemistry_lab', label: 'Chemistry Lab', icon: <Beaker size={16} className="text-emerald-500" />, onClick: () => { setActiveLabTab('chemistry'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
-                        { id: 'math_lab', label: 'Math Lab', icon: <Compass size={16} className="text-purple-500" />, onClick: () => { setActiveLabTab('math'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
-                        { id: 'biology_lab', label: 'Biology Lab', icon: <Flower2 size={16} className="text-rose-500" />, onClick: () => { setActiveLabTab('biology'); setCurrentChatId(null); setIsHeaderMenuOpen(false); } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
-                        { id: 'account', label: 'Account', icon: <User size={16} />, onClick: () => { setIsHeaderMenuOpen(false); } },
+                        { id: 'dev_tools', label: 'DevTools', icon: <Sliders size={16} className="text-blue-500 animate-[pulse_3s_infinite]" />, onClick: () => { setIsDevToolsOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
                           key={item.id}
+                          id={item.id === 'dev_tools' ? 'devtools-trigger-btn' : undefined}
                           onClick={item.onClick}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white transition-colors"
+                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all group duration-200 ${
+                            item.id === 'dev_tools'
+                              ? 'bg-blue-500/5 dark:bg-blue-500/[0.03] border border-blue-500/15 dark:border-blue-500/10 text-blue-600 dark:text-blue-400 hover:border-blue-500/40 hover:bg-blue-500/10 dark:hover:bg-blue-500/10 font-semibold'
+                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white'
+                          }`}
                         >
-                          {item.icon}
-                          {item.label}
+                          <div className="flex items-center gap-3">
+                            {item.icon}
+                            <span>{item.label}</span>
+                          </div>
+                          {item.id === 'dev_tools' && (
+                            <span className="flex h-2 w-2 relative">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                            </span>
+                          )}
                         </button>
                       ))}
                       <div className="my-1.5 border-t border-gray-100 dark:border-white/5" />
@@ -8867,34 +5842,6 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               )}
             </AnimatePresence>
           </div>
-        ) : isPhysicsTabActive ? (
-          <div className="flex-1 flex flex-col overflow-hidden relative min-h-0 bg-[var(--theme-bg)]">
-            {activeLabTab === 'physics' && (
-              <PhysicsGraphCanvas 
-                isOpen={false} 
-                isInline={true} 
-                onClose={() => setActiveLabTab(null)} 
-              />
-            )}
-            {activeLabTab === 'chemistry' && (
-              <ChemistryLabCanvas 
-                onClose={() => setActiveLabTab(null)} 
-                isInline={true}
-              />
-            )}
-            {activeLabTab === 'math' && (
-              <MathLabCanvas 
-                onClose={() => setActiveLabTab(null)} 
-                isInline={true}
-              />
-            )}
-            {activeLabTab === 'biology' && (
-              <BiologyLabCanvas 
-                onClose={() => setActiveLabTab(null)} 
-                isInline={true}
-              />
-            )}
-          </div>
         ) : (
           <>
             <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
@@ -8928,9 +5875,11 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         ) : (
                           <>
                             <motion.div 
+                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                              title={isSidebarOpen ? "Collapse Lumina Sidebar" : "Expand Lumina Sidebar"}
                               animate={{ scale: [1, 1.05, 1] }}
                               transition={{ duration: 4, repeat: Infinity }}
-                              className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-full flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm overflow-hidden animate-active-ring"
+                              className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-full flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm overflow-hidden animate-active-ring cursor-pointer hover:border-blue-500 hover:ring-2 hover:ring-blue-500/20 dark:hover:border-blue-500 transition-all duration-300"
                             >
                               {userProfile.avatar ? (
                                 <img src={userProfile.avatar} alt={userProfile.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -8944,6 +5893,15 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                             <p className="text-gray-500 dark:text-gray-400 max-w-sm mb-6">
                               Modern intelligence, refined interface.
                             </p>
+                            <button
+                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                              className="flex items-center gap-2.5 px-4.5 py-2.5 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800/80 text-gray-700 dark:text-zinc-200 rounded-xl text-xs font-semibold border border-gray-200 dark:border-white/10 shadow-sm cursor-pointer transition-all active:scale-[0.98] animate-focus-target"
+                              id="slidepanel-toggle-option"
+                              title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+                            >
+                              <SidebarIcon size={14} className={isSidebarOpen ? "text-blue-500" : "text-gray-400"} />
+                              <span>{isSidebarOpen ? "Collapse Sidebar Menu" : "Expand Sidebar Menu"}</span>
+                            </button>
                           </>
                         )}
                       </motion.div>
@@ -9025,74 +5983,69 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 
       <AnimatePresence>
         {isSettingsOpen && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsSettingsOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative w-full max-w-3xl h-[520px] bg-white dark:bg-zinc-900 text-brand-primary dark:text-white rounded-3xl shadow-2xl overflow-hidden flex"
-            >
-              <div className="w-56 border-r border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-zinc-950/20 p-6 flex flex-col">
-                <h2 className="text-xl font-display font-semibold mb-8">Settings</h2>
-                <nav className="space-y-1 flex-1">
-                  {[
-                    { id: 'general', label: 'General', icon: <Settings size={16} /> },
-                    { id: 'profile', label: 'My Profile', icon: <User size={16} /> },
-                    { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
-                    { id: 'search', label: 'Search', icon: <Search size={16} /> },
-                    { id: 'persona', label: 'Persona', icon: <User size={16} /> },
-                    { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
-                    { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
-                    { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
+          <SettingsModal
+            onClose={() => setIsSettingsOpen(false)}
+            activeSettingsTab={activeSettingsTab}
+            setActiveSettingsTab={setActiveSettingsTab}
+            useBubbles={useBubbles}
+            setUseBubbles={setUseBubbles}
+            isCompactSidebar={isCompactSidebar}
+            setIsCompactSidebar={setIsCompactSidebar}
+            autoHideTopBar={autoHideTopBar}
+            setAutoHideTopBar={setAutoHideTopBar}
+            useBridgeTools={useBridgeTools}
+            setUseBridgeTools={setUseBridgeTools}
+            useTurboQuant={useTurboQuant}
+            setUseTurboQuant={setUseTurboQuant}
+            selectedProvider={selectedProvider}
+            handleProviderSelect={handleProviderSelect}
+            providerSearchQuery={providerSearchQuery}
+            setProviderSearchQuery={setProviderSearchQuery}
+            serverUrl={serverUrl}
+            setServerUrl={setServerUrl}
+            apiKey={apiKey}
+            setApiKey={setApiKey}
+            aiVerificationState={aiVerificationState}
+            handleVerifyAI={handleVerifyAI}
+            handleSaveAI={handleSaveAI}
+            isAiSaved={isAiSaved}
+            searchProvider={searchProvider}
+            setSearchProvider={setSearchProvider}
+            tavilyApiKey={tavilyApiKey}
+            setTavilyApiKey={setTavilyApiKey}
+            serpApiKey={serpApiKey}
+            setSerpApiKey={setSerpApiKey}
+            searchVerificationState={searchVerificationState}
+            handleVerifySearch={handleVerifySearch}
+            handleSaveSearch={handleSaveSearch}
+            isSearchSaved={isSearchSaved}
+            userProfile={userProfile}
+            setUserProfile={setUserProfile}
+            persona={persona}
+            setPersona={setPersona}
+            luminaTools={luminaTools}
+            setLuminaTools={setLuminaTools}
+            showToast={showToast}
+            llamaBridgeUrl={llamaBridgeUrl}
+            setLlamaBridgeUrl={setLlamaBridgeUrl}
+            llamaBridgeApiKey={llamaBridgeApiKey}
+            setLlamaBridgeApiKey={setLlamaBridgeApiKey}
+            isMcpConnected={isMcpConnected}
+            llamaBridgeModels={llamaBridgeModels}
+            selectedLlamaModel={selectedLlamaModel}
+            setSelectedLlamaModel={setSelectedLlamaModel}
+            bridgeTools={bridgeTools}
+            handleTestLlamaConnection={handleTestLlamaConnection}
+            handleLoadLlamaModels={handleLoadLlamaModels}
+            handleLoadBridgeTools={handleLoadBridgeTools}
+          />
+        )}
+      </AnimatePresence>
 
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveSettingsTab(tab.id as any)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                        activeSettingsTab === tab.id 
-                          ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm border border-gray-100 dark:border-white/10' 
-                          : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5'
-                      }`}
-                    >
-                      {tab.icon}
-                      {tab.label}
-                    </button>
-                  ))}
-                </nav>
-                <div className="mt-auto">
-                  <div className="flex items-center gap-3 p-2 bg-white dark:bg-zinc-800 rounded-2xl border border-gray-100 dark:border-white/10 shadow-sm">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-xs">
-                      AR
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11px] font-semibold truncate">Abdur Ramiz</div>
-                      <div className="text-[10px] text-gray-400 truncate uppercase">Pro</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex-1 flex flex-col min-w-0">
-                <div className="flex items-center justify-end p-6 pb-0">
-                  <button 
-                    onClick={() => setIsSettingsOpen(false)}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-full transition-colors text-gray-500"
-                  >
-                    <Plus size={20} className="rotate-45" />
-                  </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-8 pt-4 custom-scrollbar">
-                  {activeSettingsTab === 'general' && (
-                    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
+      <div style={{ display: 'none' }}>
+        {/* Hidden fallback wrapper */}
+        {activeSettingsTab === 'general' && (
+          <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Appearance</h3>
                         <div className="space-y-6">
@@ -9189,6 +6142,46 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                               />
                             </button>
                           </div>
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">
+                          Context Intelligence
+                        </h3>
+                        <div className="space-y-6">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <div className="font-medium text-sm flex items-center gap-2">
+                                TurboQuant Compression
+                              </div>
+                              <div className="text-xs text-gray-400 mt-1 max-w-sm leading-relaxed">
+                                Semantically compress large tool outputs (web search, scraped pages, Wikipedia, transcripts) before injecting into the AI context window. Preserves meaning while reducing token usage by 40–60%.
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const next = !useTurboQuant;
+                                setUseTurboQuant(next);
+                                localStorage.setItem('lumina_turboquant', next.toString());
+                                showToast(`TurboQuant ${next ? 'enabled' : 'disabled'}`);
+                              }}
+                              className={`w-12 h-6 rounded-full transition-all relative shrink-0 mt-0.5 ${useTurboQuant ? 'bg-violet-600' : 'bg-gray-200 dark:bg-zinc-700'}`}
+                            >
+                              <motion.div
+                                animate={{ x: useTurboQuant ? 24 : 4 }}
+                                className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
+                              />
+                            </button>
+                          </div>
+                          {useTurboQuant && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="p-3 rounded-xl bg-violet-500/5 border border-violet-500/15 text-[11px] text-violet-400 font-medium leading-relaxed font-sans"
+                            >
+                              ⚡ TurboQuant is active. All web search results, scraped pages, Wikipedia articles, URL attachments, and video transcripts will be compressed before being sent to the AI.
+                            </motion.div>
+                          )}
                         </div>
                       </div>
                     </motion.div>
@@ -9844,12 +6837,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                   )}
 
 
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </div>
 
       <div className="fixed top-20 right-6 flex flex-col gap-1.5 items-end z-[9999] pointer-events-none">
         <AnimatePresence>
@@ -9877,10 +6865,497 @@ When the user asks you to build page(s), applications, interfaces, features, or 
         allArtifacts={chats.find(c => c.id === currentChatId)?.messages.flatMap(m => m.artifacts || []) || []}
       />
 
-      <PhysicsGraphCanvas 
-        isOpen={isPhysicsCanvasOpen} 
-        onClose={() => setIsPhysicsCanvasOpen(false)} 
-      />
+
+
+      {/* Retro Cyberpunk CRT Grid Scanlines visual overlay */}
+      {retroFilter && (
+        <div 
+          className="pointer-events-none fixed inset-0 z-[1000] opacity-[0.05]" 
+          style={{
+            background: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.05), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.05))',
+            backgroundSize: '100% 4px, 6px 100%'
+          }} 
+        />
+      )}
+
+      {/* Lumina Developer Tools Dialog Panel */}
+      <AnimatePresence>
+        {isDevToolsOpen && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDevToolsOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="relative w-full max-w-4xl h-[600px] bg-zinc-950 text-white rounded-3xl border border-zinc-900 shadow-2xl overflow-hidden flex font-mono"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Left sidebar nav panel */}
+              <div className="w-60 border-r border-zinc-900 bg-zinc-950 p-5 flex flex-col justify-between select-none">
+                <div>
+                  <div className="flex items-center gap-2 px-1 mb-6">
+                    <Terminal size={18} className="text-blue-500 animate-pulse" />
+                    <div>
+                      <h3 className="font-mono text-xs font-bold tracking-widest uppercase text-zinc-100">LUMINA DEBUG</h3>
+                      <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest mt-0.5">DEV PANEL CORE V1.0</p>
+                    </div>
+                  </div>
+                  
+                  <nav className="space-y-1">
+                    {[
+                      { id: 'status', label: 'System Nodes', icon: <HardDrive size={13} /> },
+                      { id: 'console', label: 'Diagnostic Terminal', icon: <SquareTerminal size={13} /> },
+                      { id: 'perf', label: 'Telemetry/Perf', icon: <Activity size={13} /> },
+                      { id: 'storage', label: 'State & Storage', icon: <Sliders size={13} /> },
+                      { id: 'flags', label: 'Feature Toggles', icon: <Wrench size={13} /> },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveDevTab(tab.id as any)}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-mono font-medium transition-all cursor-pointer ${
+                          activeDevTab === tab.id 
+                            ? 'bg-blue-600/15 text-blue-400 border border-blue-500/20 shadow-md' 
+                            : 'text-zinc-400 hover:text-zinc-250 hover:bg-zinc-900/40 border border-transparent'
+                        }`}
+                      >
+                        {tab.icon}
+                        <span>{tab.label}</span>
+                      </button>
+                    ))}
+                  </nav>
+                </div>
+                
+                {/* dev stats summary footer */}
+                <div className="pt-4 border-t border-zinc-900/60">
+                  <div className="flex items-center justify-between font-mono text-[10px] text-zinc-500 px-1">
+                    <span>Websocket Port</span>
+                    <span className="text-emerald-400 font-bold">3000 (IN CLOUD)</span>
+                  </div>
+                  <div className="flex items-center justify-between font-mono text-[10px] text-zinc-500 px-1 mt-1.5">
+                    <span>Active Chats</span>
+                    <span className="text-zinc-300 font-bold">{chats.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between font-mono text-[10px] text-zinc-500 px-1 mt-1.5">
+                    <span>Latency Simulation</span>
+                    <span className={`${simLatency ? 'text-orange-400' : 'text-zinc-500'} font-bold`}>
+                      {simLatency ? '+500ms' : '0ms'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Tab Contents Panel Area */}
+              <div className="flex-1 flex flex-col min-w-0">
+                {/* Header title */}
+                <div className="flex items-center justify-between p-5 border-b border-zinc-900 bg-zinc-950/40 z-10 select-none">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-zinc-300">
+                      {activeDevTab === 'status' && 'System Node Status Map'}
+                      {activeDevTab === 'console' && 'Diagnostic Terminal Emulator'}
+                      {activeDevTab === 'perf' && 'Real-time Telemetry Graph'}
+                      {activeDevTab === 'storage' && 'Runtime Key-Value Storage Inspector'}
+                      {activeDevTab === 'flags' && 'Experimental Dev Toggles'}
+                    </h2>
+                  </div>
+                  <button 
+                    onClick={() => setIsDevToolsOpen(false)}
+                    className="p-1.5 hover:bg-zinc-900 bg-zinc-950 border border-zinc-800 rounded-full transition-all text-zinc-400 hover:text-white cursor-pointer"
+                    title="Close Panel"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                {/* Content Body */}
+                <div className="flex-1 overflow-y-auto p-6 bg-zinc-950/20 custom-scrollbar font-mono">
+                  
+                  {/* TAB 1: STATUS MAP */}
+                  {activeDevTab === 'status' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+                      <p className="text-xs text-zinc-400 leading-relaxed font-sans">
+                        Dynamic routing diagram linking AI models, interface nodes, server processes, and databases live in your current preview sandbox.
+                      </p>
+                      
+                      {/* Interactive Diagram UI */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="border border-zinc-900 bg-zinc-900/25 p-4 rounded-2xl">
+                          <div className="flex items-center gap-2.5 mb-2">
+                            <Bot className="text-blue-400" size={16} />
+                            <h4 className="text-xs font-bold text-zinc-200 font-mono">Antigravity Core Model</h4>
+                          </div>
+                          <div className="text-[10px] space-y-1 text-zinc-400">
+                            <div>Provider: <span className="text-zinc-300 font-semibold">{selectedProvider === 'custom' ? 'Custom HTTP proxy' : selectedProvider}</span></div>
+                            <div>Endpoint: <span className="text-zinc-300 truncate font-mono block max-w-xs">{serverUrl || 'N/A'}</span></div>
+                            <div>State: <span className="text-emerald-400 font-semibold">Ready</span></div>
+                          </div>
+                        </div>
+
+                        <div className="border border-zinc-900 bg-zinc-900/25 p-4 rounded-2xl">
+                          <div className="flex items-center gap-2.5 mb-2">
+                            <Code className="text-teal-400" size={16} />
+                            <h4 className="text-xs font-bold text-zinc-200 font-mono">Coder Mode Module</h4>
+                          </div>
+                          <div className="text-[10px] space-y-1 text-zinc-400">
+                            <div>State: <span className={isCoderMode ? 'text-teal-400 font-bold' : 'text-zinc-500'}>{isCoderMode ? 'ACTIVE & LOADED' : 'INACTIVE'}</span></div>
+                            <div>Left Explorer Panel: <span className={isCoderLeftPanelOpen ? 'text-teal-400' : 'text-zinc-500'}>{isCoderLeftPanelOpen ? 'OPENED' : 'CLOSED'}</span></div>
+                            <div>Preview Frame State: <span className={isCoderRightPanelOpen ? 'text-orange-400' : 'text-zinc-500'}>{isCoderRightPanelOpen ? 'RUNNING' : 'COLLAPSED'}</span></div>
+                          </div>
+                        </div>
+
+                        <div className="border border-zinc-900 bg-zinc-900/25 p-4 rounded-2xl">
+                          <div className="flex items-center gap-2.5 mb-2">
+                            <Settings className="text-zinc-400 animate-[spin_4s_linear_infinite]" size={16} />
+                            <h4 className="text-xs font-bold text-zinc-200 font-mono">Llama Bridge Integrator</h4>
+                          </div>
+                          <div className="text-[10px] space-y-1 text-zinc-400">
+                            <div>Bridge Client Url: <span className="text-zinc-300 truncate block max-w-xs font-mono">http://localhost:11434</span></div>
+                            <div>Bridge Connection: <span className={isMcpConnected ? 'text-emerald-400 font-bold' : 'text-orange-400'}>{isMcpConnected ? 'CONNECTED' : 'STANDBY'}</span></div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Diagnostic Status Box */}
+                      <div className="border border-zinc-900 bg-zinc-900/30 p-4 rounded-2xl select-text">
+                        <h4 className="text-xs font-bold text-zinc-200 mb-3 uppercase tracking-wider">Diagnostic Connections Logs</h4>
+                        <div className="space-y-1 text-[10px] text-zinc-500 font-mono">
+                          <div>[03:21:15] Checking Port 3000 ingress server... <span className="text-emerald-400">OK</span></div>
+                          <div>[03:21:16] Scanning active workspace files... found {workspaceRefreshKey > 0 ? 'modified files cache' : 'fresh directories'}</div>
+                          <div>[03:21:17] Loading available theme configurations ... standard Dark/White contrast active.</div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* TAB 2: DIAGNOSTIC TERMINAL / CONSOLE */}
+                  {activeDevTab === 'console' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col h-full space-y-4">
+                      <div className="flex items-center justify-between text-[11px] text-zinc-400 pb-1.5 border-b border-zinc-905 select-none">
+                        <span>Lumina Debug Logger Console stdout Logs</span>
+                        <button 
+                          onClick={() => setDevLogs([{ timestamp: new Date().toLocaleTimeString(), level: 'system', text: 'Logs cleared.' }])}
+                          className="px-2 py-1 text-[10px] bg-zinc-900 border border-zinc-800 rounded hover:bg-zinc-800 text-zinc-300 cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      
+                      {/* Virtual terminal screen */}
+                      <div className="bg-black/80 border border-zinc-900 rounded-xl p-4 h-60 overflow-y-auto custom-scrollbar font-mono text-xs text-zinc-300 space-y-2 select-text">
+                        {devLogs.map((log, index) => (
+                          <div key={index} className="flex gap-2 items-start leading-relaxed">
+                            <span className="text-zinc-650 shrink-0 select-none">[{log.timestamp}]</span>
+                            <span className={`shrink-0 select-none font-bold uppercase text-[9px] px-1.5 py-0.5 rounded ${
+                              log.level === 'system' ? 'bg-purple-900/35 text-purple-400' :
+                              log.level === 'success' ? 'bg-emerald-900/35 text-emerald-400' :
+                              log.level === 'warn' ? 'bg-orange-900/35 text-orange-400' : 'bg-blue-900/35 text-blue-400'
+                            }`}>
+                              {log.level}
+                            </span>
+                            <span className="break-all font-mono select-text">{log.text}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Terminal prompt input for executing mock command line! */}
+                      <div className="border border-zinc-900 bg-zinc-900/25 p-3 rounded-2xl">
+                        <p className="text-[10px] text-zinc-400 mb-2 font-mono">Execute diagnostic actions in workspace container:</p>
+                        <div className="flex gap-2">
+                          <input 
+                            type="text"
+                            placeholder="Type a debugging instruction (e.g. 'help', 'ping', 'stats', 'trigger-scans', 'logs-test')..."
+                            className="flex-1 h-10 px-3 bg-black text-xs border border-zinc-900 rounded-xl text-blue-400 font-mono outline-none focus:border-blue-500"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const input = (e.target as HTMLInputElement).value.trim();
+                                if (!input) return;
+                                (e.target as HTMLInputElement).value = '';
+                                handleExecMockCommand(input);
+                              }
+                            }}
+                          />
+                          <button 
+                            onClick={() => {
+                              const inputEl = document.querySelector('input[placeholder*="Type a debugging instruction"]') as HTMLInputElement;
+                              if (inputEl && inputEl.value.trim()) {
+                                handleExecMockCommand(inputEl.value.trim());
+                                inputEl.value = '';
+                              }
+                            }}
+                            className="px-4.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold cursor-pointer font-sans"
+                          >
+                            RUN
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* TAB 3: TELEMETRY & PERF GRAPH */}
+                  {activeDevTab === 'perf' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <div className="flex items-center justify-between select-none">
+                        <p className="text-xs text-zinc-400 font-sans">
+                          Real-time canvas-based performance monitor drawing core metrics, render delay, and thread frames.
+                        </p>
+                        <div className="flex gap-3 text-[10px] bg-zinc-900 border border-zinc-800 rounded-full px-3 py-1 font-semibold text-zinc-400 font-mono">
+                          <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>FPS: {simLatency ? '58 stable' : '60 constant'}</span>
+                          <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>CPU: ~1.2%</span>
+                        </div>
+                      </div>
+
+                      {/* Performance Visualizer (Canvas Canvas) */}
+                      <div className="border border-zinc-900 bg-zinc-900/25 p-4.5 rounded-2xl relative select-none">
+                        <h4 className="text-xs font-bold text-zinc-200 mb-3 flex items-center gap-1.5 font-mono">
+                          <Activity size={12} className="text-emerald-500 animate-pulse" />
+                          <span>Interactive Telemetry Waveform</span>
+                        </h4>
+                        
+                        <div className="h-44 bg-black/60 border border-zinc-900 rounded-xl overflow-hidden flex items-end p-1 relative">
+                          <DevPerfCanvas />
+                          <div className="absolute top-3 left-3 flex flex-col gap-1 text-[9px] font-mono text-zinc-500">
+                            <div>Memory Limit: 512.0 MB</div>
+                            <div>Active Usage: ~41.6 MB (Stable Peak)</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Resource Heap Info boxes */}
+                      <div className="grid grid-cols-2 gap-4 select-none">
+                        <div className="border border-zinc-900 bg-zinc-950 p-4 rounded-xl">
+                          <span className="text-[10px] text-zinc-500 uppercase block mb-1">Heap Details</span>
+                          <span className="text-sm font-bold text-zinc-200">41,617 KB / 524,288 KB</span>
+                          <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden mt-3">
+                            <div className="bg-emerald-500 h-full rounded-full" style={{ width: '8%' }}></div>
+                          </div>
+                        </div>
+
+                        <div className="border border-zinc-900 bg-zinc-950 p-4 rounded-xl">
+                          <span className="text-[10px] text-zinc-500 uppercase block mb-1">Render Latency delay</span>
+                          <span className="text-sm font-bold text-zinc-200">~1.42 ms <span className="text-zinc-500 text-xs font-normal font-sans">avg</span></span>
+                          <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden mt-3">
+                            <div className="bg-blue-500 h-full rounded-full" style={{ width: '4%' }}></div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* TAB 4: STORAGE / KEY-VALUE INSPECTOR */}
+                  {activeDevTab === 'storage' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+                        Read, edit, delete, or inject debugging parameters directly into your sandbox's standard `localStorage` cache storage.
+                      </p>
+
+                      <div className="border border-zinc-900 bg-zinc-900/25 rounded-2xl overflow-hidden">
+                        <div className="bg-zinc-900/40 px-4.5 py-2.5 border-b border-zinc-900 flex items-center justify-between text-xs text-zinc-300 select-none">
+                          <span className="font-bold">LocalStorage Workspace Tree</span>
+                          <button 
+                            onClick={() => {
+                              localStorage.clear();
+                              addDevLog('localStorage wiped by developer', 'warn');
+                              showToast('System LocalStorage key-value storage wiped completely.');
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 text-[10px] border border-red-500/20 text-red-400 hover:bg-red-500/10 rounded transition-all cursor-pointer font-bold uppercase font-sans"
+                          >
+                            <Trash2 size={11} />
+                            <span>Wipe Storage</span>
+                          </button>
+                        </div>
+
+                        {/* actual reading from storage */}
+                        <div className="p-2 divide-y divide-zinc-900 text-xs">
+                          {(() => {
+                            const keys = Object.keys(localStorage).filter(k => k.startsWith('lumina_') || k.includes('chat') || k === 'user_profile' || k.includes('settings'));
+                            if (keys.length === 0) {
+                              return (
+                                <p className="text-[11px] text-zinc-500 p-4 italic text-center">
+                                  No active local-storage tracking entries detected. Type values or select tabs to initialize keys.
+                                </p>
+                              );
+                            }
+                            return keys.map(k => {
+                              const val = localStorage.getItem(k) || '';
+                              return (
+                                <div key={k} className="p-3 select-text flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between group">
+                                  <div className="min-w-0 flex-1">
+                                    <span className="block font-bold text-blue-400 truncate text-[11px] mb-0.5">{k}</span>
+                                    <span className="block font-mono text-zinc-400 text-[10px] break-all max-h-12 overflow-y-auto select-text bg-[#0A0908] px-2 py-1 rounded border border-zinc-900">
+                                      {val}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center opacity-80 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                      onClick={() => {
+                                        const newVal = prompt(`Value for ${k}:`, val);
+                                        if (newVal !== null) {
+                                          localStorage.setItem(k, newVal);
+                                          addDevLog(`Storage updated: ${k}`, 'success');
+                                          showToast(`Storage updated: ${k}`);
+                                          if (k === 'lumina_compact_sidebar') {
+                                            setIsCompactSidebar(newVal === 'true');
+                                          } else if (k === 'lumina_use_bubbles') {
+                                            setUseBubbles(newVal !== 'false');
+                                          } else if (k === 'lumina_auto_hide_top_bar') {
+                                            setAutoHideTopBar(newVal === 'true');
+                                          }
+                                        }
+                                      }}
+                                      className="p-1.5 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded transition-all cursor-pointer border border-zinc-850 bg-zinc-900"
+                                      title="Edit Value"
+                                    >
+                                      <Wrench size={11} />
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if (confirm(`Delete key ${k}?`)) {
+                                          localStorage.removeItem(k);
+                                          addDevLog(`Storage key deleted: ${k}`, 'warn');
+                                          showToast(`Deleted storage key: ${k}`);
+                                        }
+                                      }}
+                                      className="p-1.5 hover:bg-red-950/20 text-red-450 rounded transition-all cursor-pointer border border-zinc-850 bg-zinc-900"
+                                      title="Delete Key"
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Custom Storage Injector */}
+                      <div className="border border-zinc-900 bg-zinc-900/25 p-4 rounded-2xl space-y-3">
+                        <h4 className="text-xs font-bold text-zinc-200 uppercase tracking-wide">Inject Custom Key-Value</h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <input 
+                            id="storage-key-input"
+                            type="text"
+                            placeholder="Key (e.g., lumina_custom_debug)"
+                            className="bg-black text-xs border border-zinc-900 rounded-xl h-9.5 px-3 font-mono text-zinc-300 outline-none"
+                          />
+                          <input 
+                            id="storage-val-input"
+                            type="text"
+                            placeholder="Value (e.g., true)"
+                            className="bg-black text-xs border border-zinc-900 rounded-xl h-9.5 px-3 font-mono text-zinc-300 outline-none"
+                          />
+                        </div>
+                        <button 
+                          onClick={() => {
+                            const keyEl = document.getElementById('storage-key-input') as HTMLInputElement;
+                            const valEl = document.getElementById('storage-val-input') as HTMLInputElement;
+                            if (keyEl && valEl && keyEl.value.trim() && valEl.value.trim()) {
+                              localStorage.setItem(keyEl.value.trim(), valEl.value.trim());
+                              addDevLog(`Injected storage key: ${keyEl.value}`, 'success');
+                              showToast(`Injected key: ${keyEl.value}`);
+                              keyEl.value = '';
+                              valEl.value = '';
+                            } else {
+                              showToast('Please provide both unique key and value.');
+                            }
+                          }}
+                          className="w-full h-9.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-bold text-white transition-all cursor-pointer font-sans"
+                        >
+                          INJECT INTO STORAGE DB
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* TAB 5: EXPERIMENTAL FLAGS */}
+                  {activeDevTab === 'flags' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+                      <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+                        Control micro-interactions, simulate slow sandbox models, and experiment with styling overlays in real-time.
+                      </p>
+
+                      <div className="space-y-4 select-none">
+                        {/* Simulation Latency Toggle */}
+                        <div className="flex items-center justify-between p-4 bg-zinc-900/30 border border-zinc-900 rounded-2xl">
+                          <div>
+                            <div className="font-bold text-xs text-zinc-250 uppercase tracking-wide mb-1 select-none font-mono">Simulate Endpoint Latency</div>
+                            <div className="text-[10px] text-zinc-400 font-sans leading-relaxed">Apply +500ms delay to mock network API calls</div>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              const next = !simLatency;
+                              setSimLatency(next);
+                              addDevLog(`Latency Simulation changed: ${next ? 'ENABLED' : 'DISABLED'}`, 'warn');
+                              showToast(next ? 'Active simulation latency +500ms enabled.' : 'Simulation latency delay disabled.');
+                            }}
+                            className={`w-11 h-5.5 rounded-full transition-all relative cursor-pointer ${simLatency ? 'bg-blue-600' : 'bg-zinc-805'}`}
+                          >
+                            <motion.div 
+                              animate={{ x: simLatency ? 22 : 2 }}
+                              className="absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow-sm"
+                            />
+                          </button>
+                        </div>
+
+                        {/* Retro Cyberpunk Scanlines */}
+                        <div className="flex items-center justify-between p-4 bg-zinc-900/30 border border-zinc-900 rounded-2xl">
+                          <div>
+                            <div className="font-bold text-xs text-zinc-250 uppercase tracking-wide mb-1 select-none font-mono">Retro Scanlines CRT overlay</div>
+                            <div className="text-[10px] text-zinc-400 font-sans leading-relaxed">Toggle visual phosphor phosphor grid filters</div>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              const next = !retroFilter;
+                              setRetroFilter(next);
+                              addDevLog(`Retro Monitor Overlay switched: ${next ? 'ON' : 'OFF'}`, 'success');
+                              showToast(next ? 'Retro CRT grid styling active.' : 'Retro CRT overlay disabled.');
+                            }}
+                            className={`w-11 h-5.5 rounded-full transition-all relative cursor-pointer ${retroFilter ? 'bg-blue-600' : 'bg-zinc-805'}`}
+                          >
+                            <motion.div 
+                              animate={{ x: retroFilter ? 22 : 2 }}
+                              className="absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow-sm"
+                            />
+                          </button>
+                        </div>
+
+                        {/* Interactive Sparkles Animation Toggle */}
+                        <div className="flex items-center justify-between p-4 bg-zinc-900/30 border border-zinc-900 rounded-2xl">
+                          <div>
+                            <div className="font-bold text-xs text-zinc-250 uppercase tracking-wide mb-1 select-none font-mono">Verbose Debug Log level</div>
+                            <div className="text-[10px] text-zinc-400 font-sans leading-relaxed">Logs more events from header selections, folder trees, and layout clicks</div>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              const next = !verboseDebug;
+                              setVerboseDebug(next);
+                              addDevLog(`Verbose Debug switch: ${next ? 'LOG ALL' : 'STANDARD'}`, 'info');
+                              showToast(next ? 'Verbose session logging active.' : 'Verbose logging level normalized.');
+                            }}
+                            className={`w-11 h-5.5 rounded-full transition-all relative cursor-pointer ${verboseDebug ? 'bg-blue-600' : 'bg-zinc-805'}`}
+                          >
+                            <motion.div 
+                              animate={{ x: verboseDebug ? 22 : 2 }}
+                              className="absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow-sm"
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Scanned Layout Element Report Modal */}
       <AnimatePresence>
@@ -10196,6 +7671,177 @@ When the user asks you to build page(s), applications, interfaces, features, or 
         )}
       </AnimatePresence>
 
+      {/* URL Tool Modal */}
+      <AnimatePresence>
+        {isUrlToolOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4 font-sans"
+            onClick={() => { if (!urlToolLoading) { setIsUrlToolOpen(false); setUrlToolError(null); setUrlToolInput(''); } }}
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', damping: 26, stiffness: 380 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 text-left"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-blue-500/10 rounded-xl">
+                    <LinkIcon size={16} className="text-blue-400 font-sans" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[var(--theme-primary)] font-sans">Attach URL</h3>
+                    <p className="text-[11px] text-[var(--theme-muted)] leading-none mt-1 font-sans">Scrape a web page and attach it as context</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setIsUrlToolOpen(false); setUrlToolError(null); setUrlToolInput(''); }}
+                  disabled={urlToolLoading}
+                  className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all cursor-pointer disabled:opacity-40"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* URL Input */}
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-semibold text-[var(--theme-secondary)] uppercase tracking-widest font-sans">
+                  Page URL
+                </label>
+                <input
+                  type="url"
+                  value={urlToolInput}
+                  onChange={(e) => { setUrlToolInput(e.target.value); setUrlToolError(null); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !urlToolLoading) handleAttachUrl(); }}
+                  placeholder="https://example.com/article"
+                  disabled={urlToolLoading}
+                  autoFocus
+                  className="w-full h-11 px-4 bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] focus:border-blue-500/50 rounded-xl text-sm text-[var(--theme-primary)] placeholder-[var(--theme-muted)] outline-none transition-all disabled:opacity-50 font-sans"
+                />
+                {urlToolError && (
+                  <p className="text-xs text-rose-400 font-medium font-sans">{urlToolError}</p>
+                )}
+              </div>
+
+              {/* Action Button */}
+              <button
+                onClick={handleAttachUrl}
+                disabled={!urlToolInput.trim() || urlToolLoading}
+                className="w-full h-11 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-all shadow-md cursor-pointer font-sans"
+              >
+                {urlToolLoading ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span className="font-sans">Fetching page...</span>
+                  </>
+                ) : (
+                  <>
+                    <LinkIcon size={15} />
+                    <span className="font-sans">Fetch &amp; Attach</span>
+                  </>
+                )}
+              </button>
+
+              <p className="text-[10px] text-center text-[var(--theme-muted)] font-sans">
+                The page content will be compressed and attached as a document for the AI to read.
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Transcript Tool Modal */}
+      <AnimatePresence>
+        {isTranscriptToolOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4 font-sans"
+            onClick={() => { if (!transcriptToolLoading) { setIsTranscriptToolOpen(false); setTranscriptToolError(null); setTranscriptToolInput(''); } }}
+          >
+            <motion.div
+              initial={{ scale: 0.96, y: 12 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', damping: 26, stiffness: 380 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 text-left"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-rose-500/10 rounded-xl">
+                    <Video size={16} className="text-rose-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[var(--theme-primary)] font-sans">Video Transcript</h3>
+                    <p className="text-[11px] text-[var(--theme-muted)] leading-none mt-1 font-sans">Fetch captions from YouTube &amp; attach as context</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setIsTranscriptToolOpen(false); setTranscriptToolError(null); setTranscriptToolInput(''); }}
+                  disabled={transcriptToolLoading}
+                  className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all cursor-pointer disabled:opacity-40"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Input */}
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-semibold text-[var(--theme-secondary)] uppercase tracking-widest font-sans">
+                  YouTube URL
+                </label>
+                <input
+                  type="url"
+                  value={transcriptToolInput}
+                  onChange={(e) => { setTranscriptToolInput(e.target.value); setTranscriptToolError(null); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !transcriptToolLoading) handleFetchTranscript(); }}
+                  placeholder="https://youtube.com/watch?v=..."
+                  disabled={transcriptToolLoading}
+                  autoFocus
+                  className="w-full h-11 px-4 bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] focus:border-rose-500/50 rounded-xl text-sm text-[var(--theme-primary)] placeholder-[var(--theme-muted)] outline-none transition-all disabled:opacity-50 font-sans"
+                />
+                {transcriptToolError && (
+                  <p className="text-xs text-rose-400 font-medium font-sans">{transcriptToolError}</p>
+                )}
+              </div>
+
+              {/* Action Button */}
+              <button
+                onClick={handleFetchTranscript}
+                disabled={!transcriptToolInput.trim() || transcriptToolLoading}
+                className="w-full h-11 flex items-center justify-center gap-2 bg-rose-500 hover:bg-rose-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-all shadow-md cursor-pointer font-sans"
+              >
+                {transcriptToolLoading ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span className="font-sans">Fetching transcript...</span>
+                  </>
+                ) : (
+                  <>
+                    <Video size={15} />
+                    <span className="font-sans">Get Transcript</span>
+                  </>
+                )}
+              </button>
+
+              <div className="text-[10px] text-center text-[var(--theme-muted)] space-y-0.5 font-sans">
+                <p>Works with YouTube videos that have captions enabled.</p>
+                <p className="text-[var(--theme-muted)]/60">Supports <code className="font-mono">youtube.com/watch</code> and <code className="font-mono">youtu.be</code> links.</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Floating Action Context Menu */}
       {attachmentContextMenu.visible && (
         <div 
@@ -10231,12 +7877,183 @@ When the user asks you to build page(s), applications, interfaces, features, or 
               }
               setAttachmentContextMenu({ visible: false, x: 0, y: 0, attachment: null, index: -1 });
             }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-xs text-rose-455 hover:bg-rose-500/10 rounded-lg transition-all text-left cursor-pointer font-medium"
+            className="flex items-center gap-2 w-full px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all text-left cursor-pointer font-medium"
           >
             <X size={13} />
             <span>Remove Attachment</span>
           </button>
         </div>
+      )}
+
+      {/* Transcription Option selector Popup Modal */}
+      {transcriptionOptionsDoc && (() => {
+        const isVideo = !!transcriptionOptionsDoc.videoId && !!transcriptionOptionsDoc.segments;
+        const isOcr = !!transcriptionOptionsDoc.isOcr;
+        const rawTitle = isOcr ? transcriptionOptionsDoc.url.replace(/^\[OCR Image Attachment\]:\s*/, '') : transcriptionOptionsDoc.title;
+        const safeTitle = rawTitle.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
+        const docId = transcriptionOptionsDoc.id;
+        
+        const markdownPath = isOcr 
+          ? `ocr_transcripts/ocr_${safeTitle}_${docId}.md`
+          : `scraped_pages/${safeTitle || 'page'}_${docId}.md`;
+          
+        const jsonPath = isOcr
+          ? `ocr_transcripts/ocr_${safeTitle}_${docId}.json`
+          : `scraped_pages/${safeTitle || 'page'}_${docId}.json`;
+
+        return (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[600] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 15 }}
+              className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl relative select-none"
+            >
+              {/* Header info */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl border shrink-0 ${
+                    isVideo ? 'bg-rose-500/10 text-rose-500 border-rose-500/10' :
+                    isOcr ? 'bg-amber-500/10 text-amber-500 border-amber-500/10' :
+                    'bg-blue-500/10 text-blue-400 border-blue-500/10'
+                  }`}>
+                    {isVideo ? <Video className="w-5 h-5" /> : 
+                     isOcr ? <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" /> : 
+                     <LinkIcon className="w-5 h-5" />}
+                  </div>
+                  <div className="text-left min-w-0">
+                    <h3 className="text-sm font-bold text-zinc-100 font-sans truncate max-w-[220px]">
+                      {isOcr ? `OCR Data: ${rawTitle}` : transcriptionOptionsDoc.title}
+                    </h3>
+                    <p className="text-[10px] text-zinc-500 font-mono tracking-wider mt-0.5">
+                      {isVideo ? `VIDEO ID: ${transcriptionOptionsDoc.videoId}` : 
+                       isOcr ? `OCR IMAGE SCAN` : 
+                       `SOURCE URL: ${transcriptionOptionsDoc.url.replace(/https?:\/\/(www\.)?/, '').slice(0, 30)}...`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setTranscriptionOptionsDoc(null)}
+                  className="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              <p className="text-xs text-zinc-400 font-sans text-left mb-6 leading-relaxed">
+                {isVideo 
+                  ? "This YouTube video transcript and playhead metrics have been processed & written to disk. How would you like to explore this collected data?"
+                  : isOcr
+                    ? "This image attachment has been fully transcribed using our background OCR engine. Extracted text and layout bounding matrices are saved to disk. How would you like to open it?"
+                    : "This webpage has been scraped, compressed, and written to disk as custom markdown/json formats. How would you like to open it in your workspace code editor?"
+                }
+              </p>
+
+              {/* Selection choices */}
+              <div className="space-y-3 select-none">
+                {isVideo && (
+                  <button
+                    onClick={() => {
+                      setSelectedTranscriptDoc(transcriptionOptionsDoc);
+                      setTranscriptionOptionsDoc(null);
+                    }}
+                    className="w-full group text-left p-4 bg-zinc-850 hover:bg-rose-500/10 border border-zinc-800 hover:border-rose-500/30 rounded-xl transition-all cursor-pointer flex items-start gap-3.5"
+                  >
+                    <div className="p-2.5 bg-zinc-90 w-10 h-10 rounded-lg flex items-center justify-center text-zinc-400 group-hover:bg-rose-500/20 group-hover:text-rose-400 shrink-0">
+                      <Play size={18} className="fill-current" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-zinc-200 group-hover:text-rose-450 font-sans transition-colors">
+                        🎬 Interactive Studio Player
+                      </h4>
+                      <p className="text-[11px] text-zinc-400 mt-1 font-sans leading-normal">
+                        Sync captions with live YouTube, speed-navigate chapters, and consult the AI Q&A Chatbot with integrated playhead pointers.
+                      </p>
+                    </div>
+                  </button>
+                )}
+
+                <button
+                  onClick={async () => {
+                    if (isVideo) {
+                      await ensureTranscriptFilesOnDisk(transcriptionOptionsDoc);
+                      setFloatingEditFile(`transcripts/transcript_${transcriptionOptionsDoc.videoId}.md`);
+                    } else if (isOcr) {
+                      setFloatingEditFile(markdownPath);
+                    } else {
+                      await ensureScrapedFilesOnDisk(transcriptionOptionsDoc);
+                      setFloatingEditFile(markdownPath);
+                    }
+                    setTranscriptionOptionsDoc(null);
+                  }}
+                  className="w-full group text-left p-4 bg-zinc-850 hover:bg-blue-500/10 border border-zinc-800 hover:border-blue-500/30 rounded-xl transition-all cursor-pointer flex items-start gap-3.5"
+                >
+                  <div className="p-2.5 bg-zinc-90 w-10 h-10 rounded-lg flex items-center justify-center text-zinc-300 group-hover:bg-blue-500/20 group-hover:text-blue-400 shrink-0">
+                    <FileText size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-200 group-hover:text-blue-400 font-sans transition-colors">
+                      📝 Open Markdown in Code Editor
+                    </h4>
+                    <p className="text-[11px] text-zinc-400 mt-1 font-sans leading-normal">
+                      Inspect fully-formatted notes, section blocks, and clean layouts within the premium virtual workbench.
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={async () => {
+                    if (isVideo) {
+                      await ensureTranscriptFilesOnDisk(transcriptionOptionsDoc);
+                      setFloatingEditFile(`transcripts/transcript_${transcriptionOptionsDoc.videoId}.json`);
+                    } else if (isOcr) {
+                      setFloatingEditFile(jsonPath);
+                    } else {
+                      await ensureScrapedFilesOnDisk(transcriptionOptionsDoc);
+                      setFloatingEditFile(jsonPath);
+                    }
+                    setTranscriptionOptionsDoc(null);
+                  }}
+                  className="w-full group text-left p-4 bg-zinc-850 hover:bg-[#D97756]/10 border border-zinc-800 hover:border-[#D97756]/30 rounded-xl transition-all cursor-pointer flex items-start gap-3.5"
+                >
+                  <div className="p-2.5 bg-zinc-90 w-10 h-10 rounded-lg flex items-center justify-center text-zinc-305 group-hover:bg-[#D97756]/20 group-hover:text-[#D97756] shrink-0">
+                    <FileJson size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-200 group-hover:text-[#D97756] font-sans transition-colors">
+                      📊 Open Captured JSON in Code Editor
+                    </h4>
+                    <p className="text-[11px] text-zinc-400 mt-1 font-sans leading-normal">
+                      {isOcr 
+                        ? "Analyze OCR character confidence, pixel dimensions, word layouts, and bounding coordinates."
+                        : "Analyze, map, or modify playhead metrics and parsed dialogue segments under standard JSON formatting."}
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        );
+      })()}
+
+      {/* Synchronized Video Transcription Immersive Board Overlay */}
+      {selectedTranscriptDoc && (
+        <VideoTranscriptStudio
+          isOpen={!!selectedTranscriptDoc}
+          onClose={() => setSelectedTranscriptDoc(null)}
+          videoUrl={selectedTranscriptDoc.url}
+          videoId={selectedTranscriptDoc.videoId || ''}
+          videoTitle={selectedTranscriptDoc.title}
+          segments={selectedTranscriptDoc.segments || []}
+          fullText={selectedTranscriptDoc.content}
+          onPasteTextToInput={(pasted) => {
+            setInput(pasted);
+            showToast('Ref text pasted into your workspace input!');
+          }}
+          callLlamaBridge={async (messagesPrompt, toolsList) => {
+            return await callLlamaBridge(messagesPrompt, toolsList);
+          }}
+        />
       )}
     </div>
   );

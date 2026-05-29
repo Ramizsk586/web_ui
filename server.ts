@@ -9,6 +9,7 @@ import { search } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
 import { exec } from "child_process";
+import Tesseract from 'tesseract.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,8 +19,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Handle JSON and CORS
-  app.use(express.json());
+  // Handle JSON and CORS with increased body limits for OCR image payloads
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -520,6 +522,70 @@ async function startServer() {
     }
     return { allowed: true };
   };
+
+  // Node.js based OCR system utilizing Tesseract
+  app.post("/api/ocr", async (req, res) => {
+    const { image } = req.body; // base64 formatted data string or image URL
+    if (!image) {
+      return res.status(400).json({ error: "Image data (base64 or URL) is required" });
+    }
+
+    try {
+      let imageInput: Buffer | string = image;
+      
+      // If base64 data URL, extract the raw base64 and create a buffer
+      if (typeof image === 'string' && image.startsWith('data:image')) {
+        const matches = image.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const base64Data = matches[2];
+          imageInput = Buffer.from(base64Data, 'base64');
+        } else {
+          const base64Data = image.split(',')[1];
+          if (base64Data) {
+            imageInput = Buffer.from(base64Data, 'base64');
+          }
+        }
+      } else if (typeof image === 'string' && image.startsWith('data:')) {
+        const base64Data = image.split(',')[1];
+        if (base64Data) {
+          imageInput = Buffer.from(base64Data, 'base64');
+        }
+      }
+
+      console.log(`[OCR SERVER] Running Tesseract character recognition...`);
+      const result = (await Tesseract.recognize(
+        imageInput,
+        'eng',
+        {
+          logger: m => {
+            // progress tracking logs if necessary in development
+          }
+        }
+      ) as any);
+
+      const text = result?.data?.text || '';
+      const confidence = result?.data?.confidence || 0;
+      
+      console.log(`[OCR SERVER] Processed successfully. Confidence: ${confidence}%. Text length: ${text.length}`);
+
+      res.json({
+        success: true,
+        text,
+        confidence,
+        words: result?.data?.words?.map(w => ({
+          text: w.text,
+          confidence: w.confidence,
+          bbox: w.bbox
+        })) || []
+      });
+    } catch (error: any) {
+      console.error("[OCR SERVER] Error during OCR parsing:", error);
+      res.status(500).json({
+        error: "Failed to perform OCR on the provided image.",
+        details: error?.message || String(error)
+      });
+    }
+  });
 
   // Web Scraping API proxy endpoint
   app.post("/api/scrape", async (req, res) => {
