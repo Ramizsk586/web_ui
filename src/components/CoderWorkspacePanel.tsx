@@ -28,8 +28,17 @@ import {
   Hash,
   FolderPlus,
   FilePlus,
-  MousePointerClick
+  MousePointerClick,
+  Bot,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Play,
+  XCircle,
+  Users
 } from 'lucide-react';
+
+import type { SubAgent, OrchestrationConflict, AgentOrchestrationState } from '../hooks/useCoderMode';
 
 interface FileNode {
   name: string;
@@ -45,6 +54,9 @@ interface CoderWorkspacePanelProps {
   showToast: (msg: string) => void;
   workspaceRootPath: string;
   onInsertAttachedText?: (text: string) => void;
+  orchestrationState?: AgentOrchestrationState;
+  orchestrationCollapsed?: boolean;
+  setOrchestrationCollapsed?: (collapsed: boolean) => void;
 }
 
 export const CoderWorkspacePanel: React.FC<CoderWorkspacePanelProps> = ({
@@ -52,7 +64,10 @@ export const CoderWorkspacePanel: React.FC<CoderWorkspacePanelProps> = ({
   triggerWorkspaceRefresh,
   showToast,
   workspaceRootPath,
-  onInsertAttachedText
+  onInsertAttachedText,
+  orchestrationState,
+  orchestrationCollapsed,
+  setOrchestrationCollapsed
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'preview'>('preview');
   const [files, setFiles] = useState<FileNode[]>([]);
@@ -560,6 +575,98 @@ I would like to change this element to:
           Files & Manual Code
         </button>
       </div>
+
+      {/* Agent Orchestration Status Board */}
+      {orchestrationState?.isActive && (
+        <div className="shrink-0 border-b border-[#241C18] bg-[#181412]">
+          <button
+            onClick={() => setOrchestrationCollapsed?.(!orchestrationCollapsed)}
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-[#D97756] hover:bg-[#1D1917] transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <Bot size={14} />
+              <span>Agent Orchestration</span>
+              {orchestrationState && (
+                <span className="text-[10px] font-mono text-[#AD9F91]">
+                  Phase {orchestrationState.currentPhase}/{orchestrationState.totalPhases}
+                </span>
+              )}
+            </div>
+            <ChevronDown size={12} className={`transition-transform ${orchestrationCollapsed ? '-rotate-90' : ''}`} />
+          </button>
+
+          {!orchestrationCollapsed && (
+            <div className="px-3 pb-3 space-y-2">
+              {/* Progress bar */}
+              {orchestrationState && (
+                <div className="w-full h-1 bg-[#0E0B0A] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#D97756] transition-all duration-500"
+                    style={{
+                      width: `${orchestrationState.totalPhases > 0
+                        ? ((orchestrationState.currentPhase - 1) / orchestrationState.totalPhases) * 100
+                        : 0}%`
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Agent list */}
+              <div className="space-y-1 max-h-[160px] overflow-y-auto custom-scrollbar">
+                {orchestrationState?.agents.map(agent => {
+                  const statusIcon = () => {
+                    switch (agent.status) {
+                      case 'done': return <CheckCircle2 size={12} className="text-green-400 shrink-0" />;
+                      case 'running': return <Play size={12} className="text-[#D97756] animate-pulse shrink-0" />;
+                      case 'failed': return <XCircle size={12} className="text-red-400 shrink-0" />;
+                      case 'needs_review': return <AlertTriangle size={12} className="text-yellow-400 shrink-0" />;
+                      default: return <Clock size={12} className="text-[#635F59] shrink-0" />;
+                    }
+                  };
+                  const statusBg = () => {
+                    switch (agent.status) {
+                      case 'done': return 'bg-green-500/10 border-green-500/20';
+                      case 'running': return 'bg-[#D97756]/10 border-[#D97756]/20';
+                      case 'failed': return 'bg-red-500/10 border-red-500/20';
+                      case 'needs_review': return 'bg-yellow-500/10 border-yellow-500/20';
+                      default: return 'bg-[#0E0B0A] border-[#1D1917]';
+                    }
+                  };
+                  return (
+                    <div key={agent.id} className={`flex items-center gap-2 px-2 py-1.5 rounded border text-[11px] ${statusBg()}`}>
+                      {statusIcon()}
+                      <span className="font-mono text-[10px] text-[#AD9F91] shrink-0">{agent.id}</span>
+                      <span className="text-[#EDE6DD] truncate">{agent.name}</span>
+                      <span className="ml-auto text-[9px] uppercase font-bold tracking-wider"
+                        style={{
+                          color: agent.status === 'done' ? '#4ade80' :
+                                 agent.status === 'running' ? '#D97756' :
+                                 agent.status === 'failed' ? '#f87171' :
+                                 agent.status === 'needs_review' ? '#fbbf24' : '#635F59'
+                        }}
+                      >
+                        {agent.status === 'needs_review' ? 'REVIEW' : agent.status}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Conflicts */}
+              {orchestrationState && orchestrationState.conflicts.length > 0 && (
+                <div className="space-y-1">
+                  {orchestrationState.conflicts.filter(c => !c.resolved).map(conflict => (
+                    <div key={conflict.id} className="flex items-start gap-2 px-2 py-1.5 rounded border bg-yellow-500/5 border-yellow-500/20 text-[11px]">
+                      <AlertTriangle size={12} className="text-yellow-400 shrink-0 mt-0.5" />
+                      <span className="text-[#EDE6DD]">{conflict.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden flex flex-col relative bg-[#110E0D]">
         {/* TAB 1: Live Web Frame Viewer */}

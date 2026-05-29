@@ -1670,7 +1670,11 @@ export default function App() {
     showTodoPanel,
     setShowTodoPanel,
     todoCollapsed,
-    setTodoCollapsed
+    setTodoCollapsed,
+    orchestrationState,
+    setOrchestrationState,
+    orchestrationCollapsed,
+    setOrchestrationCollapsed
   } = useCoderMode({
     currentChatId,
     chats,
@@ -2474,8 +2478,62 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 12. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
       }
 
-      // FIX: Inject search context into systemPrompt BEFORE building apiMessages,
-      // so the AI actually receives the web search results.
+      // Orchestration Trigger Detection
+      const ORCHESTRATION_TRIGGERS = [
+        'full app', 'entire', 'complete project', 'everything', 'end-to-end',
+        'full stack', 'whole thing', 'the whole', 'from scratch', 'build me a',
+        'create a complete', 'scaffold', 'production ready', 'deploy'
+      ];
+      const shouldActivateOrchestration = (msg: string): boolean => {
+        const lower = msg.toLowerCase();
+        return ORCHESTRATION_TRIGGERS.some(trigger => lower.includes(trigger));
+      };
+
+      if (isCoderMode && shouldActivateOrchestration(content) && !orchestrationState.isActive) {
+        setOrchestrationState({
+          isActive: true,
+          projectAnalysis: {
+            complexityScore: 'HIGH',
+            estimatedFiles: 20,
+            domainsDetected: ['frontend', 'backend', 'database', 'auth', 'devops'],
+            recommendedStrategy: 'SUBAGENT_TEAM',
+          },
+          agents: [],
+          currentPhase: 1,
+          totalPhases: 5,
+          awaitingUserConfirmation: false,
+          conflicts: [],
+        });
+
+        systemPrompt += `\n\n[SUBAGENT ORCHESTRATION MODE]
+You are the Lumina AI Master Orchestrator operating in Coder Mode.
+Your primary role is to analyze incoming software projects and INTELLIGENTLY DECOMPOSE
+large, complex work into coordinated subagent tasks that run with maximum parallelism
+and minimum inter-dependency conflicts.
+
+When the user asks to build a full project, FIRST output a PROJECT ANALYSIS BLOCK:
+┌─────────────────────────────────────────────────────┐
+│ 🔍 PROJECT ANALYSIS                                 │
+├─────────────────────────────────────────────────────┤
+│ Project Name: <name or "Unnamed Project">           │
+│ Complexity Score: <LOW | MEDIUM | HIGH | CRITICAL>  │
+│ Estimated Files: <number>                           │
+│ Domains Detected: <comma-separated list>            │
+│ Parallelizable: <YES | NO>                          │
+│ Recommended Strategy: <SOLO | SUBAGENT_TEAM>        │
+└─────────────────────────────────────────────────────┘
+
+Then output a SUBAGENT TASK DECOMPOSITION PLAN with phases.
+Then ask the user for confirmation before beginning.
+
+Available subagents: scaffold-agent, config-agent, backend-agent, frontend-agent,
+database-agent, auth-agent, integration-agent, test-agent, docs-agent, deploy-agent.
+
+Store subagent .prompt files at .lumina/subagents/ in the workspace.
+Store contract files at .lumina/contracts/ in the workspace.`;
+      }
+
+      // Inject search context into systemPrompt BEFORE building apiMessages,
       if (searchResults.length > 0) {
         const rawContextString = searchResults.slice(0, 8)
           .map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`)
@@ -5829,6 +5887,13 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                         setRightPreviewSubpath(rel);
                       }
                     }}
+                    fileAttributions={orchestrationState.isActive ? orchestrationState.agents.flatMap(a =>
+                      a.filesCreated.map(fp => ({
+                        relativePath: fp.replace(/\\/g, '/'),
+                        agentId: a.id,
+                        status: a.status === 'done' ? 'done' as const : a.status === 'needs_review' ? 'needs_review' as const : 'pending' as const
+                      }))
+                    ) : undefined}
                   />
                 </motion.div>
               )}
@@ -6533,6 +6598,9 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                     showToast={showToast}
                     workspaceRootPath={coderWorkspacePath}
                     onInsertAttachedText={insertAttachedContent}
+                    orchestrationState={orchestrationState}
+                    orchestrationCollapsed={orchestrationCollapsed}
+                    setOrchestrationCollapsed={setOrchestrationCollapsed}
                   />
                 </div>
               )}

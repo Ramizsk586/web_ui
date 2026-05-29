@@ -1,6 +1,42 @@
 import { useState, useEffect } from 'react';
 import { Chat } from '../types';
 
+export interface SubAgent {
+  id: string;
+  name: string;
+  phase: number;
+  status: 'waiting' | 'running' | 'done' | 'failed' | 'needs_review';
+  filesCreated: string[];
+  startedAt?: number;
+  completedAt?: number;
+  error?: string;
+}
+
+export interface OrchestrationConflict {
+  id: string;
+  description: string;
+  optionA: string;
+  optionB: string;
+  resolved: boolean;
+}
+
+export interface ProjectAnalysis {
+  complexityScore: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  estimatedFiles: number;
+  domainsDetected: string[];
+  recommendedStrategy: 'SOLO' | 'SUBAGENT_TEAM';
+}
+
+export interface AgentOrchestrationState {
+  isActive: boolean;
+  projectAnalysis: ProjectAnalysis | null;
+  agents: SubAgent[];
+  currentPhase: number;
+  totalPhases: number;
+  awaitingUserConfirmation: boolean;
+  conflicts: OrchestrationConflict[];
+}
+
 export interface UseCoderModeProps {
   currentChatId: string | null;
   chats: Chat[];
@@ -10,6 +46,16 @@ export interface UseCoderModeProps {
   handleStartBuilding: (chatId: string, messageId: string, todos: any[]) => void;
   isTyping: boolean;
 }
+
+const INITIAL_ORCHESTRATION: AgentOrchestrationState = {
+  isActive: false,
+  projectAnalysis: null,
+  agents: [],
+  currentPhase: 0,
+  totalPhases: 0,
+  awaitingUserConfirmation: false,
+  conflicts: [],
+};
 
 export function useCoderMode({
   currentChatId,
@@ -28,6 +74,9 @@ export function useCoderMode({
   const [isGeneratingTodos, setIsGeneratingTodos] = useState(false);
   const [showTodoPanel, setShowTodoPanel] = useState(false);
   const [todoCollapsed, setTodoCollapsed] = useState(false);
+
+  const [orchestrationState, setOrchestrationState] = useState<AgentOrchestrationState>(INITIAL_ORCHESTRATION);
+  const [orchestrationCollapsed, setOrchestrationCollapsed] = useState(false);
 
   // Synchronize isCoderMode with currentChat active coder state
   const currentChatActive = chats.find(c => c.id === currentChatId);
@@ -134,6 +183,10 @@ export function useCoderMode({
     showTodoPanel,
     setShowTodoPanel,
     todoCollapsed,
-    setTodoCollapsed
+    setTodoCollapsed,
+    orchestrationState,
+    setOrchestrationState,
+    orchestrationCollapsed,
+    setOrchestrationCollapsed,
   };
 }

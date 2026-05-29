@@ -18,6 +18,8 @@ export interface TreeNode {
   isRenaming?: boolean;
   isCreatingType?: 'file' | 'folder';
   depth: number;
+  agentId?: string;      // subagent that created this file
+  agentStatus?: 'done' | 'pending' | 'needs_review';  // attribution status
 }
 
 interface ContextMenuState {
@@ -32,6 +34,12 @@ interface ExplorerToast {
   type: 'success' | 'error' | 'info';
 }
 
+export interface FileAgentAttribution {
+  relativePath: string;
+  agentId: string;
+  status: 'done' | 'pending' | 'needs_review';
+}
+
 interface CoderLeftExplorerProps {
   workspaceRefreshKey: number;
   triggerWorkspaceRefresh: () => void;
@@ -39,6 +47,7 @@ interface CoderLeftExplorerProps {
   workspaceRootPath: string;
   onWorkspaceRootPathChange: (path: string) => void;
   onSelectFile: (filePath: string) => void;
+  fileAttributions?: FileAgentAttribution[];
 }
 
 // Lightweight random UUID generator
@@ -213,6 +222,18 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
             <div className="w-[17px] h-[17px]" />
           )}
 
+          {/* Agent attribution dot */}
+          {node.agentId && (
+            <span
+              className="w-1.5 h-1.5 rounded-full shrink-0"
+              style={{
+                backgroundColor: node.agentStatus === 'done' ? '#4ade80' :
+                                 node.agentStatus === 'needs_review' ? '#f87171' : '#eab308'
+              }}
+              title={`Created by ${node.agentId}${node.agentStatus === 'pending' ? ' (pending integration)' : node.agentStatus === 'needs_review' ? ' (needs review)' : ' (verified)'}`}
+            />
+          )}
+
           {/* Icon */}
           {getFileIcon(node.name, node.type, node.isOpen)}
 
@@ -325,7 +346,8 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
   showToast: parentShowToast,
   workspaceRootPath,
   onWorkspaceRootPathChange,
-  onSelectFile
+  onSelectFile,
+  fileAttributions
 }) => {
   const [flatFiles, setFlatFiles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -400,9 +422,18 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
   const treeStructure = useMemo(() => {
     const nodeMap: Record<string, TreeNode> = {};
     
+    // Build attribution lookup
+    const attributionMap = new Map<string, FileAgentAttribution>();
+    if (fileAttributions) {
+      fileAttributions.forEach(a => {
+        attributionMap.set(a.relativePath, a);
+      });
+    }
+
     // 1. Build dictionary mapping keys to items
     flatFiles.forEach(f => {
       const parentId = getParentPath(f.relativePath);
+      const attr = attributionMap.get(f.relativePath);
       nodeMap[f.relativePath] = {
         id: f.relativePath,
         name: f.name,
@@ -412,7 +443,8 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
         isOpen: expandedPaths.has(f.relativePath),
         isRenaming: renamingId === f.relativePath,
         depth: f.relativePath.split('/').filter(Boolean).length - 1,
-        children: f.isDirectory ? [] : undefined
+        children: f.isDirectory ? [] : undefined,
+        ...(attr ? { agentId: attr.agentId, agentStatus: attr.status } : {})
       };
     });
 
@@ -652,9 +684,10 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       return;
     }
 
-    const oldPath = `${workspaceRootPath}/${node.id}`;
-    const targetRelPath = node.parentId ? `${node.parentId}/${name}` : name;
-    const newPath = `${workspaceRootPath}/${targetRelPath}`;
+    const oldPath = node.path || `${workspaceRootPath}/${node.id}`;
+    const parentDir = node.path ? node.path.substring(0, node.path.lastIndexOf('/')) : (workspaceRootPath ? `${workspaceRootPath}/${node.parentId || ''}` : '');
+    const newPath = `${parentDir}/${name}`;
+    const newRelativePath = node.parentId ? `${node.parentId}/${name}` : name;
 
     try {
       const res = await fetch('/api/fs/move', {
@@ -669,7 +702,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
         setInputValue('');
         setValidationError(null);
         
-        setSelectedId(targetRelPath);
+        setSelectedId(newRelativePath);
         triggerWorkspaceRefresh();
       } else {
         const d = await res.json();
@@ -696,7 +729,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       const res = await fetch('/api/fs/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: `${workspaceRootPath}/${node.id}` })
+        body: JSON.stringify({ filePath: node.path })
       });
 
       if (res.ok) {
@@ -722,7 +755,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       const res = await fetch('/api/fs/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: `${workspaceRootPath}/${node.id}` })
+        body: JSON.stringify({ filePath: node.path })
       });
 
       if (res.ok) {
@@ -907,9 +940,15 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
       return;
     }
 
-    const oldPath = `${workspaceRootPath}/${dragSourceNode.id}`;
-    const newRelative = targetParentId ? `${targetParentId}/${dragSourceNode.name}` : dragSourceNode.name;
-    const newPath = `${workspaceRootPath}/${newRelative}`;
+    const oldPath = dragSourceNode.path || `${workspaceRootPath}/${dragSourceNode.id}`;
+    let newPath: string;
+    if (targetNode !== 'root') {
+      const targetDirPath = targetNode.type === 'folder' ? targetNode.path : (targetNode.path ? targetNode.path.substring(0, targetNode.path.lastIndexOf('/')) : '');
+      newPath = `${targetDirPath}/${dragSourceNode.name}`;
+    } else {
+      const newRelative = dragSourceNode.name;
+      newPath = workspaceRootPath ? `${workspaceRootPath}/${newRelative}` : newRelative;
+    }
 
     try {
       const res = await fetch('/api/fs/move', {
@@ -920,7 +959,8 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
 
       if (res.ok) {
         addToast(`Moved ${dragSourceNode.name} to target location`, "success");
-        setFlashingId(newRelative);
+        const flashRel = targetParentId ? `${targetParentId}/${dragSourceNode.name}` : dragSourceNode.name;
+        setFlashingId(flashRel);
         setTimeout(() => setFlashingId(null), 1500);
 
         // Expand target folder automatically on drop
