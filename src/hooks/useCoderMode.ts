@@ -24,7 +24,7 @@ export function useCoderMode({
   const [isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen] = useState(true);
   const [activeCommandType, setActiveCommandType] = useState<string | null>(null);
   const [activeCommandQuery, setActiveCommandQuery] = useState<string | null>(null);
-  const [coderTodos, setCoderTodos] = useState<{ id: string; text: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[]>([]);
+  const [coderTodos, setCoderTodos] = useState<{ id: string; text?: string; content?: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[]>([]);
   const [isGeneratingTodos, setIsGeneratingTodos] = useState(false);
   const [showTodoPanel, setShowTodoPanel] = useState(false);
   const [todoCollapsed, setTodoCollapsed] = useState(false);

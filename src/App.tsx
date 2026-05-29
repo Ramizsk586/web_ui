@@ -2193,13 +2193,14 @@ export default function App() {
           {
             type: 'function',
             function: {
-              name: 'Bash',
-              description: 'Executes shell commands in the project workspace. Use for running build tools, linters, tests, package managers (npm/pip/cargo), git operations, or any CLI tool.',
+              name: 'Shell_Command',
+              description: 'Executes shell commands in the project workspace. Adapts to the host OS — use PowerShell syntax on Windows, bash on Linux/macOS. Use for running build tools, linters, tests, package managers (npm/pip/cargo), git operations, or any CLI tool.',
               parameters: {
                 type: 'object',
                 properties: {
-                  command: { type: 'string', description: 'Shell command to execute (e.g. "npm run build", "ls -la", "git status", "pip install -r requirements.txt").' },
-                  cwd: { type: 'string', description: 'Optional subdirectory to run the command in, relative to the workspace root.' }
+                  command: { type: 'string', description: 'Shell command to execute. Write Windows/PowerShell syntax when on Windows (e.g. "Get-ChildItem", "npm run build", "dir"). Write bash syntax on Linux/macOS (e.g. "ls -la", "npm run build").' },
+                  cwd: { type: 'string', description: 'Optional subdirectory to run the command in, relative to the workspace root.' },
+                  shell: { type: 'string', enum: ['auto', 'powershell', 'cmd', 'bash'], description: 'Force a specific shell. Auto detects from OS (default).' }
                 },
                 required: ['command']
               }
@@ -2382,6 +2383,51 @@ export default function App() {
                 required: ['questions']
               }
             }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Create',
+              description: 'Creates a new file or directory in the project workspace. Automatically creates parent directories if they do not exist.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path for the new file or directory (e.g. "src/components/Button.tsx", "public/images").' },
+                  content: { type: 'string', description: 'File content (omit to create an empty file or use isDirectory for a folder).' },
+                  isDirectory: { type: 'boolean', description: 'Set to true to create a directory instead of a file.' }
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Delete',
+              description: 'Deletes a file or directory from the project workspace. Use with caution — this permanently removes the target.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path of the file or directory to delete.' }
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'Rename',
+              description: 'Renames or moves a file or directory to a new location within the project workspace.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Current relative path of the file or directory.' },
+                  newPath: { type: 'string', description: 'New relative path to move or rename to.' }
+                },
+                required: ['filePath', 'newPath']
+              }
+            }
           }
         );
       }
@@ -2410,20 +2456,22 @@ Never guess or pretend you do not have functions; execute them immediately and e
       }
 
       if (isCoderMode) {
-        systemPrompt += `\n\n[CODER MODE IS ACTIVE]
-You are a highly capable, autonomous, and professional software engineering agent running inside the root directory of our workspace.
+        const osName = (navigator as any)?.platform || 'unknown';
+        systemPrompt += `\n\n[CODER MODE IS ACTIVE — Host OS: ${osName}]
+You are a highly capable, autonomous, and professional software engineering agent running inside the root directory of our workspace on ${osName}.
 When the user asks you to build page(s), applications, interfaces, features, or modify codes:
-1. You MUST make real modifications in the file system using the tools provided: 'Edit_and_Write', 'Read', 'Grep_and_Glob', 'Bash', 'Apply_patch', and 'Webfetch'. All file paths are relative to the project root directory!
+1. You MUST make real modifications in the file system using the tools provided: 'Edit_and_Write', 'Read', 'Grep_and_Glob', 'Shell_Command', 'Create', 'Delete', 'Rename', 'Apply_patch', and 'Webfetch'. All file paths are relative to the project root directory!
 2. Do NOT just output a text response with code blocks of code changes. You MUST actually execute the tools to create or edit the actual files in real-time.
-3. If a file already exists, always use 'Read' first to understand its current content, then make edits with 'Edit_and_Write'.
-4. Use 'Grep_and_Glob' before editing when you need to find symbols, text, styles, routes, or error sources. Use 'Apply_patch' for precise snippet replacements. Use 'Bash' to run build commands, linters, tests, or git operations.
-5. Use 'Websearch' or 'Webfetch' to look up documentation, find solutions, or fetch reference code from the internet.
-6. Use 'Question' when requirements are ambiguous or you need user input on design decisions.
-7. Use 'Todowrite' to track multi-step progress through complex tasks.
-8. Use 'LSP_Experimental' to analyze file structure, symbols, and imports before making changes.
-9. Work agentically in repeated cycles: briefly reason about what you observed, call one or more tools, inspect the results, then decide the next tool call. Do not stop after a single tool batch if requirements, verification, or preview state remain incomplete.
-10. Do NOT use artifact/canvas output in Coder Mode. The right preview panel is the only app preview surface.
-11. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
+3. If a file already exists, always use 'Read' first to understand its current content, then make edits with 'Edit_and_Write' or 'Apply_patch'.
+4. Use 'Grep_and_Glob' before editing when you need to find symbols, text, styles, routes, or error sources. Use 'Apply_patch' for precise snippet replacements.
+5. Use 'Shell_Command' to run build commands, linters, tests, package managers, git operations, or any CLI tool. Use 'Create' to create new files/directories, 'Delete' to remove, 'Rename' to move or rename.
+6. Use 'Websearch' or 'Webfetch' to look up documentation, find solutions, or fetch reference code from the internet.
+7. Use 'Question' when requirements are ambiguous or you need user input on design decisions.
+8. Use 'Todowrite' to track multi-step progress through complex tasks.
+9. Use 'LSP_Experimental' to analyze file structure, symbols, and imports before making changes.
+10. Work agentically in repeated cycles: briefly reason about what you observed, call one or more tools, inspect the results, then decide the next tool call. Do not stop after a single tool batch if requirements, verification, or preview state remain incomplete.
+11. Do NOT use artifact/canvas output in Coder Mode. The right preview panel is the only app preview surface.
+12. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
       }
 
       // FIX: Inject search context into systemPrompt BEFORE building apiMessages,
@@ -2549,7 +2597,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 toolName: name,
                 argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
                 icon: isScrape ? <Globe size={14} /> :
-                      name === 'Bash' ? <Terminal size={14} /> :
+                      name === 'Shell_Command' ? <Terminal size={14} /> :
                       name === 'Websearch' ? <Search size={14} /> :
                       name === 'Grep_and_Glob' ? <Search size={14} /> :
                       name === 'Read' ? <FileText size={14} /> :
@@ -2559,6 +2607,9 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                       name === 'Skill' ? <Sparkles size={14} /> :
                       name === 'Todowrite' ? <Wrench size={14} /> :
                       name === 'Question' ? <Sparkles size={14} /> :
+                      name === 'Create' ? <Sparkles size={14} /> :
+                      name === 'Delete' ? <Terminal size={14} /> :
+                      name === 'Rename' ? <PenTool size={14} /> :
                       name.includes('grep') || name.includes('search') || name.includes('subtask') ? <Search size={14} /> :
                       name.includes('read') || name.includes('file') ? <FileText size={14} /> :
                       name.includes('edit') || name.includes('create') ? <PenTool size={14} /> :
@@ -2592,19 +2643,58 @@ When the user asks you to build page(s), applications, interfaces, features, or 
             let resultValue: any = null;
 
             try {
-              if (!isCoderMode && ['Bash', 'Edit_and_Write', 'Read', 'Grep_and_Glob', 'LSP_Experimental', 'Apply_patch', 'Skill', 'Todowrite', 'Webfetch', 'Websearch', 'Question'].includes(name)) {
+              if (!isCoderMode && ['Shell_Command', 'Edit_and_Write', 'Read', 'Grep_and_Glob', 'LSP_Experimental', 'Apply_patch', 'Skill', 'Todowrite', 'Webfetch', 'Websearch', 'Question', 'Create', 'Delete', 'Rename'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               }
               const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
-              if (name === 'Bash') {
+              if (name === 'Shell_Command') {
+                const execBody: any = { command: args.command, cwd: args.cwd || '', ...workspaceArg };
+                if (args.shell) execBody.shell = args.shell;
                 const execRes = await fetch('/api/fs/exec', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ command: args.command, cwd: args.cwd || '', ...workspaceArg }),
+                  body: JSON.stringify(execBody),
                   signal
                 });
                 resultValue = await execRes.json();
                 showToast(`Executed: ${args.command?.substring(0, 40)}`);
+              } else if (name === 'Create') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                if (cleanedPath.includes('/') && !args.isDirectory) {
+                  const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
+                  const folderFullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${folderPart}` : `./${folderPart}`;
+                  await fetch('/api/fs/create', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: folderFullPath, isDirectory: true, ...workspaceArg }), signal
+                  });
+                }
+                const createRes = await fetch('/api/fs/create', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, isDirectory: !!args.isDirectory, content: args.content, ...workspaceArg }), signal
+                });
+                resultValue = await createRes.json();
+                showToast(`Created ${cleanedPath}`);
+              } else if (name === 'Delete') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const delRes = await fetch('/api/fs/delete', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, ...workspaceArg }), signal
+                });
+                resultValue = await delRes.json();
+                showToast(`Deleted ${cleanedPath}`);
+              } else if (name === 'Rename') {
+                const oldPath = args.filePath.replace(/^\/+/, '');
+                const newPath = args.newPath.replace(/^\/+/, '');
+                const fullOldPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${oldPath}` : `./${oldPath}`;
+                const fullNewPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${newPath}` : `./${newPath}`;
+                const moveRes = await fetch('/api/fs/move', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ oldPath: fullOldPath, newPath: fullNewPath, ...workspaceArg }), signal
+                });
+                resultValue = await moveRes.json();
+                showToast(`Renamed ${oldPath} → ${newPath}`);
               } else if (name === 'Edit_and_Write') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
@@ -2776,7 +2866,10 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                 showToast(`Applied skill: ${skillId}`);
               } else if (name === 'Todowrite') {
                 const action = String(args.action || '');
-                const items = args.items || [];
+                const items = (args.items || []).map((item: any, i: number) => ({
+                  ...item,
+                  id: item.id || `todo-${Date.now()}-${i}`
+                }));
                 if (action === 'create' || action === 'update') {
                   setCoderTodos(items);
                   resultValue = { success: true, action, count: items.length, items };
@@ -4236,7 +4329,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                             const isActive = todo.status === 'in_progress';
                             return (
                               <motion.div
-                                key={todo.id}
+                                key={todo.id || todo.content || Math.random()}
                                 initial={{ opacity: 0, x: -5 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all ${
@@ -4263,7 +4356,7 @@ When the user asks you to build page(s), applications, interfaces, features, or 
                                       ? 'text-[var(--theme-primary)] font-semibold' 
                                       : 'text-[var(--theme-secondary)]'
                                 }`}>
-                                  {todo.text}
+                                  {todo.content || todo.text || ''}
                                 </span>
 
                                 {isDone && (

@@ -3,12 +3,13 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from 'url';
+import os from 'os';
 import 'dotenv/config';
 import axios from 'axios';
 import { search } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
-import { exec, spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import Tesseract from 'tesseract.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -43,158 +44,185 @@ async function startServer() {
     res.json({ status: 'ok', server: 'Lumina Web UI Server' });
   });
 
-  // Real multi-shell terminal command executor translating macOS/Windows/PowerShell/Linux commands on backend
-  app.post("/api/terminal/execute", (req, res) => {
-    let { command, currentPath } = req.body;
-    if (!command) {
-      return res.status(400).json({ error: "command is required" });
-    }
+  // ─── Terminal Session Store ────────────────────────────────────────────────────
+  const terminalSessions = new Map<string, { cwd: string; lastAccess: number }>();
 
-    const startDir = currentPath ? path.resolve(process.cwd(), currentPath) : process.cwd();
-
-    const parts = command.trim().split(/\s+/);
-    const firstWord = parts[0];
-    const firstWordLower = firstWord.toLowerCase();
-
-    // Handle 'clear' / 'cls' / 'clear-host'
-    if (['cls', 'clear', 'clear-host'].includes(firstWordLower)) {
-      return res.json({
-        success: true,
-        clear: true,
-        stdout: '',
-        stderr: ''
-      });
-    }
-
-    // Handle CD / Set-Location / sl
-    if (['cd', 'set-location', 'sl'].includes(firstWordLower)) {
-      const rest = parts.slice(1).join(' ').trim();
-      let targetPath = rest;
-      if (!targetPath || targetPath === '~') {
-        targetPath = process.cwd();
-      } else {
-        targetPath = path.resolve(startDir, targetPath);
-      }
-
-      if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
-        const relativePath = path.relative(process.cwd(), targetPath).replace(/\\/g, '/');
-        return res.json({
-          success: true,
-          stdout: '',
-          stderr: '',
-          newPath: relativePath === '' ? '.' : relativePath
-        });
-      } else {
-        return res.json({
-          success: true,
-          stdout: '',
-          stderr: `cd: no such file or directory: ${rest}`,
-          newPath: currentPath
-        });
-      }
-    }
-
-    // Command Translation Helpers
-    const translateSegment = (segment: string): string => {
-      segment = segment.trim();
-      if (!segment) return '';
-
-      const segParts = segment.split(/\s+/);
-      const cmd = segParts[0];
-      const cmdLower = cmd.toLowerCase();
-      const args = segParts.slice(1);
-
-      // Windows shell & PowerShell aliases mapping to modern Linux equivalents
-      const mapping: Record<string, string> = {
-        'dir': 'ls -laF --color=always',
-        'gci': 'ls -laF --color=always',
-        'get-childitem': 'ls -laF --color=always',
-        'ls': 'ls -F --color=always',
-
-        'type': 'cat',
-        'gc': 'cat',
-        'get-content': 'cat',
-
-        'md': 'mkdir -p',
-        'mkdir': 'mkdir -p',
-
-        'rd': 'rm -rf',
-        'rmdir': 'rm -rf',
-        'del': 'rm -f',
-        'erase': 'rm -f',
-        'ri': 'rm -rf',
-        'remove-item': 'rm -rf',
-
-        'copy': 'cp -r',
-        'copy-item': 'cp -r',
-
-        'move': 'mv',
-        'move-item': 'mv',
-
-        'ren': 'mv',
-        'rename-item': 'mv',
-
-        'pwd': 'pwd',
-        'gl': 'pwd',
-        'get-location': 'pwd',
-
-        'get-date': 'date',
-        'write-output': 'echo',
-        'write': 'echo',
-
-        'get-process': 'ps aux',
-        'gps': 'ps aux',
-
-        'get-command': 'which',
-        'gcm': 'which',
-
-        'get-help': 'man',
+  function getTerminalSession(sessionId?: string) {
+    if (!sessionId || !terminalSessions.has(sessionId)) {
+      const newSession = {
+        cwd: process.cwd(),
+        lastAccess: Date.now(),
       };
+      const id = sessionId || `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      terminalSessions.set(id, newSession);
+      return { id, session: newSession };
+    }
+    const session = terminalSessions.get(sessionId)!;
+    session.lastAccess = Date.now();
+    return { id: sessionId, session };
+  }
 
-      if (cmdLower === 'ver') {
-        return `echo "Microsoft Windows [Version 10.0.22631.3527]"`;
-      }
-      if (cmdLower === 'sw_vers') {
-        return `echo -e "ProductName:\\tmacOS\\nProductVersion:\\t14.4.1\\nBuildVersion:\\t23E224"`;
-      }
-      if (cmdLower === 'systeminfo') {
-        return `echo -e "Host Name:\\t\\t\\tLUMINA-CONTAINER\\nOS Name:\\t\\t\\tMicrosoft Windows 11 Pro\\nOS Version:\\t\\t\\t10.0.22631 N/A Build 22631\\nSystem Manufacturer:\\t\\tLumina Virtual Platforms\\nSystem Type:\\t\\t\\tx64-based PC\\nProcessor(s):\\t\\t\\t1 Processor(s) Installed. [01]: Intel Xeon @ 2.50 GHz"`;
-      }
-      if (cmdLower === '$psversiontable') {
-        return `echo -e "Name                           Value\\n----                           -----\\nPSVersion                      7.4.2\\nPSEdition                      Core\\nGitCommitId                    7.4.2\\nOS                             Linux\\nPlatform                       Unix"`;
-      }
-      if (cmdLower === 'ipconfig') {
-        return `(ip addr || ifconfig) 2>/dev/null`;
-      }
-
-      if (mapping[cmdLower]) {
-        return `${mapping[cmdLower]} ${args.join(' ')}`.trim();
-      }
-
-      return segment;
-    };
-
-    // Parse commands joined by separators like &&, ||, ;, |
-    const segments = command.split(/(&&|\|\||;|\|)/);
-    let translatedCmd = '';
-    for (const seg of segments) {
-      if (['&&', '||', ';', '|'].includes(seg)) {
-        translatedCmd += ` ${seg} `;
-      } else {
-        translatedCmd += ` ${translateSegment(seg)} `;
+  // Clean up stale terminal sessions every 10 minutes
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, sess] of terminalSessions.entries()) {
+      if (now - sess.lastAccess > 60 * 60 * 1000) {
+        terminalSessions.delete(id);
       }
     }
-    translatedCmd = translatedCmd.trim();
+  }, 10 * 60 * 1000);
 
-    // Execute the command natively!
-    exec(translatedCmd, { cwd: startDir, maxBuffer: 1024 * 1024 * 15 }, (error, stdout, stderr) => {
-      res.json({
-        success: true,
-        stdout: stdout || '',
-        stderr: stderr || (error ? error.message : ''),
-        exitCode: error ? error.code : 0
+  const isWindows = process.platform === 'win32';
+
+  function resolveTermPath(currentAbsPath: string, segment: string) {
+    if (!segment || segment === '.') return currentAbsPath;
+    if (path.isAbsolute(segment)) return segment;
+    return path.resolve(currentAbsPath, segment);
+  }
+
+  function toTermRelativePath(absPath: string) {
+    const rel = path.relative(process.cwd(), absPath);
+    return rel === '' ? '.' : rel;
+  }
+
+  function handleTermCd(args: string, session: { cwd: string }) {
+    let target: string;
+    if (!args || args.trim() === '') {
+      target = os.homedir();
+    } else {
+      target = args.trim();
+      if (target === '~' || target.startsWith('~/') || target.startsWith('~\\')) {
+        target = os.homedir() + target.slice(1);
+      }
+    }
+    const newAbs = resolveTermPath(session.cwd, target);
+    try {
+      if (!fs.statSync(newAbs).isDirectory()) {
+        return { stderr: `cd: not a directory: ${target}`, changed: false };
+      }
+      session.cwd = newAbs;
+      return { newPath: toTermRelativePath(newAbs), changed: true };
+    } catch {
+      return { stderr: `cd: no such file or directory: ${target}`, changed: false };
+    }
+  }
+
+  function executeTermCommand(command: string, cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    return new Promise((resolve) => {
+      let shell: string;
+      let shellArgs: string[];
+
+      if (isWindows) {
+        shell = 'powershell.exe';
+        shellArgs = ['-NoProfile', '-NonInteractive', '-Command', command];
+      } else {
+        shell = '/bin/bash';
+        shellArgs = ['-c', command];
+      }
+
+      const child = spawn(shell, shellArgs, {
+        cwd,
+        env: { ...process.env, TERM: 'xterm-256color', FORCE_COLOR: '1' },
+        timeout: 30000,
       });
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+      child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+      child.on('close', (code) => {
+        resolve({ stdout, stderr, exitCode: code ?? 1 });
+      });
+
+      child.on('error', (err) => {
+        resolve({ stdout: '', stderr: err.message, exitCode: 1 });
+      });
+
+      setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch {}
+        resolve({ stdout, stderr: stderr + '\n[Timed out after 30s]', exitCode: 124 });
+      }, 30000);
     });
+  }
+
+  // GET /api/terminal/session — create or resume a session
+  app.get("/api/terminal/session", (req, res) => {
+    const { id, session } = getTerminalSession();
+    const hostname = os.hostname();
+    let username = 'user';
+    try { username = os.userInfo().username; } catch {}
+    res.json({
+      sessionId: id,
+      cwd: session.cwd,
+      currentPath: toTermRelativePath(session.cwd),
+      platform: process.platform,
+      shell: isWindows ? 'powershell' : 'bash',
+      hostname,
+      username,
+    });
+  });
+
+  // POST /api/terminal/execute — real OS shell command execution with session support
+  app.post("/api/terminal/execute", async (req, res) => {
+    const { command, currentPath, sessionId: clientSessionId } = req.body;
+    if (!command || typeof command !== 'string') {
+      return res.status(400).json({ stderr: 'No command provided.' });
+    }
+
+    const { id: sessionId, session } = getTerminalSession(clientSessionId);
+
+    if (currentPath && currentPath !== '.') {
+      const resolved = resolveTermPath(process.cwd(), currentPath);
+      try {
+        if (fs.statSync(resolved).isDirectory()) {
+          session.cwd = resolved;
+        }
+      } catch {}
+    }
+
+    const trimmed = command.trim();
+    const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
+
+    // Built-in: clear/cls
+    if (['cls', 'clear', 'clear-host'].includes(firstWord)) {
+      return res.json({ sessionId, clear: true, stdout: '', stderr: '' });
+    }
+
+    // Built-in: cd
+    if (firstWord === 'cd' || firstWord === 'set-location' || firstWord === 'sl') {
+      const args = trimmed.slice(firstWord.length).trim();
+      const result = handleTermCd(args, session);
+      return res.json({
+        sessionId,
+        stdout: '',
+        stderr: result.stderr || '',
+        newPath: result.newPath !== undefined ? result.newPath : toTermRelativePath(session.cwd),
+      });
+    }
+
+    // Built-in: pwd
+    if (firstWord === 'pwd' || firstWord === 'get-location' || firstWord === 'gl') {
+      return res.json({ sessionId, stdout: session.cwd + '\n', stderr: '', newPath: toTermRelativePath(session.cwd) });
+    }
+
+    // Execute via real shell spawn
+    try {
+      const result = await executeTermCommand(trimmed, session.cwd);
+
+      try { fs.statSync(session.cwd); } catch { session.cwd = process.cwd(); }
+
+      return res.json({
+        sessionId,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        newPath: toTermRelativePath(session.cwd),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ sessionId, stderr: `Server error: ${err.message}`, stdout: '' });
+    }
   });
 
   // Live Compiler/Transpiler Sandbox Interceptor for React / JSX / TSX and JS
@@ -1355,7 +1383,7 @@ async function startServer() {
   });
 
   app.post("/api/fs/create", (req, res) => {
-    const { filePath, isDirectory, workspaceRoot } = req.body;
+    const { filePath, isDirectory, workspaceRoot, content } = req.body;
     if (!filePath) {
       return res.status(400).json({ error: "filePath is required" });
     }
@@ -1366,7 +1394,7 @@ async function startServer() {
         fs.mkdirSync(resolvedPath, { recursive: true });
        } else {
         fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
-        fs.writeFileSync(resolvedPath, '', 'utf8');
+        fs.writeFileSync(resolvedPath, content !== undefined ? content : '', 'utf8');
       }
       res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
     } catch (e: any) {
@@ -1468,23 +1496,26 @@ async function startServer() {
     return res.json({ type: 'unknown', entryPoint: null, framework: null });
   });
 
-  // Execute a shell command inside the workspace (for Coder Mode Bash tool)
+  // Execute a shell command inside the workspace (for Coder Mode Shell_Command tool)
   app.post("/api/fs/exec", async (req, res) => {
-    const { command, workspaceRoot, cwd } = req.body;
+    const { command, workspaceRoot, cwd, shell: preferredShell } = req.body;
     if (!command) {
       return res.status(400).json({ error: "command is required" });
     }
     const workDir = cwd
       ? resolveCoderPath(cwd, workspaceRoot)
       : (workspaceRoot ? path.resolve(workspaceRoot) : process.cwd());
+        const isWin = process.platform === 'win32';
     try {
       const { execSync } = await import('child_process');
+      const shellPath = isWin ? (preferredShell === 'powershell' ? 'powershell.exe' : 'cmd.exe') : '/bin/bash';
       const output = execSync(command, {
         cwd: workDir,
         timeout: 30000,
         maxBuffer: 1024 * 1024,
         encoding: 'utf8',
-        windowsHide: true
+        windowsHide: true,
+        shell: shellPath,
       });
       res.json({ success: true, stdout: output, stderr: '' });
     } catch (e: any) {
@@ -1495,6 +1526,18 @@ async function startServer() {
         exitCode: e.status || 1
       });
     }
+  });
+
+  // Report OS info for the AI to adapt its commands
+  app.get("/api/os/info", (req, res) => {
+    res.json({
+      platform: process.platform,
+      isWindows: process.platform === 'win32',
+      isMac: process.platform === 'darwin',
+      isLinux: process.platform === 'linux',
+      shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash',
+      hostname: os.hostname(),
+    });
   });
 
   // Experimental LSP endpoint: provides diagnostics & symbols for a file
