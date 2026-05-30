@@ -180,6 +180,12 @@ import { ArtifactCard } from './components/Chat/ArtifactCard';
 
 import { MessageItem } from './components/Chat/MessageItem';
 
+import { Agent } from './agents/types';
+import { loadAgents, addAgent, updateAgent, deleteAgent } from './agents/agentStore';
+import { AgentSidebarSection } from './components/Agents/AgentSidebarSection';
+import { AgentCreationModal } from './components/Agents/AgentCreationModal';
+import { AgentChatView } from './components/Agents/AgentChatView';
+
 import { Canvas } from './components/Canvas/Canvas';
 
 import { ClaudeAsterisk } from './components/ui/ClaudeAsterisk';
@@ -348,6 +354,40 @@ export default function App() {
   }, []);
 
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+
+  const [agents, setAgents] = useState<Agent[]>(() => loadAgents());
+  const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
+  const [showAgentCreation, setShowAgentCreation] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+
+  const handleSelectAgent = useCallback((agent: Agent) => {
+    setActiveAgent(agent);
+    setCurrentChatId(null); // Deselect generic chat since we are in Agent View!
+  }, []);
+
+  const handleAgentCreated = useCallback((agent: Agent) => {
+    const updated = addAgent(agent);
+    setAgents(updated);
+    setActiveAgent(agent);
+    setShowAgentCreation(false);
+  }, []);
+
+  const handleDeleteAgent = useCallback((id: string) => {
+    const updated = deleteAgent(id);
+    setAgents(updated);
+    if (activeAgent?.id === id) setActiveAgent(null);
+  }, [activeAgent]);
+
+  const handleUpdateAgent = useCallback((id: string, patch: Partial<Agent>) => {
+    const updated = updateAgent(id, patch);
+    setAgents(updated);
+    setActiveAgent(prev => prev?.id === id ? { ...prev, ...patch } : prev);
+  }, []);
+
+  const handleEditAgent = useCallback((agent: Agent) => {
+    setEditingAgent(agent);
+    setShowAgentCreation(true);
+  }, []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [isResizing, setIsResizing] = useState(false);
@@ -387,6 +427,19 @@ export default function App() {
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      setShowAgentCreation(false);
+      setEditingAgent(null);
+    }
+  }, [isSettingsOpen]);
+
+  useEffect(() => {
+    if (showAgentCreation) {
+      setIsSettingsOpen(false);
+    }
+  }, [showAgentCreation]);
   const [isCompactSidebar, setIsCompactSidebar] = useState(() => {
     return localStorage.getItem('lumina_compact_sidebar') === 'true';
   });
@@ -419,7 +472,7 @@ export default function App() {
     avatar: '',
     isGeneratingAvatar: false
   });
-  const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', DEFAULT_SERVER_URL));
+  const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', 'https://openprovider.mimika.in/v1'));
   const [apiKey, setApiKey] = useState(() => safeGetItem('lumina_api_key', DEFAULT_API_KEY));
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
   const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', DEFAULT_API_KEY));
@@ -526,17 +579,27 @@ export default function App() {
   ]);
 
   const [bridgeTools, setBridgeTools] = useState<Tool[]>([]);
-  const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>([
-    { id: 'sonnet-4.6', name: 'Sonnet 4.6', icon: <Sparkles size={14} />, color: 'text-amber-500' },
-    { id: 'lumina-ultra-plus', name: 'Lumina Ultra Plus', icon: <Sparkles size={14} />, color: 'text-blue-500' },
-    { id: 'lumina-pro-max', name: 'Lumina Pro Max', icon: <Plus size={14} />, color: 'text-purple-500' },
-    { id: 'lumina-mini-flash', name: 'Lumina Mini Flash', icon: <ArrowUp size={14} />, color: 'text-orange-500' },
-  ]);
+  const [availableModels, setAvailableModels] = useState<{ id: string; name: string; icon: React.ReactNode; color: string }[]>(() => {
+    const provider = safeGetItem('lumina_provider', 'openprovider');
+    const defaultModels = [
+      { id: 'sonnet-4.6', name: 'Sonnet 4.6', icon: <Sparkles size={14} />, color: 'text-amber-500' },
+      { id: 'lumina-ultra-plus', name: 'Lumina Ultra Plus', icon: <Sparkles size={14} />, color: 'text-blue-500' },
+      { id: 'lumina-pro-max', name: 'Lumina Pro Max', icon: <Plus size={14} />, color: 'text-purple-500' },
+      { id: 'lumina-mini-flash', name: 'Lumina Mini Flash', icon: <ArrowUp size={14} />, color: 'text-orange-500' },
+    ];
+    if (provider === 'openprovider') {
+      return [
+        { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free', icon: <Sparkles size={14} />, color: 'text-teal-400' },
+        ...defaultModels
+      ];
+    }
+    return defaultModels;
+  });
 
   const [isMcpConnected, setIsMcpConnected] = useState(false);
   const [isConnectingMcp, setIsConnectingMcp] = useState(false);
   const [writingStyle, setWritingStyle] = useState('default');
-  const [selectedProvider, setSelectedProvider] = useState(() => safeGetItem('lumina_provider', 'custom'));
+  const [selectedProvider, setSelectedProvider] = useState(() => safeGetItem('lumina_provider', 'openprovider'));
 
   const handleProviderSelect = (providerId: string) => {
     setSelectedProvider(providerId);
@@ -546,6 +609,18 @@ export default function App() {
     }
     if (providerId === 'custom') {
       setServerUrl(DEFAULT_SERVER_URL);
+    }
+    if (providerId === 'openprovider') {
+      setSelectedModel('openprovider/auto-free');
+      setAvailableModels(prev => {
+        if (!prev.some(m => m.id === 'openprovider/auto-free')) {
+          return [
+            { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free', icon: <Sparkles size={14} />, color: 'text-teal-400' },
+            ...prev
+          ];
+        }
+        return prev;
+      });
     }
     setIsAiSaved(false);
   };
@@ -561,36 +636,84 @@ export default function App() {
   const handleVerifyAI = useCallback(async () => {
     setAiVerificationState('verifying');
     try {
-      const isOpenCode = selectedProvider === 'opencode';
-      const headers: Record<string, string> = {};
-      if (isOpenCode) {
-        headers['x-api-key'] = apiKey;
-      } else {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
+      const isExternal = serverUrl.startsWith('http://') || serverUrl.startsWith('https://');
+      if (isExternal) {
+        // Use our server-side proxy to verify the external provider endpoint
+        const response = await fetch('/api/provider/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            endpoint: serverUrl,
+            apiKey: apiKey,
+            provider: selectedProvider
+          })
+        });
 
-      const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, {
-        method: 'GET',
-        headers
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        const modelsArr = data.data || data.models || [];
-        if (Array.isArray(modelsArr)) {
-          const fetchedModels = modelsArr.map((m: any) => ({
-            id: m.id,
-            name: m.display_name || m.id,
-            icon: <Sparkles size={14} />,
-            color: 'text-blue-500'
-          }));
-          if (fetchedModels.length > 0) {
-            setAvailableModels(fetchedModels);
+        if (response.ok) {
+          const verifyData = await response.json();
+          // Also load the available models from this provider via the server-side proxy
+          try {
+            const modelsResponse = await fetch('/api/provider/models', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                endpoint: serverUrl,
+                apiKey: apiKey
+              })
+            });
+            if (modelsResponse.ok) {
+              const modelsData = await modelsResponse.json();
+              if (modelsData.success && Array.isArray(modelsData.models)) {
+                const fetchedModels = modelsData.models.map((m: any) => ({
+                  id: m.id,
+                  name: m.name || m.id,
+                  icon: <Sparkles size={14} />,
+                  color: 'text-blue-500'
+                }));
+                if (fetchedModels.length > 0) {
+                  setAvailableModels(fetchedModels);
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('Failed to fetch models but verified connection', err);
           }
+          setAiVerificationState('success');
+        } else {
+          setAiVerificationState('error');
         }
-        setAiVerificationState('success');
       } else {
-        setAiVerificationState('error');
+        const isOpenCode = selectedProvider === 'opencode';
+        const headers: Record<string, string> = {};
+        if (isOpenCode) {
+          headers['x-api-key'] = apiKey;
+        } else {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+
+        const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, {
+          method: 'GET',
+          headers
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const modelsArr = data.data || data.models || [];
+          if (Array.isArray(modelsArr)) {
+            const fetchedModels = modelsArr.map((m: any) => ({
+              id: m.id,
+              name: m.display_name || m.id,
+              icon: <Sparkles size={14} />,
+              color: 'text-blue-500'
+            }));
+            if (fetchedModels.length > 0) {
+              setAvailableModels(fetchedModels);
+            }
+          }
+          setAiVerificationState('success');
+        } else {
+          setAiVerificationState('error');
+        }
       }
     } catch (error) {
       console.error('Verification failed:', error);
@@ -701,6 +824,51 @@ export default function App() {
     const baseUrl = useBridge ? llamaBridgeUrl.replace(/\/+$/, '') : serverUrl.replace(/\/+$/, '');
     const key = useBridge ? llamaBridgeApiKey : apiKey;
     
+    const isExternal = baseUrl.startsWith('http://') || baseUrl.startsWith('https://');
+    
+    if (isExternal) {
+      // Proxy external API calls through our Node server to bypass browser CORS constraints safely
+      const response = await fetch('/api/bridge/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bridgeUrl: baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, ''),
+          apiKey: key,
+          model: useBridge ? selectedLlamaModel : activeModelId,
+          messages,
+          tools,
+          stream: false
+        }),
+        signal
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        let errorMsg = `Server returned status ${response.status}`;
+        try {
+          const parsed = JSON.parse(text);
+          errorMsg = parsed.error?.message || parsed.error || parsed.message || parsed.detail || errorMsg;
+          if (typeof errorMsg === 'object') {
+            errorMsg = JSON.stringify(errorMsg);
+          }
+        } catch {
+          if (text.trim().startsWith('<')) {
+            errorMsg = `Server error (HTML response with status ${response.status})`;
+          } else if (text) {
+            errorMsg = text.substring(0, 200);
+          }
+        }
+        throw new Error(errorMsg);
+      }
+
+      const text = await response.text();
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        throw new Error(`Failed to parse response: ${text.substring(0, 100)}`);
+      }
+    }
+
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (key) headers['Authorization'] = `Bearer ${key}`;
     
@@ -725,7 +893,31 @@ export default function App() {
       signal,
     });
     
-    return await response.json();
+    if (!response.ok) {
+      const text = await response.text();
+      let errorMsg = `Server returned status ${response.status}`;
+      try {
+        const parsed = JSON.parse(text);
+        errorMsg = parsed.error?.message || parsed.error || parsed.message || parsed.detail || errorMsg;
+        if (typeof errorMsg === 'object') {
+          errorMsg = JSON.stringify(errorMsg);
+        }
+      } catch {
+        if (text.trim().startsWith('<')) {
+          errorMsg = `Server error (HTML response with status ${response.status})`;
+        } else if (text) {
+          errorMsg = text.substring(0, 200);
+        }
+      }
+      throw new Error(errorMsg);
+    }
+    
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (err) {
+      throw new Error(`Failed to parse response: ${text.substring(0, 100)}`);
+    }
   };
   
   const updateToolCallStatus = (toolCallId: string, status: 'pending' | 'active' | 'complete' | 'failed') => {
@@ -835,7 +1027,10 @@ export default function App() {
     }
   };
 
-  const [selectedModel, setSelectedModel] = useState('sonnet-4.6');
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const provider = safeGetItem('lumina_provider', 'openprovider');
+    return provider === 'openprovider' ? 'openprovider/auto-free' : 'sonnet-4.6';
+  });
   const activeModelList = useMemo(() => 
     llamaBridgeModels.length > 0
       ? llamaBridgeModels.map(m => ({ id: m.id, name: m.name, icon: <Sparkles size={14} />, color: 'text-blue-500' }))
@@ -1623,6 +1818,7 @@ export default function App() {
   const messages = currentChat?.messages || [];
 
   const createNewChat = (projId?: string | null, isCoder?: boolean) => {
+    setActiveAgent(null);
     const pId = projId !== undefined ? projId : activeProjectId;
     const newChat: Chat = {
       id: Date.now().toString(),
@@ -4529,7 +4725,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                         </button>
                       );
                     })}
-                  </div>
+</div>
                 </div>
               </motion.div>
             )}
@@ -5455,7 +5651,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
                     style={modelDropdownPosition.style}
-                    className="fixed w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
+                    className="fixed w-[269px] bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
                   >
                     {availableModels.length > 5 && (
                       <div className="px-3 py-2 bg-[var(--theme-surface)] border-b border-[var(--theme-border)] shrink-0">
@@ -5472,7 +5668,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                         </div>
                       </div>
                     )}
-                    <div className="h-[200px] overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar shrink-0">
+                    <div className="h-[220px] overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar shrink-0">
                       {activeModelList
                         .filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase()))
                         .map((model) => (
@@ -5663,6 +5859,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 currentChatId={currentChatId} 
                 setCurrentChatId={(id) => {
                   setCurrentChatId(id);
+                  setActiveAgent(null);
                   setIsMobileMenuOpen(false);
                 }} 
                 createNewChat={createNewChat} 
@@ -5680,7 +5877,23 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 setActiveProjectId={setActiveProjectId}
                 isSidebarOpen={isSidebarOpen}
                 setIsSidebarOpen={setIsSidebarOpen}
-              />
+              >
+                <AgentSidebarSection
+                  agents={agents}
+                  activeAgentId={activeAgent?.id || null}
+                  onSelectAgent={(agent) => {
+                    handleSelectAgent(agent);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  onCreateAgent={() => {
+                    setEditingAgent(null);
+                    setShowAgentCreation(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  onDeleteAgent={handleDeleteAgent}
+                  onEditAgent={handleEditAgent}
+                />
+              </SidebarContent>
             </motion.aside>
           </>
         )}
@@ -5699,7 +5912,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
           <SidebarContent 
             chats={chats} 
             currentChatId={currentChatId} 
-            setCurrentChatId={setCurrentChatId} 
+            setCurrentChatId={(id) => {
+              setCurrentChatId(id);
+              setActiveAgent(null);
+            }} 
             createNewChat={createNewChat} 
             setChats={setChats}
             onOpenSettings={() => setIsSettingsOpen(true)}
@@ -5711,7 +5927,19 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             setActiveProjectId={setActiveProjectId}
             isSidebarOpen={isSidebarOpen}
             setIsSidebarOpen={setIsSidebarOpen}
-          />
+          >
+            <AgentSidebarSection
+              agents={agents}
+              activeAgentId={activeAgent?.id || null}
+              onSelectAgent={handleSelectAgent}
+              onCreateAgent={() => {
+                setEditingAgent(null);
+                setShowAgentCreation(true);
+              }}
+              onDeleteAgent={handleDeleteAgent}
+              onEditAgent={handleEditAgent}
+            />
+          </SidebarContent>
         </div>
         
         {isSidebarOpen && (
@@ -5728,6 +5956,18 @@ Store contract files at .lumina/contracts/ in the workspace.`;
       </motion.aside>
 
       <main className="flex-1 flex flex-col relative h-full min-w-0 bg-[var(--theme-bg)] text-[var(--theme-primary)] transition-colors duration-300">
+        {activeAgent ? (
+          <AgentChatView
+            agent={activeAgent}
+            onBack={() => setActiveAgent(null)}
+            onUpdateAgent={(patch) => handleUpdateAgent(activeAgent.id, patch)}
+            onEditAgent={() => handleEditAgent(activeAgent)}
+            markdownComponents={markdownComponents}
+            userProfile={userProfile}
+            persona={persona}
+          />
+        ) : (
+          <>
 
         {!isCoderMode && (
           <header className={`h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md transition-all duration-300 ease-in-out ${
@@ -5894,6 +6134,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                         status: a.status === 'done' ? 'done' as const : a.status === 'needs_review' ? 'needs_review' as const : 'pending' as const
                       }))
                     ) : undefined}
+                    onClose={() => setIsCoderLeftPanelOpen(false)}
                   />
                 </motion.div>
               )}
@@ -6158,6 +6399,13 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                           title="Force reload preview frame"
                         >
                           <RefreshCw size={12} />
+                        </button>
+                        <button 
+                          onClick={() => setIsCoderRightPanelOpen(false)}
+                          className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
+                          title="Close App Live Preview"
+                        >
+                          <X size={12} />
                         </button>
                       </div>
                     </div>
@@ -6482,7 +6730,99 @@ Store contract files at .lumina/contracts/ in the workspace.`;
           </div>
         ) : (
           <>
-            <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
+            {isSettingsOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
+              >
+                <SettingsModal
+                  onClose={() => setIsSettingsOpen(false)}
+                  activeSettingsTab={activeSettingsTab}
+                  setActiveSettingsTab={setActiveSettingsTab}
+                  useBubbles={useBubbles}
+                  setUseBubbles={setUseBubbles}
+                  isCompactSidebar={isCompactSidebar}
+                  setIsCompactSidebar={setIsCompactSidebar}
+                  autoHideTopBar={autoHideTopBar}
+                  setAutoHideTopBar={setAutoHideTopBar}
+                  useBridgeTools={useBridgeTools}
+                  setUseBridgeTools={setUseBridgeTools}
+                  useTurboQuant={useTurboQuant}
+                  setUseTurboQuant={setUseTurboQuant}
+                  selectedProvider={selectedProvider}
+                  handleProviderSelect={handleProviderSelect}
+                  providerSearchQuery={providerSearchQuery}
+                  setProviderSearchQuery={setProviderSearchQuery}
+                  serverUrl={serverUrl}
+                  setServerUrl={setServerUrl}
+                  apiKey={apiKey}
+                  setApiKey={setApiKey}
+                  aiVerificationState={aiVerificationState}
+                  handleVerifyAI={handleVerifyAI}
+                  handleSaveAI={handleSaveAI}
+                  isAiSaved={isAiSaved}
+                  searchProvider={searchProvider}
+                  setSearchProvider={setSearchProvider}
+                  tavilyApiKey={tavilyApiKey}
+                  setTavilyApiKey={setTavilyApiKey}
+                  serpApiKey={serpApiKey}
+                  setSerpApiKey={setSerpApiKey}
+                  searchVerificationState={searchVerificationState}
+                  handleVerifySearch={handleVerifySearch}
+                  handleSaveSearch={handleSaveSearch}
+                  isSearchSaved={isSearchSaved}
+                  userProfile={userProfile}
+                  setUserProfile={setUserProfile}
+                  persona={persona}
+                  setPersona={setPersona}
+                  luminaTools={luminaTools}
+                  setLuminaTools={setLuminaTools}
+                  showToast={showToast}
+                  llamaBridgeUrl={llamaBridgeUrl}
+                  setLlamaBridgeUrl={setLlamaBridgeUrl}
+                  llamaBridgeApiKey={llamaBridgeApiKey}
+                  setLlamaBridgeApiKey={setLlamaBridgeApiKey}
+                  isMcpConnected={isMcpConnected}
+                  llamaBridgeModels={llamaBridgeModels}
+                  selectedLlamaModel={selectedLlamaModel}
+                  setSelectedLlamaModel={setSelectedLlamaModel}
+                  bridgeTools={bridgeTools}
+                  setBridgeTools={setBridgeTools}
+                  handleTestLlamaConnection={handleTestLlamaConnection}
+                  handleLoadLlamaModels={handleLoadLlamaModels}
+                  handleLoadBridgeTools={handleLoadBridgeTools}
+                />
+              </motion.div>
+            ) : showAgentCreation ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
+              >
+                <AgentCreationModal
+                  isOpen={showAgentCreation}
+                  onClose={() => {
+                    setShowAgentCreation(false);
+                    setEditingAgent(null);
+                  }}
+                  onAgentCreated={handleAgentCreated}
+                  onAgentUpdated={(id, patch) => {
+                    handleUpdateAgent(id, patch);
+                    setShowAgentCreation(false);
+                    setEditingAgent(null);
+                  }}
+                  editAgent={editingAgent}
+                  isPanel={true}
+                />
+              </motion.div>
+            ) : (
+              <>
+                <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
               <div 
                 ref={scrollRef}
                 className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar scroll-smooth"
@@ -6601,6 +6941,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                     orchestrationState={orchestrationState}
                     orchestrationCollapsed={orchestrationCollapsed}
                     setOrchestrationCollapsed={setOrchestrationCollapsed}
+                    onClose={() => setIsCoderWorkspacePanelOpen(false)}
                   />
                 </div>
               )}
@@ -6620,11 +6961,15 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             </div>
           </>
         )}
-      </main>
+      </>
+    )}
+          </>
+        )}
+  </main>
       </div>
 
       <AnimatePresence>
-        {isSettingsOpen && (
+        {false && isSettingsOpen && (
           <SettingsModal
             onClose={() => setIsSettingsOpen(false)}
             activeSettingsTab={activeSettingsTab}
@@ -6677,6 +7022,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             selectedLlamaModel={selectedLlamaModel}
             setSelectedLlamaModel={setSelectedLlamaModel}
             bridgeTools={bridgeTools}
+            setBridgeTools={setBridgeTools}
             handleTestLlamaConnection={handleTestLlamaConnection}
             handleLoadLlamaModels={handleLoadLlamaModels}
             handleLoadBridgeTools={handleLoadBridgeTools}
@@ -6898,11 +7244,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                               </div>
                             )}
 
-                            {selectedProvider !== 'custom' && (
-                              <p className="text-[11.5px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 pl-1 py-1 pr-1 font-medium bg-emerald-500/[0.03] rounded-lg mt-1">
-                                <Check size={13} /> Active Preset: <span className="font-bold underline">{CLOUD_PROVIDERS.find(p => p.id === selectedProvider)?.label}</span> (Endpoint auto-filled)
-                              </p>
-                            )}
+                            
                           </div>
 
                           <div className="space-y-1.5">
@@ -6956,26 +7298,6 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                               {isAiSaved ? <Check size={16} /> : null}
                               {isAiSaved ? 'Saved' : 'Save Changes'}
                             </button>
-                          </div>
-
-                          <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/20 rounded-2xl">
-                            <div className="flex gap-3">
-                              <Sparkles size={16} className="text-blue-500 mt-0.5" />
-                              <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">
-                                {selectedProvider === 'custom'
-                                  ? 'Use a custom endpoint to connect your own Lumina-compatible API or proxy server.'
-                                  : `Connecting to ${CLOUD_PROVIDERS.find(p=>p.id===selectedProvider)?.label}. Paste your API key above and click Verify.`}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
-                            <div className="flex gap-3 text-blue-500">
-                              <Terminal size={16} className="shrink-0 mt-0.5" />
-                              <p className="text-[11px] leading-relaxed">
-                                The Llama Bridge settings have moved to their own <button onClick={() => setActiveSettingsTab('bridge')} className="underline font-semibold hover:text-blue-400">Bridge panel</button>.
-                              </p>
-                            </div>
                           </div>
                         </div>
                       </div>
@@ -7264,7 +7586,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                       <div>
                         <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Bridge Tools</h3>
                         <div className="space-y-4">
-                          <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                          <div style={{ display: 'none' }} className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
                             <div className="flex gap-3">
                               <Wrench size={18} className="text-blue-500 shrink-0" />
                               <div>
@@ -7288,22 +7610,36 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                               </button>
                             </div>
                           ) : (
-                            <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-12 w-full h-full">
                               {bridgeTools.map(tool => (
                                 <div
                                   key={tool.id}
-                                  className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-zinc-950 rounded-xl border border-gray-100 dark:border-white/5"
+                                  className="flex flex-col justify-between p-5 bg-gray-50/50 dark:bg-zinc-950/40 rounded-2xl border border-gray-100/80 dark:border-white/5 hover:border-[var(--theme-accent)]/30 dark:hover:border-[var(--theme-accent)]/20 hover:bg-white dark:hover:bg-zinc-950/70 transition-all duration-300 shadow-sm hover:shadow-md h-[160px] relative group"
                                 >
-                                  <div className="flex items-center gap-3 min-w-0">
-                                    <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
+                                  <div className="flex items-start gap-4 min-w-0">
+                                    <div className="p-3 rounded-xl bg-blue-500/8 text-blue-500 dark:bg-blue-500/10 shrink-0 group-hover:scale-105 transition-transform duration-300">
                                       {tool.icon}
                                     </div>
-                                    <div className="text-left truncate">
-                                      <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{tool.name}</div>
-                                      <div className="text-[10px] text-gray-500 truncate max-w-[200px]">{tool.description}</div>
+                                    <div className="text-left min-w-0">
+                                      <div className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{tool.name}</div>
+                                      <p className="text-xs text-gray-400 dark:text-zinc-400/80 leading-relaxed mt-1.5 line-clamp-2">{tool.description || 'Bridge tool'}</p>
                                     </div>
                                   </div>
-                                  <div className="text-[10px] text-gray-400 font-mono shrink-0 ml-2">bridge</div>
+                                  <div className="flex items-center justify-between border-t border-gray-100/50 dark:border-white/5 pt-3.5 mt-3 shrink-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={"w-1.5 h-1.5 rounded-full " + (tool.enabled ? "bg-emerald-500 animate-pulse" : "bg-gray-400")} />
+                                      <span className="text-[10px] text-gray-400 font-mono tracking-wider uppercase">Bridge MCP</span>
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        setBridgeTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                        showToast((tool.enabled ? 'Disabled' : 'Enabled') + ' ' + tool.name);
+                                      }}
+                                      className={"w-11 h-6 rounded-full transition-all relative " + (tool.enabled ? "bg-[var(--theme-accent)]" : "bg-gray-200 dark:bg-zinc-800")}
+                                    >
+                                      <div className={"absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-md " + (tool.enabled ? "right-1" : "left-1")} />
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>

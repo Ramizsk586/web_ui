@@ -35,7 +35,8 @@ import {
   Clock,
   Play,
   XCircle,
-  Users
+  Users,
+  X
 } from 'lucide-react';
 
 import type { SubAgent, OrchestrationConflict, AgentOrchestrationState } from '../hooks/useCoderMode';
@@ -57,6 +58,7 @@ interface CoderWorkspacePanelProps {
   orchestrationState?: AgentOrchestrationState;
   orchestrationCollapsed?: boolean;
   setOrchestrationCollapsed?: (collapsed: boolean) => void;
+  onClose?: () => void;
 }
 
 export const CoderWorkspacePanel: React.FC<CoderWorkspacePanelProps> = ({
@@ -67,7 +69,8 @@ export const CoderWorkspacePanel: React.FC<CoderWorkspacePanelProps> = ({
   onInsertAttachedText,
   orchestrationState,
   orchestrationCollapsed,
-  setOrchestrationCollapsed
+  setOrchestrationCollapsed,
+  onClose
 }) => {
   const [activeTab, setActiveTab] = useState<'files' | 'preview'>('preview');
   const [files, setFiles] = useState<FileNode[]>([]);
@@ -536,18 +539,30 @@ I would like to change this element to:
           <Code size={14} className="text-[#D97756] animate-pulse" />
           <span className="text-xs font-bold uppercase tracking-wider text-[#D97756]">Workspace Directory</span>
         </div>
-        <button 
-        onClick={() => {
-            if (workspaceRootPath) fetchFiles(workspaceRootPath);
-            startWorkspacePreview();
-            setIframeKey(k => k + 1);
-            showToast("Workspace refreshed!");
-          }}
-          className="p-1.5 hover:bg-[#1D1917] border border-[#241C18] bg-[#0E0B0A]/50 rounded-lg text-[#AD9F91] hover:text-[#EDE6DD] transition-all flex items-center justify-center cursor-pointer"
-          title="Refresh Directory & Preview"
-        >
-          <RefreshCw size={12} />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button 
+            onClick={() => {
+              if (workspaceRootPath) fetchFiles(workspaceRootPath);
+              startWorkspacePreview();
+              setIframeKey(k => k + 1);
+              showToast("Workspace refreshed!");
+            }}
+            className="p-1.5 hover:bg-[#1D1917] border border-[#241C18] bg-[#0E0B0A]/50 rounded-lg text-[#AD9F91] hover:text-[#EDE6DD] transition-all flex items-center justify-center cursor-pointer"
+            title="Refresh Directory & Preview"
+          >
+            <RefreshCw size={12} />
+          </button>
+          
+          {onClose && (
+            <button 
+              onClick={onClose}
+              className="p-1.5 hover:bg-[#1D1917] border border-[#241C18] bg-[#0E0B0A]/50 rounded-lg text-[#AD9F91] hover:text-[#EDE6DD] transition-all flex items-center justify-center cursor-pointer"
+              title="Close Workspace Panel"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Navigation tabs */}

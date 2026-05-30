@@ -48,6 +48,7 @@ interface CoderLeftExplorerProps {
   onWorkspaceRootPathChange: (path: string) => void;
   onSelectFile: (filePath: string) => void;
   fileAttributions?: FileAgentAttribution[];
+  onClose?: () => void;
 }
 
 // Lightweight random UUID generator
@@ -347,7 +348,8 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
   workspaceRootPath,
   onWorkspaceRootPathChange,
   onSelectFile,
-  fileAttributions
+  fileAttributions,
+  onClose
 }) => {
   const [flatFiles, setFlatFiles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -1139,6 +1141,16 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
           >
             <FolderOpen size={13} />
           </button>
+          
+          {onClose && (
+            <button 
+              onClick={onClose}
+              className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
+              title="Collapse Explorer Sidebar"
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
       </div>
 

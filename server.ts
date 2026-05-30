@@ -2350,9 +2350,9 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         apiKey = process.env.KILO_API_KEY || '';
       }
       // OpenCode models
-      else if (modelLower.includes('opencode')) {
+      else if (modelLower.includes('opencode') || modelLower.includes('big pickle') || modelLower.includes('big-pickle') || modelLower.includes('bigpickle')) {
         provider = 'opencode';
-        baseUrl = 'https://opencode.ai/zen';
+        baseUrl = 'https://opencode.ai/zen/v1';
         apiKey = process.env.OPENCODE_API_KEY || '';
       }
       // Cline models
@@ -2581,8 +2581,8 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     });
   }
 
-  const server = app.listen(PORT, "localhost", () => {
-    console.log(`\n🚀 Proxy server ready at http://localhost:${PORT}`);
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`\n🚀 Proxy server ready at http://0.0.0.0:${PORT}`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);

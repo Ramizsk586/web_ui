@@ -43,6 +43,7 @@ interface SidebarProps {
   setActiveProjectId?: (id: string | null) => void;
   isSidebarOpen?: boolean;
   setIsSidebarOpen?: (open: boolean) => void;
+  children?: React.ReactNode;
 }
 
 export const SidebarContent = ({ 
@@ -61,6 +62,7 @@ export const SidebarContent = ({
   setActiveProjectId,
   isSidebarOpen,
   setIsSidebarOpen,
+  children,
 }: SidebarProps) => {
   const [isRecentChatsOpen, setIsRecentChatsOpen] = useState(false);
   const [isAvatarSelectorOpen, setIsAvatarSelectorOpen] = useState(false);
@@ -118,6 +120,7 @@ export const SidebarContent = ({
       </button>
 
       <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
+        {children}
         {/* Projects Category */}
         <div className="space-y-1">
           <button

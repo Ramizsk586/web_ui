@@ -1,18 +1,18 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { 
-  Settings, 
-  User, 
-  Sparkles, 
-  Search, 
-  Hammer, 
-  Terminal, 
-  HardDrive, 
-  Plus, 
-  Check, 
-  X, 
-  Globe, 
-  Brain, 
+import {
+  Settings,
+  User,
+  Sparkles,
+  Search,
+  Hammer,
+  Terminal,
+  HardDrive,
+  Plus,
+  Check,
+  X,
+  Globe,
+  Brain,
   Wrench,
   Box,
   CloudMoon,
@@ -41,8 +41,6 @@ interface SettingsModalProps {
   setUseBridgeTools: (val: boolean) => void;
   useTurboQuant: boolean;
   setUseTurboQuant: (val: boolean) => void;
-  
-  // AI Settings
   selectedProvider: string;
   handleProviderSelect: (id: string) => void;
   providerSearchQuery: string;
@@ -55,8 +53,6 @@ interface SettingsModalProps {
   handleVerifyAI: () => void;
   handleSaveAI: () => void;
   isAiSaved: boolean;
-  
-  // Search Settings
   searchProvider: string;
   setSearchProvider: (val: string) => void;
   tavilyApiKey: string;
@@ -67,8 +63,6 @@ interface SettingsModalProps {
   handleVerifySearch: () => void;
   handleSaveSearch: () => void;
   isSearchSaved: boolean;
-  
-  // Personal Settings
   userProfile: {
     name: string;
     avatar: string;
@@ -83,8 +77,6 @@ interface SettingsModalProps {
     location: string;
     age?: number | string;
   }>>;
-  
-  // Persona Settings
   persona: {
     name: string;
     role: string;
@@ -97,8 +89,6 @@ interface SettingsModalProps {
     avatar: string;
     isGeneratingAvatar: boolean;
   }>>;
-
-  // Lumina Tools Settings
   luminaTools: Array<{
     id: string;
     name: string;
@@ -125,6 +115,7 @@ interface SettingsModalProps {
     enabled: boolean;
     icon: React.ReactNode;
   }>;
+  setBridgeTools: React.Dispatch<React.SetStateAction<any[]>>;
   handleTestLlamaConnection: () => void;
   handleLoadLlamaModels: () => void;
   handleLoadBridgeTools: () => void;
@@ -182,26 +173,73 @@ export function SettingsModal({
   selectedLlamaModel,
   setSelectedLlamaModel,
   bridgeTools,
+  setBridgeTools,
   handleTestLlamaConnection,
   handleLoadLlamaModels,
   handleLoadBridgeTools
 }: SettingsModalProps) {
+  // Rich Profile State
+  const [timezone, setTimezone] = React.useState(() => localStorage.getItem('lumina_profile_timezone') || 'GMT+05:30');
+  const [preferredLanguages, setPreferredLanguages] = React.useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lumina_profile_languages') || '["TypeScript", "Python", "JavaScript"]');
+    } catch {
+      return ["TypeScript", "Python", "JavaScript"];
+    }
+  });
+  const [customInstructions, setCustomInstructions] = React.useState(() => localStorage.getItem('lumina_profile_instructions') || '');
+
+  // Rich Persona State
+  const [personaTone, setPersonaTone] = React.useState(() => localStorage.getItem('lumina_persona_tone') || 'technical');
+  const [personaLength, setPersonaLength] = React.useState(() => localStorage.getItem('lumina_persona_length') || 'balanced');
+  const [personaCreativity, setPersonaCreativity] = React.useState(() => localStorage.getItem('lumina_persona_creativity') || 'balanced');
+
+  const handleTimezoneChange = (tz: string) => {
+    setTimezone(tz);
+    localStorage.setItem('lumina_profile_timezone', tz);
+  };
+
+  const handleLanguageToggle = (lang: string) => {
+    let next = [...preferredLanguages];
+    if (next.includes(lang)) {
+      next = next.filter(l => l !== lang);
+    } else {
+      next.push(lang);
+    }
+    setPreferredLanguages(next);
+    localStorage.setItem('lumina_profile_languages', JSON.stringify(next));
+  };
+
+  const handleInstructionsChange = (inst: string) => {
+    setCustomInstructions(inst);
+    localStorage.setItem('lumina_profile_instructions', inst);
+  };
+
+  const handleToneChange = (tone: string) => {
+    setPersonaTone(tone);
+    localStorage.setItem('lumina_persona_tone', tone);
+  };
+
+  const handleLengthChange = (length: string) => {
+    setPersonaLength(length);
+    localStorage.setItem('lumina_persona_length', length);
+  };
+
+  const handleCreativityChange = (creativity: string) => {
+    setPersonaCreativity(creativity);
+    localStorage.setItem('lumina_persona_creativity', creativity);
+  };
+
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+    <div className="w-full h-full flex">
       <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-      />
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        className="relative w-full max-w-3xl h-[520px] bg-white dark:bg-zinc-900 text-brand-primary dark:text-white rounded-3xl shadow-2xl overflow-hidden flex"
+        initial={{ opacity: 0, x: 24 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 24 }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+        className="relative w-full h-full bg-white dark:bg-zinc-900 text-brand-primary dark:text-white flex flex-col md:flex-row overflow-hidden"
       >
-        <div className="w-56 border-r border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-zinc-950/20 p-6 flex flex-col">
+        <div className="w-full md:w-56 border-b md:border-b-0 md:border-r border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-zinc-950/20 p-6 flex flex-col">
           <h2 className="text-xl font-display font-semibold mb-8">Settings</h2>
           <nav className="space-y-1 flex-1">
             {[
@@ -228,17 +266,6 @@ export function SettingsModal({
               </button>
             ))}
           </nav>
-          <div className="mt-auto">
-            <div className="flex items-center gap-3 p-2 bg-white dark:bg-zinc-800 rounded-2xl border border-gray-100 dark:border-white/10 shadow-sm">
-              <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-xs">
-                AR
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-semibold truncate">Abdur Ramiz</div>
-                <div className="text-[10px] text-gray-400 truncate uppercase">Pro</div>
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
@@ -463,11 +490,7 @@ export function SettingsModal({
                         </div>
                       )}
 
-                      {selectedProvider !== 'custom' && (
-                        <p className="text-[11.5px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 pl-1 py-1 pr-1 font-medium bg-emerald-500/[0.03] rounded-lg mt-1">
-                          <Check size={13} /> Active Preset: <span className="font-bold underline">{CLOUD_PROVIDERS.find(p => p.id === selectedProvider)?.label}</span> (Endpoint auto-filled)
-                        </p>
-                      )}
+
                     </div>
 
                     <div className="space-y-1.5">
@@ -523,25 +546,7 @@ export function SettingsModal({
                       </button>
                     </div>
 
-                    <div className="p-4 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/20 rounded-2xl">
-                      <div className="flex gap-3">
-                        <Sparkles size={16} className="text-blue-500 mt-0.5" />
-                        <p className="text-xs text-blue-800 dark:text-blue-300 leading-relaxed">
-                          {selectedProvider === 'custom'
-                            ? 'Use a custom endpoint to connect your own Lumina-compatible API or proxy server.'
-                            : `Connecting to ${CLOUD_PROVIDERS.find(p=>p.id===selectedProvider)?.label}. Paste your API key above and click Verify.`}
-                        </p>
-                      </div>
-                    </div>
 
-                    <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
-                      <div className="flex gap-3 text-blue-500">
-                        <Terminal size={16} className="shrink-0 mt-0.5" />
-                        <p className="text-[11px] leading-relaxed">
-                          The Llama Bridge settings have moved to their own <button onClick={() => setActiveSettingsTab('bridge')} className="underline font-semibold hover:text-blue-400">Bridge panel</button>.
-                        </p>
-                      </div>
-                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -776,7 +781,7 @@ export function SettingsModal({
                 <div>
                   <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Lumina Tools</h3>
                   <div className="space-y-4">
-                    <div className="p-4 bg-[var(--theme-accent)]/5 border border-[var(--theme-accent)]/10 rounded-2xl">
+                    <div style={{ display: 'none' }} className="p-4 bg-[var(--theme-accent)]/5 border border-[var(--theme-accent)]/10 rounded-2xl">
                       <div className="flex gap-3">
                         <Hammer size={18} className="text-[var(--theme-accent)] shrink-0" />
                         <div>
@@ -789,31 +794,31 @@ export function SettingsModal({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-12 w-full h-full">
                       {luminaTools.map(tool => (
                         <div
                           key={tool.id}
-                          className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-zinc-950 rounded-xl border border-gray-100 dark:border-white/5"
+                          className="flex flex-col justify-between p-5 bg-gray-50/50 dark:bg-zinc-950/40 rounded-2xl border border-gray-100/80 dark:border-white/5 hover:border-[var(--theme-accent)]/30 dark:hover:border-[var(--theme-accent)]/20 hover:bg-white dark:hover:bg-zinc-950/70 transition-all duration-300 shadow-sm hover:shadow-md h-[160px] relative group"
                         >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="p-1.5 rounded-lg bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]">
+                          <div className="flex items-start gap-4">
+                            <div className="p-3 rounded-xl bg-[var(--theme-accent)]/8 text-[var(--theme-accent)] dark:bg-[var(--theme-accent)]/10 shrink-0 group-hover:scale-105 transition-transform duration-300">
                               {tool.icon}
                             </div>
-                            <div className="text-left truncate">
-                              <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{tool.name}</div>
-                              <div className="text-[10px] text-gray-500 truncate max-w-[200px]">{tool.description}</div>
+                            <div className="text-left">
+                              <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">{tool.name}</div>
+                              <p className="text-xs text-gray-400 dark:text-zinc-400/80 leading-relaxed mt-1.5 line-clamp-2">{tool.description}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-gray-400 font-mono shrink-0">inbuilt</span>
+                          <div className="flex items-center justify-between border-t border-gray-100/50 dark:border-white/5 pt-3.5 mt-3 shrink-0">
+                            <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /><span className="text-[10px] text-gray-400 font-mono tracking-wider uppercase">Inbuilt Capability</span></div>
                             <button
                               onClick={() => {
                                 setLuminaTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
                                 showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
                               }}
-                              className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? 'bg-[var(--theme-accent)]' : 'bg-[var(--theme-hover-bg)]'}`}
+                              className={`w-11 h-6 rounded-full transition-all relative ${tool.enabled ? 'bg-[var(--theme-accent)]' : 'bg-gray-200 dark:bg-zinc-800'}`}
                             >
-                              <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? 'right-0.5' : 'left-0.5'}`} />
+                              <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-md ${tool.enabled ? 'right-1' : 'left-1'}`} />
                             </button>
                           </div>
                         </div>
@@ -829,7 +834,7 @@ export function SettingsModal({
                 <div>
                   <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Bridge Tools</h3>
                   <div className="space-y-4">
-                    <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                    <div style={{ display: 'none' }} className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
                       <div className="flex gap-3">
                         <Wrench size={18} className="text-blue-500 shrink-0" />
                         <div>
@@ -853,22 +858,36 @@ export function SettingsModal({
                         </button>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-12 w-full h-full">
                         {bridgeTools.map(tool => (
                           <div
                             key={tool.id}
-                            className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-zinc-950 rounded-xl border border-gray-100 dark:border-white/5"
+                            className="flex flex-col justify-between p-5 bg-gray-50/50 dark:bg-zinc-950/40 rounded-2xl border border-gray-100/80 dark:border-white/5 hover:border-[var(--theme-accent)]/30 dark:hover:border-[var(--theme-accent)]/20 hover:bg-white dark:hover:bg-zinc-950/70 transition-all duration-300 shadow-sm hover:shadow-md h-[160px] relative group"
                           >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
+                            <div className="flex items-start gap-4 min-w-0">
+                              <div className="p-3 rounded-xl bg-blue-500/8 text-blue-500 dark:bg-blue-500/10 shrink-0 group-hover:scale-105 transition-transform duration-300">
                                 {tool.icon}
                               </div>
-                              <div className="text-left truncate">
-                                <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{tool.name}</div>
-                                <div className="text-[10px] text-gray-500 truncate max-w-[200px]">{tool.description}</div>
+                              <div className="text-left min-w-0">
+                                <div className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{tool.name}</div>
+                                <p className="text-xs text-gray-400 dark:text-zinc-400/80 leading-relaxed mt-1.5 line-clamp-2">{tool.description || 'Bridge tool'}</p>
                               </div>
                             </div>
-                            <div className="text-[10px] text-gray-400 font-mono shrink-0 ml-2">bridge</div>
+                            <div className="flex items-center justify-between border-t border-gray-100/50 dark:border-white/5 pt-3.5 mt-3 shrink-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-1.5 h-1.5 rounded-full ${tool.enabled ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
+                                <span className="text-[10px] text-gray-400 font-mono tracking-wider uppercase">Bridge MCP</span>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setBridgeTools(prev => prev.map(t => t.id === tool.id ? { ...t, enabled: !t.enabled } : t));
+                                  showToast(`${tool.enabled ? 'Disabled' : 'Enabled'} ${tool.name}`);
+                                }}
+                                className={`w-11 h-6 rounded-full transition-all relative ${tool.enabled ? 'bg-[var(--theme-accent)]' : 'bg-gray-200 dark:bg-zinc-800'}`}
+                              >
+                                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-md ${tool.enabled ? 'right-1' : 'left-1'}`} />
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
