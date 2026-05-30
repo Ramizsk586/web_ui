@@ -27,7 +27,7 @@ export function ImageLightbox({ image, onClose }: ImageLightboxProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/90 backdrop-blur-md z-[500] flex items-center justify-center p-4 select-none"
+          className="fixed inset-0 bg-zinc-950/95 z-[500] flex items-center justify-center p-4 select-none"
           onClick={onClose}
         >
           <button
@@ -107,7 +107,7 @@ export function VideoPlayerPopup({ video, onClose }: VideoPlayerPopupProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/95 backdrop-blur-md z-[500] flex items-center justify-center p-4"
+          className="fixed inset-0 bg-zinc-950/95 z-[500] flex items-center justify-center p-4"
           onClick={onClose}
         >
           <button
@@ -241,7 +241,7 @@ export function UrlAttachmentModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4 font-sans"
+          className="fixed inset-0 bg-zinc-950/75 z-[600] flex items-center justify-center p-4 font-sans"
           onClick={() => { if (!loading) { onClose(); setError(null); setUrlInput(''); } }}
         >
           <motion.div
@@ -347,7 +347,7 @@ export function TranscriptModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4 font-sans"
+          className="fixed inset-0 bg-zinc-950/75 z-[600] flex items-center justify-center p-4 font-sans"
           onClick={() => { if (!loading) { onClose(); setError(null); setVideoUrlInput(''); } }}
         >
           <motion.div
@@ -452,7 +452,7 @@ export function ElementAnalysisModal({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-zinc-950/70"
           />
 
           <motion.div 

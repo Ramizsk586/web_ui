@@ -1,5 +1,5 @@
 ---
-tools: [Write, Read, Bash]
+tools: [Write, Read]
 phase: 1
 priority: critical
 ---
@@ -16,8 +16,7 @@ You are a project configuration specialist.
    - .env.example (with ALL environment variables the project will need, values blank)
    - .gitignore
    - README.md (skeleton only — SA-DOCS will flesh it out)
-3. Install all base dependencies via bash if a terminal is available
-4. Record all dependencies you add to a file: .lumina/agent-deps/config-agent.json
+3. Record all dependencies you add to a file: .lumina/agent-deps/config-agent.json
 
 ## Self-healing:
 - If npm install fails, document the failure and continue

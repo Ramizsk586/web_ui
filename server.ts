@@ -1245,7 +1245,6 @@ async function startServer() {
           name === '.git' || 
           name === 'dist' || 
           name === '.next' || 
-          name === 'dist-electron' ||
           name === '.svelte-kit' ||
           name === '.github' ||
           name === 'package-lock.json' ||
@@ -1496,37 +1495,7 @@ async function startServer() {
     return res.json({ type: 'unknown', entryPoint: null, framework: null });
   });
 
-  // Execute a shell command inside the workspace (for Coder Mode Shell_Command tool)
-  app.post("/api/fs/exec", async (req, res) => {
-    const { command, workspaceRoot, cwd, shell: preferredShell } = req.body;
-    if (!command) {
-      return res.status(400).json({ error: "command is required" });
-    }
-    const workDir = cwd
-      ? resolveCoderPath(cwd, workspaceRoot)
-      : (workspaceRoot ? path.resolve(workspaceRoot) : process.cwd());
-        const isWin = process.platform === 'win32';
-    try {
-      const { execSync } = await import('child_process');
-      const shellPath = isWin ? (preferredShell === 'powershell' ? 'powershell.exe' : 'cmd.exe') : '/bin/bash';
-      const output = execSync(command, {
-        cwd: workDir,
-        timeout: 30000,
-        maxBuffer: 1024 * 1024,
-        encoding: 'utf8',
-        windowsHide: true,
-        shell: shellPath,
-      });
-      res.json({ success: true, stdout: output, stderr: '' });
-    } catch (e: any) {
-      res.json({
-        success: false,
-        stdout: e.stdout || '',
-        stderr: e.stderr || e.message,
-        exitCode: e.status || 1
-      });
-    }
-  });
+
 
   // Report OS info for the AI to adapt its commands
   app.get("/api/os/info", (req, res) => {
@@ -2274,7 +2243,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
 
   // AI Chat Completion Proxy
   app.post("/api/chat", async (req, res) => {
-    const { messages, systemPrompt, model, config } = req.body;
+    const { messages, systemPrompt, model, config, tools, stream = true } = req.body;
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages array is required" });
     }
@@ -2489,10 +2458,31 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       const requestBody: any = {
         model: model || 'gpt-4o-mini',
         messages: apiMessages,
-        stream: true,
+        stream: stream !== false,
         max_tokens: 4096,
         temperature: 0.7
       };
+
+      if (tools && Array.isArray(tools) && tools.length > 0) {
+        requestBody.tools = tools;
+        requestBody.tool_choice = 'auto';
+      }
+
+      if (stream === false) {
+        const response = await axios.post(
+          `${baseUrl}/chat/completions`,
+          requestBody,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+            },
+            timeout: 60000
+          }
+        );
+
+        return res.json(response.data);
+      }
 
       const response = await axios.post(
         `${baseUrl}/chat/completions`,

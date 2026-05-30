@@ -67,7 +67,7 @@ function parseAnsi(text: string): React.ReactNode[] {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function TerminalConsole({
+function TerminalConsole({
   apiBase = '',           // e.g. 'http://localhost:3001' or '' for same-origin
   onToast,
   triggerRefresh,
@@ -500,3 +500,5 @@ export default function TerminalConsole({
     </div>
   );
 }
+
+export default React.memo(TerminalConsole);

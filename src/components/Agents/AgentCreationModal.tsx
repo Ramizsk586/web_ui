@@ -29,7 +29,18 @@ const PROVIDERS = [
   { id: 'anthropic', label: 'Anthropic Claude' },
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'groq', label: 'Groq Llama / Mixtral' },
+  { id: 'opencode', label: 'OpenCode Zen' },
+  { id: 'openprovider', label: 'OpenProvider' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'together', label: 'Together AI' },
+  { id: 'mistral', label: 'Mistral' },
+  { id: 'cohere', label: 'Cohere' },
+  { id: 'sarvamai', label: 'Sarvam AI' },
+  { id: 'kilo', label: 'Kilo AI' },
+  { id: 'cline', label: 'Cline' },
+  { id: 'nvidia_nim', label: 'NVIDIA NIM' },
   { id: 'ollama', label: 'Ollama (Local)' },
+  { id: 'ollama_cloud', label: 'Ollama Cloud' },
   { id: 'lm-studio', label: 'LM Studio (Local)' },
   { id: 'custom-openai-compatible', label: 'Custom OpenAI-Compatible' }
 ];
@@ -67,11 +78,63 @@ const PROVIDER_MODELS: Record<string, { label: string; value: string }[]> = {
     { label: 'Mixtral 8x7b (Groq)', value: 'mixtral-8x7b-32768' },
     { label: 'Custom Model ID...', value: 'custom' }
   ],
+  'opencode': [
+    { label: 'OpenCode Zen (v1)', value: 'opencode-zen-v1' },
+    { label: 'Big Pickle Coder', value: 'big-pickle-coder' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'openprovider': [
+    { label: 'OpenProvider Standard', value: 'gpt-4o' },
+    { label: 'OpenProvider Smart', value: 'claude-3-5-sonnet' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'openrouter': [
+    { label: 'Llama 3.1 405B Instruct', value: 'meta-llama/llama-3.1-405b' },
+    { label: 'Claude 3.5 Sonnet', value: 'anthropic/claude-3.5-sonnet' },
+    { label: 'Gemini Pro 1.5', value: 'google/gemini-pro-1.5' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'together': [
+    { label: 'Llama 3.1 70B Instruct Turbo', value: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo' },
+    { label: 'Mixtral 8x7B Instruct v0.1', value: 'mistralai/Mixtral-8x7B-Instruct-v0.1' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'mistral': [
+    { label: 'Mistral Large Latest', value: 'mistral-large-latest' },
+    { label: 'Mistral Medium Latest', value: 'mistral-medium-latest' },
+    { label: 'Mistral Small Latest', value: 'mistral-small-latest' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'cohere': [
+    { label: 'Command R+', value: 'command-r-plus' },
+    { label: 'Command R', value: 'command-r' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'sarvamai': [
+    { label: 'Sarvam 1', value: 'sarvam-1' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'kilo': [
+    { label: 'Kilo Model v1', value: 'kilo-model-v1' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'cline': [
+    { label: 'Cline Agent v1', value: 'cline-agent-v1' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'nvidia_nim': [
+    { label: 'Llama 3 70B Instruct', value: 'meta/llama3-70b-instruct' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
   'ollama': [
     { label: 'Llama 3.3 (Local)', value: 'llama3.3' },
     { label: 'Mistral (Local)', value: 'mistral' },
     { label: 'Phi-3 (Local)', value: 'phi3' },
     { label: 'Qwen 2.5 Coder (Local)', value: 'qwen2.5-coder' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'ollama_cloud': [
+    { label: 'Llama 3 (Cloud)', value: 'llama3' },
     { label: 'Custom Model ID...', value: 'custom' }
   ],
   'lm-studio': [
@@ -91,6 +154,17 @@ const editModelProvider = (modelVal: string, providerVal?: string): string => {
   if (modelLower.startsWith('gpt') || modelLower.startsWith('o1')) return 'openai';
   if (modelLower.includes('deepseek')) return 'deepseek';
   if (modelLower.includes('llama') || modelLower.includes('groq')) return 'groq';
+  if (modelLower.includes('opencode')) return 'opencode';
+  if (modelLower.includes('openprovider')) return 'openprovider';
+  if (modelLower.includes('openrouter')) return 'openrouter';
+  if (modelLower.includes('together')) return 'together';
+  if (modelLower.includes('mistral')) return 'mistral';
+  if (modelLower.includes('cohere')) return 'cohere';
+  if (modelLower.includes('sarvam')) return 'sarvamai';
+  if (modelLower.includes('kilo')) return 'kilo';
+  if (modelLower.includes('cline')) return 'cline';
+  if (modelLower.includes('nvidia')) return 'nvidia_nim';
+  if (modelLower.includes('ollama_cloud')) return 'ollama_cloud';
   if (modelLower.includes('ollama')) return 'ollama';
   if (modelLower.includes('lm-studio')) return 'lm-studio';
   return 'google-gemini';
@@ -586,9 +660,20 @@ Output ONLY valid JSON with no markdown, no backticks, no explanation. The JSON 
                               if (nextProv === 'google-gemini') setBaseUrl('https://generativelanguage.googleapis.com/v1beta');
                               else if (nextProv === 'openai') setBaseUrl('https://api.openai.com/v1');
                               else if (nextProv === 'anthropic') setBaseUrl('https://api.anthropic.com/v1');
-                              else if (nextProv === 'deepseek') setBaseUrl('https://api.deepseek.com/v1');
+                              else if (nextProv === 'deepseek') setBaseUrl('https://api.deepseek.com');
                               else if (nextProv === 'groq') setBaseUrl('https://api.groq.com/openai/v1');
+                              else if (nextProv === 'opencode') setBaseUrl('https://opencode.ai/zen/v1');
+                              else if (nextProv === 'openprovider') setBaseUrl('https://openprovider.mimika.in/v1');
+                              else if (nextProv === 'openrouter') setBaseUrl('https://openrouter.ai/api/v1');
+                              else if (nextProv === 'together') setBaseUrl('https://api.together.xyz/v1');
+                              else if (nextProv === 'mistral') setBaseUrl('https://api.mistral.ai/v1');
+                              else if (nextProv === 'cohere') setBaseUrl('https://api.cohere.com/compatibility/v1');
+                              else if (nextProv === 'sarvamai') setBaseUrl('https://api.sarvam.ai/v1');
+                              else if (nextProv === 'kilo') setBaseUrl('https://api.kilo.ai/api/gateway');
+                              else if (nextProv === 'cline') setBaseUrl('https://api.cline.bot');
+                              else if (nextProv === 'nvidia_nim') setBaseUrl('https://integrate.api.nvidia.com/v1');
                               else if (nextProv === 'ollama') setBaseUrl('http://localhost:11434/v1');
+                              else if (nextProv === 'ollama_cloud') setBaseUrl('https://ollama.com');
                               else if (nextProv === 'lm-studio') setBaseUrl('http://localhost:1234/v1');
                               else setBaseUrl('');
                             }}
@@ -1054,9 +1139,20 @@ Output ONLY valid JSON with no markdown, no backticks, no explanation. The JSON 
                             if (nextProv === 'google-gemini') setBaseUrl('https://generativelanguage.googleapis.com/v1beta');
                             else if (nextProv === 'openai') setBaseUrl('https://api.openai.com/v1');
                             else if (nextProv === 'anthropic') setBaseUrl('https://api.anthropic.com/v1');
-                            else if (nextProv === 'deepseek') setBaseUrl('https://api.deepseek.com/v1');
+                            else if (nextProv === 'deepseek') setBaseUrl('https://api.deepseek.com');
                             else if (nextProv === 'groq') setBaseUrl('https://api.groq.com/openai/v1');
+                            else if (nextProv === 'opencode') setBaseUrl('https://opencode.ai/zen/v1');
+                            else if (nextProv === 'openprovider') setBaseUrl('https://openprovider.mimika.in/v1');
+                            else if (nextProv === 'openrouter') setBaseUrl('https://openrouter.ai/api/v1');
+                            else if (nextProv === 'together') setBaseUrl('https://api.together.xyz/v1');
+                            else if (nextProv === 'mistral') setBaseUrl('https://api.mistral.ai/v1');
+                            else if (nextProv === 'cohere') setBaseUrl('https://api.cohere.com/compatibility/v1');
+                            else if (nextProv === 'sarvamai') setBaseUrl('https://api.sarvam.ai/v1');
+                            else if (nextProv === 'kilo') setBaseUrl('https://api.kilo.ai/api/gateway');
+                            else if (nextProv === 'cline') setBaseUrl('https://api.cline.bot');
+                            else if (nextProv === 'nvidia_nim') setBaseUrl('https://integrate.api.nvidia.com/v1');
                             else if (nextProv === 'ollama') setBaseUrl('http://localhost:11434/v1');
+                            else if (nextProv === 'ollama_cloud') setBaseUrl('https://ollama.com');
                             else if (nextProv === 'lm-studio') setBaseUrl('http://localhost:1234/v1');
                             else setBaseUrl('');
                           }}

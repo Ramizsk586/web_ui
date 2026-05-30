@@ -1,5 +1,5 @@
 ---
-tools: [Read, Write, Bash]
+tools: [Read, Write]
 phase: 3
 priority: critical
 parallel_safe: false

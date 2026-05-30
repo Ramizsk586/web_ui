@@ -195,7 +195,7 @@ const cleanPathForWorkspace = (path: string): string => {
 };
 
 // ==================== CORE COMPONENT ====================
-export const FileTreeCanvas: React.FC<FileTreeCanvasProps> = ({ code, isStreaming }) => {
+const FileTreeCanvasComponent: React.FC<FileTreeCanvasProps> = ({ code, isStreaming }) => {
   const [activeTab, setActiveTab] = useState<'visual' | 'code'>('visual');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -878,3 +878,5 @@ export const FileTreeCanvas: React.FC<FileTreeCanvasProps> = ({ code, isStreamin
     </div>
   );
 };
+
+export const FileTreeCanvas = React.memo(FileTreeCanvasComponent);

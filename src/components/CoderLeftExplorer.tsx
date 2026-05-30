@@ -5,6 +5,7 @@ import {
   Code, Hash, Zap, FileCode, Braces, BookOpen, Edit3, ChevronRight, ChevronDown, 
   FilePlus, FolderPlus, Copy, FolderTree, X, Search
 } from 'lucide-react';
+import { openFolderDialog } from '../desktopBridge';
 
 // ==================== TYPES ====================
 export interface TreeNode {
@@ -341,7 +342,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
 });
 
 // ==================== CORE CODER EXPLORER PANEL ====================
-export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
+const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
   workspaceRefreshKey,
   triggerWorkspaceRefresh,
   showToast: parentShowToast,
@@ -1039,18 +1040,13 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
   };
 
   const handleOpenFolder = useCallback(async () => {
-    const electronAPI = (window as any).__electronAPI;
-    if (electronAPI?.openFolderDialog) {
-      const folderPath = await electronAPI.openFolderDialog();
-      if (folderPath) {
-        onWorkspaceRootPathChange(folderPath);
-        setExpandedPaths(new Set());
-        setSelectedId(null);
-        addToast(`Opened folder: ${folderPath}`, "success");
-        triggerWorkspaceRefresh();
-      }
-    } else {
-      addToast("Open Folder is only available in the desktop app", "info");
+    const folderPath = await openFolderDialog();
+    if (folderPath) {
+      onWorkspaceRootPathChange(folderPath);
+      setExpandedPaths(new Set());
+      setSelectedId(null);
+      addToast(`Opened folder: ${folderPath}`, "success");
+      triggerWorkspaceRefresh();
     }
   }, [addToast, triggerWorkspaceRefresh, onWorkspaceRootPathChange]);
 
@@ -1274,7 +1270,7 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
 
       {/* PORTALS LAYER - INLINE DELETE MODAL BANNER confirmation */}
       {pendingDeleteNode && createPortal(
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[250] flex items-center justify-center p-4 animate-fade-in select-text">
+        <div className="fixed inset-0 bg-zinc-950/75 z-[250] flex items-center justify-center p-4 animate-fade-in select-text">
           <div className="bg-[#1B1A18] border border-[#2A2925] text-[#AD9F91] p-4 w-full max-w-xs flex flex-col gap-4 shadow-2xl rounded-md">
             <div className="flex flex-col gap-2">
               <h4 className="text-[13px] font-bold text-[#E05A47] flex items-center gap-1.5">
@@ -1417,3 +1413,5 @@ export const CoderLeftExplorer: React.FC<CoderLeftExplorerProps> = ({
     </div>
   );
 };
+
+export const CoderLeftExplorer = React.memo(CoderLeftExplorerComponent);

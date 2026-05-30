@@ -54,7 +54,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.4 }}
-        className="w-full max-w-md bg-zinc-900/60 backdrop-blur-2xl border border-zinc-800/80 rounded-3xl p-8 shadow-2xl relative z-10 flex flex-col items-center text-center"
+        className="w-full max-w-md bg-zinc-900/95 border border-zinc-800/80 rounded-3xl p-8 shadow-2xl relative z-10 flex flex-col items-center text-center"
       >
         {/* Logo */}
         <div className="w-14 h-14 rounded-2xl !bg-[#ffffff] !text-[#09090b] flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(255,255,255,0.15)]">

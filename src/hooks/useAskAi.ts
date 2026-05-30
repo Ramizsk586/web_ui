@@ -148,9 +148,13 @@ export function useAskAi({
     }, 200);
   };
 
-  const handleSelectAnswer = (questionId: string, value: any, autoAdvance: boolean) => {
+  const handleSelectAnswer = (questionId: string, value: any, autoAdvance?: boolean) => {
     setAskAiAnswers(prev => ({ ...prev, [questionId]: value }));
-    if (autoAdvance) {
+    const question = askAiQuestions.find(q => q.id === questionId);
+    const shouldAdvance = autoAdvance !== undefined 
+      ? autoAdvance 
+      : (question?.type === 'single_choice' || question?.type === 'scale' || question?.type === 'confirm');
+    if (shouldAdvance) {
       handleNextQuestion();
     }
   };

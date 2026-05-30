@@ -42,9 +42,38 @@ export default defineConfig(({mode}) => {
         }
       })
     ],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('react') || id.includes('react-dom') || id.includes('motion')) {
+                return 'react-core';
+              }
+              if (id.includes('lucide-react')) {
+                return 'lucide-icons';
+              }
+              if (id.includes('@monaco-editor') || id.includes('monaco-editor')) {
+                return 'monaco-suite';
+              }
+              if (id.includes('react-syntax-highlighter') || id.includes('prismjs')) {
+                return 'syntax-highlighter-pkg';
+              }
+              if (id.includes('tesseract.js')) {
+                return 'ocr-tesseract-engine';
+              }
+              if (id.includes('react-markdown') || id.includes('remark-') || id.includes('turndown') || id.includes('cheerio')) {
+                return 'content-parsers-suite';
+              }
+              return 'vendor-libs';
+            }
+          }
+        }
+      },
+      chunkSizeWarningLimit: 2000
     },
+
+
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

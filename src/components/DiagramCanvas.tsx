@@ -114,7 +114,7 @@ function parseDiagramText(text: string): { nodes: DiagramNode[]; edges: DiagramE
   return { nodes, edges };
 }
 
-export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({ code }) => {
+const DiagramCanvasComponent: React.FC<DiagramCanvasProps> = ({ code }) => {
   const [activeStepIdx, setActiveStepIdx] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -460,3 +460,5 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({ code }) => {
     </div>
   );
 };
+
+export const DiagramCanvas = React.memo(DiagramCanvasComponent);

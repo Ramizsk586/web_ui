@@ -68,6 +68,7 @@ export interface AgentMessage {
   toolCallId?: string;
   toolName?: string;
   isStreaming?: boolean;
+  toolCalls?: any[]; // For render animations
 }
 
 export interface AgentCreationDraft {

@@ -1,5 +1,5 @@
 ---
-tools: [Write, Bash, FileCreate]
+tools: [Write, FileCreate]
 phase: 1
 priority: critical
 ---

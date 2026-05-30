@@ -51,7 +51,7 @@ const NOTE_COLORS = [
   '#DDD6FE'  // soft violet
 ];
 
-export default function Whiteboard() {
+function Whiteboard() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1070,3 +1070,5 @@ export default function Whiteboard() {
     </div>
   );
 }
+
+export default React.memo(Whiteboard);

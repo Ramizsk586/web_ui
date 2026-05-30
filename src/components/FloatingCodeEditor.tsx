@@ -99,7 +99,7 @@ const getFileExt = (name: string): string => {
   return '';
 };
 
-export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
+const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
   filePath,
   onClose,
   showToast,
@@ -858,3 +858,5 @@ export const FloatingCodeEditor: React.FC<FloatingCodeEditorProps> = ({
     </div>
   );
 };
+
+export const FloatingCodeEditor = React.memo(FloatingCodeEditorComponent);

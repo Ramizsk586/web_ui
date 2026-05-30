@@ -336,7 +336,7 @@ export function VideoTranscriptStudio({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 bg-zinc-950/90 backdrop-blur-md z-[550] flex items-center justify-center p-3 select-none">
+      <div className="fixed inset-0 bg-zinc-950/95 z-[550] flex items-center justify-center p-3 select-none">
         
         {/* Main Immersive Window */}
         <motion.div

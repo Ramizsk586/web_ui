@@ -21,7 +21,7 @@ export function AgentSidebarSection({
   onDeleteAgent,
   onEditAgent,
 }: AgentSidebarSectionProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
     <div className="border-b border-zinc-900/60 pb-3 mb-3">

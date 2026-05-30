@@ -79,3 +79,5 @@ export const SLASH_COMMANDS = [
   { id: 'coder', name: 'coder', desc: 'Activate autonomous Software Engineering Agent mode' },
   { id: 'coder_off', name: 'coder off', desc: 'Deactivate autonomous Software Engineering Agent mode' }
 ];
+
+export * from './voiceLanguages';

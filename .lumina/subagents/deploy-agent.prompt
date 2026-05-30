@@ -1,5 +1,5 @@
 ---
-tools: [Read, Write, Bash]
+tools: [Read, Write]
 phase: 5
 priority: medium
 depends_on: [SA-INTEGRATION, SA-TESTS]

@@ -61,7 +61,7 @@ interface CoderWorkspacePanelProps {
   onClose?: () => void;
 }
 
-export const CoderWorkspacePanel: React.FC<CoderWorkspacePanelProps> = ({
+const CoderWorkspacePanelComponent: React.FC<CoderWorkspacePanelProps> = ({
   workspaceRefreshKey,
   triggerWorkspaceRefresh,
   showToast,
@@ -1256,3 +1256,5 @@ I would like to change this element to:
     </div>
   );
 };
+
+export const CoderWorkspacePanel = React.memo(CoderWorkspacePanelComponent);

@@ -63,7 +63,7 @@ export interface Tool {
   name: string;
   description: string;
   enabled: boolean;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   parameters?: any;
 }
 
