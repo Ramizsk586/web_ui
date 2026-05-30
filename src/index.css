@@ -68,7 +68,7 @@
     @apply font-display tracking-tight;
   }
   
-  /* High-fidelity interaction styles for standard elements in desktop webview environments */
+  /* High-fidelity interaction styles for standard elements in Electron/Webview environments */
   button, [role="button"], a, select, summary {
     cursor: pointer !important;
     -webkit-app-region: no-drag !important;

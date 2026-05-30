@@ -5,7 +5,6 @@ import {
   Code, Hash, Zap, FileCode, Braces, BookOpen, Edit3, ChevronRight, ChevronDown, 
   FilePlus, FolderPlus, Copy, FolderTree, X, Search
 } from 'lucide-react';
-import { openFolderDialog } from '../desktopBridge';
 
 // ==================== TYPES ====================
 export interface TreeNode {
@@ -1040,13 +1039,18 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
   };
 
   const handleOpenFolder = useCallback(async () => {
-    const folderPath = await openFolderDialog();
-    if (folderPath) {
-      onWorkspaceRootPathChange(folderPath);
-      setExpandedPaths(new Set());
-      setSelectedId(null);
-      addToast(`Opened folder: ${folderPath}`, "success");
-      triggerWorkspaceRefresh();
+    const electronAPI = (window as any).__electronAPI;
+    if (electronAPI?.openFolderDialog) {
+      const folderPath = await electronAPI.openFolderDialog();
+      if (folderPath) {
+        onWorkspaceRootPathChange(folderPath);
+        setExpandedPaths(new Set());
+        setSelectedId(null);
+        addToast(`Opened folder: ${folderPath}`, "success");
+        triggerWorkspaceRefresh();
+      }
+    } else {
+      addToast("Open Folder is only available in the desktop app", "info");
     }
   }, [addToast, triggerWorkspaceRefresh, onWorkspaceRootPathChange]);
 
