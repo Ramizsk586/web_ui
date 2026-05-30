@@ -2581,8 +2581,8 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n🚀 Proxy server ready at http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, "127.0.0.1", () => {
+    console.log(`\n🚀 Proxy server ready at http://127.0.0.1:${PORT}`);
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);
