@@ -297,6 +297,7 @@ export function useAskAi({
     handleNextQuestion,
     handleSelectAnswer,
     handleDotClick,
-    handleFinishQuestions
+    handleFinishQuestions,
+    createNewChat
   };
 }

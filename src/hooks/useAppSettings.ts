@@ -146,6 +146,10 @@ export function useAppSettings({
   const [useTurboQuant, setUseTurboQuant] = useState(() => {
     return localStorage.getItem('lumina_turboquant') === 'true';
   });
+  const [modelSelectorMode, setModelSelectorMode] = useState<'popup' | 'drawer'>(() => {
+    const saved = localStorage.getItem('lumina_model_selector_mode');
+    return saved === 'drawer' ? 'drawer' : 'popup';
+  });
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'lumina_tools' | 'project' | 'skills' | 'style'>('main');
@@ -365,6 +369,7 @@ export function useAppSettings({
     useBubbles, setUseBubbles,
     autoHideTopBar, setAutoHideTopBar,
     useTurboQuant, setUseTurboQuant,
+    modelSelectorMode, setModelSelectorMode,
     activeSettingsTab, setActiveSettingsTab,
     activePlusSubMenu, setActivePlusSubMenu,
     mcpMode, setMcpMode,

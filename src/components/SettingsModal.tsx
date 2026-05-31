@@ -37,6 +37,8 @@ interface SettingsModalProps {
   setIsCompactSidebar: (val: boolean) => void;
   autoHideTopBar: boolean;
   setAutoHideTopBar: (val: boolean) => void;
+  modelSelectorMode: 'popup' | 'drawer';
+  setModelSelectorMode: (mode: 'popup' | 'drawer') => void;
   useBridgeTools: boolean;
   setUseBridgeTools: (val: boolean) => void;
   useTurboQuant: boolean;
@@ -131,6 +133,8 @@ export function SettingsModal({
   setIsCompactSidebar,
   autoHideTopBar,
   setAutoHideTopBar,
+  modelSelectorMode,
+  setModelSelectorMode,
   useBridgeTools,
   setUseBridgeTools,
   useTurboQuant,
@@ -352,6 +356,33 @@ export function SettingsModal({
                            className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
                          />
                        </button>
+                     </div>
+                     <div className="flex items-center justify-between gap-4">
+                       <div>
+                         <div className="font-medium text-sm">Model Selector</div>
+                         <div className="text-xs text-gray-400">Choose popup menu or right slide panel</div>
+                       </div>
+                       <div className="flex p-1 rounded-xl bg-gray-100 dark:bg-zinc-950 border border-gray-100 dark:border-white/10 shrink-0">
+                         {[
+                           { id: 'popup' as const, label: 'Popup' },
+                           { id: 'drawer' as const, label: 'Slide' }
+                         ].map(option => (
+                           <button
+                             key={option.id}
+                             onClick={() => {
+                               setModelSelectorMode(option.id);
+                               localStorage.setItem('lumina_model_selector_mode', option.id);
+                             }}
+                             className={`h-8 px-3 rounded-lg text-xs font-semibold transition-colors ${
+                               modelSelectorMode === option.id
+                                 ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm'
+                                 : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+                             }`}
+                           >
+                             {option.label}
+                           </button>
+                         ))}
+                       </div>
                      </div>
                   </div>
                 </div>

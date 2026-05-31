@@ -30,6 +30,25 @@ export function useLlamaBridge({
   const [isMcpConnected, setIsMcpConnected] = useState(false);
   const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
 
+  const normalizeTools = (tools: ToolDefinition[] = []) => tools.map((tool) => {
+    const parameters = tool.function?.parameters && typeof tool.function.parameters === 'object'
+      ? tool.function.parameters
+      : { type: 'object', properties: {}, required: [] };
+
+    return {
+      type: 'function' as const,
+      function: {
+        name: tool.function.name,
+        description: tool.function.description || tool.function.name,
+        parameters: {
+          type: parameters.type || 'object',
+          properties: parameters.properties || {},
+          required: Array.isArray(parameters.required) ? parameters.required : []
+        }
+      }
+    };
+  });
+
   const handleTestLlamaConnection = async () => {
     setAiVerificationState('verifying');
     try {
@@ -111,6 +130,7 @@ export function useLlamaBridge({
     const useBridge = useBridgeTools && llamaBridgeUrl;
     const baseUrl = useBridge ? llamaBridgeUrl.replace(/\/+$/, '') : serverUrl.replace(/\/+$/, '');
     const key = useBridge ? llamaBridgeApiKey : apiKey;
+    const requestTools = normalizeTools(tools);
 
     if (useBridge) {
       const response = await fetch('/api/bridge/chat', {
@@ -121,7 +141,7 @@ export function useLlamaBridge({
           apiKey: key,
           model: selectedLlamaModel,
           messages: messagesPrompt,
-          tools,
+          tools: requestTools,
           stream: false
         }),
         signal
@@ -165,7 +185,7 @@ export function useLlamaBridge({
           baseUrl,
           apiKey: key,
         },
-        tools,
+        tools: requestTools,
         stream: false,
       }),
       signal,

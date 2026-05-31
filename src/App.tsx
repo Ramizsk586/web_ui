@@ -20,7 +20,13 @@ export default function App() {
 
   // Shared declarations referenced across hooks
   const [availableModels, setAvailableModels] = useState<any[]>([]);
-  const [selectedModel, setSelectedModel] = useState('openprovider/auto-free');
+  const [selectedModel, setSelectedModel] = useState(() => {
+    try {
+      return localStorage.getItem('lumina_selected_model') || 'openprovider/auto-free';
+    } catch {
+      return 'openprovider/auto-free';
+    }
+  });
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
 
   const showToast = useCallback((message: string) => {
@@ -39,7 +45,13 @@ export default function App() {
   });
 
   const { serverUrl, apiKey, selectedProvider } = appSettings;
-  const activeModelId = selectedProvider === 'openprovider' ? 'openprovider/auto-free' : selectedModel;
+  const activeModelId = selectedModel || 'openprovider/auto-free';
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('lumina_selected_model', selectedModel);
+    } catch {}
+  }, [selectedModel]);
 
   // 2. Llama Bridge Hook
   const llamaBridge = useLlamaBridge({

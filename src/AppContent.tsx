@@ -277,6 +277,7 @@ export default function AppContent({
     useBubbles, setUseBubbles,
     autoHideTopBar, setAutoHideTopBar,
     useTurboQuant, setUseTurboQuant,
+    modelSelectorMode, setModelSelectorMode,
     activeSettingsTab, setActiveSettingsTab,
     activePlusSubMenu, setActivePlusSubMenu,
     mcpMode, setMcpMode,
@@ -485,7 +486,6 @@ export default function AppContent({
   // React Refs
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<any>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const menuContentRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
@@ -506,6 +506,7 @@ export default function AppContent({
   const [simLatency, setSimLatency] = useState(120);
   const [activeDevTab, setActiveDevTab] = useState<'status' | 'console' | 'perf' | 'storage' | 'flags'>('status');
   const [devLogs, setDevLogs] = useState<any[]>([]);
+  const [isModelDrawerOpen, setIsModelDrawerOpen] = useState(false);
 
   // Computed variables
   const messages = useMemo(() => {
@@ -521,6 +522,19 @@ export default function AppContent({
 
   const setActiveModelId = (id: string) => {
     setSelectedModel(id);
+  };
+
+  const filteredModelList = useMemo(() => {
+    const query = modelSearchQuery.trim().toLowerCase();
+    if (!query) return activeModelList;
+    return activeModelList.filter(model => model.name.toLowerCase().includes(query) || model.id.toLowerCase().includes(query));
+  }, [activeModelList, modelSearchQuery]);
+
+  const handleModelSelect = (id: string) => {
+    setActiveModelId(id);
+    setIsModelDropdownOpen(false);
+    setIsModelDrawerOpen(false);
+    setModelSearchQuery('');
   };
 
   // Smart Popups
@@ -1051,10 +1065,46 @@ const startCoderPreview = useCallback(async () => {
       inputRef.current.style.height = 'auto';
     }
 
+    const thinkingId = (Date.now() + 1).toString();
+    const isCoderPlanning = isCoderMode || content.startsWith('/coder');
+    const thinkingMessage: Message = {
+      id: thinkingId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      thinking: isCoderPlanning ? 'Generating engineering TODOs...' : (isWebSearchEnabled ? 'Searching the web...' : 'Thinking...'),
+      isSearching: isWebSearchEnabled,
+      isStreaming: true,
+      toolCalls: [
+        {
+          id: 'thinking-node',
+          label: isCoderPlanning
+            ? 'Coder planner - generating TODOs...'
+            : (isWebSearchEnabled ? 'Searching the web...' : `${persona.name} - thinking...`),
+          type: 'ai',
+          status: 'active',
+          icon: isCoderPlanning ? <LuminaToolCallingAnimation /> : (isWebSearchEnabled ? <Globe size={14} /> : <Sparkles size={14} />)
+        }
+      ]
+    };
+
+    setTypingMessageId(thinkingId);
+    setChats(prev => prev.map(chat => {
+      if (chat.id === chatId) {
+        return {
+          ...chat,
+          messages: [...chat.messages, thinkingMessage],
+          updatedAt: new Date(),
+        };
+      }
+      return chat;
+    }));
+
     const isSlash = content.startsWith('/');
     if (isSlash || isCoderMode) {
       setIsGeneratingTodos(true);
       setShowTodoPanel(true);
+      setTodoCollapsed(false);
       
       const firstSpaceIdx = content.indexOf(' ');
       const cmdName = firstSpaceIdx !== -1 ? content.substring(1, firstSpaceIdx).toLowerCase() : content.substring(1).toLowerCase();
@@ -1098,6 +1148,37 @@ const startCoderPreview = useCallback(async () => {
         ]);
         setIsGeneratingTodos(false);
       } else if (isCoderMode || cmdName === 'coder') {
+        const queryPreview = (cmdQuery || content).substring(0, 42);
+        setCoderTodos([
+          { id: 'planning-1', text: `Understanding request: "${queryPreview}${(cmdQuery || content).length > 42 ? '...' : ''}"`, status: 'in_progress' },
+          { id: 'planning-2', text: 'Inspecting workspace intent and likely files', status: 'pending' },
+          { id: 'planning-3', text: 'Preparing executable engineering checklist', status: 'pending' }
+        ]);
+        setChats(prev => prev.map(chat => chat.id === chatId ? {
+          ...chat,
+          messages: chat.messages.map(m => m.id === thinkingId ? {
+            ...m,
+            thinking: 'Generating engineering TODOs...',
+            toolCalls: [
+              {
+                id: 'coder-plan-node',
+                label: 'Generating coder TODO runbook',
+                type: 'tool',
+                status: 'active',
+                toolName: 'Todowrite',
+                icon: <LuminaToolCallingAnimation />,
+                resultSummary: 'planning workspace steps'
+              },
+              {
+                id: 'coder-plan-ai',
+                label: `${persona.name} - preparing agent path`,
+                type: 'ai',
+                status: 'active',
+                icon: <Sparkles size={14} />
+              }
+            ]
+          } : m)
+        } : chat));
         try {
           const planPromptMessage = [
             {
@@ -1121,6 +1202,31 @@ const startCoderPreview = useCallback(async () => {
                 status: idx === 0 ? 'in_progress' : 'pending'
               }));
               setCoderTodos(mapped);
+              setChats(prev => prev.map(chat => chat.id === chatId ? {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? {
+                  ...m,
+                  thinking: 'Coder TODOs ready. Starting agent...',
+                  toolCalls: [
+                    {
+                      id: 'coder-plan-node',
+                      label: 'Coder TODO runbook generated',
+                      type: 'tool',
+                      status: 'complete',
+                      toolName: 'Todowrite',
+                      icon: <Check size={14} />,
+                      resultSummary: `${mapped.length} tasks prepared`
+                    },
+                    {
+                      id: 'coder-plan-ai',
+                      label: `${persona.name} - starting tool execution`,
+                      type: 'ai',
+                      status: 'active',
+                      icon: <LuminaToolCallingAnimation />
+                    }
+                  ]
+                } : m)
+              } : chat));
             } else {
               throw new Error("Invalid structure");
             }
@@ -1134,6 +1240,31 @@ const startCoderPreview = useCallback(async () => {
             { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' },
             { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' }
           ]);
+          setChats(prev => prev.map(chat => chat.id === chatId ? {
+            ...chat,
+            messages: chat.messages.map(m => m.id === thinkingId ? {
+              ...m,
+              thinking: 'Using fallback TODOs. Starting agent...',
+              toolCalls: [
+                {
+                  id: 'coder-plan-node',
+                  label: 'Fallback coder TODO runbook prepared',
+                  type: 'tool',
+                  status: 'complete',
+                  toolName: 'Todowrite',
+                  icon: <Check size={14} />,
+                  resultSummary: '3 tasks prepared'
+                },
+                {
+                  id: 'coder-plan-ai',
+                  label: `${persona.name} - starting tool execution`,
+                  type: 'ai',
+                  status: 'active',
+                  icon: <LuminaToolCallingAnimation />
+                }
+              ]
+            } : m)
+          } : chat));
         } finally {
           setIsGeneratingTodos(false);
         }
@@ -1149,38 +1280,6 @@ const startCoderPreview = useCallback(async () => {
       setActiveCommandType(null);
       setActiveCommandQuery(null);
     }
-
-    const thinkingId = (Date.now() + 1).toString();
-    const thinkingMessage: Message = {
-      id: thinkingId,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(),
-      thinking: isWebSearchEnabled ? 'Searching the web...' : 'Thinking...',
-      isSearching: isWebSearchEnabled,
-      isStreaming: true,
-      toolCalls: [
-        {
-          id: 'thinking-node',
-          label: isWebSearchEnabled ? 'Searching the web...' : `${persona.name} — thinking...`,
-          type: 'ai',
-          status: 'active',
-          icon: isWebSearchEnabled ? <Globe size={14} /> : <Sparkles size={14} />
-        }
-      ]
-    };
-
-    setTypingMessageId(thinkingId);
-    setChats(prev => prev.map(chat => {
-      if (chat.id === chatId) {
-        return {
-          ...chat,
-          messages: [...chat.messages, thinkingMessage],
-          updatedAt: new Date(),
-        };
-      }
-      return chat;
-    }));
 
     let searchResults: any[] = [];
     let searchProvider = "";
@@ -1486,18 +1585,16 @@ const startCoderPreview = useCallback(async () => {
         );
       }
 
-      let systemPrompt = `You are ${persona.name}. Character description/Role: ${persona.role}. ${persona.role ? '' : 'Address the user as a helpful digital assistant.'}`;
+      const personaLine = `You are ${persona.name}. Character description/Role: ${persona.role || 'helpful digital assistant'}.`;
+      let systemPrompt = personaLine;
 
-      // Active mode instructions
-      if (activeAssistantMode === 'builder') {
-        systemPrompt += `\n\n[ASSISTANT MODE: BUILDER - AUTONOMOUS CODING]
-You are operating in BUILDER mode. Your main objective is to implement new application layers, create fresh code resources, write logical components, clean styling patterns, and autonomously build out features requested by the user. Ensure your output code has perfect syntax, imports all required icons from 'lucide-react', and is fully modular.`;
-      } else if (activeAssistantMode === 'planner') {
-        systemPrompt += `\n\n[ASSISTANT MODE: PLANNER - BLUEPRINTING & ARCHITECTURE]
-You are operating in PLANNER mode. Before writing any massive code blocks, your focus is to create high-level engineering blueprints, break down complex task lists, plan files architecture, and outline step-by-step implementation sequences. Guide the user on how the system should be structured before execution.`;
-      } else if (activeAssistantMode === 'debugger') {
-        systemPrompt += `\n\n[ASSISTANT MODE: DEBUGGER - INQUIRY & TROUBLESHOOTING]
-You are operating in DEBUGGER mode. Your focus is to trace errors, debug syntax issues, inspect performance anomalies, explain complex code paths, and repair bugs reported by the user. Do not delete features; provide clean, precise hot-fixes and explain root causes clearly.`;
+      if (!isCoderMode) {
+        systemPrompt += `\n\n[CHAT MODE IS ACTIVE]
+You are in normal chat mode. Respond as a conversational assistant, not as an autonomous coding agent.
+- Do not claim to be in Builder, Planner, Debugger, or Coder Mode.
+- Do not say you are ready to modify files, run builds, or execute coding tasks unless the user explicitly asks about those capabilities.
+- If the user asks for code, you may explain, draft snippets, or give guidance, but do not imply that files were changed.
+- Keep the tone natural and helpful for general conversation.`;
       }
 
       if (activeTools.length > 0) {
@@ -1526,6 +1623,17 @@ When the user asks you to build page(s), applications, interfaces, features, or 
 10. Work agentically in repeated cycles: briefly reason about what you observed, call one or more tools, inspect the results, then decide the next tool call. Do not stop after a single tool batch if requirements, verification, or preview state remain incomplete.
 11. Do NOT use artifact/canvas output in Coder Mode. The right preview panel is the only app preview surface.
 12. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
+
+        if (activeAssistantMode === 'builder') {
+          systemPrompt += `\n\n[CODER ASSISTANT MODE: BUILDER]
+Focus on implementing new application layers, creating files/components, writing modular code, and delivering working UI or feature changes. Ensure generated code has valid syntax, imports required dependencies, and matches the existing project patterns.`;
+        } else if (activeAssistantMode === 'planner') {
+          systemPrompt += `\n\n[CODER ASSISTANT MODE: PLANNER]
+Focus on architecture, file planning, and sequencing. Prefer clear engineering blueprints and ask before large implementation work when the user has not requested execution.`;
+        } else if (activeAssistantMode === 'debugger') {
+          systemPrompt += `\n\n[CODER ASSISTANT MODE: DEBUGGER]
+Focus on tracing errors, inspecting code paths, and repairing bugs with minimal, targeted changes. Preserve existing behavior unless the bug fix requires changing it.`;
+        }
       }
 
       // Orchestration Trigger Detection
@@ -3870,7 +3978,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                     <div className="text-left select-none">
                       <div className="flex items-center gap-2">
                         <span className={`text-[10.5px] font-extrabold tracking-widest uppercase ${isVoiceListening ? 'text-red-500 animate-pulse' : 'text-[var(--theme-secondary)]'}`}>
-                          {isVoiceListening ? 'Recording Live Transcripts' : 'Voice Dictation'}
+                          {isVoiceListening ? 'Recording Offline Audio' : 'Local Whisper Dictation'}
                         </span>
                         {isVoiceListening && (
                           <span className="text-[9px] font-mono bg-red-500/15 text-red-400 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
@@ -3879,9 +3987,9 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                         )}
                       </div>
                       <div className="text-[10px] text-[var(--theme-muted)] mt-0.5 max-w-[210px] sm:max-w-xs truncate">
-                        {isVoiceListening 
-                          ? (voiceInterimText ? 'Transcribing speech stream...' : 'Start speaking to formulate message...') 
-                          : 'Dictate custom prompts and codes organically'}
+                        {isVoiceListening
+                          ? (voiceInterimText || 'Recording locally. Stop to transcribe with Whisper.')
+                          : (voiceInterimText || 'Offline STT with local Whisper after recording')}
                       </div>
                     </div>
                   </div>
@@ -3928,38 +4036,8 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                           setVoiceLanguage(code);
                           showToast(`Acoustic language swapped: ${SUPPORTED_VOICE_LANGUAGES.find(s=>s.code===code)?.label}`);
                           if (isVoiceListening) {
-                            stopVoiceDictation();
-                            setTimeout(() => {
-                              const RecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                              if (RecognitionConstructor) {
-                                const rec = new RecognitionConstructor();
-                                rec.continuous = true;
-                                rec.interimResults = true;
-                                rec.lang = code;
-                                rec.onstart = () => { setIsVoiceListening(true); };
-                                rec.onerror = (err_e: any) => { if (err_e.error !== 'no-speech') setVoiceError(`Error: ${err_e.error}`); };
-                                rec.onend = () => { setIsVoiceListening(false); };
-                                rec.onresult = (res_e: any) => {
-                                  let finalTrans = '';
-                                  let interimTrans = '';
-                                  for (let idx = res_e.resultIndex; idx < res_e.results.length; ++idx) {
-                                    if (res_e.results[idx].isFinal) finalTrans += res_e.results[idx][0].transcript;
-                                    else interimTrans += res_e.results[idx][0].transcript;
-                                  }
-                                  if (interimTrans) setVoiceInterimText(interimTrans);
-                                  if (finalTrans) {
-                                    setInput(prev => {
-                                      const added = finalTrans.trim();
-                                      if (!added) return prev;
-                                      return voiceAppendMode ? (prev ? (prev.endsWith(' ') ? prev + added : prev + ' ' + added) : added) : added;
-                                    });
-                                    setVoiceInterimText('');
-                                  }
-                                };
-                                recognitionRef.current = rec;
-                                rec.start();
-                              }
-                            }, 250);
+                            stopVoiceDictation(false);
+                            setTimeout(() => startVoiceDictation(code), 250);
                           }
                         }}
                         className="h-7 bg-[var(--theme-surface)] text-[var(--theme-primary)] border border-[var(--theme-border)] text-[10px] rounded-lg px-2.5 outline-none cursor-pointer focus:border-[var(--theme-accent)] transition-all shrink-0 max-w-[125px] font-sans"
@@ -4030,8 +4108,8 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   </div>
                 </div>
 
-                {/* Real-time Subtitle translation stream feedback */}
-                {isVoiceListening && (
+                {/* Offline recording status feedback */}
+                {(isVoiceListening || voiceInterimText) && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.99, y: 3 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -4040,9 +4118,9 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   >
                     <Sparkles size={13} className="text-amber-500 animate-spin shrink-0 mt-0.5" />
                     <div className="flex-1 text-xs leading-relaxed select-none font-sans">
-                      <span className="text-[var(--theme-secondary)] font-semibold font-sans">Interim Speech Chunk: </span>
+                      <span className="text-[var(--theme-secondary)] font-semibold font-sans">Local STT Status: </span>
                       <span className="text-amber-400 italic font-bold font-sans">
-                        {voiceInterimText || 'Awaiting live voice stream inputs...'}
+                        {voiceInterimText || 'Recording audio on-device...'}
                       </span>
                     </div>
                   </motion.div>
@@ -4470,22 +4548,23 @@ Store contract files at .lumina/contracts/ in the workspace.`;
 
           <div className="flex items-center gap-3">
             <div className="relative" ref={dropdownRef}>
-              <motion.button 
-                whileTap={{ scale: 0.95 }}
-                transition={{ duration: 0.08 }}
-                onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95"
+              <button
+                onClick={() => {
+                  if (modelSelectorMode === 'drawer') {
+                    setIsModelDropdownOpen(false);
+                    setIsModelDrawerOpen(true);
+                    return;
+                  }
+                  setIsModelDropdownOpen(!isModelDropdownOpen);
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
               >
                 <span>{(activeModelList.find(m => m.id === activeModelId)?.name) || 'Select Model'}</span>
                 <ChevronDown size={14} className={`transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
-              </motion.button>
-              <AnimatePresence>
-                {isModelDropdownOpen && (
-                  <motion.div
+              </button>
+              {isModelDropdownOpen && (
+                  <div
                     ref={modelDropdownContentRef}
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
                     style={modelDropdownPosition.style}
                     className="fixed w-[269px] bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
                   >
@@ -4505,16 +4584,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                       </div>
                     )}
                     <div className="h-[220px] overflow-y-auto p-1.5 space-y-0.5 custom-scrollbar shrink-0">
-                      {activeModelList
-                        .filter(m => m.name.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                      {filteredModelList
                         .map((model) => (
                           <button
                             key={model.id}
-                            onClick={() => {
-                              setActiveModelId(model.id);
-                              setIsModelDropdownOpen(false);
-                              setModelSearchQuery('');
-                            }}
+                            onClick={() => handleModelSelect(model.id)}
                             className={`w-full h-[36px] flex items-center gap-3 px-3 rounded-xl text-xs font-medium transition-colors shrink-0 ${
                               activeModelId === model.id 
                                 ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' 
@@ -4527,11 +4601,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                             <div className="flex-1 text-left truncate">{model.name}</div>
                             {activeModelId === model.id && <Check size={12} className="text-[var(--theme-accent)] shrink-0" />}
                           </button>
-                        ))}
+                      ))}
                     </div>
-                  </motion.div>
+                  </div>
                 )}
-              </AnimatePresence>
             </div>
 
             <motion.button
@@ -5584,7 +5657,9 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   setIsCompactSidebar={setIsCompactSidebar}
                   autoHideTopBar={autoHideTopBar}
                   setAutoHideTopBar={setAutoHideTopBar}
-                  useBridgeTools={useBridgeTools}
+            modelSelectorMode={modelSelectorMode}
+            setModelSelectorMode={setModelSelectorMode}
+            useBridgeTools={useBridgeTools}
                   setUseBridgeTools={setUseBridgeTools}
                   useTurboQuant={useTurboQuant}
                   setUseTurboQuant={setUseTurboQuant}
@@ -5805,6 +5880,82 @@ Store contract files at .lumina/contracts/ in the workspace.`;
       </div>
 
       <AnimatePresence>
+        {isModelDrawerOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              onClick={() => setIsModelDrawerOpen(false)}
+              className="fixed inset-0 z-[190] bg-black/25"
+            />
+            <motion.aside
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="fixed right-0 top-0 bottom-0 z-[191] w-full max-w-[380px] bg-[var(--theme-surface)] border-l border-[var(--theme-border)] shadow-2xl flex flex-col"
+            >
+              <div className="h-16 px-5 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[var(--theme-primary)]">Select Model</div>
+                  <div className="text-xs text-[var(--theme-secondary)] truncate">
+                    {(activeModelList.find(m => m.id === activeModelId)?.name) || activeModelId}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsModelDrawerOpen(false)}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                  aria-label="Close model selector"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="p-4 border-b border-[var(--theme-border)] shrink-0">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--theme-muted)]" />
+                  <input
+                    type="text"
+                    placeholder="Search models..."
+                    value={modelSearchQuery}
+                    onChange={(e) => setModelSearchQuery(e.target.value)}
+                    className="w-full h-10 pl-9 pr-3 bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] rounded-xl text-sm outline-none text-[var(--theme-primary)] placeholder:text-[var(--theme-muted)]"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+                {filteredModelList.length > 0 ? (
+                  filteredModelList.map(model => (
+                    <button
+                      key={model.id}
+                      onClick={() => handleModelSelect(model.id)}
+                      className={`w-full min-h-[46px] flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
+                        activeModelId === model.id
+                          ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold'
+                          : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
+                      }`}
+                    >
+                      <div className={model.color || ''}>
+                        {model.icon}
+                      </div>
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="truncate">{model.name}</div>
+                        <div className="text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</div>
+                      </div>
+                      {activeModelId === model.id && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-3 py-8 text-center text-xs text-[var(--theme-secondary)]">
+                    No models found
+                  </div>
+                )}
+              </div>
+            </motion.aside>
+          </>
+        )}
         {false && isSettingsOpen && (
           <SettingsModal
             onClose={() => setIsSettingsOpen(false)}
@@ -5816,6 +5967,8 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             setIsCompactSidebar={setIsCompactSidebar}
             autoHideTopBar={autoHideTopBar}
             setAutoHideTopBar={setAutoHideTopBar}
+            modelSelectorMode={modelSelectorMode}
+            setModelSelectorMode={setModelSelectorMode}
             useBridgeTools={useBridgeTools}
             setUseBridgeTools={setUseBridgeTools}
             useTurboQuant={useTurboQuant}

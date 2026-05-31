@@ -44,6 +44,124 @@ async function startServer() {
     res.json({ status: 'ok', server: 'Lumina Web UI Server' });
   });
 
+  const getLuminaDataDir = () => {
+    return process.env.LUMINA_DATA_DIR || path.join(os.homedir(), '.lumina');
+  };
+
+  const extensionFromMime = (mimeType = '') => {
+    const clean = mimeType.split(';')[0].trim().toLowerCase();
+    if (clean === 'audio/wav' || clean === 'audio/wave' || clean === 'audio/x-wav') return '.wav';
+    if (clean === 'audio/mpeg' || clean === 'audio/mp3') return '.mp3';
+    if (clean === 'audio/mp4' || clean === 'video/mp4') return '.mp4';
+    if (clean === 'audio/flac') return '.flac';
+    if (clean === 'audio/ogg' || clean === 'audio/opus') return '.ogg';
+    if (clean === 'audio/webm' || clean === 'video/webm') return '.webm';
+    return '.webm';
+  };
+
+  const cleanWhisperTranscript = (raw: string) => {
+    return String(raw || '')
+      .split(/\r?\n/)
+      .map(line => line
+        .replace(/^\s*\[[^\]]*-->\s*[^\]]*\]\s*/g, '')
+        .replace(/^\s*\[[0-9:.]+\s*-->\s*[0-9:.]+\]\s*/g, '')
+        .trim())
+      .filter(line => {
+        if (!line) return false;
+        const lower = line.toLowerCase();
+        return !lower.includes('[nodejs-whisper]') &&
+          !lower.startsWith('whisper_') &&
+          !lower.startsWith('system_info:') &&
+          !lower.startsWith('main:');
+      })
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  app.post("/api/stt/transcribe", async (req, res) => {
+    const { audioBase64, mimeType = 'audio/webm', modelName = 'base.en', language } = req.body || {};
+    if (!audioBase64 || typeof audioBase64 !== 'string') {
+      return res.status(400).json({ error: 'audioBase64 is required' });
+    }
+
+    const audioBuffer = Buffer.from(audioBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!audioBuffer.length) {
+      return res.status(400).json({ error: 'Audio payload is empty' });
+    }
+
+    const sttRoot = path.join(getLuminaDataDir(), 'local-stt');
+    const audioDir = path.join(sttRoot, 'audio');
+    const modelRootPath = path.join(sttRoot, 'models');
+    fs.mkdirSync(audioDir, { recursive: true });
+    fs.mkdirSync(modelRootPath, { recursive: true });
+
+    const audioPath = path.join(audioDir, `voice-${Date.now()}-${Math.random().toString(36).slice(2)}${extensionFromMime(mimeType)}`);
+    fs.writeFileSync(audioPath, audioBuffer);
+
+    try {
+      const whisperModule: any = await import('nodejs-whisper');
+      const nodewhisper = whisperModule.nodewhisper || whisperModule.default?.nodewhisper;
+      if (typeof nodewhisper !== 'function') {
+        throw new Error('nodejs-whisper did not expose nodewhisper().');
+      }
+
+      const whisperLanguage = typeof language === 'string' && language
+        ? language.split('-')[0].toLowerCase()
+        : undefined;
+      const logs: string[] = [];
+      const logger = {
+        debug: (...args: any[]) => logs.push(args.map(String).join(' ')),
+        log: (...args: any[]) => logs.push(args.map(String).join(' ')),
+        error: (...args: any[]) => logs.push(args.map(String).join(' '))
+      };
+
+      const rawTranscript = await nodewhisper(audioPath, {
+        modelName,
+        autoDownloadModelName: modelName,
+        modelRootPath,
+        removeWavFileAfterTranscription: true,
+        withCuda: false,
+        logger,
+        whisperOptions: {
+          language: whisperLanguage,
+          outputInText: false,
+          outputInSrt: false,
+          outputInVtt: false,
+          outputInJson: false,
+          splitOnWord: true,
+          noGpu: true
+        }
+      });
+
+      try { fs.unlinkSync(audioPath); } catch {}
+      res.json({
+        success: true,
+        transcript: cleanWhisperTranscript(rawTranscript) || rawTranscript.trim(),
+        rawTranscript,
+        modelName,
+        modelRootPath
+      });
+    } catch (e: any) {
+      try { fs.unlinkSync(audioPath); } catch {}
+      const detail = e?.message || String(e);
+      const ffmpegHint = detail.toLowerCase().includes('ffmpeg')
+        ? ' Install FFmpeg and ensure it is available on PATH. Windows: scoop install ffmpeg, or download from https://ffmpeg.org/download.html'
+        : '';
+      res.status(500).json({
+        error: 'Local transcription failed',
+        detail: `${detail}${ffmpegHint}`,
+        prerequisites: {
+          ffmpeg: {
+            macOS: 'brew install ffmpeg',
+            linux: 'sudo apt install ffmpeg',
+            windows: 'scoop install ffmpeg or download from https://ffmpeg.org/download.html'
+          }
+        }
+      });
+    }
+  });
+
   // ─── Terminal Session Store ────────────────────────────────────────────────────
   const terminalSessions = new Map<string, { cwd: string; lastAccess: number }>();
 
@@ -1200,10 +1318,27 @@ async function startServer() {
         body.tools = tools;
         body.tool_choice = 'auto';
       }
-      const response = await axios.post(`${bridgeUrl}/v1/chat/completions`, body, { headers, timeout: 30000 });
+      let response;
+      try {
+        response = await axios.post(`${bridgeUrl}/v1/chat/completions`, body, { headers, timeout: 30000 });
+      } catch (toolChoiceError: any) {
+        const upstreamDetail = JSON.stringify(toolChoiceError.response?.data || '').toLowerCase();
+        const canRetryWithoutToolChoice = body.tool_choice && (
+          upstreamDetail.includes('tool_choice') ||
+          upstreamDetail.includes('unsupported') ||
+          upstreamDetail.includes('extra_forbidden') ||
+          upstreamDetail.includes('unrecognized')
+        );
+        if (!canRetryWithoutToolChoice) throw toolChoiceError;
+
+        const retryBody = { ...body };
+        delete retryBody.tool_choice;
+        response = await axios.post(`${bridgeUrl}/v1/chat/completions`, retryBody, { headers, timeout: 30000 });
+      }
       res.json(response.data);
     } catch (e: any) {
-      res.status(502).json({ error: 'Bridge chat failed', detail: e.message });
+      const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+      res.status(502).json({ error: 'Bridge chat failed', detail });
     }
   });
 
@@ -2470,17 +2605,43 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       }
 
       if (stream === false) {
-        const response = await axios.post(
-          `${baseUrl}/chat/completions`,
-          requestBody,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
-            },
-            timeout: 60000
-          }
-        );
+        let response;
+        try {
+          response = await axios.post(
+            `${baseUrl}/chat/completions`,
+            requestBody,
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+              },
+              timeout: 60000
+            }
+          );
+        } catch (toolChoiceError: any) {
+          const upstreamDetail = JSON.stringify(toolChoiceError.response?.data || '').toLowerCase();
+          const canRetryWithoutToolChoice = requestBody.tool_choice && (
+            upstreamDetail.includes('tool_choice') ||
+            upstreamDetail.includes('unsupported') ||
+            upstreamDetail.includes('extra_forbidden') ||
+            upstreamDetail.includes('unrecognized')
+          );
+          if (!canRetryWithoutToolChoice) throw toolChoiceError;
+
+          const retryBody = { ...requestBody };
+          delete retryBody.tool_choice;
+          response = await axios.post(
+            `${baseUrl}/chat/completions`,
+            retryBody,
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+              },
+              timeout: 60000
+            }
+          );
+        }
 
         return res.json(response.data);
       }
@@ -2531,10 +2692,11 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       });
 
     } catch (e: any) {
-      console.error('Chat API Error:', e.message);
+      const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+      console.error('Chat API Error:', detail);
       // If streaming headers haven't been set yet, send JSON error
       if (!res.headersSent) {
-        res.status(502).json({ error: 'Chat completion failed', detail: e.message });
+        res.status(502).json({ error: 'Chat completion failed', detail });
       } else {
         res.end();
       }
