@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Sparkles, ArrowLeft, Bot, Check, ChevronDown, ChevronUp, AlertCircle, RefreshCw, Wand2, Terminal, Key, Eye, EyeOff, Server, Globe, Cpu } from 'lucide-react';
+import { X, Sparkles, ArrowLeft, Bot, Check, ChevronDown, ChevronUp, AlertCircle, RefreshCw, Wand2, Terminal, Key, Eye, EyeOff, Server, Globe, Cpu, Brain, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Agent, AgentSkill, AgentTool, AgentModel } from '../../agents/types';
+import { Agent, AgentSkill, AgentTool, AgentModel, AgentSkillFile } from '../../agents/types';
 import { ALL_AGENT_SKILLS, ALL_AGENT_TOOLS, AGENT_AVATARS, AGENT_AVATAR_COLORS, MAX_AGENT_SKILLS, MAX_AGENT_TOOLS } from '../../agents/constants';
 import { AgentAvatar } from './AgentAvatar';
 
@@ -202,6 +202,8 @@ export function AgentCreationModal({
   const [toolsList, setToolsList] = useState<AgentTool[]>([]);
   const [tags, setTags] = useState<string[]>([]);
   const [showPromptEditor, setShowPromptEditor] = useState(false);
+  const [skillFiles, setSkillFiles] = useState<AgentSkillFile[]>([]);
+  const [activeSkillFileIdx, setActiveSkillFileIdx] = useState<number>(0);
 
   // Initialize skills, tools, and configurations if entering edit modes or reset
   useEffect(() => {
@@ -216,6 +218,8 @@ export function AgentCreationModal({
       setAvatarEmoji(editAgent.avatarEmoji);
       setAvatarColor(editAgent.avatarColor);
       setTags(editAgent.tags || []);
+      setSkillFiles(editAgent.skillFiles || []);
+      setActiveSkillFileIdx(0);
       
       const editProvider = editModelProvider(editAgent.model, editAgent.provider);
       setProvider(editProvider);
@@ -263,6 +267,8 @@ export function AgentCreationModal({
       setTags(['assistant']);
       setSkillsList(ALL_AGENT_SKILLS.map(s => ({ ...s, enabled: false })));
       setToolsList(ALL_AGENT_TOOLS.map(t => ({ ...t, active: false })));
+      setSkillFiles([]);
+      setActiveSkillFileIdx(0);
     }
   }, [isOpen, editAgent]);
 
@@ -290,6 +296,14 @@ export function AgentCreationModal({
     setCustomModelText('');
     setSkillsList(ALL_AGENT_SKILLS.map(sk => ({ ...sk, enabled: false })));
     setToolsList(ALL_AGENT_TOOLS.map(tl => ({ ...tl, active: false })));
+    setSkillFiles([
+      {
+        name: 'AGENT.md',
+        description: 'Core Identity & Behavior Guidelines',
+        content: `# Identity\n\nYou are an expert digital assistant with custom capabilities.\n\n## Core Principles\n- Deliver highly relevant, accurate responses tailored to constraints.\n- Outline decisions step-by-step to expose logic.\n- Avoid verbose filler words.`
+      }
+    ]);
+    setActiveSkillFileIdx(0);
     setPhase('configure');
   };
 
@@ -303,19 +317,38 @@ export function AgentCreationModal({
 
     const builderSystemInstruction = `You are an AI agent configuration generator. Given a user's description of what they want their AI agent to do, generate a complete agent configuration as a JSON object.
 
-Output ONLY valid JSON with no markdown, no backticks, no explanation. The JSON must match this structure exactly:
+Output ONLY valid JSON with no markdown formatting, no backticks, no wrap text, and no explanation. The JSON must match this structure exactly:
 
 {
-  "name": "short agent name (2-4 words)",
+  "name": "short agent name (2-3 words)",
   "description": "one sentence describing what this agent does",
   "avatarEmoji": "single most fitting emoji",
   "avatarColor": "one of: bg-violet-500, bg-blue-500, bg-teal-500, bg-emerald-500, bg-amber-500, bg-rose-500, bg-fuchsia-500, bg-sky-500",
-  "systemPrompt": "detailed system prompt (200-400 words) that defines the agent's persona, expertise, communication style, and behavior",
+  "systemPrompt": "detailed system prompt (100-200 words) defining persona and direct goals",
   "skills": ["web_browsing", "memory"],  // array of relevant skill IDs from: web_browsing, memory, artifacts, code_execution, image_generation, file_read_write, wiki_search, web_scraper — max 6
   "tools": ["web_search", "calculator"], // array of relevant tool IDs from: web_search, wikipedia, code_runner, scraper, image_gen, file_manager, calculator, translator, weather, news_reader — max 8
-  "tags": ["tag1", "tag2"],              // 2-4 lowercase tags
-  "model": "gemini-3.5-flash"
-}`;
+  "tags": ["productivity", "custom"],   // 2-3 lowercase tags
+  "model": "gemini-3.5-flash",
+  "skillFiles": [
+    {
+      "name": "AGENT.md",
+      "description": "Core Identity & Behavioral Principles",
+      "content": "# Agent Identity\\n\\n## Profile\\n[Detailed persona tailored to the user requirements. Keep it professional and immersive.]\\n\\n## Decision Hierarchy\\n[Strategic approach to satisfying instructions, priorities, and standard error fallback paths]\\n\\n## Guidelines\\n- Bulleted specific instructions representing excellence"
+    },
+    {
+      "name": "TOOLS.md",
+      "description": "Tool Execution Guide & Priorities",
+      "content": "# Tool Usage Guidelines\\n\\n## Recommended Tooling\\n- [Describe how the selected systems of tools should be integrated cleanly]\\n\\n## Strategic Priorities\\n1. Check results prior to making final assumptions\\n2. Perform step-by-step mathematical or code audits"
+    },
+    {
+      "name": "WORKFLOWS.md",
+      "description": "Step-by-Step Task Execution Plans",
+      "content": "# Core Workflows\\n\\n## Main Interaction Flow\\n1. Receive request and isolate requirements\\n2. Coordinate plans with AGENT.md guidelines\\n3. Execute actions using tools\\n\\n## Edge Cases & Fail-safes\\n- If tools provide empty lists, fall back gracefully."
+    }
+  ]
+}
+
+Ensure that skillFiles contains highly detailed custom markdown content. Do NOT use fake placeholders or 'fill in later'. Custom-write the files completely to map the exact agent's domain and responsibilities.`;
 
     try {
       const response = await fetch('/api/chat', {
@@ -376,6 +409,18 @@ Output ONLY valid JSON with no markdown, no backticks, no explanation. The JSON 
         active: toolIds.includes(tl.id)
       })));
 
+      // Map generated skill files
+      const generatedSkillFiles: AgentSkillFile[] = generatedConfig.skillFiles || [];
+      if (generatedSkillFiles.length === 0) {
+        generatedSkillFiles.push({
+          name: 'AGENT.md',
+          description: 'Core Identity & Behavioral Principles',
+          content: `# Identity\n\nYou are ${generatedConfig.name || 'AI Assistant'}.\n\n## Guidelines\n- Deliver highly relevant, accurate responses tailored to constraints.`
+        });
+      }
+      setSkillFiles(generatedSkillFiles);
+      setActiveSkillFileIdx(0);
+
       setPhase('configure');
     } catch (e: any) {
       console.error(e);
@@ -409,7 +454,8 @@ Output ONLY valid JSON with no markdown, no backticks, no explanation. The JSON 
           tags,
           provider: provider,
           apiKey: apiKey.trim(),
-          baseUrl: baseUrl.trim()
+          baseUrl: baseUrl.trim(),
+          skillFiles: skillFiles,
         });
       }
       onClose();
@@ -432,7 +478,8 @@ Output ONLY valid JSON with no markdown, no backticks, no explanation. The JSON 
         tags,
         provider: provider,
         apiKey: apiKey.trim(),
-        baseUrl: baseUrl.trim()
+        baseUrl: baseUrl.trim(),
+        skillFiles: skillFiles,
       };
       onAgentCreated(finalAgent);
     }
@@ -1301,6 +1348,147 @@ Output ONLY valid JSON with no markdown, no backticks, no explanation. The JSON 
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
+
+              {/* Custom .md Skill Files Workspace */}
+              <div className="border border-zinc-900 rounded-2xl overflow-hidden bg-zinc-950 p-4.5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-900 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Brain size={14} className="text-teal-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-white">Custom Skill Files Workspace</span>
+                  </div>
+                  <span className="self-start text-[9.5px] px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20 font-sans font-medium">
+                    Claude Identity System Compatible
+                  </span>
+                </div>
+
+                <p className="text-[10px] text-zinc-500 leading-normal">
+                  These autonomous markdown files represent the agent's identity, instructions, and constraints. When executing, the agent directly reads and operates from these custom files.
+                </p>
+
+                {skillFiles.length === 0 ? (
+                  <div className="text-center py-6 bg-zinc-900/10 rounded-xl border border-dashed border-zinc-850">
+                    <span className="text-xs text-zinc-500 block">No guidelines scale files generated. Try Generating or click add below.</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSkillFiles([
+                          {
+                            name: 'AGENT.md',
+                            description: 'Core Identity & Behavioral Principles',
+                            content: `# Identity\n\nYou are a customized digital assistant.\n\n## Guidelines\n- Satisfy instructions with highest developer speed.`
+                          }
+                        ]);
+                        setActiveSkillFileIdx(0);
+                      }}
+                      className="mt-3 text-[10px] bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 px-3 py-1.5 rounded-lg active:scale-95 transition-transform cursor-pointer font-sans"
+                    >
+                      + Bootstrap Default AGENT.md
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 min-h-[260px] border border-zinc-900/80 rounded-xl overflow-hidden bg-zinc-950">
+                    {/* Sidebar file explorer column */}
+                    <div className="bg-zinc-900/10 border-r border-zinc-900/60 p-2 space-y-2 flex flex-col justify-between">
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-bold text-zinc-500 tracking-wider uppercase block px-1 pb-1">FILES</span>
+                        {skillFiles.map((f, i) => (
+                          <div
+                            key={f.name}
+                            onClick={() => setActiveSkillFileIdx(i)}
+                            className={`w-full group text-left p-2 rounded-lg text-[10.5px] transition-all flex items-center justify-between cursor-pointer ${
+                              activeSkillFileIdx === i
+                                ? 'bg-zinc-900 text-teal-400 font-semibold border-l-2 border-teal-500 pl-2'
+                                : 'text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200 pl-1.5'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <FileText size={12} className={activeSkillFileIdx === i ? 'text-teal-400' : 'text-zinc-500'} />
+                              <span className="truncate">{f.name}</span>
+                            </div>
+                            {skillFiles.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const nextList = skillFiles.filter((_, idx) => idx !== i);
+                                  setSkillFiles(nextList);
+                                  setActiveSkillFileIdx(0);
+                                }}
+                                className="p-0.5 rounded text-zinc-650 hover:text-rose-400 hover:bg-zinc-950 transition-colors opacity-0 group-hover:opacity-100"
+                              >
+                                <X size={10} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fileName = prompt('Enter name of new custom skill file (e.g. EXTRA.md):', 'RULES.md');
+                          if (fileName && fileName.trim()) {
+                            const trimmedName = fileName.trim();
+                            const nameClean = trimmedName.toUpperCase().endsWith('.md') ? trimmedName : `${trimmedName}.md`;
+                            if (skillFiles.some(f => f.name === nameClean)) {
+                              alert('A skill file with that name already exists!');
+                              return;
+                            }
+                            const nextList = [
+                              ...skillFiles,
+                              {
+                                name: nameClean,
+                                description: 'Custom domain reference instructions',
+                                content: `# ${nameClean.replace('.md', '')}\n\n## Guidelines\n- Add guidelines instructions here.`
+                              }
+                            ];
+                            setSkillFiles(nextList);
+                            setActiveSkillFileIdx(nextList.length - 1);
+                          }
+                        }}
+                        className="w-full text-center py-1.5 hover:bg-zinc-900/30 rounded-lg border border-dashed border-zinc-800 hover:border-zinc-750 text-[10px] text-zinc-500 hover:text-zinc-300 font-sans cursor-pointer transition-colors"
+                      >
+                        + Add Skill File
+                      </button>
+                    </div>
+
+                    {/* Editor column */}
+                    <div className="md:col-span-2 flex flex-col bg-zinc-950 p-3 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-wider">
+                          Editing: <strong className="text-zinc-300 font-semibold">{skillFiles[activeSkillFileIdx]?.name}</strong>
+                        </span>
+                        <span className="text-[8.5px] italic text-zinc-600">Markdown format</span>
+                      </div>
+                      <textarea
+                        value={skillFiles[activeSkillFileIdx]?.content || ''}
+                        onChange={(e) => {
+                          const updated = [...skillFiles];
+                          if (updated[activeSkillFileIdx]) {
+                            updated[activeSkillFileIdx].content = e.target.value;
+                            setSkillFiles(updated);
+                          }
+                        }}
+                        rows={10}
+                        className="w-full bg-zinc-900/40 border border-zinc-900 rounded-lg p-3 text-[10.5px] font-mono text-zinc-300 placeholder-zinc-800 leading-relaxed focus:outline-none focus:ring-1 focus:ring-teal-500/20"
+                      />
+                      <input
+                        type="text"
+                        value={skillFiles[activeSkillFileIdx]?.description || ''}
+                        onChange={(e) => {
+                          const updated = [...skillFiles];
+                          if (updated[activeSkillFileIdx]) {
+                            updated[activeSkillFileIdx].description = e.target.value;
+                            setSkillFiles(updated);
+                          }
+                        }}
+                        placeholder="Short description of this file... (e.g. Strategic priority tree)"
+                        className="w-full bg-zinc-900/30 border border-zinc-900 rounded-lg px-2.5 py-1 text-[9.5px] text-zinc-400 placeholder-zinc-700 outline-none focus:border-zinc-800 transition-colors"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Skills checklist Checklist */}

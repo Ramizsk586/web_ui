@@ -84,13 +84,9 @@ interface SettingsModalProps {
     role: string;
     avatar: string;
     isGeneratingAvatar: boolean;
+    systemPrompt?: string;
   };
-  setPersona: React.Dispatch<React.SetStateAction<{
-    name: string;
-    role: string;
-    avatar: string;
-    isGeneratingAvatar: boolean;
-  }>>;
+  setPersona: React.Dispatch<React.SetStateAction<any>>;
   luminaTools: Array<{
     id: string;
     name: string;
@@ -773,7 +769,7 @@ export function SettingsModal({
                   <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">AI Persona</h3>
                   <div className="space-y-5">
                     <div className="space-y-2">
-                      <label className="text-[11px] font-medium text-gray-500">Persona Name</label>
+                      <label className="text-[11px] font-medium text-gray-500">Profile Name</label>
                       <input
                         type="text"
                         value={persona.name}
@@ -790,6 +786,16 @@ export function SettingsModal({
                         onChange={(e) => setPersona({ ...persona, role: e.target.value })}
                         placeholder="e.g., Modern Intelligence"
                         className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-medium text-gray-500">System Prompt</label>
+                      <textarea
+                        value={persona.systemPrompt || ''}
+                        onChange={(e) => setPersona({ ...persona, systemPrompt: e.target.value })}
+                        placeholder="Define custom instructions, guidelines, or fallback behaviors for the AI helper..."
+                        rows={4}
+                        className="w-full p-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all resize-y min-h-[100px] font-sans text-gray-900 dark:text-zinc-100 placeholder-gray-400 dark:placeholder-zinc-500"
                       />
                     </div>
                     <div className="space-y-2">

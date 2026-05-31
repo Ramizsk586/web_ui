@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, type ReactElement } fr
 import {
   Pencil, Eraser, Minus, Square, Circle, Type, Download, Trash2,
   RotateCcw, RotateCw, StickyNote, MousePointer, Settings, HelpCircle, GripHorizontal, X,
-  Triangle, Diamond, ArrowRight, Star, PaintBucket
+  Triangle, Diamond, ArrowRight, Star, PaintBucket, Send
 } from 'lucide-react';
 
 type Tool = 'pen' | 'eraser' | 'line' | 'rect' | 'circle' | 'triangle' | 'diamond' | 'arrow' | 'star' | 'text' | 'select' | 'fill';
@@ -51,12 +51,18 @@ const NOTE_COLORS = [
   '#DDD6FE'  // soft violet
 ];
 
-function Whiteboard() {
+interface WhiteboardProps {
+  onAttachToChat?: (file: File) => void;
+  onClose?: () => void;
+}
+
+function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const customCursorRef = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<Tool>('pen');
+  const [zoom, setZoom] = useState<'fit' | 0.5 | 1 | 1.5 | 2>('fit');
   const [color, setColor] = useState('#EDE6DD');
   const [brushSize, setBrushSize] = useState(3);
   const [actions, setActions] = useState<DrawAction[]>([]);
@@ -442,9 +448,9 @@ function Whiteboard() {
       customCursor.style.marginLeft = `${-size / 2}px`;
       customCursor.style.marginTop = `${-size / 2}px`;
       customCursor.style.borderRadius = '50%';
-      customCursor.style.border = '1.5px solid #D97756';
-      customCursor.style.boxShadow = '0 0 0 1px #ffffff';
-      customCursor.style.backgroundColor = 'transparent';
+      customCursor.style.border = '1px solid #ffffff';
+      customCursor.style.boxShadow = '0 0 2px rgba(0, 0, 0, 0.5)';
+      customCursor.style.backgroundColor = color;
     } else {
       customCursor.style.width = '8px';
       customCursor.style.height = '8px';
@@ -612,6 +618,7 @@ function Whiteboard() {
         }
       }
       lastPointRef.current = p;
+      updateCustomCursor(e);
     }
   };
 
@@ -879,6 +886,28 @@ function Whiteboard() {
           />
         </div>
 
+        <div className="w-px h-5 bg-[var(--theme-border)]/35 mx-1 self-center" />
+
+        {/* Dynamic Zoom Scale Dropdown */}
+        <div className="flex items-center gap-1.5 px-1.5 py-1 rounded-lg bg-[var(--theme-bg)]/45 border border-[var(--theme-border)]/35">
+          <span className="text-[9px] font-mono font-bold text-[var(--theme-muted)]">Scale:</span>
+          <select
+            value={zoom}
+            onChange={(e) => {
+              const val = e.target.value;
+              setZoom(val === 'fit' ? 'fit' : parseFloat(val) as any);
+              canvasRectRef.current = null;
+            }}
+            className="bg-transparent text-[10px] text-[var(--theme-primary)] font-semibold border-none focus:outline-none cursor-pointer"
+          >
+            <option value="fit">Fit Screen</option>
+            <option value="0.5">50% (Small)</option>
+            <option value="1">100% (Original)</option>
+            <option value="1.5">150% (Large)</option>
+            <option value="2">200% (Zoomed)</option>
+          </select>
+        </div>
+
         <div className="flex-1" />
 
         {/* Action Controls */}
@@ -923,36 +952,71 @@ function Whiteboard() {
           >
             <Download size={13} />
           </button>
+          {onAttachToChat && (
+            <button
+              onClick={async () => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                try {
+                  const dataUrl = canvas.toDataURL('image/png');
+                  const res = await fetch(dataUrl);
+                  const blob = await res.blob();
+                  const file = new File([blob], `whiteboard-${Date.now()}.png`, { type: 'image/png' });
+                  onAttachToChat(file);
+                } catch (err) {
+                  console.error("Error attaching sketch:", err);
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#D97756] hover:bg-[#c36342] text-white flex items-center gap-1.5 transition-all cursor-pointer ml-1 animate-fade-in"
+              title="Attach this drawing directly to your chat input box as an image attachment"
+            >
+              <Send size={11} />
+              <span>Attach Sketch to Chat</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Canvas viewport container */}
-      <div ref={containerRef} className="flex-1 overflow-auto custom-scrollbar relative bg-[var(--theme-input-bg)]">
+      <div 
+        ref={containerRef} 
+        className={`flex-1 relative bg-[var(--theme-input-bg)] flex items-center justify-center ${
+          zoom === 'fit' ? 'overflow-hidden' : 'overflow-auto custom-scrollbar'
+        }`}
+        style={{ cursor: tool === 'select' ? 'default' : tool === 'text' ? 'text' : 'none' }}
+      >
         <canvas
           ref={canvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
           style={{ 
-            width: CANVAS_WIDTH, 
-            height: CANVAS_HEIGHT, 
-            cursor: tool === 'text' ? 'text' : tool === 'select' ? 'default' : (tool === 'eraser' || tool === 'pen') ? 'none' : 'crosshair' 
+            width: zoom === 'fit' ? '100%' : `${CANVAS_WIDTH * zoom}px`, 
+            height: zoom === 'fit' ? '100%' : `${CANVAS_HEIGHT * zoom}px`,
+            maxWidth: '100%',
+            maxHeight: '100%',
+            objectFit: 'contain',
+            cursor: tool === 'select' ? 'default' : tool === 'text' ? 'text' : 'none'
           }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}
-          className="block select-none"
+          className="block select-none shrink-0"
         />
         <canvas
           ref={previewCanvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
           style={{ 
-            width: CANVAS_WIDTH, 
-            height: CANVAS_HEIGHT,
-            pointerEvents: 'none'
+            width: zoom === 'fit' ? '100%' : `${CANVAS_WIDTH * zoom}px`, 
+            height: zoom === 'fit' ? '100%' : `${CANVAS_HEIGHT * zoom}px`,
+            maxWidth: '100%',
+            maxHeight: '100%',
+            objectFit: 'contain',
+            pointerEvents: 'none',
+            cursor: tool === 'select' ? 'default' : tool === 'text' ? 'text' : 'none'
           }}
-          className="absolute top-0 left-0 block select-none pointer-events-none"
+          className="absolute block select-none pointer-events-none shrink-0"
         />
         <div 
           ref={customCursorRef}

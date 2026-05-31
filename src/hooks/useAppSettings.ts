@@ -160,12 +160,34 @@ export function useAppSettings({
   const [testToolResult, setTestToolResult] = useState<any>(null);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [providerSearchQuery, setProviderSearchQuery] = useState('');
-  const [persona, setPersona] = useState({
-    name: 'Lumina',
-    role: 'Modern Intelligence',
-    avatar: '',
-    isGeneratingAvatar: false
+  const [persona, setPersona] = useState(() => {
+    try {
+      const saved = localStorage.getItem('lumina_persona');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          name: parsed.name || 'Lumina',
+          role: parsed.role || 'Modern Intelligence',
+          avatar: parsed.avatar || '',
+          isGeneratingAvatar: !!parsed.isGeneratingAvatar,
+          systemPrompt: parsed.systemPrompt || 'You are a helpful, precise, and highly capable AI assistant.'
+        };
+      }
+    } catch (e) {}
+    return {
+      name: 'Lumina',
+      role: 'Modern Intelligence',
+      avatar: '',
+      isGeneratingAvatar: false,
+      systemPrompt: 'You are a helpful, precise, and highly capable AI assistant.'
+    };
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lumina_persona', JSON.stringify(persona));
+    } catch (e) {}
+  }, [persona]);
   const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', 'https://openprovider.mimika.in/v1'));
   const [apiKey, setApiKey] = useState(() => safeGetItem('lumina_api_key', DEFAULT_API_KEY));
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));

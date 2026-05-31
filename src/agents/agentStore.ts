@@ -15,6 +15,7 @@ export function loadAgents(): Agent[] {
       skills: a.skills || [],
       tools: a.tools || [],
       tags: a.tags || [],
+      skillFiles: a.skillFiles || [],
     }));
     return [...BUILTIN_AGENTS, ...cleanUserAgents];
   } catch {

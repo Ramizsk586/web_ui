@@ -56,6 +56,7 @@ export interface Chat {
   messages: Message[];
   updatedAt: Date;
   projectId?: string;
+  isCoderMode?: boolean;
 }
 
 export interface Tool {

@@ -53,7 +53,8 @@ export const ArtifactCard = React.memo(({ artifact, onOpen }: ArtifactCardProps)
       <button
         type="button"
         onClick={downloadFile}
-        className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-xl text-xs font-bold transition-all hover:scale-105 active:scale-95 shadow-lg shrink-0 cursor-pointer"
+        className="px-4 py-2 text-zinc-900 border border-zinc-200 rounded-xl text-xs font-bold transition-all hover:scale-105 active:scale-95 shadow-md shrink-0 cursor-pointer"
+        style={{ backgroundColor: '#ffffff' }}
       >
         Download
       </button>

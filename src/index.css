@@ -744,3 +744,14 @@
 [data-theme] .theme-sidebar { background-color: var(--theme-sidebar); }
 [data-theme] .theme-input { background-color: var(--theme-input-bg); border-color: var(--theme-input-border); }
 [data-theme] .theme-card { background-color: var(--theme-card-bg); }
+
+/* Matched background and border rules for specific workspace/chat container panels */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) {
+  background-color: var(--theme-bg) !important;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) {
+  background-color: var(--theme-bg) !important;
+  border-top-color: transparent !important;
+  box-shadow: none !important;
+}

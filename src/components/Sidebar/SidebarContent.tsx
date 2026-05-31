@@ -16,7 +16,8 @@ import {
   Compass, 
   Flower2, 
   Settings, 
-  Camera 
+  Camera,
+  Code
 } from 'lucide-react';
 import { Chat } from '../../types';
 import { AVAILABLE_AVATARS } from '../../constants';
@@ -70,6 +71,9 @@ export const SidebarContent = ({
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+
+  const generalChats = chats.filter(c => !c.projectId && !c.isCoderMode);
+  const coderChats = chats.filter(c => !c.projectId && c.isCoderMode);
 
   const handleSaveProject = () => {
     if (newProjectName.trim()) {
@@ -271,12 +275,18 @@ export const SidebarContent = ({
                                   }}
                                   className={`w-full py-1 px-2 rounded-md flex items-center gap-2 text-xs transition-colors pr-8 ${
                                     currentChatId === chat.id
-                                      ? 'text-zinc-200 bg-zinc-800/20 font-medium pl-1.5 border-l border-zinc-650' 
-                                      : 'text-zinc-500 hover:bg-zinc-800/20 hover:text-zinc-350'
+                                      ? 'text-zinc-200 bg-zinc-800/20 font-medium pl-1.5 border-l border-zinc-600' 
+                                      : 'text-zinc-500 hover:bg-zinc-800/20 hover:text-zinc-300'
                                   }`}
                                 >
-                                  <MessageSquare size={13} className={(currentChatId === chat.id) ? 'text-zinc-400' : 'text-zinc-505'} />
-                                  <span className="truncate text-left flex-1">{chat.title}</span>
+                                  {chat.isCoderMode ? (
+                                    <Code size={13} className={currentChatId === chat.id ? 'text-zinc-200' : 'text-zinc-500'} />
+                                  ) : (
+                                    <MessageSquare size={13} className={currentChatId === chat.id ? 'text-zinc-200' : 'text-zinc-500'} />
+                                  )}
+                                  <span className="truncate text-left flex-1">
+                                    {chat.title}
+                                  </span>
                                 </button>
                                 <button
                                   onClick={(e) => {
@@ -334,37 +344,111 @@ export const SidebarContent = ({
                 className="space-y-1 overflow-hidden"
               >
 
-                {chats.filter(c => !c.projectId).map(chat => (
-                  <div key={chat.id} className="group relative">
-                    <button
-                      onClick={() => {
-                        setCurrentChatId(chat.id);
-                        if (onSelect) onSelect();
-                      }}
-                      className={`w-full p-2.5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors pr-10 ${
-                        currentChatId === chat.id
-                          ? 'bg-gray-200/50 text-black dark:text-white font-semibold' 
-                          : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:text-zinc-300'
-                      }`}
-                    >
-                      <MessageSquare size={16} className={(currentChatId === chat.id) ? 'text-black dark:text-white' : 'text-gray-400'} />
-                      <span className="truncate">{chat.title}</span>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setChats(prev => prev.filter(c => c.id !== chat.id));
-                        if (currentChatId === chat.id) setCurrentChatId(null);
-                      }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-                      title="Delete chat"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-                {chats.filter(c => !c.projectId).length === 0 && (
+                {/* Chat and Coder Categorized Lists */}
+                {chats.filter(c => !c.projectId).length === 0 ? (
                   <div className="px-3 py-4 text-xs text-gray-400 dark:text-zinc-500 italic">No recent chats</div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* General Chats Subcategory */}
+                    <div className="space-y-1">
+                      <div className="px-3 py-1 flex items-center justify-between text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest select-none">
+                        <span className="flex items-center gap-1.5">
+                          <MessageSquare size={10} className="text-gray-400 dark:text-zinc-500" />
+                          Chat
+                        </span>
+                        {generalChats.length > 0 && (
+                          <span className="bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[9px] font-bold px-1.5 py-0.2 rounded-full">
+                            {generalChats.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-0.5">
+                        {generalChats.map(chat => (
+                          <div key={chat.id} className="group relative">
+                            <button
+                              onClick={() => {
+                                setCurrentChatId(chat.id);
+                                if (onSelect) onSelect();
+                              }}
+                              className={`w-full p-2 rounded-lg flex items-center gap-2.5 text-xs font-medium transition-colors pr-10 ${
+                                currentChatId === chat.id
+                                  ? 'bg-gray-200/50 text-black dark:text-white font-semibold' 
+                                  : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-850/40 hover:text-gray-700 dark:hover:text-zinc-300'
+                              }`}
+                            >
+                              <MessageSquare size={14} className={currentChatId === chat.id ? 'text-blue-500' : 'text-gray-400'} />
+                              <span className="truncate flex-1 text-left">{chat.title}</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setChats(prev => prev.filter(c => c.id !== chat.id));
+                                if (currentChatId === chat.id) setCurrentChatId(null);
+                              }}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-md opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                              title="Delete chat"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        ))}
+                        {generalChats.length === 0 && (
+                          <div className="px-3 py-1.5 text-[11px] text-gray-400 dark:text-zinc-600 italic">No general chats</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Coder Chats Subcategory */}
+                    <div className="space-y-1 pt-1">
+                      <div className="px-3 py-1 flex items-center justify-between text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest select-none">
+                        <span className="flex items-center gap-1.5">
+                          <Code size={10} className="text-gray-400 dark:text-zinc-500" />
+                          Coder
+                        </span>
+                        {coderChats.length > 0 && (
+                          <span className="bg-gray-100 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 text-[9px] font-bold px-1.5 py-0.2 rounded-full">
+                            {coderChats.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-0.5">
+                        {coderChats.map(chat => (
+                          <div key={chat.id} className="group relative">
+                            <button
+                              onClick={() => {
+                                setCurrentChatId(chat.id);
+                                if (onSelect) onSelect();
+                              }}
+                              className={`w-full p-2 rounded-lg flex items-center gap-2.5 text-xs font-medium transition-colors pr-10 ${
+                                currentChatId === chat.id
+                                  ? 'bg-gray-200/50 text-black dark:text-white font-semibold' 
+                                  : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-850/40 hover:text-gray-700 dark:hover:text-zinc-300'
+                              }`}
+                            >
+                              <Code size={14} className={currentChatId === chat.id ? 'text-black dark:text-white' : 'text-gray-400'} />
+                              <span className="truncate flex-1 text-left">
+                                {chat.title}
+                              </span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setChats(prev => prev.filter(c => c.id !== chat.id));
+                                if (currentChatId === chat.id) setCurrentChatId(null);
+                              }}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-md opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                              title="Delete chat"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        ))}
+                        {coderChats.length === 0 && (
+                          <div className="px-3 py-1.5 text-[11px] text-gray-400 dark:text-zinc-600 italic">No coder chats</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </motion.div>
             )}

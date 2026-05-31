@@ -18,6 +18,16 @@ export async function runAgent({
     { role: 'user' as const, content: userMessage },
   ];
 
+  // Assemble compound systemPrompt by appending content of each custom markdown skill file
+  let systemInstructionCombined = agent.systemPrompt || '';
+  if (agent.skillFiles && agent.skillFiles.length > 0) {
+    const skillFilesMarkdown = agent.skillFiles
+      .map(file => `### FILE: ${file.name}\nDescription: ${file.description || 'No description'}\n\n${file.content}`)
+      .join('\n\n---\n\n');
+    
+    systemInstructionCombined = `${systemInstructionCombined}\n\n## Active Custom Skill Files System\nRead and follow the guidelines and rules structured below precisely:\n\n${skillFilesMarkdown}`;
+  }
+
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -27,7 +37,7 @@ export async function runAgent({
       body: JSON.stringify({
         model: agent.model,
         messages,
-        systemPrompt: agent.systemPrompt,
+        systemPrompt: systemInstructionCombined,
         config: agent.provider ? {
           provider: agent.provider,
           apiKey: agent.apiKey,

@@ -1141,16 +1141,6 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
           >
             <FolderOpen size={13} />
           </button>
-          
-          {onClose && (
-            <button 
-              onClick={onClose}
-              className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
-              title="Collapse Explorer Sidebar"
-            >
-              <X size={13} />
-            </button>
-          )}
         </div>
       </div>
 

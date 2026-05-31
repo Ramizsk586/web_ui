@@ -122,9 +122,7 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
             setProjectFramework(data.framework);
             if (data.entryPoint) {
               setRightPreviewSubpath(data.entryPoint);
-              setIsCoderRightPanelOpen(true);
             }
-            await startCoderPreview();
           }
         } catch { /* ignore */ }
       };
@@ -136,7 +134,7 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
         rightPreviewPollRef.current = null;
       }
     };
-  }, [workspaceRefreshKey, isCoderMode, coderWorkspacePath, startCoderPreview]);
+  }, [workspaceRefreshKey, isCoderMode, coderWorkspacePath]);
 
   return {
     isCoderLeftPanelOpen, setIsCoderLeftPanelOpen,

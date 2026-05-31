@@ -1,0 +1,2466 @@
+import React from 'react';
+import { 
+  Globe, 
+  Sparkles, 
+  Check, 
+  Search, 
+  FileText, 
+  PenTool, 
+  Code, 
+  Wrench, 
+  Terminal, 
+  Box, 
+  CloudMoon 
+} from 'lucide-react';
+import { LuminaToolCallingAnimation } from '../components/ui/Animations';
+import { computeLineDiff } from '../components/NodeGraph/FileDiffNode';
+import { parseThinkTags, turboQuantCompress } from '../utils/textUtils';
+import { extractArtifacts } from '../utils/artifactUtils';
+import { extractYouTubeId, fetchYouTubeTranscript } from '../utils/youtubeUtils';
+import { SKILLS } from '../constants';
+import { Chat, Message, ToolCallNode } from '../types';
+import { scrapeUrl, ScrapeResult } from '../services/scrapingService';
+import {
+  wikiSearch,
+  wikiGetPage,
+  wikiGetSummary,
+  wikiGetSections,
+  wikiGetCategories,
+  wikiGetLinks,
+  wikiGetImages,
+  wikiGetRelated
+} from '../services/wikiService';
+
+export interface UseAppHandlersParams {
+  input: string;
+  setInput: (v: string) => void;
+  isTyping: boolean;
+  setIsTyping: (v: boolean) => void;
+  activeSkills: string[];
+  showsSlashCommands: boolean;
+  filteredCommands: any[];
+  selectedCommandIndex: number;
+  setSelectedCommandIndex: (v: number | ((prev: number) => number)) => void;
+  setTypingMessageId: (v: string | null) => void;
+
+  callLlamaBridge: any;
+
+  persona: any;
+  writingStyle: string;
+  useTurboQuant: boolean;
+  tavilyApiKey: string;
+  serpApiKey: string;
+  searchProvider: string;
+  selectedModel: string;
+  activeModelId: string;
+  activeModelList: any[];
+
+  chats: Chat[];
+  setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
+  currentChatId: string | null;
+  setCurrentChatId: (v: string | null) => void;
+  isWebSearchEnabled: boolean;
+  isVoiceListening: boolean;
+  stopVoiceDictation: () => void;
+  attachedFiles: File[];
+  setAttachedFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  attachedUrlDocs: any[];
+  setAttachedUrlDocs: React.Dispatch<React.SetStateAction<any[]>>;
+  isPlusMenuOpen: boolean;
+  setIsPlusMenuOpen: (v: boolean) => void;
+  isUrlToolOpen: boolean;
+  setIsUrlToolOpen: (v: boolean) => void;
+  urlToolInput: string;
+  setUrlToolInput: (v: string) => void;
+  urlToolLoading: boolean;
+  setUrlToolLoading: (v: boolean) => void;
+  urlToolError: string | null;
+  setUrlToolError: (v: string | null) => void;
+  isTranscriptToolOpen: boolean;
+  setIsTranscriptToolOpen: (v: boolean) => void;
+  transcriptToolInput: string;
+  setTranscriptToolInput: (v: string) => void;
+  transcriptToolLoading: boolean;
+  setTranscriptToolLoading: (v: boolean) => void;
+  transcriptToolError: string | null;
+  setTranscriptToolError: (v: string | null) => void;
+  setTranscriptionOptionsDoc: (v: any) => void;
+  isOcrProcessing: boolean;
+  setIsOcrProcessing: (v: boolean) => void;
+  setActiveArtifact: (v: any) => void;
+  setIsCanvasOpen: (v: boolean) => void;
+  setCanvasView: (v: any) => void;
+  showToast: (v: string) => void;
+
+  isCoderMode: boolean;
+  setIsCoderMode: (v: boolean) => void;
+  isCoderWorkspacePanelOpen: boolean;
+  setIsCoderWorkspacePanelOpen: (v: boolean) => void;
+  activeAssistantMode: string;
+  activeCommandType: string | null;
+  activeCommandQuery: string | null;
+  setActiveCommandType: (v: string | null) => void;
+  setActiveCommandQuery: (v: string | null) => void;
+  coderTodos: any[];
+  setCoderTodos: React.Dispatch<React.SetStateAction<any[]>>;
+  isGeneratingTodos: boolean;
+  setIsGeneratingTodos: (v: boolean) => void;
+  showTodoPanel: boolean;
+  setShowTodoPanel: (v: boolean) => void;
+  todoCollapsed: boolean;
+  setTodoCollapsed: (v: boolean) => void;
+  orchestrationState: any;
+  setOrchestrationState: React.Dispatch<React.SetStateAction<any>>;
+
+  setIsSidebarOpen: (v: boolean) => void;
+
+  coderWorkspacePath: string;
+  triggerWorkspaceRefresh: () => void;
+
+  scrapingResults: Map<string, any>;
+  setScrapingResults: React.Dispatch<React.SetStateAction<Map<string, any>>>;
+  setActiveScrapingJobs: React.Dispatch<React.SetStateAction<Set<string>>>;
+  wikiResults: Map<string, any>;
+  setWikiResults: React.Dispatch<React.SetStateAction<Map<string, any>>>;
+
+  localElementAttachments: any[];
+  setLocalElementAttachments: React.Dispatch<React.SetStateAction<any[]>>;
+
+  inputRef: React.RefObject<HTMLTextAreaElement>;
+  abortControllerRef: React.RefObject<AbortController | null>;
+
+  setAskAiQuestions: (v: any[]) => void;
+  setCurrentQuestionIndex: (v: number) => void;
+  setAskAiAnswers: (v: any) => void;
+  setShowAskAiPanel: (v: boolean) => void;
+  createNewChat: (agentId: string | null, coderModeEnabled?: boolean) => string;
+
+  buildActiveTools: () => any[];
+}
+
+const isLikelyCoderTask = (message: string) => {
+  const trimmed = message.trim().toLowerCase();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('/coder')) return true;
+  if (trimmed.length <= 24 && /^(hi|hey|hello|yo|sup|thanks|thank you|ok|okay|yes|no|hmm|hmmm|test)[!.? ]*$/.test(trimmed)) {
+    return false;
+  }
+
+  const coderTriggers = [
+    'build', 'create', 'make', 'implement', 'add', 'fix', 'debug', 'repair',
+    'change', 'modify', 'update', 'edit', 'refactor', 'remove', 'delete',
+    'file', 'folder', 'component', 'page', 'app', 'website', 'ui', 'bug',
+    'error', 'stack trace', 'typescript', 'css', 'html', 'react', 'electron',
+    'server', 'api', 'database', 'route', 'function', 'class', 'import',
+    'install', 'package', 'dependency', 'run', 'test', 'lint'
+  ];
+
+  return coderTriggers.some(trigger => trimmed.includes(trigger));
+};
+
+export function useAppHandlers(params: UseAppHandlersParams) {
+  const {
+    input, setInput,
+    isTyping, setIsTyping,
+    activeSkills,
+    showsSlashCommands, filteredCommands,
+    selectedCommandIndex, setSelectedCommandIndex,
+    setTypingMessageId,
+    callLlamaBridge,
+    persona, writingStyle, useTurboQuant,
+    tavilyApiKey, serpApiKey, searchProvider,
+    selectedModel, activeModelId, activeModelList,
+    chats, setChats,
+    currentChatId, setCurrentChatId,
+    isWebSearchEnabled,
+    isVoiceListening, stopVoiceDictation,
+    attachedFiles, setAttachedFiles,
+    attachedUrlDocs, setAttachedUrlDocs,
+    isPlusMenuOpen, setIsPlusMenuOpen,
+    isUrlToolOpen, setIsUrlToolOpen,
+    urlToolInput, setUrlToolInput,
+    urlToolLoading, setUrlToolLoading,
+    urlToolError, setUrlToolError,
+    isTranscriptToolOpen, setIsTranscriptToolOpen,
+    transcriptToolInput, setTranscriptToolInput,
+    transcriptToolLoading, setTranscriptToolLoading,
+    transcriptToolError, setTranscriptToolError,
+    setTranscriptionOptionsDoc,
+    isOcrProcessing, setIsOcrProcessing,
+    setActiveArtifact, setIsCanvasOpen, setCanvasView,
+    showToast,
+    isCoderMode, setIsCoderMode,
+    isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen,
+    activeAssistantMode,
+    activeCommandType, activeCommandQuery,
+    setActiveCommandType, setActiveCommandQuery,
+    coderTodos, setCoderTodos,
+    isGeneratingTodos, setIsGeneratingTodos,
+    showTodoPanel, setShowTodoPanel,
+    todoCollapsed, setTodoCollapsed,
+    orchestrationState, setOrchestrationState,
+    setIsSidebarOpen,
+    coderWorkspacePath, triggerWorkspaceRefresh,
+    scrapingResults, setScrapingResults,
+    setActiveScrapingJobs,
+    wikiResults, setWikiResults,
+    localElementAttachments, setLocalElementAttachments,
+    inputRef, abortControllerRef,
+    setAskAiQuestions, setCurrentQuestionIndex,
+    setAskAiAnswers, setShowAskAiPanel,
+    createNewChat,
+    buildActiveTools
+  } = params;
+
+  const handleClearChat = () => {
+    setChats(prev => prev.map(chat => {
+      if (chat.id === currentChatId) {
+        return {
+          ...chat,
+          messages: [],
+          updatedAt: new Date()
+        };
+      }
+      return chat;
+    }));
+    showToast("Chat cleared successfully!");
+  };
+
+  const handleSend = async (contentOverride?: string) => {
+    if (isVoiceListening) {
+      stopVoiceDictation();
+    }
+    if (isTyping) return;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
+
+    let content = contentOverride || input.trim();
+    if (!content && attachedFiles.length === 0 && attachedUrlDocs.length === 0) return;
+
+    if (content.trim().toLowerCase() === '/clear') {
+      handleClearChat();
+      setInput('');
+      return;
+    }
+
+    if (content.trim().toLowerCase() === '/new') {
+      createNewChat(null, isCoderMode);
+      setInput('');
+      return;
+    }
+
+    if (content.toLowerCase().startsWith('/coder')) {
+      const trimCmd = content.trim().toLowerCase();
+      let newState = true;
+      if (trimCmd === '/coder off') {
+        newState = false;
+      }
+      
+      setIsCoderMode(newState);
+      setIsCoderWorkspacePanelOpen(newState);
+      if (newState) {
+        setIsSidebarOpen(false);
+      }
+      
+      const targetChatId = createNewChat(null, newState);
+      
+      setChats(prev => prev.map(chat => {
+        if (chat.id === targetChatId) {
+          const sysMsgId = (Date.now() + 1).toString();
+          return {
+            ...chat,
+            isCoderMode: newState,
+            messages: [
+              ...chat.messages,
+              {
+                id: Date.now().toString(),
+                role: 'user',
+                content: content,
+                timestamp: new Date()
+              },
+              {
+                id: sysMsgId,
+                role: 'assistant',
+                content: newState 
+                  ? "⚡ **Coder Mode Activated!**\n\nI am now running as an autonomous Software Engineering Agent. I am connected directly to your active project workspace directory and am ready to write, read, edit, and list files in real-time. Give me instructions on what to build!"
+                  : "🚫 **Coder Mode Deactivated.**\n\nI will now answer your questions as a standard digital assistant without modifying the workspace.",
+                timestamp: new Date()
+              }
+            ],
+            updatedAt: new Date()
+          };
+        }
+        return chat;
+      }));
+      
+      setInput('');
+      triggerWorkspaceRefresh();
+      return;
+    }
+
+    if (activeSkills.length > 0) {
+      const skillPrompts = activeSkills.map(id => SKILLS.find(s => s.id === id)?.prompt).filter(Boolean);
+      content = skillPrompts.join('') + content;
+    }
+
+    // Inject attached URL documents into content
+    if (attachedUrlDocs.length > 0) {
+      const docBlocks = attachedUrlDocs.map(doc => {
+        const processedContent = useTurboQuant
+          ? turboQuantCompress(doc.content, 5000, 'medium')
+          : doc.content;
+        return `\n\n[ATTACHED URL DOCUMENT${useTurboQuant ? ' — TurboQuant Compressed' : ''}]\nSource: ${doc.url}\nTitle: ${doc.title}\nContent:\n${processedContent}\n[END DOCUMENT]`;
+      }).join('');
+      content = content + docBlocks;
+    }
+
+    // Read attached files (non-image) into content
+    if (attachedFiles.length > 0) {
+      const fileBlocks: string[] = [];
+      for (const file of attachedFiles) {
+        const isLikelyBinary = file.type && !file.type.startsWith('text/') &&
+          !/\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh)$/i.test(file.name);
+        if (!isLikelyBinary && file.size < 2 * 1024 * 1024) {
+          const fileContent = await file.text();
+          fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${fileContent}\n[END FILE]`);
+        } else {
+          fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+        }
+      }
+      content = content + fileBlocks.join('');
+    }
+
+    let chatId = currentChatId;
+    if (!chatId) {
+      chatId = createNewChat(null, isCoderMode);
+    }
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: content,
+      timestamp: new Date(),
+      elementAttachments: [...localElementAttachments]
+    } as any;
+
+    setAttachedFiles([]);
+    setAttachedUrlDocs([]);
+    setLocalElementAttachments([]);
+
+    setChats(prev => prev.map(chat => {
+      if (chat.id === chatId) {
+        const newMessages = [...chat.messages, userMessage];
+        return {
+          ...chat,
+          messages: newMessages,
+          title: chat.messages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : chat.title,
+          updatedAt: new Date(),
+        };
+      }
+      return chat;
+    }));
+
+    setInput('');
+    setIsTyping(true);
+
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
+
+    const thinkingId = (Date.now() + 1).toString();
+    const isCoderPlanning = isCoderMode || content.startsWith('/coder');
+    const thinkingMessage: Message = {
+      id: thinkingId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      thinking: isCoderPlanning ? 'Generating engineering TODOs...' : (isWebSearchEnabled ? 'Searching the web...' : 'Thinking...'),
+      isSearching: isWebSearchEnabled,
+      isStreaming: true,
+      toolCalls: [
+        {
+          id: 'thinking-node',
+          label: isCoderPlanning
+            ? 'Coder planner - generating TODOs...'
+            : (isWebSearchEnabled ? 'Searching the web...' : `${persona.name} - thinking...`),
+          type: 'ai',
+          status: 'active',
+          icon: isCoderPlanning ? React.createElement(LuminaToolCallingAnimation) : (isWebSearchEnabled ? React.createElement(Globe, { size: 14 }) : React.createElement(Sparkles, { size: 14 }))
+        }
+      ]
+    };
+
+    setTypingMessageId(thinkingId);
+    setChats(prev => prev.map(chat => {
+      if (chat.id === chatId) {
+        return {
+          ...chat,
+          messages: [...chat.messages, thinkingMessage],
+          updatedAt: new Date(),
+        };
+      }
+      return chat;
+    }));
+
+    const isSlash = content.startsWith('/');
+    const shouldRunCoderAgent = isCoderMode && isLikelyCoderTask(content);
+    if (isSlash || shouldRunCoderAgent) {
+      setIsGeneratingTodos(true);
+      setShowTodoPanel(true);
+      setTodoCollapsed(false);
+      
+      const firstSpaceIdx = content.indexOf(' ');
+      const cmdName = firstSpaceIdx !== -1 ? content.substring(1, firstSpaceIdx).toLowerCase() : content.substring(1).toLowerCase();
+      const cmdQuery = firstSpaceIdx !== -1 ? content.substring(firstSpaceIdx + 1).trim() : '';
+
+      setActiveCommandType(cmdName);
+      setActiveCommandQuery(cmdQuery || null);
+
+      if (cmdName === 'goal') {
+        setCoderTodos([
+          { id: 'goal-1', text: `Analyzing task goals for: "${cmdQuery || 'objective'}"`, status: 'in_progress' },
+          { id: 'goal-2', text: 'Scaffolding requirements & database blueprint schemas', status: 'pending' },
+          { id: 'goal-3', text: 'Assembling components and validating API payloads', status: 'pending' },
+          { id: 'goal-4', text: 'Running local test executions and structural verification', status: 'pending' },
+          { id: 'goal-5', text: 'Compiling final build output for interactive preview', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (cmdName === 'browser') {
+        setCoderTodos([
+          { id: 'browser-1', text: `Booting sandboxed browser module for: "${cmdQuery || 'target host'}"`, status: 'in_progress' },
+          { id: 'browser-2', text: 'Parsing viewport elements, stylesheets, and meta nodes', status: 'pending' },
+          { id: 'browser-3', text: 'Simulating interactive pointer clicks and network requests', status: 'pending' },
+          { id: 'browser-4', text: 'Capturing High-Definition page screenshots and asset state', status: 'pending' },
+          { id: 'browser-5', text: 'Outputting full diagnostic site audits and log reports', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (cmdName === 'schedule') {
+        setCoderTodos([
+          { id: 'schedule-1', text: `Registering recurring task rules: "${cmdQuery || 'automation schedule'}"`, status: 'in_progress' },
+          { id: 'schedule-2', text: 'Binding execution cron listeners & persistent intervals', status: 'pending' },
+          { id: 'schedule-3', text: 'Syncing backend job dispatch triggers and logs database', status: 'pending' },
+          { id: 'schedule-4', text: 'Running first-pass scheduler dry-runs', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (cmdName === 'grill-me') {
+        setCoderTodos([
+          { id: 'grill-1', text: `Reviewing initial alignment details for: "${cmdQuery || 'feature design'}"`, status: 'in_progress' },
+          { id: 'grill-2', text: 'Formulating diagnostic clarification interview questions', status: 'pending' },
+          { id: 'grill-3', text: 'Rendering dynamic user feedback input prompts', status: 'pending' },
+          { id: 'grill-4', text: 'Realigning architecture blueprint based on user responses', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      } else if (shouldRunCoderAgent || cmdName === 'coder') {
+        const queryPreview = (cmdQuery || content).substring(0, 42);
+        setCoderTodos([
+          { id: 'planning-1', text: `Understanding request: "${queryPreview}${(cmdQuery || content).length > 42 ? '...' : ''}"`, status: 'in_progress' },
+          { id: 'planning-2', text: 'Inspecting workspace intent and likely files', status: 'pending' },
+          { id: 'planning-3', text: 'Preparing executable engineering checklist', status: 'pending' }
+        ]);
+        setChats(prev => prev.map(chat => chat.id === chatId ? {
+          ...chat,
+          messages: chat.messages.map(m => m.id === thinkingId ? {
+            ...m,
+            thinking: 'Generating engineering TODOs...',
+            toolCalls: [
+              {
+                id: 'coder-plan-node',
+                label: 'Generating coder TODO runbook',
+                type: 'tool',
+                status: 'active',
+                toolName: 'manage_todos',
+                icon: React.createElement(LuminaToolCallingAnimation),
+                resultSummary: 'planning workspace steps'
+              },
+              {
+                id: 'coder-plan-ai',
+                label: `${persona.name} - preparing agent path`,
+                type: 'ai',
+                status: 'active',
+                icon: React.createElement(Sparkles, { size: 14 })
+              }
+            ]
+          } : m)
+        } : chat));
+        try {
+          const planPromptMessage = [
+            {
+              role: 'system',
+              content: 'You are an expert technical planner. Formulate a targeted, structured task checklist of 3-5 concrete engineering steps to accomplish the user\'s workspace request. Focus on specifying relevant files to check, create, edit, or build. Respond ONLY with a clean JSON object containing a "todos" array with items having "id" (string starting at "1"), "text" (the specific task description), and "status" (always "pending"). Do not explain. Do not wrap in markdown tags. Example: {"todos": [{"id": "1", "text": "Analyze existing project files for structure", "status": "pending"}]}.'
+            },
+            {
+              role: 'user',
+              content: `User query: "${cmdQuery || content}"`
+            }
+          ];
+          const planRes = await callLlamaBridge(planPromptMessage, [], signal);
+          const textResponse = planRes?.choices?.[0]?.message?.content || '';
+          const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(parsed.todos) && parsed.todos.length > 0) {
+              const mapped = parsed.todos.map((t: any, idx: number) => ({
+                id: t.id || (idx + 1).toString(),
+                text: t.text || 'Engineering task',
+                status: idx === 0 ? 'in_progress' : 'pending'
+              }));
+              setCoderTodos(mapped);
+              setChats(prev => prev.map(chat => chat.id === chatId ? {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? {
+                  ...m,
+                  thinking: 'Coder TODOs ready. Starting agent...',
+                  toolCalls: [
+                    {
+                      id: 'coder-plan-node',
+                      label: 'Coder TODO runbook generated',
+                      type: 'tool',
+                      status: 'complete',
+                      toolName: 'manage_todos',
+                      icon: React.createElement(Check, { size: 14 }),
+                      resultSummary: `${mapped.length} tasks prepared`
+                    },
+                    {
+                      id: 'coder-plan-ai',
+                      label: `${persona.name} - starting tool execution`,
+                      type: 'ai',
+                      status: 'active',
+                      icon: React.createElement(LuminaToolCallingAnimation)
+                    }
+                  ]
+                } : m)
+              } : chat));
+            } else {
+              throw new Error("Invalid structure");
+            }
+          } else {
+            throw new Error("No JSON found");
+          }
+        } catch (err) {
+          console.warn("Failed to generate dynamic todos via AI:", err);
+          setCoderTodos([
+            { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' },
+            { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' },
+            { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' }
+          ]);
+          setChats(prev => prev.map(chat => chat.id === chatId ? {
+            ...chat,
+            messages: chat.messages.map(m => m.id === thinkingId ? {
+              ...m,
+              thinking: 'Using fallback TODOs. Starting agent...',
+              toolCalls: [
+                {
+                  id: 'coder-plan-node',
+                  label: 'Fallback coder TODO runbook prepared',
+                  type: 'tool',
+                  status: 'complete',
+                  toolName: 'manage_todos',
+                  icon: React.createElement(Check, { size: 14 }),
+                  resultSummary: '3 tasks prepared'
+                },
+                {
+                  id: 'coder-plan-ai',
+                  label: `${persona.name} - starting tool execution`,
+                  type: 'ai',
+                  status: 'active',
+                  icon: React.createElement(LuminaToolCallingAnimation)
+                }
+              ]
+            } : m)
+          } : chat));
+        } finally {
+          setIsGeneratingTodos(false);
+        }
+      } else {
+        setCoderTodos([
+          { id: 'fb-1', text: `Formulating workspace task: "/${cmdName} ${cmdQuery}"`, status: 'in_progress' },
+          { id: 'fb-2', text: `Processing task strategies with ${selectedModel}`, status: 'pending' },
+          { id: 'fb-3', text: 'Executing response flow actions', status: 'pending' }
+        ]);
+        setIsGeneratingTodos(false);
+      }
+    } else {
+      setActiveCommandType(null);
+      setActiveCommandQuery(null);
+    }
+
+    let searchResults: any[] = [];
+    let searchProviderVal = "";
+
+    if (isWebSearchEnabled) {
+      try {
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map(m => m.id === thinkingId
+              ? { ...m, thinking: 'Searching the web...', isSearching: true }
+              : m)
+          };
+        }));
+
+        const hasTavilyKey = tavilyApiKey && tavilyApiKey.trim().length > 0;
+        const hasSerpKey = serpApiKey && serpApiKey.trim().length > 0;
+        
+        let providerName = 'DuckDuckGo';
+        if (searchProvider === 'tavily' && hasTavilyKey) {
+          providerName = 'Tavily';
+        } else if (searchProvider === 'serpapi' && hasSerpKey) {
+          providerName = 'SerpApi';
+        } else if (hasTavilyKey) {
+          providerName = 'Tavily';
+        } else if (hasSerpKey) {
+          providerName = 'SerpApi';
+        }
+
+        const searchResp = await fetch(`/api/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            query: content, 
+            tavilyKey: tavilyApiKey,
+            serpKey: serpApiKey,
+            provider: searchProvider
+          }),
+          signal
+        });
+        
+        if (searchResp.ok) {
+          const searchData = await searchResp.json();
+          searchResults = searchData.results || [];
+          searchProviderVal = searchData.provider || "Search";
+        } else {
+          console.warn('Backend search failed, no further fallback available.');
+        }
+
+        if (searchResults.length > 0) {
+          setChats(prev => prev.map(chat => {
+            if (chat.id === chatId) {
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? { 
+                  ...m, 
+                  isSearching: true, 
+                  thinking: `Synthesizing info from ${searchProviderVal}...`,
+                  sources: searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) 
+                } : m),
+              };
+            }
+            return chat;
+          }));
+        } else {
+          console.warn("Search returned no results from any provider.");
+        }
+      } catch (err) {
+        console.error("Search step failed:", err);
+      }
+    }
+
+    try {
+      const chatContext = chats.find(c => c.id === chatId)?.messages || [];
+      
+      let activeTools = (!isCoderMode || shouldRunCoderAgent) ? buildActiveTools() : [];
+      if (shouldRunCoderAgent) {
+        activeTools.push(
+          {
+            type: 'function',
+            function: {
+              name: 'write_file',
+              description: 'Create or overwrite a file. Creates parent dirs automatically.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path from project root.' },
+                  content: { type: 'string', description: 'File content to write.' }
+                },
+                required: ['filePath', 'content']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'read_file',
+              description: 'Read file contents. Optional line range with offset/limit.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative file path.' },
+                  offset: { type: 'number', description: 'Start line (1-indexed).' },
+                  limit: { type: 'number', description: 'Max lines to return.' }
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'search_code',
+              description: 'Search files by regex or list files by glob pattern.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  query: { type: 'string', description: 'Regex/text to search for.' },
+                  fileGlob: { type: 'string', description: 'File filter like "*.tsx".' },
+                  maxResults: { type: 'number', description: 'Max results (default 30).' }
+                },
+                required: []
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'analyze_file',
+              description: 'LSP analysis: imports, symbols, diagnostics, metadata.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative file path.' }
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'edit_file',
+              description: 'Find and replace text in an existing file.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative file path.' },
+                  search: { type: 'string', description: 'Exact text to find.' },
+                  replace: { type: 'string', description: 'Replacement text.' },
+                  all: { type: 'boolean', description: 'Replace all occurrences.' }
+                },
+                required: ['filePath', 'search', 'replace']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'run_skill',
+              description: 'Execute a skill template.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  skillId: { type: 'string', description: 'Skill ID.' },
+                  input: { type: 'string', description: 'Input text.' }
+                },
+                required: ['skillId', 'input']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'manage_todos',
+              description: 'Manage task todo list.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  action: { type: 'string', enum: ['create', 'update', 'complete', 'list'] },
+                  items: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        content: { type: 'string' },
+                        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+                        priority: { type: 'string', enum: ['high', 'medium', 'low'] }
+                      },
+                      required: ['content', 'status']
+                    }
+                  }
+                },
+                required: ['action', 'items']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'fetch_url',
+              description: 'Fetch and scrape a web page.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  url: { type: 'string', description: 'URL to fetch.' },
+                  outputFormat: { type: 'string', enum: ['markdown', 'text', 'html'], description: 'Output format (default: markdown).' }
+                },
+                required: ['url']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'web_search',
+              description: 'Search the web for current information.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  query: { type: 'string', description: 'Search query.' },
+                  maxResults: { type: 'number', description: 'Max results (default 5).' }
+                },
+                required: ['query']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'ask_user',
+              description: 'Ask clarifying questions when requirements are ambiguous.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  questions: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                        question: { type: 'string' },
+                        type: { type: 'string', enum: ['single_choice', 'multi_choice', 'text_input', 'confirm'] },
+                        options: { type: 'array', items: { type: 'string' } }
+                      },
+                      required: ['id', 'question', 'type']
+                    }
+                  }
+                },
+                required: ['questions']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'create_file',
+              description: 'Create a file or directory.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path.' },
+                  content: { type: 'string', description: 'File content.' },
+                  isDirectory: { type: 'boolean', description: 'Create directory instead.' }
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'delete_file',
+              description: 'Delete a file or directory.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Relative path to delete.' }
+                },
+                required: ['filePath']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'rename_file',
+              description: 'Rename or move a file/directory.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  filePath: { type: 'string', description: 'Current path.' },
+                  newPath: { type: 'string', description: 'New path.' }
+                },
+                required: ['filePath', 'newPath']
+              }
+            }
+          }
+        );
+      }
+
+      const personaLine = `You are ${persona.name}. Character description/Role: ${persona.role || 'helpful digital assistant'}.${persona.systemPrompt ? `\nInstructions: ${persona.systemPrompt}` : ''}`;
+      let systemPrompt = personaLine;
+
+      if (!isCoderMode) {
+        systemPrompt += `\n[CHAT MODE] Respond as a conversational assistant. Do not claim to be in Coder/Builder mode unless asked.`;
+      }
+
+      if (activeTools.length > 0) {
+        systemPrompt += `\n[TOOLS] Active: ${activeTools.map(t => t.function.name).join(', ')}. Use relevant tools proactively.`;
+      }
+
+      if (isCoderMode) {
+        const osName = (navigator as any)?.platform || 'unknown';
+        if (!shouldRunCoderAgent) {
+          systemPrompt += `\n[CODER CHAT MODE - ${osName}] Coder mode is open, but this message is conversational. Reply briefly. Do not call tools or discuss file changes unless the user asks for engineering work.`;
+        } else {
+          systemPrompt += `\n\n[CODER MODE — ${osName}]
+You are a software engineering agent. When asked to build/modify code:
+1. Use tools to make real file system changes. Always 'read_file' before editing.
+2. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
+3. Use 'search_code' to find symbols/errors. Use 'create_file'/'delete_file'/'rename_file' for file ops.
+4. Work in tool-call cycles until the task is complete. Give a summary when done.`;
+
+          if (activeAssistantMode === 'builder') {
+            systemPrompt += `\n[MODE: BUILDER] Implement features, create files, write working code.`;
+          } else if (activeAssistantMode === 'planner') {
+            systemPrompt += `\n[MODE: PLANNER] Plan architecture and sequencing. Ask before executing.`;
+          } else if (activeAssistantMode === 'debugger') {
+            systemPrompt += `\n[MODE: DEBUGGER] Trace errors, fix bugs with minimal changes.`;
+          }
+        }
+      }
+
+      // Orchestration Trigger Detection
+      const ORCHESTRATION_TRIGGERS = [
+        'full app', 'entire', 'complete project', 'everything', 'end-to-end',
+        'full-stack', 'full stack', 'whole thing', 'the whole', 'from scratch', 'build me a',
+        'create a complete', 'scaffold', 'production ready', 'deploy'
+      ];
+      const shouldActivateOrchestration = (msg: string): boolean => {
+        const lower = msg.toLowerCase();
+        return ORCHESTRATION_TRIGGERS.some(trigger => lower.includes(trigger));
+      };
+
+      if (isCoderMode && shouldActivateOrchestration(content) && !orchestrationState.isActive) {
+        setOrchestrationState({
+          isActive: true,
+          projectAnalysis: {
+            complexityScore: 'HIGH',
+            estimatedFiles: 20,
+            domainsDetected: ['frontend', 'backend', 'database', 'auth', 'devops'],
+            recommendedStrategy: 'SUBAGENT_TEAM',
+          },
+          agents: [],
+          currentPhase: 1,
+          totalPhases: 5,
+          awaitingUserConfirmation: false,
+          conflicts: [],
+        });
+
+        systemPrompt += `\n\n[SUBAGENT ORCHESTRATION MODE]
+You are the Lumina AI Master Orchestrator operating in Coder Mode.
+Your primary role is to analyze incoming software projects and INTELLIGENTLY DECOMPOSE
+large, complex work into coordinated subagent tasks that run with maximum parallelism
+and minimum inter-dependency conflicts.
+
+When the user asks to build a full project, FIRST output a PROJECT ANALYSIS BLOCK:
+┌─────────────────────────────────────────────────────┐
+│ 🔍 PROJECT ANALYSIS                                 │
+├─────────────────────────────────────────────────────┤
+│ Project Name: <name or "Unnamed Project">           │
+│ Complexity Score: <LOW | MEDIUM | HIGH | CRITICAL>  │
+│ Estimated Files: <number>                           │
+│ Domains Detected: <comma-separated list>            │
+│ Parallelizable: <YES | NO>                          │
+│ Recommended Strategy: <SOLO | SUBAGENT_TEAM>        │
+└─────────────────────────────────────────────────────┘
+
+Then output a SUBAGENT TASK DECOMPOSITION PLAN with phases.
+Then ask the user for confirmation before beginning.
+
+Available subagents: scaffold-agent, config-agent, backend-agent, frontend-agent,
+database-agent, auth-agent, integration-agent, test-agent, docs-agent, deploy-agent.
+
+Store subagent .prompt files at .lumina/subagents/ in the workspace.
+Store contract files at .lumina/contracts/ in the workspace.`;
+      }
+
+      // Inject search context into systemPrompt BEFORE building apiMessages
+      if (searchResults.length > 0 && !isCoderMode) {
+        const rawContextString = searchResults.slice(0, 8)
+          .map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`)
+          .join('\n\n');
+        
+        const contextString = useTurboQuant
+          ? turboQuantCompress(rawContextString, 5000, 'medium')
+          : rawContextString;
+
+        systemPrompt += `\n\nWeb Search Results${useTurboQuant ? ' (TurboQuant compressed)' : ''}:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
+      }
+
+      const recentContext = isCoderMode ? chatContext.slice(-4) : chatContext;
+      const apiMessages = [
+        { role: 'system', content: systemPrompt },
+        ...([...recentContext, userMessage]
+          .filter(m => (m.content && m.content.trim().length > 0) || (m.elementAttachments && m.elementAttachments.length > 0))
+          .map(m => {
+            let text = m.content || '';
+            if (m.elementAttachments && m.elementAttachments.length > 0) {
+              text += `\n\n[INSPECTED CODE ATTACHMENT FOR CONTEXT]:`;
+              m.elementAttachments.forEach((att: any) => {
+                text += `\n- File Name: ${att.fileName}\n- File Path: ${att.filePath}\n- Code Subsection:\n\`\`\`\n${att.specificCode}\n\`\`\`\n- Functional Role: ${att.elementWork}\n`;
+              });
+            }
+            return {
+              role: m.role,
+              content: text
+            };
+          }))
+      ];
+      
+      // Direct call to Llama Bridge
+      let rawResponse: any = await callLlamaBridge(apiMessages, activeTools, signal);
+
+      const data = rawResponse;
+      let choice = data.choices?.[0]?.message;
+      let toolCallsRaw = choice?.tool_calls;
+      const responseImages = data.images || [];
+
+      const toolCallNodes: ToolCallNode[] = [];
+      let agentTraceContent = '';
+
+      const hasWebScrapeCall = toolCallsRaw && toolCallsRaw.some((tc: any) => tc.function?.name === 'web_scrape');
+      if (isCoderMode || hasWebScrapeCall) {
+        let loopCount = 0;
+        const maxLoops = 20;
+        while (choice?.tool_calls && choice.tool_calls.length > 0 && loopCount < maxLoops) {
+          loopCount++;
+          let shouldStopAfterAsk = false;
+
+          const interimThought = typeof choice.content === 'string' ? choice.content.trim() : '';
+          if (interimThought) {
+            agentTraceContent += `${agentTraceContent ? '\n\n' : ''}${interimThought}`;
+            setChats(prev => prev.map(chat => {
+              if (chat.id !== chatId) return chat;
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? {
+                  ...m,
+                  content: `${m.content || ''}${m.content ? '\n\n' : ''}${interimThought}`,
+                  thinking: `Planning next tool step ${loopCount}...`
+                } : m)
+              };
+            }));
+          }
+          
+          const activeToolNames = choice.tool_calls.map((t: any) => t.function?.name || '');
+          if (activeToolNames.some((n: string) => n === 'read_file' || n === 'search_code' || n === 'analyze_file')) {
+            setCoderTodos(prev => {
+              if (prev.length > 0) {
+                return prev.map((item, idx) => {
+                  if (idx === 0) return { ...item, status: 'complete' };
+                  if (idx === 1 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+          if (activeToolNames.some((n: string) => n === 'write_file' || n === 'edit_file')) {
+            setCoderTodos(prev => {
+              if (prev.length > 1) {
+                return prev.map((item, idx) => {
+                  if (idx <= 1) return { ...item, status: 'complete' };
+                  if (idx === 2 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+          if (loopCount >= 2) {
+            setCoderTodos(prev => {
+              if (prev.length > 2) {
+                return prev.map((item, idx) => {
+                  if (idx <= 2) return { ...item, status: 'complete' };
+                  if (idx === 3 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+
+          const currentCallNodes: ToolCallNode[] = [];
+          
+          for (const [idx, tc] of choice.tool_calls.entries()) {
+            const fn = tc.function || {};
+            const name = fn.name || 'unknown';
+            const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
+            
+            const isScrape = name === 'web_scrape' || name === 'fetch_url';
+            const readRange = name === 'read_file' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
+            const node: ToolCallNode = {
+              id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
+              type: 'tool',
+              label: isScrape ? `Web Scraper (${args.url})` : `${name} ${args.filePath ? `(${args.filePath})` : ''}${readRange}`,
+              status: 'active',
+              toolName: name,
+              argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
+              icon: isScrape ? React.createElement(Globe, { size: 14 }) :
+                    name === 'web_search' ? React.createElement(Search, { size: 14 }) :
+                    name === 'search_code' ? React.createElement(Search, { size: 14 }) :
+                    name === 'read_file' ? React.createElement(FileText, { size: 14 }) :
+                    name === 'write_file' ? React.createElement(PenTool, { size: 14 }) :
+                    name === 'edit_file' ? React.createElement(PenTool, { size: 14 }) :
+                    name === 'analyze_file' ? React.createElement(Code, { size: 14 }) :
+                    name === 'run_skill' ? React.createElement(Sparkles, { size: 14 }) :
+                    name === 'manage_todos' ? React.createElement(Wrench, { size: 14 }) :
+                    name === 'ask_user' ? React.createElement(Sparkles, { size: 14 }) :
+                    name === 'create_file' ? React.createElement(Sparkles, { size: 14 }) :
+                    name === 'delete_file' ? React.createElement(Terminal, { size: 14 }) :
+                    name === 'rename_file' ? React.createElement(PenTool, { size: 14 }) :
+                    name.includes('grep') || name.includes('search') || name.includes('subtask') ? React.createElement(Search, { size: 14 }) :
+                    name.includes('read') || name.includes('file') ? React.createElement(FileText, { size: 14 }) :
+                    name.includes('edit') || name.includes('create') ? React.createElement(PenTool, { size: 14 }) :
+                    React.createElement(Sparkles, { size: 14 }),
+              filePath: args.filePath || '',
+              addedCount: name === 'write_file' ? (args.content ? args.content.split('\n').length : 15) : (name === 'edit_file' ? 45 : undefined),
+              removedCount: name === 'write_file' ? 0 : (name === 'edit_file' ? 8 : undefined)
+            };
+            currentCallNodes.push(node);
+            toolCallNodes.push(node);
+          }
+
+          setChats(prev => prev.map(chat => {
+            if (chat.id === chatId) {
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? {
+                  ...m,
+                  toolCalls: [...toolCallNodes]
+                } : m)
+              };
+            }
+            return chat;
+          }));
+
+          const toolResultMessages = [];
+          for (const tc of choice.tool_calls) {
+            const fn = tc.function || {};
+            const name = fn.name || 'unknown';
+            const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
+            let resultValue: any = null;
+
+            try {
+              if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'search_code', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file'].includes(name)) {
+                throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
+              }
+              const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+              if (name === 'create_file') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                if (cleanedPath.includes('/') && !args.isDirectory) {
+                  const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
+                  const folderFullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${folderPart}` : `./${folderPart}`;
+                  await fetch('/api/fs/create', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: folderFullPath, isDirectory: true, ...workspaceArg }), signal
+                  });
+                }
+                const createRes = await fetch('/api/fs/create', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, isDirectory: !!args.isDirectory, content: args.content, ...workspaceArg }), signal
+                });
+                resultValue = await createRes.json();
+                showToast(`Created ${cleanedPath}`);
+              } else if (name === 'delete_file') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const delRes = await fetch('/api/fs/delete', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, ...workspaceArg }), signal
+                });
+                resultValue = await delRes.json();
+                showToast(`Deleted ${cleanedPath}`);
+              } else if (name === 'rename_file') {
+                const oldPath = args.filePath.replace(/^\/+/, '');
+                const newPath = args.newPath.replace(/^\/+/, '');
+                const fullOldPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${oldPath}` : `./${oldPath}`;
+                const fullNewPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${newPath}` : `./${newPath}`;
+                const moveRes = await fetch('/api/fs/move', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ oldPath: fullOldPath, newPath: fullNewPath, ...workspaceArg }), signal
+                });
+                resultValue = await moveRes.json();
+                showToast(`Renamed ${oldPath} → ${newPath}`);
+              } else if (name === 'write_file') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                
+                let oldContent = '';
+                try {
+                  const readOld = await fetch('/api/fs/read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
+                    signal
+                  });
+                  if (readOld.ok) {
+                    const oldData = await readOld.json();
+                    oldContent = oldData.content || '';
+                  }
+                } catch (e) {}
+
+                if (cleanedPath.includes('/')) {
+                  const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
+                  const folderFullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${folderPart}` : `./${folderPart}`;
+                  await fetch('/api/fs/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: folderFullPath, isDirectory: true, ...workspaceArg }),
+                    signal
+                  });
+                }
+                const writeRes = await fetch('/api/fs/write', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, content: args.content, ...workspaceArg }),
+                  signal
+                });
+                resultValue = await writeRes.json();
+                
+                const newContent = args.content || '';
+                const diffValues = computeLineDiff(oldContent, newContent);
+                
+                const matchingNode = toolCallNodes.find(n => n.id === tc.id);
+                if (matchingNode) {
+                  matchingNode.addedCount = diffValues.added;
+                  matchingNode.removedCount = diffValues.removed;
+                }
+                showToast(`Wrote ${cleanedPath}`);
+              } else if (name === 'read_file') {
+                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const readBody: any = { filePath: fullPath, ...workspaceArg };
+                if (args.offset) readBody.offset = Number(args.offset);
+                if (args.limit) readBody.limit = Number(args.limit);
+                const readRes = await fetch('/api/fs/read', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(readBody),
+                  signal
+                });
+                resultValue = await readRes.json();
+                const range = args.offset ? ` [offset=${args.offset}${args.limit ? `, limit=${args.limit}` : ''}]` : '';
+                showToast(`Read ${cleanedPath}${range}`);
+              } else if (name === 'search_code') {
+                const maxResults = Math.max(1, Math.min(Number(args.maxResults || 30), 80));
+                const listRes = await fetch('/api/fs/list', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ folderPath: coderWorkspacePath || '.', ...workspaceArg }),
+                  signal
+                });
+                const listData = await listRes.json();
+                let files = listData.files || [];
+
+                const fileGlob = String(args.fileGlob || '').toLowerCase();
+                if (fileGlob) {
+                  files = files.filter((f: any) => {
+                    if (f.isDirectory) return false;
+                    const rel = String(f.relativePath || f.path || '').toLowerCase();
+                    return rel.includes(fileGlob) || rel.endsWith(fileGlob);
+                  });
+                }
+
+                const query = String(args.query || '').trim();
+                if (!query) {
+                  resultValue = { query: '', count: files.length, files: files.slice(0, maxResults).map((f: any) => ({ filePath: f.relativePath || f.path, isDirectory: f.isDirectory })) };
+                } else {
+                  files = files.filter((f: any) => {
+                    if (f.isDirectory) return false;
+                    const rel = String(f.relativePath || f.path || '').toLowerCase();
+                    return /\.(html?|css|scss|js|jsx|ts|tsx|json|md|vue|svelte|py|rs|go|php|rb|java|kt|swift)$/i.test(rel);
+                  });
+                  let regex: RegExp;
+                  try { regex = new RegExp(query, 'ig'); } catch { regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'); }
+                  const matches: any[] = [];
+                  for (const file of files) {
+                    if (matches.length >= maxResults) break;
+                    const readRes = await fetch('/api/fs/read', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ filePath: file.relativePath || file.path, ...workspaceArg }),
+                      signal
+                    });
+                    if (!readRes.ok) continue;
+                    const readData = await readRes.json();
+                    const lines = String(readData.content || '').split('\n');
+                    lines.forEach((line, idx) => {
+                      if (matches.length >= maxResults) return;
+                      regex.lastIndex = 0;
+                      if (regex.test(line)) {
+                        matches.push({ filePath: file.relativePath || file.path, line: idx + 1, text: line.trim().slice(0, 240) });
+                      }
+                    });
+                  }
+                  resultValue = { query, count: matches.length, matches };
+                  showToast(`Found ${matches.length} match${matches.length === 1 ? '' : 'es'}`);
+                }
+              } else if (name === 'analyze_file') {
+                const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
+                if (!cleanedPath) throw new Error("LSP_Experimental requires filePath");
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const lspRes = await fetch('/api/lsp/analyze', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
+                  signal
+                });
+                resultValue = await lspRes.json();
+                showToast(`LSP analyzed ${cleanedPath}`);
+              } else if (name === 'edit_file') {
+                const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
+                const searchText = String(args.search || '');
+                const replaceText = String(args.replace ?? '');
+                if (!cleanedPath || !searchText) throw new Error("edit_file requires filePath and search");
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const readRes = await fetch('/api/fs/read', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
+                  signal
+                });
+                const readData = await readRes.json();
+                if (!readRes.ok) throw new Error(readData.error || readData.detail || `Could not read ${cleanedPath}`);
+                const oldContent = readData.content || '';
+                const occurrences = oldContent.split(searchText).length - 1;
+                if (occurrences === 0) throw new Error(`Exact search text was not found in ${cleanedPath}`);
+                const newContentVal = args.all ? oldContent.split(searchText).join(replaceText) : oldContent.replace(searchText, replaceText);
+                const writeRes = await fetch('/api/fs/write', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, content: newContentVal, ...workspaceArg }),
+                  signal
+                });
+                resultValue = await writeRes.json();
+                const diffValues = computeLineDiff(oldContent, newContentVal);
+                const matchingNode = toolCallNodes.find(n => n.id === tc.id);
+                if (matchingNode) {
+                  matchingNode.addedCount = diffValues.added;
+                  matchingNode.removedCount = diffValues.removed;
+                }
+                resultValue = { ...resultValue, replacements: args.all ? occurrences : 1 };
+                showToast(`Patched ${cleanedPath}`);
+              } else if (name === 'run_skill') {
+                const skillId = String(args.skillId || '');
+                const inputVal = String(args.input || '');
+                const skill = SKILLS.find((s: any) => s.id === skillId);
+                if (skill) {
+                  resultValue = { skillId, skillLabel: skill.label, prompt: skill.prompt, input: inputVal, result: `${skill.prompt}${inputVal}` };
+                } else {
+                  resultValue = { error: `Unknown skill: ${skillId}. Available: ${SKILLS.map((s: any) => s.id).join(', ')}` };
+                }
+                showToast(`Applied skill: ${skillId}`);
+              } else if (name === 'manage_todos') {
+                const action = String(args.action || '');
+                const items = (args.items || []).map((item: any, i: number) => ({
+                  ...item,
+                  id: item.id || `todo-${Date.now()}-${i}`
+                }));
+                if (action === 'create' || action === 'update') {
+                  setCoderTodos(items);
+                  resultValue = { success: true, action, count: items.length, items };
+                } else if (action === 'complete') {
+                  setCoderTodos(prev => prev.map((item: any) => ({ ...item, status: 'completed' })));
+                  resultValue = { success: true, action: 'complete' };
+                } else {
+                  resultValue = { success: true, action: 'list', items: coderTodos };
+                }
+                showToast(`Todos: ${action} ${items.length} items`);
+              } else if (name === 'fetch_url') {
+                const targetUrl = args.url;
+                if (!targetUrl) throw new Error("Missing required 'url' parameter for Webfetch.");
+                setActiveScrapingJobs(prev => { const c = new Set(prev); c.add(tc.id); return c; });
+                showToast(`Fetching: ${targetUrl.substring(0, 30)}...`);
+                const scrapeResult = await scrapeUrl({
+                  url: targetUrl,
+                  outputFormat: args.outputFormat || 'markdown'
+                });
+                setScrapingResults(prev => { const c = new Map(prev); c.set(tc.id, scrapeResult); return c; });
+                setActiveScrapingJobs(prev => { const c = new Set(prev); c.delete(tc.id); return c; });
+                if (scrapeResult.error) {
+                  resultValue = { error: scrapeResult.error };
+                } else {
+                  const rawText = scrapeResult.rawText || '';
+                  const processedText = useTurboQuant
+                    ? turboQuantCompress(rawText, 4000, 'medium')
+                    : rawText.substring(0, 3000) + (rawText.length > 3000 ? '...' : '');
+                  resultValue = {
+                    title: scrapeResult.title,
+                    statusCode: scrapeResult.statusCode,
+                    linksFound: scrapeResult.links?.length || 0,
+                    content: processedText
+                  };
+                }
+              } else if (name === 'web_search') {
+                const searchQueryVal = String(args.query || '');
+                const maxRes = Math.min(Number(args.maxResults || 5), 10);
+                if (!searchQueryVal) throw new Error("Websearch requires query");
+                showToast(`Searching: ${searchQueryVal.substring(0, 40)}`);
+                const key = searchProvider === 'serpapi' ? serpApiKey : tavilyApiKey;
+                if (key && key.trim()) {
+                  const searchRes = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: searchQueryVal, tavilyKey: tavilyApiKey, serpKey: serpApiKey, provider: searchProvider }),
+                    signal
+                  });
+                  const searchData = await searchRes.json();
+                  const sliced = (searchData.results || []).slice(0, maxRes);
+                  resultValue = { query: searchQueryVal, provider: searchData.provider, count: sliced.length, results: sliced };
+                } else {
+                  resultValue = { error: 'No search API key configured. Configure Tavily or SerpAPI in Settings.' };
+                }
+              } else if (name === 'ask_user') {
+                const qs = args.questions || [];
+                setAskAiQuestions(qs);
+                setCurrentQuestionIndex(0);
+                setAskAiAnswers({});
+                setShowAskAiPanel(true);
+                shouldStopAfterAsk = true;
+                resultValue = { status: "success", message: "Successfully presented clarify questions to the user. Generation has paused for user inputs." };
+                showToast("AI is asking you clarifying questions!");
+              } else if (name === 'web_scrape') {
+                const targetUrl = args.url;
+                if (!targetUrl) {
+                  throw new Error("Missing required 'url' parameter for web_scrape.");
+                }
+
+                // Push to active scraping jobs set
+                setActiveScrapingJobs(prev => {
+                  const cloned = new Set(prev);
+                  cloned.add(tc.id);
+                  return cloned;
+                });
+
+                showToast(`Scraping webpage: ${targetUrl.substring(0, 30)}...`);
+
+                // Perform proxy-mediated scraping
+                const scrapeResult = await scrapeUrl({
+                  url: targetUrl,
+                  selectors: args.selectors,
+                  usePuppeteer: args.usePuppeteer,
+                  extractLinks: args.extractLinks,
+                  extractTables: args.extractTables,
+                  outputFormat: args.outputFormat
+                });
+
+                // Update scraping results Map state
+                setScrapingResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, scrapeResult);
+                  return cloned;
+                });
+
+                // Evict from active scraping jobs set
+                setActiveScrapingJobs(prev => {
+                  const cloned = new Set(prev);
+                  cloned.delete(tc.id);
+                  return cloned;
+                });
+
+                if (scrapeResult.error) {
+                  resultValue = { error: scrapeResult.error };
+                  showToast(`Scrape failed: ${scrapeResult.error.substring(0, 30)}...`);
+                } else {
+                  const rawMarkdown = scrapeResult.rawText || '';
+                  const processedMarkdown = useTurboQuant
+                    ? turboQuantCompress(rawMarkdown, 4000, 'medium')
+                    : (rawMarkdown.substring(0, 3000) + (rawMarkdown.length > 3000 ? '... [Truncated for prompt boundaries]' : ''));
+
+                  resultValue = {
+                    title: scrapeResult.title,
+                    statusCode: scrapeResult.statusCode,
+                    scrapedAt: scrapeResult.scrapedAt,
+                    dataExcerpt: scrapeResult.data,
+                    linksFound: scrapeResult.links?.length || 0,
+                    markdownExcerpt: processedMarkdown || 'No page text extracted.',
+                    turboQuantApplied: useTurboQuant,
+                  };
+                  showToast(`Successfully scraped "${scrapeResult.title || 'Page'}"`);
+                }
+              } else if (name === 'wiki_search') {
+                const { query, limit = 10, language = 'en' } = args;
+                showToast(`Searching Wikipedia for: ${query}`);
+                const searchResultsVal = await wikiSearch(query, limit, language);
+                
+                // Store results
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'search', data: { results: searchResultsVal } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  resultsCount: searchResultsVal.length,
+                  resultsBrief: searchResultsVal.slice(0, 3).map((r: any) => ({ pageId: r.pageId, title: r.title, url: r.url })),
+                  payload: searchResultsVal
+                };
+                
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Found ${searchResultsVal.length} indexed pages matching "${query}"`;
+                }
+              } else if (name === 'wiki_get_page') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Fetching full page ID: ${pageId}`);
+                const pageResult = await wikiGetPage(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: pageResult });
+                  return cloned;
+                });
+
+                const rawIntro = pageResult.intro || '';
+                const rawSections = pageResult.sections
+                  ? pageResult.sections.map((s: any) => `## ${s.title}\n${s.content || ''}`).join('\n\n')
+                  : '';
+                const fullWikiText = rawIntro + '\n\n' + rawSections;
+
+                const compressedWikiText = useTurboQuant
+                  ? turboQuantCompress(fullWikiText, 5000, 'medium')
+                  : fullWikiText.substring(0, 5000);
+
+                resultValue = {
+                  title: pageResult.title,
+                  wordCount: pageResult.wordCount,
+                  sectionsCount: pageResult.sections?.length || 0,
+                  introExcerpt: useTurboQuant
+                    ? turboQuantCompress(rawIntro, 600, 'light')
+                    : rawIntro.substring(0, 500),
+                  compressedContent: compressedWikiText,
+                  turboQuantApplied: useTurboQuant,
+                  payload: pageResult
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `"${pageResult.title}" fully loaded — ${pageResult.sections?.length || 0} sections, ${pageResult.wordCount} words`;
+                }
+              } else if (name === 'wiki_get_summary') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Getting summary for ID: ${pageId}`);
+                const summaryResult = await wikiGetSummary(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'summary', data: summaryResult });
+                  return cloned;
+                });
+
+                const rawExtract = summaryResult.extract || '';
+                resultValue = {
+                  title: summaryResult.title,
+                  extract: useTurboQuant
+                    ? turboQuantCompress(rawExtract, 1500, 'light')
+                    : rawExtract,
+                  url: summaryResult.url,
+                  turboQuantApplied: useTurboQuant,
+                  payload: summaryResult
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Summary for "${summaryResult.title}" parsed: "${summaryResult.extract.substring(0, 100)}..."`;
+                }
+              } else if (name === 'wiki_get_sections') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Reading page ID: ${pageId}`);
+                const sectionsList = await wikiGetSections(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Page ID ${pageId} sections`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, sections: sectionsList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  sectionsCount: sectionsList.length,
+                  list: sectionsList.map((s: any) => ({ index: s.index, title: s.title, level: s.level })),
+                  payload: sectionsList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Header index parsed: ${sectionsList.length} sections found`;
+                }
+              } else if (name === 'wiki_get_categories') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Reading target indices...`);
+                const catsList = await wikiGetCategories(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Categories for page ${pageId}`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, categories: catsList.map((c: any) => c.name) } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  categoriesCount: catsList.length,
+                  list: catsList.map((c: any) => c.name),
+                  payload: catsList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${catsList.length} taxonomies resolved`;
+                }
+              } else if (name === 'wiki_get_links') {
+                const { pageId, limit = 50, language = 'en' } = args;
+                showToast(`Collecting outbound page links...`);
+                const linksList = await wikiGetLinks(Number(pageId), Number(limit), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Outbound links for page ${pageId}`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, links: linksList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  linksCount: linksList.length,
+                  payload: linksList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${linksList.length} outbound connections logged`;
+                }
+              } else if (name === 'wiki_get_images') {
+                const { pageId, language = 'en' } = args;
+                showToast(`Extracting static elements...`);
+                const imgsList = await wikiGetImages(Number(pageId), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'page', data: { title: `Media elements for page ${pageId}`, url: `https://${language}.wikipedia.org/?curid=${pageId}`, images: imgsList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  imagesCount: imgsList.length,
+                  list: imgsList.map((i: any) => i.name),
+                  payload: imgsList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${imgsList.length} static illustrations resolved`;
+                }
+              } else if (name === 'wiki_get_related') {
+                const { pageId, limit = 10, language = 'en' } = args;
+                showToast(`Finding adjacent articles...`);
+                const relatedList = await wikiGetRelated(Number(pageId), Number(limit), language);
+
+                setWikiResults(prev => {
+                  const cloned = new Map(prev);
+                  cloned.set(tc.id, { wikiType: 'search', data: { results: relatedList } });
+                  return cloned;
+                });
+
+                resultValue = {
+                  relatedCount: relatedList.length,
+                  payload: relatedList
+                };
+
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `Trajectory logged: ${relatedList.length} related pages found`;
+                }
+              } else {
+                resultValue = { error: `Unsupported coder tool: ${name}` };
+              }
+            } catch (err: any) {
+              resultValue = { error: err.message };
+            }
+
+            const matchedIdx = toolCallNodes.findIndex(node => (node.id === tc.id) || (node.label.startsWith(name) && node.status === 'active'));
+            if (matchedIdx !== -1) {
+              toolCallNodes[matchedIdx].status = 'complete';
+              const resultStr = JSON.stringify(resultValue, null, 2);
+              toolCallNodes[matchedIdx].result = resultStr;
+              if (!toolCallNodes[matchedIdx].resultSummary) {
+                const preview = resultStr.length > 200 ? resultStr.slice(0, 200) + '...' : resultStr;
+                toolCallNodes[matchedIdx].resultSummary = preview;
+              }
+            }
+
+            toolResultMessages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              name: name,
+              content: JSON.stringify(resultValue)
+            });
+
+            setChats(prev => prev.map(chat => {
+              if (chat.id === chatId) {
+                return {
+                  ...chat,
+                  messages: chat.messages.map(m => m.id === thinkingId ? {
+                    ...m,
+                    toolCalls: [...toolCallNodes]
+                  } : m)
+                };
+              }
+              return chat;
+            }));
+          }
+
+          apiMessages.push(choice);
+          apiMessages.push(...toolResultMessages);
+
+          await new Promise(r => setTimeout(r, 600));
+          triggerWorkspaceRefresh();
+
+          if (shouldStopAfterAsk) {
+            break;
+          }
+
+          const nextResponse = await callLlamaBridge(apiMessages, activeTools, signal);
+          choice = nextResponse.choices?.[0]?.message;
+        }
+
+        triggerWorkspaceRefresh();
+      } else {
+        if (Array.isArray(toolCallsRaw) && toolCallsRaw.length > 0) {
+          toolCallsRaw.forEach((tc: any, idx: number) => {
+            const fn = tc.function || {};
+            const name = fn.name || 'unknown';
+            const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
+
+            toolCallNodes.push({
+              id: tc.id || `tc-${idx}`,
+              type: 'tool',
+              label: name,
+              status: 'complete',
+              argsCount: typeof args === 'object' && Object.keys(args).length === 0 ? 0 : Object.keys(args).length,
+              toolName: name,
+              icon: name.includes('search') || name.includes('research') ? React.createElement(Search, { size: 14 }) :
+                    name.includes('wikipedia') ? React.createElement(Globe, { size: 14 }) :
+                    name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs') ? React.createElement(FileText, { size: 14 }) :
+                    name.includes('write') || name.includes('edit') ? React.createElement(PenTool, { size: 14 }) :
+                    name.includes('github') ? React.createElement(Box, { size: 14 }) :
+                    name.includes('weather') ? React.createElement(CloudMoon, { size: 14 }) :
+                    React.createElement(Sparkles, { size: 14 })
+            });
+          });
+        }
+      }
+
+      const responseContent = choice?.content;
+      const finalContent = [agentTraceContent, responseContent]
+        .filter((part, idx, arr) => part && (idx === 0 || part !== arr[0]))
+        .join('\n\n') || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
+      
+      const scavengedImages: any[] = [];
+      toolCallNodes.forEach(tc => {
+        if (tc.toolName === 'web_scrape') {
+          const scraped = scrapingResults.get(tc.id);
+          if (scraped && scraped.images && scraped.images.length > 0) {
+            scraped.images.slice(0, 12).forEach((imgUrl: string, idx: number) => {
+              if (imgUrl && !scavengedImages.some(x => x.url === imgUrl)) {
+                scavengedImages.push({
+                  title: `Scraped Image ${idx + 1}`,
+                  url: imgUrl,
+                  source: scraped.title || 'Web Scrape'
+                });
+              }
+            });
+          }
+        } else if (tc.toolName?.startsWith('wiki_')) {
+          const wikiRes = wikiResults.get(tc.id);
+          if (wikiRes && wikiRes.data) {
+            if (wikiRes.wikiType === 'page' && wikiRes.data.images && wikiRes.data.images.length > 0) {
+              wikiRes.data.images.slice(0, 12).forEach((img: any, idx: number) => {
+                if (img.url && !scavengedImages.some(x => x.url === img.url)) {
+                  scavengedImages.push({
+                    title: img.name || `Wiki Image ${idx + 1}`,
+                    url: img.url,
+                    source: 'Wikipedia'
+                  });
+                }
+              });
+            } else if (wikiRes.wikiType === 'summary' && wikiRes.data.thumbnail?.url) {
+              const url = wikiRes.data.thumbnail.url;
+              if (url && !scavengedImages.some(x => x.url === url)) {
+                scavengedImages.push({
+                  title: wikiRes.data.title || 'Wiki Image',
+                  url: url,
+                  source: 'Wikipedia'
+                });
+              }
+            }
+          }
+        }
+      });
+
+      const imagesToAttach = [...responseImages, ...scavengedImages].map((img: any) => ({
+        title: img.title || 'Image',
+        url: img.url,
+        source: img.source,
+        thumbnail: img.thumbnail
+      }));
+
+      const finalToolNodes = [...toolCallNodes];
+
+      const modelForLabel = activeModelList.find(m => m.id === activeModelId);
+      const aiLabel = modelForLabel?.name || activeModelId;
+
+      const synthesisSubNodes: ToolCallNode[] = [];
+
+      if (toolCallNodes.length > 0) {
+        toolCallNodes.forEach((tc, idx) => {
+          synthesisSubNodes.push({
+            id: `synth-sub-${idx}`,
+            type: 'sub-tool',
+            label: `resolved: ${tc.toolName || tc.label}`,
+            status: 'complete',
+            icon: tc.icon,
+            resultSummary: tc.argsCount !== undefined
+              ? (tc.argsCount === 0 ? 'no args' : `${tc.argsCount} arg${tc.argsCount > 1 ? 's' : ''}`)
+              : undefined
+          });
+        });
+      }
+
+      if (searchResults.length > 0) {
+        synthesisSubNodes.push({
+          id: 'synth-sub-search',
+          type: 'sub-tool',
+          label: 'injected search context',
+          status: 'complete',
+          icon: React.createElement(Globe, { size: 12 }),
+          resultSummary: `${searchResults.length} result${searchResults.length > 1 ? 's' : ''} grounded`
+        });
+      }
+
+      if (writingStyle && writingStyle !== 'default') {
+        synthesisSubNodes.push({
+          id: 'synth-sub-style',
+          type: 'sub-tool',
+          label: `applied style: ${writingStyle}`,
+          status: 'complete',
+          icon: React.createElement(Sparkles, { size: 12 })
+        });
+      }
+
+      if (finalContent && finalContent.length > 0) {
+        const approxTokens = Math.round(finalContent.length / 4);
+        synthesisSubNodes.push({
+          id: 'synth-sub-tokens',
+          type: 'result',
+          label: `output generated`,
+          status: 'complete',
+          icon: React.createElement(Sparkles, { size: 12 }),
+          resultSummary: `~${approxTokens} tokens`
+        });
+      }
+
+      let synthLabel: string;
+      if (toolCallNodes.length > 1) {
+        synthLabel = `${aiLabel} — ${toolCallNodes.length} tools resolved, synthesised`;
+      } else if (toolCallNodes.length === 1) {
+        synthLabel = `${aiLabel} — tool result synthesised`;
+      } else if (searchResults.length > 0) {
+        synthLabel = `${aiLabel} — web context synthesised`;
+      } else if (isWebSearchEnabled && searchResults.length === 0) {
+        synthLabel = `${aiLabel} — direct response (no search hits)`;
+      } else if (writingStyle && writingStyle !== 'default') {
+        synthLabel = `${aiLabel} — ${writingStyle} response generated`;
+      } else {
+        synthLabel = `${aiLabel} — response generated`;
+      }
+
+      finalToolNodes.push({
+        id: 'final-ai',
+        type: 'ai',
+        label: synthLabel,
+        status: 'complete',
+        icon: React.createElement(Sparkles, { size: 12 }),
+        subNodes: synthesisSubNodes.length > 0 ? synthesisSubNodes : undefined,
+        resultSummary: synthesisSubNodes.length > 0
+          ? `${synthesisSubNodes.length} sub-step${synthesisSubNodes.length > 1 ? 's' : ''} completed`
+          : undefined
+      });
+
+      const activeToolNodes = finalToolNodes.map(n => ({ ...n, status: 'active' as const }));
+      
+      const thinkTagMatch = finalContent.match(/<think>[\s\S]*?<\/think>/);
+      const finalThinkContent = thinkTagMatch ? thinkTagMatch[0] : '';
+      const finalDisplayContent = finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+      // Detect the size of the largest code block to dynamically scale up typing streaming speed
+      const codeBlockThreshold = 50;
+      let maxLinesOfCode = 0;
+      const codeMatches = finalContent.match(/```[\s\S]*?```/g);
+      if (codeMatches) {
+        for (const block of codeMatches) {
+          const lines = block.split('\n').length;
+          if (lines > maxLinesOfCode) {
+            maxLinesOfCode = lines;
+          }
+        }
+      }
+
+      // Compute dynamic throughput (characters per second) based on file scale & line counts
+      const totalLength = finalContent.length;
+      let speedFactor = 95; // default for tiny conversational replies
+
+      if (totalLength > 8000) {
+        speedFactor = 1600;
+      } else if (totalLength > 4000) {
+        speedFactor = 1200;
+      } else if (totalLength > 2000) {
+        speedFactor = 850;
+      } else if (totalLength > 1000) {
+        speedFactor = 550;
+      } else if (totalLength > 500) {
+        speedFactor = 280;
+      }
+
+      // Scale dynamically with code block complexity to prevent stuttering but keep readable scrolling
+      if (maxLinesOfCode > codeBlockThreshold) {
+        if (maxLinesOfCode > 800) {
+          speedFactor = Math.max(speedFactor, 1950);
+        } else if (maxLinesOfCode > 400) {
+          speedFactor = Math.max(speedFactor, 1450);
+        } else if (maxLinesOfCode > 200) {
+          speedFactor = Math.max(speedFactor, 980);
+        } else if (maxLinesOfCode > 100) {
+          speedFactor = Math.max(speedFactor, 680);
+        } else {
+          speedFactor = Math.max(speedFactor, 420);
+        }
+      }
+
+      const startTime = Date.now();
+      let currentPos = 0;
+      let lastRenderTime = 0;
+      const RENDER_INTERVAL = 30; // ~33 FPS viewport updates
+
+      while (currentPos < totalLength) {
+        if (signal.aborted) {
+          break;
+        }
+
+        const elapsed = Date.now() - startTime;
+        // Exact character cursor position proportional to actual time elapsed
+        const targetPos = Math.min(totalLength, Math.floor(elapsed * (speedFactor / 1000)));
+
+        if (targetPos > currentPos) {
+          currentPos = targetPos;
+          const partial = finalContent.slice(0, currentPos);
+          const now = Date.now();
+
+          // Smoothly update state without loading main thread excessively
+          if (now - lastRenderTime > RENDER_INTERVAL || currentPos === totalLength) {
+            lastRenderTime = now;
+            const parsed = parseThinkTags(partial);
+            const displayContent = (parsed.before + parsed.after).trim();
+            setChats(prev => prev.map(chat => {
+              if (chat.id === chatId) {
+                return {
+                  ...chat,
+                  messages: chat.messages.map(m => m.id === thinkingId ? {
+                    ...m,
+                    content: parsed.isThinking ? displayContent : (displayContent || partial),
+                    thinkContent: parsed.think || undefined,
+                    isThinking: parsed.isThinking,
+                    streamPos: currentPos,
+                    toolCalls: activeToolNodes
+                  } : m),
+                };
+              }
+              return chat;
+            }));
+          }
+        }
+
+        // Relinquish execution back to the browser event loop for responsiveness (mouse tracking, layout drag)
+        await new Promise(resolve => setTimeout(resolve, 8));
+      }
+
+      if (signal.aborted) {
+        return;
+      }
+
+      const finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
+      if (finalArtifacts.length > 0) {
+        setActiveArtifact(finalArtifacts[0]);
+        setIsCanvasOpen(true);
+        setCanvasView(finalArtifacts[0].type === 'html' ? 'preview' : 'code');
+      }
+
+      setChats(prev => prev.map(chat => {
+        if (chat.id === chatId) {
+          return {
+            ...chat,
+            messages: chat.messages.map(m =>
+              m.id === thinkingId
+                ? {
+                    ...m,
+                    content: finalDisplayContent || finalContent.trim(),
+                    thinkContent: finalThinkContent.replace(/<\/?think>/g, '').trim() || undefined,
+                    isThinking: false,
+                    streamPos: undefined,
+                    thinking: undefined,
+                    toolCalls: finalToolNodes,
+                    isStreaming: false,
+                    sources: searchResults.length > 0 ? searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) : undefined,
+                    images: imagesToAttach.length > 0 ? imagesToAttach : undefined,
+                    searchQuery: isWebSearchEnabled ? userMessage.content : undefined,
+                    isSearching: false,
+                    timestamp: new Date(),
+                    artifacts: finalArtifacts.length > 0 ? finalArtifacts : undefined
+                  }
+                : m
+            ),
+            updatedAt: new Date(),
+          };
+        }
+        return chat;
+      }));
+    } catch (error: any) {
+      if (error?.name === 'AbortError' || signal.aborted) {
+        console.log('Stream generation aborted.');
+        // Gracefully finalize typing message structure up to where it currently was
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: chat.messages.map(m =>
+                m.id === thinkingId
+                  ? {
+                      ...m,
+                      isThinking: false,
+                      isStreaming: false,
+                      isSearching: false,
+                      timestamp: new Date()
+                    }
+                  : m
+              ),
+              updatedAt: new Date(),
+            };
+          }
+          return chat;
+        }));
+        return;
+      }
+      console.error('Lumina API Error:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `Error: ${error?.message || 'Chat completion failed'}. Please check your API key, model, and server configuration in Settings.`,
+        timestamp: new Date(),
+      };
+      setChats(prev => prev.map(chat => {
+        if (chat.id === chatId) {
+          const filtered = chat.messages.filter(m => m.id !== thinkingId);
+          return { ...chat, messages: [...filtered, errorMessage] };
+        }
+        return chat;
+      }));
+    } finally {
+      setIsTyping(false);
+      setTypingMessageId(null);
+      abortControllerRef.current = null;
+      setCoderTodos(prev => prev.map(t => ({ ...t, status: 'complete' })));
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showsSlashCommands && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedCommandIndex(prev => (prev + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedCommandIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const selectedCmd = filteredCommands[selectedCommandIndex];
+        if (selectedCmd) {
+          setInput(`/${selectedCmd.name} `);
+          setSelectedCommandIndex(0);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInput(input + ' ');
+        return;
+      }
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleScreenshot = async () => {
+    setIsPlusMenuOpen(false);
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const track = stream.getVideoTracks()[0];
+      const imageCapture = new (window as any).ImageCapture(track);
+      const bitmap = await imageCapture.grabFrame();
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+      track.stop();
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' });
+          handleFileAttach([file]);
+        }
+      });
+    } catch {
+      showToast('Screenshot cancelled or not supported.');
+    }
+  };
+
+  const ensureScrapedFilesOnDisk = async (doc: any) => {
+    if (!doc.id) return;
+    const docId = doc.id;
+    const isOcr = !!doc.isOcr;
+    const title = doc.title;
+    const url = doc.url;
+    const text = doc.content;
+    
+    const rawTitle = isOcr ? url.replace(/^\[OCR Image Attachment\]:\s*/, '') : title;
+    const safeTitle = rawTitle.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
+
+    const folder = isOcr ? 'ocr_transcripts' : 'scraped_pages';
+    const prefix = isOcr ? 'ocr_' : '';
+    const markdownPath = `${folder}/${prefix}${safeTitle}_${docId}.md`;
+    const jsonPath = `${folder}/${prefix}${safeTitle}_${docId}.json`;
+
+    const markdownContent = isOcr ? (
+      `# OCR Image Transcript: ${rawTitle}\n\n` +
+      `- **Source Image:** ${rawTitle}\n` +
+      `- **Captured/Uploaded On:** ${new Date().toLocaleString()}\n` +
+      `- **OCR Parser Confidence:** 100%\n` +
+      `- **Extracted Char Count:** ${text.length}\n\n` +
+      `---\n\n` +
+      `// Transcribed Text Extracted by Node.js OCR Engine\n\n` +
+      `${text || '*[No textual content found in image background]*'}`
+    ) : (
+      `# Scraped Page: ${title}\n\n` +
+      `- **URL:** ${url}\n` +
+      `- **Attached On:** ${new Date().toLocaleString()}\n` +
+      `- **Char Count:** ${text.length}\n\n` +
+      `## Full Scraped Content\n\n` +
+      `${text}`
+    );
+
+    try {
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
+      });
+
+      const jsonContent = isOcr ? JSON.stringify({
+        id: docId,
+        sourceFile: rawTitle,
+        processedAt: new Date().toISOString(),
+        extractedText: text
+      }, null, 2) : JSON.stringify({
+        id: docId,
+        url,
+        title,
+        scrapedAt: new Date().toISOString(),
+        content: text
+      }, null, 2);
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: jsonPath, content: jsonContent })
+      });
+
+      triggerWorkspaceRefresh();
+    } catch (err) {
+      console.error("Error creating files on disk:", err);
+    }
+  };
+
+  const processOcrForJoinedImage = async (file: File) => {
+    setIsOcrProcessing(true);
+    showToast(`🔍 Background OCR started for: ${file.name}...`);
+    
+    try {
+      // 1. Read file as Base64 helper
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+      });
+
+      // 2. POST to our custom backend
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Data })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server returned error: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      const extractedText = data.text || '';
+      const confidence = data.confidence || 0;
+
+      if (!extractedText.trim()) {
+        showToast(`⚠️ OCR scan completed, but no readable characters were extracted from ${file.name}.`);
+      } else {
+        showToast(`✨ OCR transcribed ${file.name} successfully (${Math.round(confidence)}% confidence)!`);
+      }
+
+      const docId = Date.now().toString();
+      const safeTitle = file.name.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
+      const markdownPath = `ocr_transcripts/ocr_${safeTitle}_${docId}.md`;
+      const jsonPath = `ocr_transcripts/ocr_${safeTitle}_${docId}.json`;
+
+      // Formulate detailed layout markdown
+      const markdownContent = `# OCR Image Transcript: ${file.name}\n\n` +
+        `- **Source Image:** ${file.name}\n` +
+        `- **Captured/Uploaded On:** ${new Date().toLocaleString()}\n` +
+        `- **OCR Parser Confidence:** ${Math.round(confidence)}%\n` +
+        `- **Extracted Words:** ${data.words?.length || 0}\n\n` +
+        `---\n\n` +
+        `## Transcribed Text Extracted by Node.js OCR Engine\n\n` +
+        `${extractedText || '*[No textual content found in image background]*'}\n\n` +
+        `---\n\n` +
+        `## Character Positioning Matrix\n\n` +
+        `| Text Element | Confidence | Layout Bounding Box |\n` +
+        `| :--- | :--- | :--- |\n` +
+        (data.words?.slice(0, 100).map((w: any) => `| **${w.text}** | ${w.confidence}% | x0: ${w.bbox.x0}, y0: ${w.bbox.y0}, x1: ${w.bbox.x1}, y1: ${w.bbox.y1} |`).join('\n') || '| N/A | N/A | N/A |') +
+        (data.words?.length > 100 ? `\n| ... and ${data.words.length - 100} more words | | |` : '');
+
+      // Write files in background
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
+      });
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filePath: jsonPath,
+          content: JSON.stringify({
+            id: docId,
+            sourceFile: file.name,
+            fileSize: file.size,
+            fileType: file.type,
+            processedAt: new Date().toISOString(),
+            confidence,
+            extractedText,
+            words: data.words || []
+          }, null, 2)
+        })
+      });
+
+      // 4. Create and attach document
+      const newDoc = {
+        id: docId,
+        url: `[OCR Image Attachment]: ${file.name}`,
+        title: `OCR Data: ${file.name}`,
+        content: extractedText,
+        favicon: base64Data, // Show real thumbnail preview
+        isOcr: true
+      };
+
+      setAttachedUrlDocs(prev => [...prev, newDoc]);
+      setTranscriptionOptionsDoc(newDoc); // Prompt options to edit/view right away!
+      triggerWorkspaceRefresh();
+    } catch (err: any) {
+      console.error("OCR background execution error: ", err);
+      showToast(`❌ OCR processing failed: ${err?.message || err}`);
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  };
+
+  const handleFileAttach = async (files: File[]) => {
+    const images = files.filter(f => f.type.startsWith('image/'));
+    const nonImages = files.filter(f => !f.type.startsWith('image/'));
+
+    // Attach non-images as regular files
+    if (nonImages.length > 0) {
+      setAttachedFiles(prev => [...prev, ...nonImages]);
+      showToast(`${nonImages.length} file(s) attached successfully!`);
+    }
+
+    // Process images sequentially with OCR of Node.js Server in background
+    for (const img of images) {
+      await processOcrForJoinedImage(img);
+    }
+  };
+
+  const handleAttachUrl = async () => {
+    const url = urlToolInput.trim();
+    if (!url) return;
+    setUrlToolLoading(true);
+    setUrlToolError(null);
+    try {
+      // Use the existing scrapeUrl service
+      const result: ScrapeResult = await scrapeUrl({ url, extractLinks: false, extractImages: false });
+      
+      // Compress: strip HTML, collapse whitespace, cap at 8000 chars
+      let text = '';
+      if (result.rawText) {
+        text = result.rawText;
+      } else if (result.data) {
+        text = result.data.text || result.data.content || result.data.markdown || JSON.stringify(result.data);
+      }
+      text = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (text.length > 8000) text = text.slice(0, 8000) + '...[truncated]';
+      
+      if (!text && result.error) {
+        throw new Error(result.error);
+      }
+      
+      const title = result.title || url;
+      const favicon = `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=32`;
+      
+      const newDoc = { id: Date.now().toString(), url, title, content: text, favicon };
+      
+      setAttachedUrlDocs(prev => [
+        ...prev,
+        newDoc
+      ]);
+      
+      // Auto save on disk & refresh workspace
+      await ensureScrapedFilesOnDisk(newDoc);
+      setTranscriptionOptionsDoc(newDoc); // Prompt options right away!
+      
+      setUrlToolInput('');
+      setIsUrlToolOpen(false);
+      showToast(`✅ Attached and written to workspace folder!`);
+    } catch (err: any) {
+      setUrlToolError(err?.message || 'Failed to fetch URL. Make sure it is accessible and try again.');
+    } finally {
+      setUrlToolLoading(false);
+    }
+  };
+
+  const ensureTranscriptFilesOnDisk = async (doc: any) => {
+    if (!doc.videoId || !doc.segments) return;
+    const videoId = doc.videoId;
+    const title = doc.title;
+    const url = doc.url;
+    const segments = doc.segments;
+    const transcript = doc.content;
+
+    const markdownPath = `transcripts/transcript_${videoId}.md`;
+    const markdownContent = `# YouTube Video Transcript\n\n` +
+      `**Video Title:** ${title}\n` +
+      `**Video URL:** ${url}\n` +
+      `**Video ID:** ${videoId}\n` +
+      `**Total Segment Milestones:** ${segments.length}\n\n` +
+      `---\n\n` +
+      `## Fully Assembled Text\n\n` +
+      `${transcript}\n\n` +
+      `---\n\n` +
+      `## Timestamped Collected Segments\n\n` +
+      `| Timestamp | Caption Line |\n` +
+      `| :--- | :--- |\n` +
+      segments.map((s: any) => `| **${s.timeStr}** | ${s.text} |`).join('\n');
+
+    try {
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
+      });
+
+      const jsonPath = `transcripts/transcript_${videoId}.json`;
+      const jsonContent = JSON.stringify({
+        videoId,
+        videoUrl: url,
+        videoTitle: title,
+        totalSegments: segments.length,
+        fullText: transcript,
+        segments: segments
+      }, null, 2);
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: jsonPath, content: jsonContent })
+      });
+
+      triggerWorkspaceRefresh();
+    } catch (err) {
+      console.error("Error creating files on the fly:", err);
+    }
+  };
+
+  const handleFetchTranscript = async () => {
+    const url = transcriptToolInput.trim();
+    if (!url) return;
+    setTranscriptToolLoading(true);
+    setTranscriptToolError(null);
+    
+    try {
+      const videoId = extractYouTubeId(url);
+      if (!videoId) throw new Error('Could not detect a valid YouTube video ID from this URL.');
+      
+      const transcriptRes = await fetchYouTubeTranscript(videoId);
+      const transcript = transcriptRes.text;
+      const segments = transcriptRes.segments;
+      const title = `YouTube Transcript – ${videoId}`;
+      const truncated = transcript.length > 12000 ? transcript.slice(0, 12000) + '...[truncated]' : transcript;
+      
+      const newDoc = {
+        id: Date.now().toString(),
+        url,
+        title,
+        content: truncated,
+        favicon: `https://www.google.com/s2/favicons?domain=youtube.com&sz=32`,
+        segments,
+        videoId
+      };
+      
+      setAttachedUrlDocs(prev => [...prev, newDoc]);
+      
+      // Auto save on disk & refresh workspace
+      await ensureTranscriptFilesOnDisk(newDoc);
+      
+      setTranscriptionOptionsDoc(newDoc); // Prompt with option choices!
+      
+      setTranscriptToolInput('');
+      setIsTranscriptToolOpen(false);
+      showToast(`✅ Transcript attached and written to workspace transcripts folder!`);
+    } catch (err: any) {
+      setTranscriptToolError(err?.message || 'Failed to fetch transcript. This video may not have captions enabled.');
+    } finally {
+      setTranscriptToolLoading(false);
+    }
+  };
+
+  return {
+    handleSend,
+    handleClearChat,
+    handleKeyDown,
+    handleScreenshot,
+    ensureScrapedFilesOnDisk,
+    processOcrForJoinedImage,
+    handleFileAttach,
+    handleAttachUrl,
+    ensureTranscriptFilesOnDisk,
+    handleFetchTranscript
+  };
+}

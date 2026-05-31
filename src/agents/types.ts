@@ -40,6 +40,12 @@ export interface AgentTool {
 
 export type AgentModel = string;
 
+export interface AgentSkillFile {
+  name: string;          // e.g. "AGENT.md", "TOOLS.md", "WORKFLOWS.md", "DOMAIN.md", "MEMORY.md"
+  content: string;       // markdown content
+  description: string;   // short description of what this file contains
+}
+
 export interface Agent {
   id: string;                    // nanoid or crypto.randomUUID()
   name: string;                  // e.g. "Technical PM", "Mindfulness Coach"
@@ -58,6 +64,7 @@ export interface Agent {
   provider?: string;             // Custom LLM provider
   apiKey?: string;               // Custom API Key
   baseUrl?: string;              // Custom Base URL
+  skillFiles?: AgentSkillFile[]; // custom generated markdown skill files
 }
 
 export interface AgentMessage {

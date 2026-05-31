@@ -303,6 +303,16 @@ async function startServer() {
     const trimmed = command.trim();
     const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
 
+    // Prevent interactive CLI processes that would hang the background spawn process
+    const LOWER_CMD = trimmed.toLowerCase();
+    const BLOCKED_CLIS = ['opencode', 'claude', 'poolside', 'cline', 'aider', 'gptengineer', 'gpt-engineer', 'devin'];
+    if (BLOCKED_CLIS.some(cli => LOWER_CMD.includes(cli))) {
+      return res.status(400).json({
+        sessionId,
+        stderr: '✖ Command blocked: Interactivity with external AI CLIs (opencode, claude, poolside, cline, etc.) is restricted to prevent terminal session freezes.\n'
+      });
+    }
+
     // Built-in: clear/cls
     if (['cls', 'clear', 'clear-host'].includes(firstWord)) {
       return res.json({ sessionId, clear: true, stdout: '', stderr: '' });

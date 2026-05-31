@@ -149,6 +149,18 @@ export default function App() {
   const smartPopup = null;
   const devTools = null;
 
+  const sidebarWithModifiedToggle = {
+    ...sidebar,
+    setIsSidebarOpen: (val: boolean | ((prev: boolean) => boolean)) => {
+      if (workspace.isCoderLeftPanelOpen) {
+        workspace.setIsCoderLeftPanelOpen(false);
+        sidebar.setIsSidebarOpen(true);
+        return;
+      }
+      sidebar.setIsSidebarOpen(val);
+    }
+  };
+
   return (
     <AppContent
       isDarkMode={isDarkMode}
@@ -157,7 +169,7 @@ export default function App() {
       appSettings={appSettings}
       llamaBridge={llamaBridge}
       agents={agents}
-      sidebar={sidebar}
+      sidebar={sidebarWithModifiedToggle}
       luminaTools={luminaTools}
       inputState={inputState}
       workspace={workspace}

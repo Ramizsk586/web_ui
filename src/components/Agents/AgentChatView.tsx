@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, Box, HardDrive, BookOpen, Link, Image, ChevronDown, Wand2 } from 'lucide-react';
+import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, Box, HardDrive, BookOpen, Link, Image, ChevronDown, Wand2, Plus, ArrowUp, X, Mic } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Agent, AgentMessage } from '../../agents/types';
 import { runAgent } from '../../agents/agentRunner';
@@ -15,6 +15,7 @@ interface AgentChatViewProps {
   markdownComponents?: any;
   userProfile?: any;
   persona?: any;
+  onOpenInEditor?: (filePath: string | null) => void;
 }
 
 export function AgentChatView({
@@ -25,6 +26,7 @@ export function AgentChatView({
   markdownComponents,
   userProfile,
   persona,
+  onOpenInEditor,
 }: AgentChatViewProps) {
   const [inputText, setInputText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -32,6 +34,117 @@ export function AgentChatView({
   const [activeToolCalls, setActiveToolCalls] = useState<any[] | undefined>(undefined);
   const [showOptions, setShowOptions] = useState(false);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [showSkillFiles, setShowSkillFiles] = useState(false);
+  const [activeSkillFileIdx, setActiveSkillFileIdx] = useState(0);
+  const [isInspectSkillsOpen, setIsInspectSkillsOpen] = useState(false);
+
+  const handleOpenSystemPromptInEditor = async () => {
+    setShowOptions(false);
+    if (!onOpenInEditor) return;
+
+    try {
+      const safeName = agent.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'agent';
+      const filePath = `system_prompts/${safeName}_system_prompt.txt`;
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath, content: agent.systemPrompt })
+      });
+
+      onOpenInEditor(filePath);
+    } catch (err) {
+      console.error("Failed to open system prompt in code editor:", err);
+    }
+  };
+
+  const handleOpenSkillFileInEditor = async (file: any) => {
+    if (!onOpenInEditor) return;
+
+    try {
+      const safeName = agent.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_') || 'agent';
+      const safeFileName = file.name.replace(/[^a-z0-9._-]/gi, '_') || 'skill_file.md';
+      const filePath = `system_prompts/${safeName}_skill_${safeFileName}`;
+
+      await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath, content: file.content })
+      });
+
+      setIsInspectSkillsOpen(false);
+      onOpenInEditor(filePath);
+    } catch (err) {
+      console.error("Failed to open skill file in code editor:", err);
+    }
+  };
+
+  // States for document and file attachments in Agent Mode
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [attachedUrlDocs, setAttachedUrlDocs] = useState<any[]>([]);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const readFileAsText = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        resolve(e.target?.result as string || '');
+      };
+      reader.onerror = () => resolve('[Unreadable File / Binary Content]');
+      reader.readAsText(file);
+    });
+  };
+
+  const handleFileAttach = async (files: File[]) => {
+    const images = files.filter(f => f.type.startsWith('image/'));
+    const nonImages = files.filter(f => !f.type.startsWith('image/'));
+
+    if (nonImages.length > 0) {
+      setAttachedFiles(prev => [...prev, ...nonImages]);
+    }
+
+    for (const img of images) {
+      await processOcrForImage(img);
+    }
+  };
+
+  const processOcrForImage = async (file: File) => {
+    setIsOcrProcessing(true);
+    try {
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = (e) => reject(e);
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Data })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const extractedText = data.text || '';
+        const docId = Date.now().toString();
+        
+        setAttachedUrlDocs(prev => [
+          ...prev,
+          {
+            id: docId,
+            title: `OCR Transcript: ${file.name}`,
+            content: extractedText,
+          }
+        ]);
+      }
+    } catch (err) {
+      console.error("Error processing OCR in AgentChatView: ", err);
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const optionsRef = useRef<HTMLDivElement>(null);
@@ -73,17 +186,47 @@ export function AgentChatView({
 
   const handleSend = async () => {
     const text = inputText.trim();
-    if (!text || isStreaming) return;
+    if ((!text && attachedFiles.length === 0 && attachedUrlDocs.length === 0) || isStreaming) return;
 
     setInputText('');
     if (textInputRef.current) {
       textInputRef.current.style.height = 'auto';
     }
 
+    let combinedContent = text;
+
+    // Read all non-image attached files sequentially
+    if (attachedFiles.length > 0) {
+      const fileBlocks = [];
+      for (const file of attachedFiles) {
+        const isLikelyBinary = file.type && !file.type.startsWith('text/') && 
+          !/\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh)$/i.test(file.name);
+        
+        if (!isLikelyBinary && file.size < 2 * 1024 * 1024) {
+          const fileContent = await readFileAsText(file);
+          fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${fileContent}\n[END FILE]`);
+        } else {
+          fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+        }
+      }
+      combinedContent = combinedContent + fileBlocks.join('');
+    }
+
+    if (attachedUrlDocs.length > 0) {
+      const docBlocks = attachedUrlDocs.map(doc => {
+        return `\n\n[ATTACHED OCR PROTOCOL: ${doc.title}]\nContent Extracted:\n${doc.content}\n[END DOCUMENT]`;
+      }).join('');
+      combinedContent = combinedContent + docBlocks;
+    }
+
+    // Clear attached states synchronously
+    setAttachedFiles([]);
+    setAttachedUrlDocs([]);
+
     const userMsg: AgentMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: text,
+      content: combinedContent,
       timestamp: Date.now(),
     };
 
@@ -342,13 +485,13 @@ export function AgentChatView({
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden relative">
+    <div className="flex flex-col h-full bg-[var(--theme-bg)] text-[var(--theme-primary)] overflow-hidden relative">
       {/* Header Bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-900 bg-zinc-900/40 relative z-20 shrink-0">
+      <div className="h-14 flex items-center justify-between px-4 md:px-6 border-b border-[var(--theme-border)]/40 bg-[var(--theme-bg)]/80 backdrop-blur-md relative z-20 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onBack}
-            className="p-1.5 hover:bg-zinc-800 rounded-xl text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer"
             title="Back to generic chat"
           >
             <ArrowLeft size={16} />
@@ -359,27 +502,22 @@ export function AgentChatView({
               <AgentAvatar emoji={agent.avatarEmoji} className="w-5 h-5 text-white" />
             </div>
             <div className="flex flex-col text-left min-w-0">
-              <span className="text-xs font-bold truncate text-white leading-tight flex items-center gap-1.5">
+              <span className="text-xs font-bold truncate text-[var(--theme-primary)] leading-tight flex items-center gap-1.5">
                 {agent.name}
               </span>
-              <span className="text-[10px] text-zinc-500 truncate leading-snug">
+              <span className="text-[10px] text-[var(--theme-secondary)] truncate leading-snug">
                 {agent.description || 'Custom AI Agent'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Skill Badges + Settings Menu */}
+        {/* Settings Menu Trigger */}
         <div className="flex items-center gap-2.5 shrink-0">
-          <div className="hidden sm:block">
-            {renderSkillBadges()}
-          </div>
-          
-          {/* Menu Trigger */}
           <div className="relative" ref={optionsRef}>
             <button
               onClick={() => setShowOptions(!showOptions)}
-              className="p-1.5 hover:bg-zinc-800 rounded-xl text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer"
             >
               <Settings size={15} />
             </button>
@@ -391,7 +529,7 @@ export function AgentChatView({
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -5 }}
                   transition={{ duration: 0.12 }}
-                  className="absolute right-0 mt-1.5 w-44 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl z-50 overflow-hidden py-1"
+                  className="absolute right-0 mt-1.5 w-44 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-xl shadow-xl z-50 overflow-hidden py-1"
                 >
                   <button
                     onClick={() => {
@@ -399,21 +537,30 @@ export function AgentChatView({
                       onEditAgent();
                     }}
                     disabled={agent.isBuiltin}
-                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-zinc-350 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
                   >
-                    <Edit size={12} className="text-zinc-400" />
+                    <Edit size={12} className="text-[var(--theme-secondary)]" />
                     Edit Agent Details
                   </button>
                   <button
-                    onClick={() => {
-                      setShowOptions(false);
-                      setShowSystemPrompt(!showSystemPrompt);
-                    }}
-                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-zinc-350 hover:text-white hover:bg-zinc-800 transition-colors"
+                    onClick={handleOpenSystemPromptInEditor}
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
                   >
-                    <Terminal size={12} className="text-zinc-400" />
-                    {showSystemPrompt ? 'Hide Prompt' : 'View System Prompt'}
+                    <Terminal size={12} className="text-[var(--theme-secondary)]" />
+                    View System Prompt
                   </button>
+                  {agent.skillFiles && agent.skillFiles.length > 0 && (
+                    <button
+                      onClick={() => {
+                        setShowOptions(false);
+                        setIsInspectSkillsOpen(true);
+                      }}
+                      className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors cursor-pointer"
+                    >
+                      <Brain size={12} className="text-teal-400" />
+                      Inspect Skill System
+                    </button>
+                  )}
                   <button
                     onClick={handleClearHistory}
                     className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 transition-colors"
@@ -427,6 +574,55 @@ export function AgentChatView({
           </div>
         </div>
       </div>
+
+      {/* Custom *.md Skill Files Display Banner */}
+      <AnimatePresence>
+        {showSkillFiles && agent.skillFiles && agent.skillFiles.length > 0 && (
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: 'auto' }}
+            exit={{ height: 0 }}
+            className="bg-zinc-950 border-b border-zinc-900 flex flex-col text-[11px] text-zinc-400 overflow-hidden relative shrink-0 z-20"
+          >
+            {/* Folder tab buttons bar */}
+            <div className="flex items-center gap-1.5 bg-zinc-900/40 px-4 py-2 border-b border-zinc-900 overflow-x-auto select-none">
+              <span className="text-[9px] font-bold text-zinc-500 tracking-wider uppercase mr-2.5 shrink-0 flex items-center gap-1">
+                <Brain size={10} className="text-teal-400 animate-pulse" />
+                <span>SKILL FILES:</span>
+              </span>
+              {agent.skillFiles.map((file, idx) => (
+                <button
+                  key={file.name}
+                  onClick={() => setActiveSkillFileIdx(idx)}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-mono shrink-0 transition-all font-medium ${
+                    activeSkillFileIdx === idx
+                      ? 'bg-teal-500/10 text-teal-400 border border-teal-500/20'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30'
+                  }`}
+                >
+                  {file.name}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowSkillFiles(false)}
+                className="ml-auto text-[9.5px] font-semibold px-2 py-1 bg-zinc-900 text-zinc-400 rounded-lg border border-zinc-800 hover:text-white transition-colors cursor-pointer shrink-0"
+              >
+                Hide
+              </button>
+            </div>
+            
+            {/* File code view */}
+            <div className="p-4 overflow-y-auto max-h-56 leading-relaxed text-left bg-zinc-950 flex flex-col gap-2">
+              <div className="text-[10px] text-zinc-500 font-sans italic">
+                Description: <span className="text-zinc-400">{agent.skillFiles[activeSkillFileIdx]?.description || 'Core instructions guidelines'}</span>
+              </div>
+              <pre className="whitespace-pre-wrap font-mono text-[10.5px] text-zinc-300 bg-zinc-900/10 p-3.5 rounded-xl border border-zinc-900 leading-relaxed max-w-full overflow-x-auto">
+                {agent.skillFiles[activeSkillFileIdx]?.content}
+              </pre>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* System Prompt Expanded Banner */}
       <AnimatePresence>
@@ -452,28 +648,29 @@ export function AgentChatView({
       </AnimatePresence>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar select-text">
-        {/* If chat history is empty, show a neat onboarding greeting card */}
-        {agent.chatHistory.length === 0 && (
-          <div className="flex flex-col items-center justify-center max-w-md mx-auto pt-16 text-center select-none">
-            <div className={`p-4 rounded-2xl ${agent.avatarColor} w-16 h-16 flex items-center justify-center mb-6 shadow-md shadow-black/20`}>
-              <AgentAvatar emoji={agent.avatarEmoji} className="w-10 h-10 text-white" />
+      <div className="flex-1 overflow-y-auto py-6 custom-scrollbar select-text bg-[var(--theme-bg)]">
+        <div className="max-w-4xl mx-auto w-full px-4 md:px-12 space-y-6">
+          {/* If chat history is empty, show a neat onboarding greeting card */}
+          {agent.chatHistory.length === 0 && (
+            <div className="flex flex-col items-center justify-center max-w-md mx-auto pt-16 text-center select-none">
+              <div className={`p-4 rounded-2xl ${agent.avatarColor} w-16 h-16 flex items-center justify-center mb-6 shadow-md shadow-black/20`}>
+                <AgentAvatar emoji={agent.avatarEmoji} className="w-10 h-10 text-white" />
+              </div>
+              <h2 className="text-base font-bold text-white mb-2 font-sans">
+                Chatting with {agent.name}
+              </h2>
+              <p className="text-xs text-zinc-500 leading-relaxed max-w-sm mb-4">
+                {agent.description || 'This specialized AI agent is configured with custom system prompts to perform targeted work.'}
+              </p>
+              <div className="flex flex-wrap gap-2 justify-center mt-2 max-w-full">
+                {agent.skills.filter(s => s.enabled).map(s => (
+                  <span key={s.id} className="text-[10px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+                    {s.name}
+                  </span>
+                ))}
+              </div>
             </div>
-            <h2 className="text-base font-bold text-white mb-2 font-sans">
-              Chatting with {agent.name}
-            </h2>
-            <p className="text-xs text-zinc-500 leading-relaxed max-w-sm mb-4">
-              {agent.description || 'This specialized AI agent is configured with custom system prompts to perform targeted work.'}
-            </p>
-            <div className="flex flex-wrap gap-2 justify-center mt-2 max-w-full">
-              {agent.skills.filter(s => s.enabled).map(s => (
-                <span key={s.id} className="text-[10px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
-                  {s.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
 
         {/* Persisted message logs */}
         {agent.chatHistory.map((msg, index) => {
@@ -545,11 +742,96 @@ export function AgentChatView({
         )}
 
         <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* Footer Chat Input Form */}
-      <div className="p-4 border-t border-zinc-900/40 bg-zinc-950 shrink-0 select-none">
-        <div className="relative border border-zinc-800 focus-within:border-cyan-500/40 bg-zinc-900/40 overflow-visible flex flex-col p-2 min-h-[110px] justify-between transition-all duration-300 rounded-2xl shadow-inner max-w-3xl mx-auto w-full">
+      <div className="p-4 md:px-6 md:pb-6 md:pt-2 border-t border-[var(--theme-border)]/30 bg-[var(--theme-bg)] shrink-0 select-none">
+        <div className="relative border border-[var(--theme-input-border)] bg-[var(--theme-input-bg)] focus-within:border-[var(--theme-accent)]/45 overflow-visible flex flex-col p-2.5 min-h-[110px] justify-between transition-all duration-300 rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.65)] max-w-4xl mx-auto w-full z-10 text-left">
+          
+          {/* File Attachments List (OCR & Text/Log sheets) */}
+          {(attachedFiles.length > 0 || attachedUrlDocs.length > 0 || isOcrProcessing) && (
+            <div className="flex flex-wrap gap-2 px-3 pt-1 pb-3 items-center border-b border-[var(--theme-border)]/35 mb-2">
+              {attachedFiles.map((file, idx) => {
+                const isImage = file.type.startsWith('image/');
+                const ext = file.name.split('.').pop()?.toUpperCase() || 'DOC';
+                let previewUrl = '';
+                if (isImage) {
+                  try {
+                    previewUrl = URL.createObjectURL(file);
+                  } catch (e) {
+                    previewUrl = '';
+                  }
+                }
+                return (
+                  <motion.div 
+                    key={`${file.name}-${idx}`}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="relative flex items-center gap-2.5 px-3 py-1.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-alt)]/65 text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-all max-w-[215px] h-12 shadow-sm group/file"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
+                      className="absolute -top-1.5 -right-1.5 w-4.5 h-4.5 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-[var(--theme-border)] text-gray-400 hover:text-white flex items-center justify-center transition-all z-10 shadow-lg cursor-pointer"
+                    >
+                      <X size={10} />
+                    </button>
+                    <div className="w-8 h-8 bg-zinc-800 border border-[var(--theme-border)]/55 rounded-lg flex items-center justify-center text-[9px] font-black uppercase text-gray-400 tracking-wider overflow-hidden shrink-0">
+                      {isImage && previewUrl ? (
+                        <img src={previewUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        ext
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center text-left">
+                      <div className="truncate font-semibold text-xs text-zinc-100 leading-none">
+                        {file.name}
+                      </div>
+                      <div className="text-[10px] text-zinc-550 font-bold tracking-tight leading-none mt-1">
+                        {(file.size / 1024).toFixed(0)} KB
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+
+              {attachedUrlDocs.map((doc) => (
+                <motion.div
+                  key={doc.id}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="relative flex items-center gap-2 px-3 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-semibold shrink-0 max-w-[210px] font-sans transition-all animate-fade-in"
+                  title="Extracted Text Document Attachment"
+                >
+                  <span className="truncate">{doc.title.slice(0, 30)}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachedUrlDocs(prev => prev.filter(d => d.id !== doc.id));
+                    }}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-zinc-900 border border-cyan-500/50 text-cyan-300 hover:text-white flex items-center justify-center transition-all z-10 cursor-pointer animate-fade-in"
+                  >
+                    <X size={9} />
+                  </button>
+                </motion.div>
+              ))}
+
+              {isOcrProcessing && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/5 text-cyan-300 h-10 shadow-sm shrink-0 animate-pulse font-sans"
+                >
+                  <div className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                  <div className="flex flex-col text-left">
+                    <span className="text-[10px] font-bold">OCR Transcribing...</span>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          )}
+
           <div className="flex-1 px-3 pt-2">
             <textarea
               ref={textInputRef}
@@ -558,58 +840,143 @@ export function AgentChatView({
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
               placeholder={`Send a message to ${agent.name}...`}
-              className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[13px] p-0 resize-none min-h-[36px] max-h-48 text-zinc-100 placeholder-zinc-500 leading-relaxed scrollbar-none"
+              className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[15px] p-0 resize-none min-h-[40px] max-h-48 text-[var(--theme-primary)] placeholder-zinc-500/70 leading-relaxed scrollbar-none text-left"
               disabled={isStreaming}
             />
           </div>
 
-          <div className="flex items-center justify-between px-3 pb-1 pt-2 border-t border-zinc-850/40 mt-2">
-            {/* Left Tools Configuration Panel - Toggle permitted tools directly on click */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {agent.skills.map(sk => {
-                const isEnabled = sk.enabled;
-                const icon = skillIcons[sk.id] || <Wand2 size={9} />;
-                return (
-                  <button
-                    key={sk.id}
-                    type="button"
-                    onClick={() => {
-                      const updatedSkills = agent.skills.map(s => s.id === sk.id ? { ...s, enabled: !s.enabled } : s);
-                      onUpdateAgent({ skills: updatedSkills });
-                    }}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all text-[10px] font-medium cursor-pointer ${
-                      isEnabled
-                        ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20 shadow-sm hover:bg-cyan-500/15'
-                        : 'bg-zinc-900/40 text-zinc-500 border-zinc-850 hover:text-zinc-400 hover:bg-zinc-800/20'
-                    }`}
-                    title={isEnabled ? `${sk.name} enabled for agent. Click to disable.` : `${sk.name} disabled. Click to enable.`}
-                  >
-                    {icon}
-                    <span>{sk.name}</span>
-                  </button>
-                );
-              })}
-            </div>
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            multiple
+            onChange={(e) => {
+              if (e.target.files) {
+                handleFileAttach(Array.from(e.target.files));
+              }
+              e.target.value = '';
+            }}
+          />
 
-            {/* Right side controls block */}
+          <div className="flex items-center justify-between px-3 pb-1 pt-2 border-t border-[var(--theme-border)]/25 mt-2">
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleSend}
-                disabled={!inputText.trim() || isStreaming}
-                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
-                  inputText.trim() && !isStreaming
-                    ? 'bg-cyan-500 hover:bg-cyan-400 text-white shadow-[0_0_10px_rgba(6,182,212,0.3)] cursor-pointer hover:scale-105'
-                    : 'bg-zinc-850 text-zinc-650 cursor-not-allowed opacity-45'
-                }`}
-                title="Send system message"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 rounded-2xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-all cursor-pointer bg-transparent border border-transparent"
+                title="Import documents and files"
               >
-                <Send size={11} />
+                <Plus size={20} className="text-zinc-400 hover:text-zinc-250 transition-colors" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <span className="font-mono text-[11px] font-semibold text-zinc-400/80 select-none tracking-tight">
+                {agent.model || 'gemini-2.3-flash'}
+              </span>
+
+              <button
+                type="button"
+                className="text-zinc-400 hover:text-zinc-200 p-2 rounded-xl transition-colors cursor-pointer bg-transparent border border-transparent"
+                title="Dictation mic"
+              >
+                <Mic size={16} />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={(!inputText.trim() && attachedFiles.length === 0 && attachedUrlDocs.length === 0) || isStreaming}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${
+                  (inputText.trim() || attachedFiles.length > 0 || attachedUrlDocs.length > 0) && !isStreaming
+                    ? 'bg-zinc-800 text-white hover:bg-zinc-700 border border-zinc-700/60 shadow-[0_0_8px_rgba(255,255,255,0.05)] cursor-pointer hover:scale-105 active:scale-95 animate-fade-in'
+                    : 'bg-zinc-900/65 text-zinc-650 cursor-not-allowed opacity-45 border border-zinc-850/40'
+                }`}
+                title="Send message"
+              >
+                <ArrowUp size={16} strokeWidth={2.5} />
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Inspect Skill System Popup Modal */}
+      <AnimatePresence>
+        {isInspectSkillsOpen && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[300] p-4 select-none animate-fade-in animate-duration-200">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 16 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full max-w-md bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl flex flex-col overflow-hidden shadow-[0_32px_80px_rgba(0,0,0,0.65)] relative text-left animate-in fade-in zoom-in-95 duration-200"
+            >
+              {/* Top Accent line or highlight */}
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-teal-500/40 via-cyan-400/40 to-blue-500/40" />
+
+              <div className="p-5 border-b border-[var(--theme-border)]/40 flex items-center justify-between shrink-0 relative bg-[var(--theme-bg)]/20">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20 shadow-inner">
+                    <Brain size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[var(--theme-primary)] font-sans flex items-center gap-1.5">
+                      Inspect Skill System
+                    </h3>
+                    <p className="text-[10px] text-[var(--theme-secondary)] leading-none mt-0.5 font-sans">
+                      Select a documentation file to edit or view
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInspectSkillsOpen(false)}
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] border border-transparent hover:border-[var(--theme-border)]/50 transition-all cursor-pointer bg-transparent"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="p-5 max-h-[320px] overflow-y-auto space-y-2.5 custom-scrollbar bg-[var(--theme-bg)]/10 select-none">
+                {agent.skillFiles && agent.skillFiles.length > 0 ? (
+                  agent.skillFiles.map((file) => (
+                    <button
+                      key={file.name}
+                      type="button"
+                      onClick={() => handleOpenSkillFileInEditor(file)}
+                      className="w-full flex items-start gap-3.5 p-3 rounded-xl border border-[var(--theme-border)]/35 bg-[var(--theme-surface-alt)]/40 hover:bg-[var(--theme-hover-bg)] hover:border-teal-500/30 transition-all duration-300 text-left group cursor-pointer"
+                    >
+                      <div className="p-2 rounded-lg bg-teal-500/5 text-teal-400 group-hover:bg-teal-500/10 group-hover:text-teal-300 transition-colors border border-transparent group-hover:border-teal-500/10 shadow-sm shrink-0">
+                        <BookOpen size={14} />
+                      </div>
+                      <div className="min-w-0 pr-1 flex flex-col justify-center">
+                        <span className="text-xs font-semibold text-[var(--theme-primary)] group-hover:text-teal-400 transition-colors truncate font-mono">
+                          {file.name}
+                        </span>
+                        <span className="text-[10px] text-[var(--theme-secondary)] leading-relaxed mt-0.5 line-clamp-2">
+                          {file.description || 'Core interactive documentation system guidelines.'}
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="text-center py-6 text-xs text-[var(--theme-secondary)]">
+                    No custom skill files found for this agent
+                  </div>
+                )}
+              </div>
+
+              <div className="px-5 py-3 border-t border-[var(--theme-border)]/30 bg-[var(--theme-bg)]/40 flex items-center justify-between text-[10px] text-[var(--theme-secondary)] font-mono shrink-0 select-none">
+                <span>Select file to open inside code editor</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--theme-hover-bg)] text-teal-400 border border-[var(--theme-border)]/50 font-bold shrink-0">
+                  {agent.skillFiles?.length || 0} Files
+                </span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

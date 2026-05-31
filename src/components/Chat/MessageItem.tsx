@@ -379,7 +379,7 @@ export const MessageItem = React.memo(({
               sources={message.sources || []} 
             />
           )}
-          <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined }}>
+          <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined, paddingLeft: '-1px' }}>
             {message.content ? (
               message.isStreaming ? (
                 <span className="streaming-content text-left block">
@@ -742,17 +742,59 @@ export const MessageItem = React.memo(({
           )}
           {message.artifacts && message.artifacts.length > 0 && (
             <div className="w-full space-y-2 mt-4 text-left">
-              {message.artifacts.map(art => (
-                <ArtifactCard 
-                  key={art.id} 
-                  artifact={art} 
-                  onOpen={(a) => {
-                    setActiveArtifact(a);
-                    setIsCanvasOpen(true);
-                    setCanvasView(a.type === 'html' ? 'preview' : 'code');
-                  }} 
-                />
-              ))}
+              {message.artifacts.flatMap(art => {
+                if (art.type === 'html') {
+                  const webPreviewCard = (
+                    <ArtifactCard 
+                      key={`${art.id}-preview`} 
+                      artifact={art} 
+                      onOpen={(a) => {
+                        setActiveArtifact(a);
+                        setIsCanvasOpen(true);
+                        setCanvasView('preview');
+                      }} 
+                    />
+                  );
+                  
+                  const codeArtifact: Artifact = {
+                    ...art,
+                    id: `${art.id}-code`,
+                    title: art.title.replace(/web preview/i, 'HTML Document Source').replace(/preview/i, 'HTML Code'),
+                    type: 'code',
+                    language: 'html'
+                  };
+                  
+                  if (codeArtifact.title === art.title) {
+                    codeArtifact.title = `${art.title} (HTML Code)`;
+                  }
+
+                  const codeCard = (
+                    <ArtifactCard
+                      key={`${art.id}-code`}
+                      artifact={codeArtifact}
+                      onOpen={() => {
+                        setActiveArtifact(art);
+                        setIsCanvasOpen(true);
+                        setCanvasView('code');
+                      }}
+                    />
+                  );
+                  
+                  return [webPreviewCard, codeCard];
+                }
+
+                return (
+                  <ArtifactCard 
+                    key={art.id} 
+                    artifact={art} 
+                    onOpen={(a) => {
+                      setActiveArtifact(a);
+                      setIsCanvasOpen(true);
+                      setCanvasView(a.type === 'html' ? 'preview' : 'code');
+                    }} 
+                  />
+                );
+              })}
             </div>
           )}
           {!message.thinking && (

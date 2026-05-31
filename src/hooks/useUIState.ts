@@ -7,10 +7,58 @@ export interface UseUIStateProps {
 }
 
 export function useUIState({ setInput, handleSend }: UseUIStateProps) {
-  const [chats, setChats] = useState<Chat[]>([]);
+  const [chats, setChats] = useState<Chat[]>(() => {
+    try {
+      const saved = localStorage.getItem('lumina_chats');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.map((chat: any) => ({
+          ...chat,
+          updatedAt: chat.updatedAt ? new Date(chat.updatedAt) : new Date(),
+          messages: chat.messages.map((m: any) => ({
+            ...m,
+            timestamp: m.timestamp ? new Date(m.timestamp) : undefined,
+            todoPlan: m.todoPlan ? {
+              ...m.todoPlan,
+              todos: m.todoPlan.todos || []
+            } : undefined
+          }))
+        }));
+      }
+    } catch (e) {
+      console.error("Error loading chats from local storage:", e);
+    }
+    return [];
+  });
+
+  const [currentChatId, setCurrentChatId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('lumina_current_chat_id');
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lumina_chats', JSON.stringify(chats));
+    } catch (e) {
+      console.error("Error saving chats to local storage:", e);
+    }
+  }, [chats]);
+
+  useEffect(() => {
+    try {
+      if (currentChatId) {
+        localStorage.setItem('lumina_current_chat_id', currentChatId);
+      } else {
+        localStorage.removeItem('lumina_current_chat_id');
+      }
+    } catch {}
+  }, [currentChatId]);
+
   const [lightboxImage, setLightboxImage] = useState<{ url: string; title?: string } | null>(null);
   const [activeVideo, setActiveVideo] = useState<{ url: string; title?: string } | null>(null);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSourcesPanelOpen, setIsSourcesPanelOpen] = useState(false);
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = useState<string | null>(null);

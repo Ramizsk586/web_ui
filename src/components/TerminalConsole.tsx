@@ -241,6 +241,17 @@ function TerminalConsole({
 
     const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
 
+    // Prevent interactive CLI processes that would hang the background spawn process
+    const LOWER_CMD = trimmed.toLowerCase();
+    const BLOCKED_CLIS = ['opencode', 'claude', 'poolside', 'cline', 'aider', 'gptengineer', 'gpt-engineer', 'devin'];
+    if (BLOCKED_CLIS.some(cli => LOWER_CMD.includes(cli))) {
+      addLines([
+        { type: 'error', text: '✖  Command blocked: Interactive Terminal CLIs are disabled.' },
+        { type: 'system', text: '   Lumina restricts launching external AI interactive CLI environments (like Claude, OpenCode, PoolSide, Cline etc.) to prevent workspace connection freezes.' }
+      ]);
+      return;
+    }
+
     // ── Client-side built-ins ───────────────────────────────────────────────
 
     if (firstWord === 'eliza') { toggleEliza(); return; }
