@@ -173,8 +173,23 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
         const data = await res.json();
         if (data.success) {
           setGpuRecommendation(data);
-          // Only auto-apply dynamic layers if it is a fresh calculation
-          if (typeof data.recommendedLayers === 'number') {
+
+          // Only auto-apply dynamic layers when the user has not already stored a custom GPU layer setting.
+          let shouldAutoApplyGpuLayers = true;
+          try {
+            const saved = localStorage.getItem(storageKey);
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (parsed?.gpuOffload !== undefined) {
+                shouldAutoApplyGpuLayers = false;
+              }
+            }
+          } catch {}
+
+          if (shouldAutoApplyGpuLayers && typeof data.recommendedLayers === 'number') {
+            if (typeof data.totalLayers === 'number' && data.totalLayers > 0) {
+              setCustomTotalLayers(data.totalLayers);
+            }
             setGpuOffload(data.recommendedLayers);
           }
         } else {
@@ -387,9 +402,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
     if (maxConcurrent && maxConcurrent > 0) {
       cmd += ` --parallel ${maxConcurrent}`;
     }
-    if (unifiedKVCache) {
-      cmd += ` --slot-save-state`;
-    }
+    // Removed --slot-save-state: not a valid llama-server argument in recent builds
     if (ropeFreqBase && ropeFreqBase !== 'Auto' && String(ropeFreqBase).trim() !== '') {
       cmd += ` --rope-freq-base ${ropeFreqBase}`;
     }
@@ -936,6 +949,9 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
                               <button
                                 onClick={() => {
                                   if (typeof gpuRecommendation.recommendedLayers === 'number') {
+                                    if (typeof gpuRecommendation.totalLayers === 'number' && gpuRecommendation.totalLayers > 0) {
+                                      setCustomTotalLayers(gpuRecommendation.totalLayers);
+                                    }
                                     setGpuOffload(gpuRecommendation.recommendedLayers);
                                     showToast(`Optimized GPU Offload to ${gpuRecommendation.recommendedLayers} layers!`);
                                   }

@@ -3296,9 +3296,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     if (maxConcurrent && Number(maxConcurrent) > 0) {
       args.push('--parallel', String(maxConcurrent));
     }
-    if (unifiedKVCache) {
-      args.push('--slot-save-state');
-    }
+    // Removed --slot-save-state: not a valid llama-server argument in recent builds
     if (ropeFreqBase && ropeFreqBase !== 'Auto' && String(ropeFreqBase).trim() !== '') {
       args.push('--rope-freq-base', String(ropeFreqBase));
     }
