@@ -1,0 +1,4 @@
+⚡ Starting Vite middleware...
+✅ Vite middleware ready
+
+🚀 Proxy server ready at http://127.0.0.1:3000

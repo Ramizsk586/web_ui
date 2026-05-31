@@ -42,6 +42,7 @@ interface MessageItemProps {
   onOpenInEditor?: (filePath: string) => void;
   showToast?: (v: string) => void;
   onUpdateTodoPlan?: (messageId: string, updatedPlan: any) => void;
+  onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>) => void;
   onStartBuilding?: (messageId: string) => void;
   scrapingResults?: Map<string, ScrapeResult>;
   wikiResults?: Map<string, { wikiType: string, data: any }>;
@@ -62,6 +63,7 @@ export const MessageItem = React.memo(({
   onOpenInEditor,
   showToast,
   onUpdateTodoPlan,
+  onUpdateMessage,
   onStartBuilding,
   scrapingResults = new Map(),
   wikiResults = new Map(),
@@ -69,6 +71,7 @@ export const MessageItem = React.memo(({
 }: MessageItemProps) => {
   const [copied, setCopied] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [textAnswer, setTextAnswer] = useState("");
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -399,6 +402,255 @@ export const MessageItem = React.memo(({
               <span className="text-zinc-400 animate-pulse text-left block">Generating...</span>
             ) : null}
           </div>
+
+
+          {/* Custom Interactive Ask AI Clarifying Questions (rendered inline in Chat bubble) */}
+          {message.askAiQuestions && message.askAiQuestions.length > 0 && message.isAskAiActive ? (() => {
+            const questionsList = message.askAiQuestions;
+            const activeIndex = message.currentQuestionIndex ?? 0;
+            const currentAnswers = message.askAiAnswers ?? {};
+            const activeQuestion = questionsList[activeIndex >= questionsList.length ? questionsList.length - 1 : activeIndex];
+
+            if (!activeQuestion) return null;
+
+            const handleSelectOption = (option: string) => {
+              const nextAnswers = { ...currentAnswers, [activeQuestion.question]: option };
+              const nextIndex = activeIndex + 1;
+              
+              if (nextIndex >= questionsList.length) {
+                submitAnswers(nextAnswers);
+              } else {
+                onUpdateMessage?.(message.id, {
+                  currentQuestionIndex: nextIndex,
+                  askAiAnswers: nextAnswers
+                });
+              }
+            };
+
+            const handleToggleMultiChoice = (option: string) => {
+              const prevArr = Array.isArray(currentAnswers[activeQuestion.question]) 
+                ? currentAnswers[activeQuestion.question] 
+                : [];
+              const nextArr = prevArr.includes(option)
+                ? prevArr.filter((x: string) => x !== option)
+                : [...prevArr, option];
+              
+              const nextAnswers = { ...currentAnswers, [activeQuestion.question]: nextArr };
+              onUpdateMessage?.(message.id, {
+                askAiAnswers: nextAnswers
+              });
+            };
+
+            const handleNextMultiChoice = () => {
+              const nextIndex = activeIndex + 1;
+              if (nextIndex >= questionsList.length) {
+                submitAnswers(currentAnswers);
+              } else {
+                onUpdateMessage?.(message.id, {
+                  currentQuestionIndex: nextIndex
+                });
+              }
+            };
+
+            const submitAnswers = (finalAnswers: Record<string, any>) => {
+              const formattedAnswers = Object.entries(finalAnswers)
+                .map(([q, a]) => `- **${q}**: ${Array.isArray(a) ? a.join(', ') : a}`)
+                .join('\n');
+              
+              const finalMsg = `Here are my answers to your clarifying questions:\n${formattedAnswers}`;
+              
+              onUpdateMessage?.(message.id, {
+                isAskAiActive: false,
+                askAiAnswers: finalAnswers
+              });
+
+              if (onSendMessage) {
+                onSendMessage(finalMsg);
+              }
+            };
+
+            const handleSkipQuestion = () => {
+              const nextAnswers = { ...currentAnswers, [activeQuestion.question]: "No preference" };
+              const nextIndex = activeIndex + 1;
+              if (nextIndex >= questionsList.length) {
+                submitAnswers(nextAnswers);
+              } else {
+                onUpdateMessage?.(message.id, {
+                  currentQuestionIndex: nextIndex,
+                  askAiAnswers: nextAnswers
+                });
+              }
+            };
+
+            const handleSkipAll = () => {
+              const nextAnswers = { ...currentAnswers };
+              questionsList.forEach(q => {
+                if (nextAnswers[q.question] === undefined) {
+                  nextAnswers[q.question] = "No preference";
+                }
+              });
+              submitAnswers(nextAnswers);
+            };
+
+            return (
+              <div id={`inline-refinement-poll-${message.id}`} className="w-full bg-[#1b1918] border border-zinc-800 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 mt-4 text-left font-sans select-none overflow-hidden relative">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/5 rounded-full blur-3xl pointer-events-none" />
+                
+                <div className="flex items-center justify-between border-b border-zinc-800 pb-3 mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-orange-550 text-sm">✦</span>
+                    <h3 className="text-xs font-bold tracking-tight text-white uppercase font-mono">Workspace Refinement Assistance</h3>
+                  </div>
+                  <span className="text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-full font-bold select-none font-mono">
+                    Question {activeIndex + 1} of {questionsList.length}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1 text-left">
+                  {activeQuestion.purpose && (
+                    <span className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider leading-none block mb-1">
+                      Purpose: {activeQuestion.purpose}
+                    </span>
+                  )}
+                  <h4 className="text-sm font-semibold text-zinc-200 leading-relaxed">
+                    {activeQuestion.question}
+                  </h4>
+                </div>
+
+                {/* Choices Rendering */}
+                {activeQuestion.type === 'single_choice' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+                    {activeQuestion.options?.map((opt, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => handleSelectOption(opt)}
+                        className="flex items-center justify-between px-3.5 py-3 rounded-xl border border-zinc-800 bg-[#141211] hover:border-orange-500/40 hover:bg-orange-500/5 text-xs text-left text-zinc-350 font-semibold hover:text-white transition-all duration-200 cursor-pointer"
+                      >
+                        <span>{opt}</span>
+                        <span className="text-zinc-600 group-hover:text-orange-400 text-[10px] font-mono">Choice {i+1}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {activeQuestion.type === 'confirm' && (
+                  <div className="flex gap-2.5 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectOption("Yes")}
+                      className="flex-1 px-4 py-3 rounded-xl border border-zinc-800 bg-[#141211] hover:border-emerald-500 hover:bg-emerald-500/5 text-xs text-center text-zinc-350 font-bold hover:text-white transition-all cursor-pointer font-sans"
+                    >
+                      Yes, absolutely
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectOption("No")}
+                      className="flex-1 px-4 py-3 rounded-xl border border-zinc-800 bg-[#141211] hover:border-rose-500 hover:bg-rose-500/5 text-xs text-center text-zinc-350 font-bold hover:text-white transition-all cursor-pointer font-sans"
+                    >
+                      No, prefer not
+                    </button>
+                  </div>
+                )}
+
+                {activeQuestion.type === 'multi_choice' && (
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    {activeQuestion.options?.map((opt, i) => {
+                      const isSelected = Array.isArray(currentAnswers[activeQuestion.question]) && currentAnswers[activeQuestion.question].includes(opt);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => handleToggleMultiChoice(opt)}
+                          className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border transition-all text-xs text-left font-medium cursor-pointer ${
+                            isSelected
+                              ? 'border-orange-500/50 bg-orange-500/5 text-white'
+                              : 'border-zinc-805 bg-[#141211] text-zinc-350 hover:border-zinc-700'
+                          }`}
+                        >
+                          <div className={`w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 ${
+                            isSelected ? 'bg-orange-500 text-black' : 'border border-zinc-700 bg-transparent'
+                          }`}>
+                            {isSelected && <Check size={10} strokeWidth={3} />}
+                          </div>
+                          <span className="flex-1">{opt}</span>
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={handleNextMultiChoice}
+                      className="mt-2 w-full px-4 py-2.5 rounded-xl bg-orange-550 hover:bg-orange-600 text-xs text-center font-bold text-black border border-orange-600 transition-all cursor-pointer font-sans"
+                    >
+                      Confirm Selection ({Array.isArray(currentAnswers[activeQuestion.question]) ? currentAnswers[activeQuestion.question].length : 0} selected)
+                    </button>
+                  </div>
+                )}
+
+                {(activeQuestion.type === 'text_input' || activeQuestion.type === 'scale') && (
+                  <div className="flex flex-col gap-2.5 mt-1">
+                    <textarea
+                      value={textAnswer}
+                      onChange={(e) => setTextAnswer(e.target.value)}
+                      placeholder={activeQuestion.type === 'scale' ? "Enter a score or explain..." : "Construct your customized answer here..."}
+                      className="w-full bg-[#141211] border border-zinc-850 hover:border-zinc-750 focus:border-orange-500/40 rounded-xl p-3 text-xs text-white outline-none placeholder-zinc-700 transition-all font-sans min-h-[75px] resize-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={!textAnswer.trim()}
+                      onClick={() => {
+                        const answerVal = textAnswer.trim();
+                        setTextAnswer("");
+                        handleSelectOption(answerVal);
+                      }}
+                      className="px-4 py-2 bg-orange-550 hover:bg-orange-600 font-bold text-black border border-orange-600 text-xs rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer max-w-[150px] self-end font-sans"
+                    >
+                      Submit Answer
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between border-t border-zinc-850 pt-3.5 mt-2 gap-4 select-none">
+                  <button
+                    type="button"
+                    onClick={handleSkipQuestion}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-350 cursor-pointer underline bg-transparent border-none font-medium font-mono"
+                  >
+                    Skip Question
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSkipAll}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-350 cursor-pointer hover:underline bg-transparent border-none font-medium font-mono"
+                  >
+                    Skip remainder ({questionsList.length - activeIndex} left)
+                  </button>
+                </div>
+              </div>
+            );
+          })() : null}
+
+          {/* Render Completed Quiz state summarized nicely */}
+          {message.askAiQuestions && message.askAiQuestions.length > 0 && !message.isAskAiActive && message.askAiAnswers && Object.keys(message.askAiAnswers).length > 0 && (
+            <div className="w-full bg-[#151312] border border-emerald-500/10 rounded-2xl p-4 mt-4 flex items-start gap-3 text-left font-sans text-xs select-none">
+              <div className="w-5 h-5 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-450 shrink-0 mt-0.5">
+                <Check size={11} strokeWidth={3} />
+              </div>
+              <div className="flex-1">
+                <h4 className="font-semibold text-zinc-250">Creative choices clarified:</h4>
+                <div className="mt-1.5 space-y-1 text-[11px] text-zinc-450 font-mono">
+                  {Object.entries(message.askAiAnswers).map(([q, ans], idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <span className="text-zinc-605 shrink-0">•</span>
+                      <span>
+                        <span className="text-zinc-450">{q}:</span> <span className="text-emerald-400">{Array.isArray(ans) ? ans.join(', ') : String(ans)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
 
           {/* Custom Interactive To-Do Plan Checklist */}

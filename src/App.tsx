@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useTheme } from './themes';
 import AppContent from './AppContent';
 import {
@@ -44,8 +44,22 @@ export default function App() {
     showToast
   });
 
-  const { serverUrl, apiKey, selectedProvider } = appSettings;
-  const activeModelId = selectedModel || 'openprovider/auto-free';
+  const { serverUrl, apiKey, selectedProvider, useLocalModelsOnly } = appSettings;
+  const activeModelId = React.useMemo(() => {
+    if (useLocalModelsOnly) {
+      const localIds = [
+        "LiquidAI/LFM2.5-VL-GGUF",
+        "LiquidAI/LFM2.5-350M-GGUF",
+        "google/gemma-2-2b-it-GGUF",
+        "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+        "lmstudio-community/Llama-3.2-1B-Instruct-GGUF"
+      ];
+      if (!localIds.includes(selectedModel)) {
+        return "LiquidAI/LFM2.5-350M-GGUF";
+      }
+    }
+    return selectedModel || 'openprovider/auto-free';
+  }, [selectedModel, useLocalModelsOnly]);
 
   React.useEffect(() => {
     try {
@@ -59,7 +73,8 @@ export default function App() {
     apiKey,
     selectedProvider,
     activeModelId,
-    showToast
+    showToast,
+    useLocalModelsOnly
   });
 
   // 3. Input State Hook
@@ -105,7 +120,20 @@ export default function App() {
     isTyping: inputState.isTyping
   });
 
-  // 10. Ask AI Hook
+  // 11. Right Panel Hook
+  const rightPanel = useRightPanel({
+    rightIframeRef: workspace.rightIframeRef,
+    iframeKey: workspace.iframeKey,
+    rightPreviewSubpath: workspace.rightPreviewSubpath,
+    showToast,
+    setFloatingEditFile: workspace.setFloatingEditFile
+  });
+
+  const smartPopup = null;
+  const devTools = null;
+
+  const sendMessageRef = useRef<((content: string) => void) | undefined>(undefined);
+
   const askAi = useAskAi({
     input: inputState.input,
     messages: currentChatId ? (chats.find(c => c.id === currentChatId)?.messages || []) : [],
@@ -134,20 +162,9 @@ export default function App() {
     },
     showToast,
     setChats,
-    setInput
+    setInput,
+    onSendMessage: (content) => sendMessageRef.current?.(content),
   });
-
-  // 11. Right Panel Hook
-  const rightPanel = useRightPanel({
-    rightIframeRef: workspace.rightIframeRef,
-    iframeKey: workspace.iframeKey,
-    rightPreviewSubpath: workspace.rightPreviewSubpath,
-    showToast,
-    setFloatingEditFile: workspace.setFloatingEditFile
-  });
-
-  const smartPopup = null;
-  const devTools = null;
 
   const sidebarWithModifiedToggle = {
     ...sidebar,
@@ -189,6 +206,7 @@ export default function App() {
       selectedModel={selectedModel}
       setSelectedModel={setSelectedModel}
       activeModelId={activeModelId}
+      sendMessageRef={sendMessageRef}
     />
   );
 }

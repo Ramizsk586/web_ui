@@ -28,7 +28,8 @@ import {
   FileUp,
   Video,
   Palette,
-  Box
+  Box,
+  Cpu
 } from 'lucide-react';
 import { WRITING_STYLES, SKILLS } from '../constants';
 
@@ -158,6 +159,11 @@ export interface ChatBoxPanelProps {
   modelDropdownContentRef: React.RefObject<HTMLDivElement | null>;
   isWhiteboardOpen?: boolean;
   setIsWhiteboardOpen?: (open: boolean) => void;
+  onOpenLocalModelConfig?: (id: string) => void;
+  localModelLoadingId?: string | null;
+  localModelLoadingProgress?: number;
+  loadedLocalModelId?: string | null;
+  useLocalModelsOnly?: boolean;
 }
 
 export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
@@ -270,7 +276,12 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   setIsModelDropdownOpen,
   setWritingStyle,
   isModelDropdownOpen,
-  modelDropdownContentRef
+  modelDropdownContentRef,
+  onOpenLocalModelConfig,
+  localModelLoadingId,
+  localModelLoadingProgress,
+  loadedLocalModelId,
+  useLocalModelsOnly
 }) => {
   return (
     <div className="w-full flex flex-col text-left">
@@ -1501,20 +1512,62 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
 
           <div className="flex items-center gap-3">
             <div className="relative" ref={dropdownRef}>
-              <button
-                onClick={() => {
-                  if (modelSelectorMode === 'drawer') {
-                    setIsModelDropdownOpen(false);
-                    setIsModelDrawerOpen(true);
-                    return;
-                  }
-                  setIsModelDropdownOpen(!isModelDropdownOpen);
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-xs font-semibold text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors shrink-0 max-w-[150px] truncate"
-              >
-                <span>{(activeModelList.find(m => m.id === activeModelId)?.name) || 'Select Model'}</span>
-                <ChevronDown size={14} className={`transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
+              <div className="flex items-center gap-0.5 bg-[var(--theme-hover-bg)] hover:bg-[var(--theme-border)]/20 rounded-2xl p-0.5 transition-all max-w-[210px] shrink-0 overflow-hidden relative border border-transparent">
+                {/* Progress bar overlay for loading state */}
+                {localModelLoadingId === activeModelId && (
+                  <div 
+                    className="absolute bottom-0 left-0 h-1 bg-blue-500/85 transition-all duration-300 pointer-events-none rounded-b-2xl"
+                    style={{ width: `${localModelLoadingProgress}%` }}
+                  />
+                )}
+                
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const isLocal = useLocalModelsOnly || activeModelId.toLowerCase().includes('gguf');
+                    if (isLocal && onOpenLocalModelConfig) {
+                      onOpenLocalModelConfig(activeModelId);
+                    } else {
+                      if (modelSelectorMode === 'drawer') {
+                        setIsModelDropdownOpen(false);
+                        setIsModelDrawerOpen(true);
+                        return;
+                      }
+                      setIsModelDropdownOpen(!isModelDropdownOpen);
+                    }
+                  }}
+                  className="flex items-center px-3 py-1.5 hover:bg-[var(--theme-hover-bg)]/65 rounded-xl cursor-pointer select-none transition-colors max-w-[155px]"
+                  title="Active Model"
+                >
+                  <span className="text-[11px] font-bold text-[var(--theme-primary)] truncate">
+                    {(() => {
+                      const matched = activeModelList.find(m => m.id === activeModelId);
+                      if (matched) return matched.name;
+                      let name = activeModelId;
+                      if (name.includes('/')) {
+                        name = name.split('/').slice(-1)[0];
+                      }
+                      return name.replace(/[-_]/g, ' ').replace(/\bgguf\b/gi, '').trim() || activeModelId;
+                    })()}
+                  </span>
+                </button>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (modelSelectorMode === 'drawer') {
+                      setIsModelDropdownOpen(false);
+                      setIsModelDrawerOpen(true);
+                      return;
+                    }
+                    setIsModelDropdownOpen(!isModelDropdownOpen);
+                  }}
+                  className="p-2 hover:bg-[var(--theme-hover-bg)]/85 rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] cursor-pointer shrink-0"
+                  title="Change model"
+                >
+                  <ChevronDown size={13} className={`transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
               {isModelDropdownOpen && (
                 <div
                   ref={modelDropdownContentRef}
@@ -1590,7 +1643,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
               <motion.button
                 whileTap={{ scale: 0.92 }}
                 onClick={() => {
-                  setIsTyping(false);
                   if (abortControllerRef.current) {
                     abortControllerRef.current.abort();
                   }

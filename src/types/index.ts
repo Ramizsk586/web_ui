@@ -48,6 +48,10 @@ export interface Message {
     isConfirmed?: boolean;
     countdown?: number;
   };
+  askAiQuestions?: AskAiQuestion[];
+  currentQuestionIndex?: number;
+  askAiAnswers?: Record<string, any>;
+  isAskAiActive?: boolean;
 }
 
 export interface Chat {

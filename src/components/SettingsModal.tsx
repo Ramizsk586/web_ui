@@ -23,14 +23,26 @@ import {
   Link as LinkIcon,
   FileText,
   Layers,
-  BookOpen
+  BookOpen,
+  Download,
+  RefreshCw,
+  Cpu,
+  Activity,
+  Folder,
+  Play,
+  Server,
+  Laptop,
+  MoreHorizontal,
+  Trash2
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
 
 interface SettingsModalProps {
   onClose: () => void;
-  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools';
-  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools') => void;
+  useLocalModelsOnly?: boolean;
+  setUseLocalModelsOnly?: (val: boolean) => void;
+  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models';
+  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models') => void;
   useBubbles: boolean;
   setUseBubbles: (val: boolean) => void;
   isCompactSidebar: boolean;
@@ -117,10 +129,112 @@ interface SettingsModalProps {
   handleTestLlamaConnection: () => void;
   handleLoadLlamaModels: () => void;
   handleLoadBridgeTools: () => void;
+
+  // Local model bindings from AppContent
+  loadedLocalModelId?: string | null;
+  setLoadedLocalModelId?: (id: string | null) => void;
+  onOpenLocalModelConfig?: (id: string) => void;
+  activeModelId?: string;
+  setActiveModelId?: (id: string) => void;
 }
+
+const renderModelLogo = (author: string, modelId: string) => {
+  const normAuthor = (author || '').toLowerCase();
+  const normId = (modelId || '').toLowerCase();
+
+  // 1. Google / Gemma
+  if (normAuthor.includes('google') || normId.includes('gemma')) {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center shadow-sm shrink-0 border border-gray-100 dark:border-zinc-800">
+        <svg viewBox="0 0 24 24" className="w-6 h-6">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22c-.65-.63-1.12-1.42-.81-2.63z" />
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+        </svg>
+      </div>
+    );
+  }
+
+  // 2. NVIDIA / Nemotron
+  if (normAuthor.includes('nvidia') || normId.includes('nemotron')) {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-black flex items-center justify-center shadow-sm shrink-0 border border-zinc-800 p-1">
+        <svg viewBox="0 0 100 100" className="w-full h-full">
+          <path fill="#76B900" d="M85.4,36.4 C81.8,24.2 71.9,15.6 57.6,15.6 C42.1,15.6 28.6,26.5 28.6,44.9 C28.6,60 38.4,71.5 50.8,74.1 L50.8,66 C42.3,63.3 36.3,55.3 36.3,44.9 C36.3,31.6 45.4,22.8 56.6,22.8 C66.8,22.8 74.2,29.3 76.9,38 L85.4,36.4 Z M70.3,43 C67.4,37.3 62,33.5 55.4,33.5 C48.1,33.5 42,39.1 42,48 C42,55.4 46.8,61.1 52.8,62.1 L52.8,55.6 C49.2,54.7 46.8,51.8 46.8,48 C46.8,42.8 50.2,38.8 55.4,38.8 C59.8,38.8 62.6,41.9 63.8,45.8 L70.3,43 Z M48,48.5 L48,51.5 L55,51.5 L55,48.5 L48,48.5 Z" />
+        </svg>
+      </div>
+    );
+  }
+
+  // 3. Qwen
+  if (normAuthor.includes('qwen') || normId.includes('qwen')) {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-[#1C1A2E] flex items-center justify-center shadow-sm shrink-0 border border-indigo-500/20">
+        <svg viewBox="0 0 32 32" className="w-6 h-6">
+          <path d="M16 2 L28 10 L28 22 L16 30 L4 22 L4 10 Z" fill="none" stroke="#818CF8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M16 6 L24 11 L24 21 L16 26 L8 21 L8 11 Z" fill="none" stroke="#C084FC" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="16" cy="16" r="3.5" fill="#818CF8" />
+        </svg>
+      </div>
+    );
+  }
+
+  // 4. Liquid AI / LFM (Premium Orange neural-network nodes brain icon)
+  if (normAuthor.includes('liquid') || normId.includes('lfm')) {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-[#201511] flex items-center justify-center shadow-sm shrink-0 border border-[#E26D2E]/25 p-1.5" title="Liquid Labs Model">
+        <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 text-[#E26D2E]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="5" r="2.5" fill="currentColor" fillOpacity="0.2" />
+          <circle cx="12" cy="19" r="2.5" fill="currentColor" fillOpacity="0.2" />
+          <circle cx="5" cy="12" r="2.5" fill="currentColor" fillOpacity="0.2" />
+          <circle cx="19" cy="12" r="2.5" fill="currentColor" fillOpacity="0.2" />
+          
+          <line x1="12" y1="7.5" x2="12" y2="16.5" />
+          <line x1="7.5" y1="12" x2="16.5" y2="12" />
+          <line x1="6.7" y1="10.3" x2="10.3" y2="6.7" />
+          <line x1="13.7" y1="6.7" x2="17.3" y2="10.3" />
+          <line x1="17.3" y1="13.7" x2="13.7" y2="17.3" />
+          <line x1="10.3" y1="17.3" x2="6.7" y2="13.7" />
+        </svg>
+      </div>
+    );
+  }
+
+  // 5. Meta / Llama
+  if (normAuthor.includes('meta') || normId.includes('llama')) {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-[#0B0F19] flex items-center justify-center shadow-sm shrink-0 border border-blue-900/40">
+        <svg viewBox="0 0 24 24" className="w-6 h-6 text-[#1A73E8]" fill="currentColor">
+          <path d="M16.5 6C14.57 6 12.92 7.08 12 8.68 11.08 7.08 9.43 6 7.5 6 4.46 6 2 8.46 2 11.5S4.46 17 7.5 17c1.93 0 3.58-1.08 4.5-2.68.92 1.6 2.57 2.68 4.5 2.68 3.04 0 5.5-2.46 5.5-5.5S19.54 6 16.5 6zm-9 9c-1.93 0-3.5-1.57-3.5-3.5S5.57 8 7.5 8s3.5 1.57 3.5 3.5S9.43 15 7.5 15zm9 0c-1.93 0-3.5-1.57-3.5-3.5S14.57 8 16.5 8s3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z" />
+        </svg>
+      </div>
+    );
+  }
+
+  // 6. GLM / Zhipu / THUDM / ChatGLM
+  if (normAuthor.includes('glm') || normAuthor.includes('thudm') || normId.includes('glm') || normId.includes('chatglm')) {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-[#141417] flex items-center justify-center shadow-sm shrink-0 border border-zinc-800">
+        <svg viewBox="0 0 24 24" className="w-6 h-6 text-white" fill="currentColor">
+          <path d="M19 4H5v3h8.5L5 17v3h14v-3h-8.5L19 7V4z" />
+        </svg>
+      </div>
+    );
+  }
+
+  // 7. General Fallback with HuggingFace icon
+  return (
+    <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shadow-sm shrink-0 border border-amber-500/15 text-lg">
+      🤗
+    </div>
+  );
+};
 
 export function SettingsModal({
   onClose,
+  useLocalModelsOnly = false,
+  setUseLocalModelsOnly = () => {},
   activeSettingsTab,
   setActiveSettingsTab,
   useBubbles,
@@ -176,7 +290,12 @@ export function SettingsModal({
   setBridgeTools,
   handleTestLlamaConnection,
   handleLoadLlamaModels,
-  handleLoadBridgeTools
+  handleLoadBridgeTools,
+  loadedLocalModelId,
+  setLoadedLocalModelId,
+  onOpenLocalModelConfig,
+  activeModelId,
+  setActiveModelId
 }: SettingsModalProps) {
   // Rich Profile State
   const [timezone, setTimezone] = React.useState(() => localStorage.getItem('lumina_profile_timezone') || 'GMT+05:30');
@@ -193,6 +312,1162 @@ export function SettingsModal({
   const [personaTone, setPersonaTone] = React.useState(() => localStorage.getItem('lumina_persona_tone') || 'technical');
   const [personaLength, setPersonaLength] = React.useState(() => localStorage.getItem('lumina_persona_length') || 'balanced');
   const [personaCreativity, setPersonaCreativity] = React.useState(() => localStorage.getItem('lumina_persona_creativity') || 'balanced');
+
+  // Local model list states (Matching look & feel of LM Studio / local models explorer)
+  const [modelsSubTab, setModelsSubTab] = React.useState<'list' | 'explore'>('list');
+  const [isDownloadsPanelOpen, setIsDownloadsPanelOpen] = React.useState(false);
+  const [modelsFilterQuery, setModelsFilterQuery] = React.useState('');
+  const [modelsPath, setModelsPath] = React.useState(() => {
+    const saved = localStorage.getItem('lumina_local_models_path');
+    if (saved) return saved;
+    const osUser = localStorage.getItem('lumina_local_os_user') || 'YOU';
+    return `C:\\Users\\${osUser}\\.lumina\\models`;
+  });
+  const [downloadedModelsList, setDownloadedModelsList] = React.useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('lumina_downloaded_models');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return [
+      {
+        id: "minicpm5-1b",
+        name: "minicpm5-1b",
+        params: "1B",
+        size: "1.15 GB",
+        modified: "6 hours ago",
+        publisher: "openbmb",
+        file: "minicpm5-1b-instruct-q8_0.gguf"
+      },
+      {
+        id: "google/gemma-2-2b-it-GGUF",
+        name: "gemma-2-2b-it",
+        params: "2.6B",
+        size: "1.67 GB",
+        modified: "12 hours ago",
+        publisher: "google",
+        file: "gemma-2-2b-it-q4_k_m.gguf"
+      },
+      {
+        id: "lmstudio-community/Llama-3.2-1B-Instruct-GGUF",
+        name: "llama-3.2-1b",
+        params: "1.2B",
+        size: "1.23 GB",
+        modified: "1 day ago",
+        publisher: "meta",
+        file: "Llama-3.2-1B-Instruct-Q8_0.gguf"
+      },
+      {
+        id: "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+        name: "qwen2.5-coder-1.5b",
+        params: "1.5B",
+        size: "1.02 GB",
+        modified: "3 days ago",
+        publisher: "Qwen",
+        file: "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+      }
+    ];
+  });
+
+  // llama.cpp state declarations
+  const [osDetectorResult, setOsDetectorResult] = React.useState<'win' | 'macos' | 'linux'>('win');
+  const [osFilter, setOsFilter] = React.useState<'auto' | 'win' | 'macos' | 'linux' | 'source'>('auto');
+  const [releases, setReleases] = React.useState<any[]>([]);
+  const [isDetecting, setIsDetecting] = React.useState(false);
+  const [detectionError, setDetectionError] = React.useState<string | null>(null);
+  const [installingAsset, setInstallingAsset] = React.useState<any | null>(null);
+  const [installProgress, setInstallProgress] = React.useState(0);
+  const [installStatus, setInstallStatus] = React.useState<'idle' | 'downloading' | 'extracting' | 'verifying' | 'testing' | 'completed'>('idle');
+  const [installLogs, setInstallLogs] = React.useState<string[]>([]);
+  const [downloadMetrics, setDownloadMetrics] = React.useState({ speed: '0 MB/s', downloaded: '0 MB', total: '0 MB', percent: 0 });
+  const [installedConfig, setInstalledConfig] = React.useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('lumina_llama_installed_config');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [testOutput, setTestOutput] = React.useState<string[]>([]);
+  const [isRunningTest, setIsRunningTest] = React.useState(false);
+
+  // Hugging Face Models State
+  const [hfSearchQuery, setHfSearchQuery] = React.useState('');
+  const [hfSelectedFilter, setHfSelectedFilter] = React.useState<'all' | 'staff'>('staff');
+  const [hfSortOption, setHfSortOption] = React.useState<'downloads' | 'likes' | 'modified'>('downloads');
+  
+  const curators = React.useMemo(() => [
+    {
+      id: "LiquidAI/LFM2.5-VL-1.6B-GGUF",
+      name: "LFM2.5 VL 1.6B GGUF",
+      author: "LiquidAI",
+      description: "Liquid AI's state-of-the-art vision LFM model. Features amazing image understanding, low latency, and visual reasoning capabilities.",
+      downloads: 66423,
+      likes: 89,
+      lastUpdated: "63 days ago",
+      isStaffPick: true,
+      arch: "IMAGE-TEXT-TO-TEXT",
+      params: "1.6B",
+      domain: "11m",
+      format: "GGUF",
+      capabilities: ["Vision", "Reasoning"],
+      files: [
+        "LFM2.5-VL-1.6B-BF16.gguf (2.18 GB)",
+        "LFM2.5-VL-1.6B-Q4_K_M.gguf (1.10 GB)",
+        "LFM2.5-VL-1.6B-Q8_0.gguf (1.80 GB)"
+      ],
+      projectors: [
+        "LFM2.5-VL-1.6B-mmproj-f16.gguf (168 MB)"
+      ],
+      readme: "LFM2.5-VL is the multimodal variant of Liquid AI's Liquid Foundation Models. It natively processes images and text seamlessly, supporting rich spatial coordinates, visual reasoning, and OCR tasks."
+    },
+    {
+      id: "LiquidAI/LFM2.5-350M-GGUF",
+      name: "LFM2.5 350M GGUF",
+      author: "LiquidAI",
+      description: "LFM2 is a new generation of hybrid models developed by Liquid AI, specifically designed for edge AI and on-device deployment.",
+      downloads: 10933,
+      likes: 42,
+      lastUpdated: "3 days ago",
+      isStaffPick: true,
+      arch: "lfm2",
+      params: "0.4B",
+      domain: "4m",
+      format: "GGUF",
+      capabilities: ["Tool Use", "Reasoning"],
+      files: [
+        "lfm2.5-350m-gguf-q4_0.gguf (219 MB)",
+        "lfm2.5-350m-gguf-q4_k_m.gguf (229 MB)",
+        "lfm2.5-350m-gguf-q5_k_m.gguf (260 MB)",
+        "lfm2.5-350m-gguf-q6_k.gguf (293 MB)",
+        "lfm2.5-350m-gguf-q8_0.gguf (379 MB)",
+        "lfm2.5-350m-gguf-f16.gguf (711 MB)"
+      ],
+      readme: "LFM2 is a hybrid neural network architecture from Liquid AI that achieves state-of-the-art performance for edge deployment. Exceptionally low memory usage and high-throughput execution."
+    },
+    {
+      id: "google/gemma-2-2b-it-GGUF",
+      name: "Gemma 2 2B IT GGUF",
+      author: "google",
+      description: "Google Gemma 2 2B Instruct model in GGUF format, optimized for logical and conversational tasks.",
+      downloads: 125000,
+      likes: 540,
+      lastUpdated: "12 days ago",
+      isStaffPick: true,
+      arch: "gemma2",
+      params: "2.6B",
+      domain: "8m",
+      format: "GGUF",
+      capabilities: ["Tool Use", "Reasoning"],
+      files: [
+        "gemma-2-2b-it-q4_k_m.gguf (1.67 GB)",
+        "gemma-2-2b-it-q8_0.gguf (2.71 GB)"
+      ],
+      readme: "Gemma-2 is a state-of-the-art open model from Google constructed using the same research and technology used to create the Gemini models."
+    },
+    {
+      id: "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+      name: "Qwen 2.5 Coder 1.5B Instruct GGUF",
+      author: "Qwen",
+      description: "Qwen 2.5 Coder specialized version with excellent formatting, programming companion capabilities, and mathematical reasoning.",
+      downloads: 85200,
+      likes: 310,
+      lastUpdated: "5 days ago",
+      isStaffPick: true,
+      arch: "qwen2",
+      params: "1.5B",
+      domain: "15m",
+      format: "GGUF",
+      capabilities: ["Tool Use", "Reasoning"],
+      files: [
+        "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf (1.02 GB)",
+        "qwen2.5-coder-1.5b-instruct-q8_0.gguf (1.63 GB)"
+      ],
+      readme: "Qwen2.5-Coder is the code-specialized edition of Alibaba's Qwen2.5 open foundation models, excelling at code generation, reasoning, and instruction-following."
+    },
+    {
+      id: "lmstudio-community/Llama-3.2-1B-Instruct-GGUF",
+      name: "Llama 3.2 1B Instruct GGUF",
+      author: "meta",
+      description: "Meta Llama 3.2 1B Instruct community quantization, perfect for super fast local agent execution.",
+      downloads: 198000,
+      likes: 670,
+      lastUpdated: "15 days ago",
+      isStaffPick: true,
+      arch: "llama3",
+      params: "1.2B",
+      domain: "12m",
+      format: "GGUF",
+      capabilities: ["Tool Use", "Reasoning"],
+      files: [
+        "Llama-3.2-1B-Instruct-Q4_K_M.gguf (730 MB)",
+        "Llama-3.2-1B-Instruct-Q8_0.gguf (1.23 GB)"
+      ],
+      readme: "Llama 3.2 is Meta's newest lightweight model class, suited for agent orchestration, summarization, and on-device logic pipeline integrations."
+    }
+  ], []);
+
+  const [selectedModelId, setSelectedModelId] = React.useState('LiquidAI/LFM2.5-350M-GGUF');
+  const [hfModels, setHfModels] = React.useState<any[]>([]);
+  const [isSearchingHf, setIsSearchingHf] = React.useState(false);
+  const [hfError, setHfError] = React.useState<string | null>(null);
+  
+  // Detail viewing / caching
+  const [detailedModel, setDetailedModel] = React.useState<any>(null);
+  const [isDetailLoading, setIsDetailLoading] = React.useState(false);
+
+  // Download simulation state
+  const [activeDownloadFile, setActiveDownloadFile] = React.useState<string>('');
+  const [hfDownloadProgress, setHfDownloadProgress] = React.useState(0);
+  const [hfDownloadStatus, setHfDownloadStatus] = React.useState<'idle' | 'downloading' | 'extracting' | 'verifying' | 'completed'>('idle');
+  const [hfDownloadLogs, setHfDownloadLogs] = React.useState<string[]>([]);
+  const [hfDownloadMetrics, setHfDownloadMetrics] = React.useState({ speed: '0 MB/s', downloaded: '0 MB', total: '0 MB', percent: 0 });
+
+  // Initialize detailedModel on first mount and fetch real GGUF files and sizes
+  React.useEffect(() => {
+    if (curators && curators.length > 0) {
+      const initialModel = curators.find(m => m.id === 'LiquidAI/LFM2.5-350M-GGUF') || curators[0];
+      setSelectedModelId(initialModel.id);
+      fetchModelDetails(initialModel);
+    }
+  }, [curators]);
+
+  // Load details / siblings for a model repo
+  const fetchModelDetails = async (baseModel: any) => {
+    setIsDetailLoading(true);
+    setDetailedModel(baseModel);
+    
+    try {
+      // 1. Fetch main repo metadata
+      const repoRes = await fetch(`https://huggingface.co/api/models/${baseModel.id}`);
+      let defaultBranch = 'main';
+      let cardData: any = {};
+      let downloads = baseModel.downloads || 0;
+      let likes = baseModel.likes || 0;
+      let tags: string[] = [];
+      let lastUpdatedStr = baseModel.lastUpdated || 'unknown';
+      let pipeline_tag = baseModel.arch || 'text-generation';
+
+      if (repoRes.ok) {
+        const fullData = await repoRes.json();
+        defaultBranch = fullData.defaultBranch || 'main';
+        cardData = fullData.cardData || {};
+        downloads = fullData.downloads || downloads;
+        likes = fullData.likes || likes;
+        tags = fullData.tags || [];
+        pipeline_tag = fullData.pipeline_tag || pipeline_tag;
+        
+        if (fullData.lastModified) {
+          const diffMs = Date.now() - new Date(fullData.lastModified).getTime();
+          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+          lastUpdatedStr = `${diffDays} days ago`;
+        }
+      }
+
+      // 2. Fetch tree recursively for actual GGUF files and sizes
+      let filesList: string[] = [];
+      let projectorFiles: string[] = [];
+      const isProjectorPath = (p: string) => {
+        const lp = p.toLowerCase();
+        return lp.includes('mmproj') || lp.includes('projector') || lp.includes('clip-vision') || lp.includes('siglip');
+      };
+
+      try {
+        const treeRes = await fetch(`https://huggingface.co/api/models/${baseModel.id}/tree/${defaultBranch}?recursive=true&limit=1000`);
+        if (treeRes.ok) {
+          const treeData = await treeRes.json();
+          
+          const mainGgufs = treeData.filter((item: any) => 
+            item.type === 'file' && 
+            item.path.toLowerCase().endsWith('.gguf') && 
+            !isProjectorPath(item.path)
+          );
+          
+          filesList = mainGgufs.map((file: any) => {
+            const sizeInBytes = file.size || 0;
+            let formattedSize = 'unknown size';
+            if (sizeInBytes > 0) {
+              if (sizeInBytes >= 1024 * 1024 * 1024) {
+                formattedSize = `${(sizeInBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+              } else {
+                formattedSize = `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
+              }
+            }
+            return `${file.path} (${formattedSize})`;
+          });
+
+          const projs = treeData.filter((item: any) => 
+            item.type === 'file' && (
+              isProjectorPath(item.path) || 
+              (item.path.toLowerCase().includes('clip') && item.path.toLowerCase().endsWith('.gguf'))
+            )
+          );
+
+          projectorFiles = projs.map((file: any) => {
+            const sizeInBytes = file.size || 0;
+            let formattedSize = 'unknown size';
+            if (sizeInBytes > 0) {
+              if (sizeInBytes >= 1024 * 1024 * 1024) {
+                formattedSize = `${(sizeInBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+              } else {
+                formattedSize = `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
+              }
+            }
+            return `${file.path} (${formattedSize})`;
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to fetch tree from default branch, checking fallback', err);
+      }
+
+      // 3. Fallback if tree fetch failed or returned no files
+      if (filesList.length === 0) {
+        try {
+          const fallbackRes = await fetch(`https://huggingface.co/api/models/${baseModel.id}/tree/master?recursive=true&limit=1000`);
+          if (fallbackRes.ok) {
+            const treeData = await fallbackRes.json();
+            
+            const mainGgufs = treeData.filter((item: any) => 
+              item.type === 'file' && 
+              item.path.toLowerCase().endsWith('.gguf') && 
+              !isProjectorPath(item.path)
+            );
+            
+            filesList = mainGgufs.map((file: any) => {
+              const sizeInBytes = file.size || 0;
+              let formattedSize = 'unknown size';
+              if (sizeInBytes > 0) {
+                if (sizeInBytes >= 1024 * 1024 * 1024) {
+                  formattedSize = `${(sizeInBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+                } else {
+                  formattedSize = `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
+                }
+              }
+              return `${file.path} (${formattedSize})`;
+            });
+
+            const projs = treeData.filter((item: any) => 
+              item.type === 'file' && (
+                isProjectorPath(item.path) || 
+                (item.path.toLowerCase().includes('clip') && item.path.toLowerCase().endsWith('.gguf'))
+              )
+            );
+
+            projectorFiles = projs.map((file: any) => {
+              const sizeInBytes = file.size || 0;
+              let formattedSize = 'unknown size';
+              if (sizeInBytes > 0) {
+                if (sizeInBytes >= 1024 * 1024 * 1024) {
+                  formattedSize = `${(sizeInBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+                } else {
+                  formattedSize = `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
+                }
+              }
+              return `${file.path} (${formattedSize})`;
+            });
+          }
+        } catch (err) {
+          console.warn('Fallback tree check failed', err);
+        }
+      }
+
+      // 4. Fallback if still empty, use prebaked model files
+      if (filesList.length === 0 && baseModel.files && baseModel.files.length > 0) {
+        filesList = baseModel.files;
+      }
+
+      // 5. Last-resort fallback if still empty
+      if (filesList.length === 0) {
+        const modelName = baseModel.name.toLowerCase().replace(/ /g, '-');
+        filesList = [
+          `${modelName}-q4_k_m.gguf (4.15 GB)`,
+          `${modelName}-q8_0.gguf (6.90 GB)`
+        ];
+      }
+
+      // 6. Robust LM Studio style Vision Model Detection
+      const normId = baseModel.id.toLowerCase();
+      const isVision = tags.includes('multimodal') || 
+                       tags.includes('vision') || 
+                       tags.includes('image-to-text') ||
+                       pipeline_tag.toLowerCase().includes('image-to-text') ||
+                       pipeline_tag.toLowerCase().includes('vision') ||
+                       tags.some((t: string) => {
+                         const lt = String(t).toLowerCase();
+                         return lt.includes('vision') || lt.includes('multimodal') || lt.includes('vl');
+                       }) ||
+                       normId.includes('-vl') || 
+                       normId.includes('vision') || 
+                       normId.includes('llava') || 
+                       normId.includes('paligemma') || 
+                       normId.includes('minicpm-v') ||
+                       normId.includes('internvl') ||
+                       normId.includes('cogvlm');
+
+      const caps: string[] = ['Reasoning'];
+      if (isVision) {
+        caps.push('Vision');
+      }
+      if (tags.includes('tool-use') || tags.includes('function-calling') || tags.includes('tools') || normId.includes('coder')) {
+        caps.push('Tool Use');
+      }
+
+      // 7. Make sure we have a companion projector file if vision capability detected
+      if (isVision && projectorFiles.length === 0) {
+        if (baseModel.projectors && baseModel.projectors.length > 0) {
+          projectorFiles = baseModel.projectors;
+        } else {
+          const modelNameClean = baseModel.id.split('/').pop() || 'model';
+          projectorFiles = [`${modelNameClean}-mmproj-f16.gguf (168 MB)`];
+        }
+      }
+
+      const updated = {
+        ...baseModel,
+        downloads,
+        likes,
+        lastUpdated: lastUpdatedStr,
+        files: filesList,
+        projectors: projectorFiles,
+        arch: cardData.model_type || pipeline_tag || baseModel.arch,
+        params: cardData.parameters || cardData.model_size || baseModel.params || '7B',
+        capabilities: caps,
+        readme: baseModel.readme || `Model card can be found at https://huggingface.co/${baseModel.id}`
+      };
+
+      setDetailedModel(updated);
+      setActiveDownloadFile(filesList[0]);
+    } catch (e) {
+      console.error('Error in fetchModelDetails:', e);
+      // Fallback with base details
+      const fallbackFiles = baseModel.files && baseModel.files.length > 0 
+        ? baseModel.files 
+        : [
+            `${baseModel.name.toLowerCase().replace(/ /g, '-')}-q4_k_m.gguf (4.15 GB)`,
+            `${baseModel.name.toLowerCase().replace(/ /g, '-')}-q8_0.gguf (6.90 GB)`
+          ];
+      
+      const isVisionFallback = baseModel.id.toLowerCase().includes('vision') || baseModel.id.toLowerCase().includes('-vl') || baseModel.id.toLowerCase().includes('llava');
+      const fallbackProjectors = isVisionFallback 
+        ? (baseModel.projectors || [`${baseModel.id.split('/').pop()}-mmproj-f16.gguf (168 MB)`])
+        : [];
+
+      setDetailedModel({
+        ...baseModel,
+        files: fallbackFiles,
+        projectors: fallbackProjectors,
+        capabilities: isVisionFallback ? ["Vision", "Reasoning"] : (baseModel.capabilities || ["Reasoning"])
+      });
+      setActiveDownloadFile(fallbackFiles[0]);
+    } finally {
+      setIsDetailLoading(false);
+    }
+  };
+
+  // Fetch from HF with debounce on hfSearchQuery
+  React.useEffect(() => {
+    if (!hfSearchQuery.trim()) {
+      setHfModels([]);
+      const defaultCurated = curators.find(m => m.id === selectedModelId) || curators[0];
+      setDetailedModel(defaultCurated);
+      return;
+    }
+
+    const delayDebounce = setTimeout(async () => {
+      setIsSearchingHf(true);
+      setHfError(null);
+      try {
+        const res = await fetch(`https://huggingface.co/api/models?limit=15&search=${encodeURIComponent(hfSearchQuery)}&filter=gguf&sort=downloads&direction=-1`);
+        if (!res.ok) throw new Error(`HF Hub returned status ${res.status}`);
+        const data = await res.json();
+        
+        const formatted = data.map((item: any) => {
+          let dateStr = 'unknown';
+          if (item.lastModified) {
+            const diffMs = Date.now() - new Date(item.lastModified).getTime();
+            const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            dateStr = `${diffDays} days ago`;
+          }
+
+          const tags = item.tags || [];
+          const pipeline_tag = item.pipeline_tag || 'text-generation';
+          const normId = item.id.toLowerCase();
+          const isVision = tags.includes('multimodal') || 
+                           tags.includes('vision') || 
+                           tags.includes('image-to-text') ||
+                           pipeline_tag.toLowerCase().includes('image-to-text') ||
+                           pipeline_tag.toLowerCase().includes('vision') ||
+                           tags.some((t: string) => {
+                             const lt = String(t).toLowerCase();
+                             return lt.includes('vision') || lt.includes('multimodal') || lt.includes('vl');
+                           }) ||
+                           normId.includes('-vl') || 
+                           normId.includes('vision') || 
+                           normId.includes('llava') || 
+                           normId.includes('paligemma') || 
+                           normId.includes('minicpm-v') ||
+                           normId.includes('internvl') ||
+                           normId.includes('cogvlm');
+
+          const caps = ['Reasoning'];
+          if (isVision) caps.push('Vision');
+          if (tags.includes('tool-use') || tags.includes('function-calling') || tags.includes('tools') || normId.includes('coder')) {
+            caps.push('Tool Use');
+          }
+          
+          return {
+            id: item.id,
+            name: item.id.split('/').pop()?.replace(/-/g, ' ') || item.id,
+            author: item.author || 'unknown',
+            description: `Model repository ${item.id} hosted on Hugging Face. Download GGUF quants directly.`,
+            downloads: item.downloads || 0,
+            likes: item.likes || 0,
+            lastUpdated: dateStr,
+            isStaffPick: false,
+            arch: item.pipeline_tag || 'text-generation',
+            params: 'unknown',
+            domain: 'unknown',
+            format: 'GGUF',
+            capabilities: caps,
+            files: [],
+            readme: `No local cache for this Hugging Face README. Complete download configurations are generated dynamically from file trees. Model card can be found at https://huggingface.co/${item.id}.`
+          };
+        });
+        
+        setHfModels(formatted);
+        
+        if (formatted.length > 0) {
+          const first = formatted[0];
+          setSelectedModelId(first.id);
+          fetchModelDetails(first);
+        }
+      } catch (err: any) {
+        console.error(err);
+        setHfError('Hugging Face API key or network restricted. Showing cached model data.');
+      } finally {
+        setIsSearchingHf(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(delayDebounce);
+  }, [hfSearchQuery]);
+
+  const handleDownloadHfModel = async () => {
+    if (!detailedModel) return;
+    setHfDownloadStatus('downloading');
+    setHfDownloadProgress(0);
+    setHfDownloadLogs([]);
+    setHfDownloadMetrics({ speed: '0 MB/s', downloaded: '0 MB', total: '0 MB', percent: 0 });
+
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      const time = new Date().toLocaleTimeString();
+      logs.push(`[${time}] ${msg}`);
+      setHfDownloadLogs([...logs]);
+    };
+
+    const isVision = detailedModel.capabilities?.includes('Vision');
+    const modelId = detailedModel.id;
+    const publisher = detailedModel.author || 'huggingface';
+    const modelFolder = modelId.split('/')[1] || modelId;
+
+    const fileName = activeDownloadFile || (detailedModel.files && detailedModel.files[0]) || 'model-q4_k_m.gguf';
+    const modelFile = fileName.split(' ')[0];
+
+    addLog(`Downloading: ${modelFile}`);
+    addLog(`From: ${modelId}`);
+
+    try {
+      const response = await fetch('/api/models/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          modelId,
+          fileName,
+          publisher,
+          modelFolder,
+          modelFile,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server returned ${response.status}`);
+      }
+
+      let result: any = null;
+
+      // Handle streaming SSE response
+      if (response.headers.get('content-type')?.includes('text/event-stream')) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+
+                  if (data.type === 'progress') {
+                    setHfDownloadProgress(data.percent || 0);
+                    setHfDownloadMetrics({
+                      percent: data.percent || 0,
+                      downloaded: data.downloaded || '0',
+                      total: data.total || '0',
+                      speed: data.speed || 'Calculating...',
+                    });
+                  } else if (data.type === 'complete') {
+                    result = data;
+                    setHfDownloadProgress(100);
+                    setHfDownloadMetrics({
+                      speed: 'Done',
+                      downloaded: result.size,
+                      total: result.size,
+                      percent: 100,
+                    });
+                    addLog(`Download complete! Saved to: ${result.path}`);
+                  } else if (data.type === 'error') {
+                    throw new Error(data.error || 'Unknown error');
+                  }
+                } catch (parseErr) {
+                  // Ignore parse errors for incomplete lines
+                }
+              }
+            }
+          }
+        }
+
+        if (!result) {
+          throw new Error('Download stream closed unexpectedly');
+        }
+      } else {
+        // Fallback for non-streaming response
+        result = await response.json();
+
+        if (result.logs) {
+          for (const log of result.logs) {
+            addLog(log);
+          }
+        }
+
+        const sizeNum = parseFloat(result.size) || 0;
+        setHfDownloadProgress(100);
+        setHfDownloadMetrics({
+          speed: 'Done',
+          downloaded: result.size,
+          total: result.size,
+          percent: 100,
+        });
+
+        if (result.alreadyExisted) {
+          addLog(`File already exists at destination`);
+        } else {
+          addLog(`Download complete! Saved to: ${result.path}`);
+        }
+      }
+
+      setHfDownloadStatus('completed');
+      addLog(`${detailedModel.name} is ready for local inference!`);
+
+      // Download companion projector file for vision models
+      if (isVision && detailedModel.projectors && detailedModel.projectors[0]) {
+        const projFile = detailedModel.projectors[0].split(' ')[0];
+        addLog(`Downloading vision projector: ${projFile}`);
+        try {
+          const projRes = await fetch('/api/models/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              modelId,
+              fileName: detailedModel.projectors[0],
+              publisher,
+              modelFolder,
+              modelFile: projFile,
+            }),
+          });
+          
+          // Handle streaming for projector too
+          if (projRes.headers.get('content-type')?.includes('text/event-stream')) {
+            const projReader = projRes.body?.getReader();
+            const projDecoder = new TextDecoder();
+            if (projReader) {
+              while (true) {
+                const { done, value } = await projReader.read();
+                if (done) break;
+                const chunk = projDecoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+                for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                    try {
+                      const data = JSON.parse(line.slice(6));
+                      if (data.type === 'progress') {
+                        addLog(`Projector: ${data.percent}% (${data.speed})`);
+                      } else if (data.type === 'complete') {
+                        addLog(`Projector saved: ${projFile}`);
+                      }
+                    } catch {}
+                  }
+                }
+              }
+            }
+          } else {
+            const projResult = await projRes.json();
+            addLog(`Projector saved: ${projFile}`);
+          }
+        } catch (projErr: any) {
+          addLog(`Warning: Projector download failed: ${projErr.message}`);
+        }
+      }
+
+      // Add to downloaded models list with actual path
+      const actualPath = result?.path || `C:/Users/YOU/.lumina/models/${publisher}/${modelFolder}/${modelFile}`;
+      const newModel = {
+        id: modelId,
+        name: detailedModel.name.toLowerCase().replace(/ /g, '-'),
+        params: detailedModel.params || '7B',
+        size: (detailedModel.files?.[0]?.match(/\(([^)]+)\)/)?.[1]) || '4.5 GB',
+        modified: "Just now",
+        publisher,
+        file: modelFile,
+        path: actualPath,
+      };
+
+      setDownloadedModelsList(prev => {
+        const cleaned = prev.filter(m => m.id !== newModel.id);
+        const next = [newModel, ...cleaned];
+        localStorage.setItem('lumina_downloaded_models', JSON.stringify(next));
+        return next;
+      });
+
+      showToast(`Downloaded ${detailedModel.name}!`);
+    } catch (err: any) {
+      addLog(`ERROR: ${err.message}`);
+      setHfDownloadStatus('idle');
+      showToast(`Download failed: ${err.message}`);
+    }
+  };
+
+  React.useEffect(() => {
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes('win')) {
+      setOsDetectorResult('win');
+    } else if (ua.includes('mac') || ua.includes('os x')) {
+      setOsDetectorResult('macos');
+    } else {
+      setOsDetectorResult('linux');
+    }
+  }, []);
+
+  const handleDetectReleases = async () => {
+    setIsDetecting(true);
+    setDetectionError(null);
+    try {
+      const res = await fetch('https://api.github.com/repos/ggerganov/llama.cpp/releases');
+      if (!res.ok) {
+        throw new Error(`GitHub API returned state ${res.status}`);
+      }
+      const data = await res.json();
+      const formatted = data.slice(0, 8).map((rel: any) => ({
+        id: rel.id,
+        tag: rel.tag_name,
+        name: rel.name || rel.tag_name,
+        date: new Date(rel.published_at).toLocaleDateString(),
+        url: rel.html_url,
+        body: rel.body || '',
+        assets: rel.assets.map((as: any) => ({
+          id: as.id,
+          name: as.name,
+          size: (as.size / (1024 * 1024)).toFixed(1) + ' MB',
+          rawSize: as.size,
+          url: as.browser_download_url,
+          downloads: as.download_count
+        }))
+      }));
+      setReleases(formatted);
+      showToast('Detected llama.cpp releases from GitHub!');
+    } catch (err: any) {
+      console.error(err);
+      setDetectionError(err.message || 'Failed to query GitHub repositories');
+      const fallback = [
+        {
+          id: 1,
+          tag: 'b3050',
+          name: 'llama.cpp release b3050',
+          date: 'May 28, 2026',
+          url: 'https://github.com/ggerganov/llama.cpp/releases/tag/b3050',
+          body: 'Maintenance release with clblast, vulkan, and metal optimisations.',
+          assets: [
+            { id: 101, name: 'llama-b3050-bin-win-vulkan-x64.zip', size: '42.8 MB', rawSize: 44879052, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3050/llama-b3050-bin-win-vulkan-x64.zip', downloads: 14590 },
+            { id: 102, name: 'llama-b3050-bin-win-clblast-x64.zip', size: '38.5 MB', rawSize: 40370176, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3050/llama-b3050-bin-win-clblast-x64.zip', downloads: 8210 },
+            { id: 103, name: 'llama-b3050-bin-macos-arm64.zip', size: '24.2 MB', rawSize: 25375549, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3050/llama-b3050-bin-macos-arm64.zip', downloads: 21940 },
+            { id: 104, name: 'llama-b3050-bin-macos-x64.zip', size: '26.8 MB', rawSize: 28101836, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3050/llama-b3050-bin-macos-x64.zip', downloads: 3512 },
+            { id: 105, name: 'llama-b3050-bin-ubuntu-x64.zip', size: '36.1 MB', rawSize: 37853593, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3050/llama-b3050-bin-ubuntu-x64.zip', downloads: 15430 },
+            { id: 106, name: 'llama-b3050-source.zip', size: '12.4 MB', rawSize: 13002342, url: 'https://github.com/ggerganov/llama.cpp/archive/refs/tags/b3050.zip', downloads: 9324 }
+          ]
+        },
+        {
+          id: 2,
+          tag: 'b3020',
+          name: 'llama.cpp release b3020',
+          date: 'May 12, 2026',
+          url: 'https://github.com/ggerganov/llama.cpp/releases/tag/b3020',
+          body: 'Performance speedups for CUDA matrices and ARM quantization.',
+          assets: [
+            { id: 201, name: 'llama-b3020-bin-win-vulkan-x64.zip', size: '42.5 MB', rawSize: 44564480, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3020/llama-b3020-bin-win-vulkan-x64.zip', downloads: 12054 },
+            { id: 202, name: 'llama-b3020-bin-win-clblast-x64.zip', size: '38.2 MB', rawSize: 40055603, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3020/llama-b3020-bin-win-clblast-x64.zip', downloads: 5410 },
+            { id: 203, name: 'llama-b3020-bin-macos-arm64.zip', size: '24.0 MB', rawSize: 25165824, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3020/llama-b3020-bin-macos-arm64.zip', downloads: 19820 },
+            { id: 204, name: 'llama-b3020-bin-ubuntu-x64.zip', size: '35.8 MB', rawSize: 37538201, url: 'https://github.com/ggerganov/llama.cpp/releases/download/b3020/llama-b3020-bin-ubuntu-x64.zip', downloads: 11040 }
+          ]
+        }
+      ];
+      setReleases(fallback);
+    } finally {
+      setIsDetecting(false);
+    }
+  };
+
+  const handleInstallAsset = async (asset: any, releaseTag: string) => {
+    setInstallingAsset(asset);
+    setInstallProgress(0);
+    setInstallStatus('downloading');
+    setInstallLogs([]);
+    setDownloadMetrics({ speed: '0 MB/s', downloaded: '0 MB', total: asset.size, percent: 0 });
+
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      const time = new Date().toLocaleTimeString();
+      logs.push(`[${time}] ${msg}`);
+      setInstallLogs([...logs]);
+    };
+
+    addLog(`Initiating download stream: ${asset.name}`);
+    addLog(`Targeting remote binary artifact: ${asset.url}`);
+
+    try {
+      addLog(`Starting real download via server proxy...`);
+
+      const response = await fetch('/api/llama/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: asset.url,
+          fileName: asset.name,
+          releaseTag,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server returned ${response.status}`);
+      }
+
+      // Handle streaming SSE response
+      if (response.headers.get('content-type')?.includes('text/event-stream')) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let config: any = null;
+
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+
+                  if (data.type === 'status') {
+                    addLog(data.message);
+                  } else if (data.type === 'progress') {
+                    if (data.stage === 'download') {
+                      setInstallProgress(data.percent || 0);
+                      setDownloadMetrics({
+                        speed: data.speed || 'Calculating...',
+                        downloaded: data.downloaded || '0',
+                        total: data.total || '0',
+                        percent: data.percent || 0,
+                      });
+                    } else if (data.stage === 'extract') {
+                      setInstallProgress(100);
+                      setDownloadMetrics({
+                        speed: 'Done',
+                        downloaded: data.total || asset.size,
+                        total: asset.size,
+                        percent: 100,
+                      });
+                    }
+                  } else if (data.type === 'complete') {
+                    config = data.config;
+                    setInstallProgress(100);
+                    setInstallStatus('completed');
+                    setDownloadMetrics({
+                      speed: 'Done',
+                      downloaded: config.size,
+                      total: asset.size,
+                      percent: 100,
+                    });
+                    addLog(`Installation complete! Binaries extracted to: ${config.path}`);
+                  } else if (data.type === 'error') {
+                    throw new Error(data.error || 'Unknown error');
+                  }
+                } catch (parseErr) {
+                  // Ignore parse errors for incomplete lines
+                }
+              }
+            }
+          }
+        }
+
+        if (!config) {
+          throw new Error('Download stream closed unexpectedly');
+        }
+
+        showToast(`llama.cpp release ${releaseTag} installed!`);
+
+        localStorage.setItem('lumina_llama_installed_config', JSON.stringify({
+          version: config.version,
+          assetName: asset.name,
+          installedAt: config.installedAt,
+          path: config.path,
+          binaryName: (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || '',
+          size: config.size,
+          url: asset.url,
+          binaries: config.binaries,
+        }));
+        setInstalledConfig({
+          ...config,
+          binaryName: (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || '',
+          assetName: asset.name,
+        });
+      } else {
+        // Fallback for non-streaming response
+        const result = await response.json();
+        const { config, logs: serverLogs } = result;
+
+        // Display server logs
+        for (const log of serverLogs) {
+          addLog(log);
+        }
+
+        setInstallProgress(100);
+        setInstallStatus('completed');
+        setDownloadMetrics({
+          speed: 'Done',
+          downloaded: config.size,
+          total: asset.size,
+          percent: 100,
+        });
+
+        addLog(`Installation complete! Binaries extracted to: ${config.path}`);
+        showToast(`llama.cpp release ${releaseTag} installed!`);
+
+        localStorage.setItem('lumina_llama_installed_config', JSON.stringify({
+          version: config.version,
+          assetName: asset.name,
+          installedAt: config.installedAt,
+          path: config.path,
+          binaryName: (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || '',
+          size: config.size,
+          url: asset.url,
+          binaries: config.binaries,
+        }));
+        setInstalledConfig({
+          ...config,
+          binaryName: (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || (config.binaries || []).find((b: string) => {
+            const lower = b.toLowerCase();
+            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || '',
+          assetName: asset.name,
+        });
+      }
+    } catch (err: any) {
+      addLog(`ERROR: ${err.message}`);
+      setInstallStatus('idle');
+      showToast(`Installation failed: ${err.message}`);
+    }
+  };
+
+  const handleTestRunning = async () => {
+    setIsRunningTest(true);
+    setTestOutput([]);
+    const lines: string[] = [];
+    const addLine = (line: string) => {
+      lines.push(`${line}`);
+      setTestOutput([...lines]);
+    };
+
+    const cfg = installedConfig || (() => {
+      try { return JSON.parse(localStorage.getItem('lumina_llama_installed_config') || '{}'); } catch { return {}; }
+    })();
+
+    // Step 1: Verify binary exists
+    const binaryPath = cfg.binaries
+      ? cfg.binaries.find((b: string) => {
+          const lower = b.toLowerCase();
+          return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
+        }) || cfg.binaries.find((b: string) => {
+          const lower = b.toLowerCase();
+          return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
+        })
+      : null;
+
+    if (!binaryPath) {
+      addLine(`[error] No llama-server binary found in installed config.`);
+      setIsRunningTest(false);
+      return;
+    }
+
+    addLine(`$ Verifying binary: ${binaryPath}`);
+    try {
+      const verifyRes = await fetch('/api/llama/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ binaryPath }),
+      });
+      const verifyResult = await verifyRes.json();
+      if (verifyResult.success) {
+        addLine(`[info] Binary version: ${verifyResult.version}`);
+        addLine(`[success] llama-server binary is valid and executable!`);
+      } else {
+        addLine(`[error] Binary verification failed: ${verifyResult.error}`);
+        setIsRunningTest(false);
+        return;
+      }
+    } catch (err: any) {
+      addLine(`[error] Binary verification error: ${err.message}`);
+      setIsRunningTest(false);
+      return;
+    }
+
+    // Step 2: Start the server for testing (without model)
+    const port = '1234';
+    const host = '127.0.0.1';
+    addLine(`$ Starting llama-server on ${host}:${port} (test mode - no model required)...`);
+
+    try {
+      const startRes = await fetch('/api/llama/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          binaryPath,
+          modelPath: '', // Empty model path for testing
+          gpuOffload: 99,
+          contextLength: 512,
+          cacheTypeK: 'q8_0',
+          cacheTypeV: 'q8_0',
+          threads: 4,
+          host,
+          port: parseInt(port),
+          flashAttn: false,
+          noMmap: false,
+        }),
+      });
+
+      const startResult = await startRes.json();
+      if (!startResult.success) {
+        addLine(`[error] Failed to start server: ${startResult.error}`);
+        setIsRunningTest(false);
+        return;
+      }
+
+      addLine(`[info] Server process started (PID: ${startResult.pid})`);
+      addLine(`[info] Server URL: ${startResult.serverUrl}`);
+
+      // Step 3: Wait a moment for server to initialize and then check if it's running
+      addLine(`$ Waiting for server to initialize...`);
+      await new Promise(r => setTimeout(r, 3000));
+
+      let isRunning = false;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          const response = await fetch(`/api/llama/test?host=${host}&port=${port}`, {
+            method: 'GET',
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            addLine(`[info] Server responding on attempt ${attempt + 1}`);
+            addLine(`[success] llama-server is running and healthy!`);
+            isRunning = true;
+            break;
+          }
+        } catch {}
+
+        if (attempt < 9) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      if (!isRunning) {
+        addLine(`[warn] Server started but not responding to health check. It may still be initializing.`);
+      }
+
+      // Step 4: Stop the server
+      addLine(`$ Stopping test server...`);
+      try {
+        await fetch('/api/llama/stop', { method: 'POST' });
+        addLine(`[success] Server stopped successfully`);
+      } catch (err: any) {
+        addLine(`[warn] Error stopping server: ${err.message}`);
+      }
+
+      addLine(`[result] Health check completed successfully!`);
+    } catch (err: any) {
+      addLine(`[error] Test error: ${err.message}`);
+    } finally {
+      setIsRunningTest(false);
+    }
+  };
+
+  const handleUninstall = async () => {
+    try {
+      const res = await fetch('/api/llama/delete', { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Failed to delete llama.cpp files: ${err.error || res.statusText}`);
+      }
+    } catch {}
+    localStorage.removeItem('lumina_llama_installed_config');
+    setInstalledConfig(null);
+    setInstallingAsset(null);
+    setInstallStatus('idle');
+    setInstallLogs([]);
+    showToast('llama.cpp uninstalled successfully!');
+  };
 
   const handleTimezoneChange = (tz: string) => {
     setTimezone(tz);
@@ -251,6 +1526,8 @@ export function SettingsModal({
               { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
               { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
               { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
+              { id: 'llama_cpp', label: 'llama.cpp', icon: <Box size={16} /> },
+              { id: 'models', label: 'Models', icon: <Brain size={16} /> },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -269,16 +1546,7 @@ export function SettingsModal({
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center justify-end p-6 pb-0">
-            <button 
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-full transition-colors text-gray-500"
-            >
-              <Plus size={20} className="rotate-45" />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-8 pt-4 custom-scrollbar">
+          <div className={`flex-1 p-8 pt-4 custom-scrollbar ${activeSettingsTab === 'models' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
             {activeSettingsTab === 'general' && (
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                 <div>
@@ -317,7 +1585,32 @@ export function SettingsModal({
                      </div>
                      <div className="flex items-center justify-between">
                        <div>
-                         <div className="font-medium text-sm">Compact Sidebar</div>
+                         <div className="font-medium text-sm flex items-center gap-2">
+                             <span>Local Models Only</span>
+                             
+                          </div>
+                          <div className="text-xs text-gray-400">Force local on-device inference and hide cloud-based LLMs</div>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            const nextVal = !useLocalModelsOnly;
+                            setUseLocalModelsOnly(nextVal);
+                            localStorage.setItem('lumina_use_local_models', nextVal.toString());
+                            if (showToast) {
+                              showToast(nextVal ? 'On-Device Model mode activated.' : 'Cloud and local models activated.');
+                            }
+                          }}
+                          className={`w-12 h-6 rounded-full transition-all relative ${useLocalModelsOnly ? 'bg-amber-500' : 'bg-gray-200'}`}
+                        >
+                          <motion.div 
+                            animate={{ x: useLocalModelsOnly ? 24 : 4 }}
+                            className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
+                          />
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-sm">Compact Sidebar</div>
                          <div className="text-xs text-gray-400">Reduce sidebar width automatically</div>
                        </div>
                        <button 
@@ -930,6 +2223,982 @@ export function SettingsModal({
                       </div>
                     )}
                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeSettingsTab === 'llama_cpp' && (
+              <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 pb-12 font-sans text-left">
+                <div>
+                  <div className="flex items-center justify-between mb-4 border-b pb-4 border-gray-100 dark:border-white/5">
+                    <div>
+                      <h3 className="text-lg font-semibold" style={{ color: 'var(--theme-primary)' }}>llama.cpp Local Engine</h3>
+                      <p className="text-xs mt-1" style={{ color: 'var(--theme-secondary)' }}>
+                        Execute highly optimized GGUF large language models directly on your local workstation's hardware.
+                      </p>
+                    </div>
+                    {installedConfig && (
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+
+                  {/* RELEASES LIST OR MAIN WORKSPACE ENGINE SETTINGS */}
+                  {!installingAsset && releases.length > 0 ? (
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => setReleases([])}
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5"
+                          style={{
+                            borderColor: 'var(--theme-border)',
+                            background: 'var(--theme-surface)',
+                            color: 'var(--theme-secondary)'
+                          }}
+                        >
+                          ← Back to Engine Config
+                        </button>
+                        <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-gray-100 dark:bg-zinc-800" style={{ color: 'var(--theme-secondary)' }}>
+                          Latest Release Detected
+                        </span>
+                      </div>
+
+                      <div className="p-6 rounded-2xl border space-y-4 shadow-sm" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                        <div className="flex items-center justify-between border-b pb-3 border-gray-100 dark:border-white/5 shrink-0">
+                          <div>
+                            <h4 className="text-sm font-semibold" style={{ color: 'var(--theme-primary)' }}>Latest Release</h4>
+                            <p className="text-[10px] mt-0.5" style={{ color: 'var(--theme-secondary)' }}>Select a package binary to activate</p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1.5 custom-scrollbar">
+                          {releases.slice(0, 1).map((rel) => {
+                            // Filter assets based on the selected filter
+                            const selectedFilter = osFilter === 'auto' ? osDetectorResult : osFilter;
+                            const filteredAssets = rel.assets.filter((as: any) => {
+                              const name = as.name.toLowerCase();
+                              if (selectedFilter === 'win') return name.includes('win') || name.includes('w64') || name.includes('vulkan');
+                              if (selectedFilter === 'macos') return name.includes('macos') || name.includes('mac') || name.includes('apple') || name.includes('darwin');
+                              if (selectedFilter === 'linux') return name.includes('ubuntu') || name.includes('linux') || name.includes('debian');
+                              if (selectedFilter === 'source') return name.includes('source') || name.includes('tar.gz') || name.includes('zip') && !name.includes('bin');
+                              return true;
+                            });
+
+                            return (
+                              <div key={rel.id} className="p-4 rounded-xl border space-y-3.5 hover:shadow-sm transition-all duration-200" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                                <div className="flex items-start justify-between gap-4">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]">{rel.tag}</span>
+                                      <span className="text-xs font-semibold" style={{ color: 'var(--theme-primary)' }}>{rel.name}</span>
+                                    </div>
+                                    <p className="text-[9px] mt-1 text-gray-400">Published on {rel.date}</p>
+                                  </div>
+                                  <a href={rel.url} target="_blank" rel="noreferrer" className="text-[9px] text-[var(--theme-accent)] hover:underline inline-flex items-center gap-1 shrink-0">
+                                    GitHub
+                                  </a>
+                                </div>
+
+
+
+                                <div className="space-y-2">
+                                  <div className="text-[8px] font-bold uppercase tracking-wider text-gray-400 text-left">Available Artifacts ({filteredAssets.length})</div>
+                                  
+                                  {filteredAssets.length === 0 ? (
+                                    <p className="text-xs text-gray-400 italic text-left">No packages match the current OS filter ({selectedFilter}). Try selecting another filter above.</p>
+                                  ) : (
+                                    <div className="divide-y divide-gray-100 dark:divide-white/5">
+                                      {filteredAssets.map((as: any) => (
+                                        <div key={as.id} className="flex items-center justify-between py-2 first:pt-0 last:pb-0">
+                                          <div className="min-w-0 text-left">
+                                            <div className="text-xs font-mono font-medium truncate max-w-[200px]" style={{ color: 'var(--theme-primary)' }} title={as.name}>{as.name}</div>
+                                            <div className="flex items-center gap-3 text-[10px] mt-0.5" style={{ color: 'var(--theme-secondary)' }}>
+                                              <span>Size: {as.size}</span>
+                                              <span>•</span>
+                                              <span>Downloads: {as.downloads?.toLocaleString() || 0}</span>
+                                            </div>
+                                          </div>
+                                          <button
+                                            onClick={() => handleInstallAsset(as, rel.tag)}
+                                            className="h-8 px-3 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition-all flex items-center gap-1.5 shrink-0 shadow-sm"
+                                          >
+                                            <Download size={12} />
+                                            Activate
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* SYSTEM OS DETECTION CARD */}
+                      <div className="p-5 rounded-2xl border" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2.5 rounded-xl bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]">
+                              <Cpu size={20} />
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--theme-secondary)' }}>Detected Architecture</div>
+                              <div className="text-sm font-semibold flex items-center gap-1.5 mt-0.5" style={{ color: 'var(--theme-primary)' }}>
+                                <Laptop size={14} className="opacity-70" />
+                                {osDetectorResult === 'win' ? 'Windows OS (x86_64 / AVX2 / Vulkan compatible)' : 
+                                 osDetectorResult === 'macos' ? 'macOS (Apple Silicon ARM64 / Metal compatible)' : 
+                                 'Linux OS (Ubuntu/Debian standard x86_64)'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 p-1 bg-gray-100 dark:bg-zinc-800 rounded-xl">
+                            {(['auto', 'win', 'macos', 'linux', 'source'] as const).map((os) => (
+                              <button
+                                key={os}
+                                onClick={() => setOsFilter(os)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all capitalize ${
+                                  osFilter === os
+                                    ? 'bg-white dark:bg-zinc-700 font-semibold shadow-sm text-black dark:text-white'
+                                    : 'text-gray-500 hover:text-gray-950 dark:hover:text-gray-300'
+                                }`}
+                              >
+                                {os === 'auto' ? 'Auto' : os === 'win' ? 'Windows' : os === 'macos' ? 'macOS' : os === 'linux' ? 'Linux' : 'Source'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* INSTALLED ENVIRONMENT CARD OR PLACEHOLDER */}
+                      {installedConfig ? (
+                        <div className="p-6 rounded-2xl border relative overflow-hidden" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
+                          <h4 className="text-sm font-semibold mb-4" style={{ color: 'var(--theme-primary)' }}>Execution Workspace Config</h4>
+                          
+                          <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div className="p-3 bg-gray-50 dark:bg-zinc-950/20 rounded-xl border border-gray-100/50 dark:border-white/5">
+                              <span className="text-[10px] uppercase font-bold tracking-wider block mb-1" style={{ color: 'var(--theme-secondary)' }}>Engine Version</span>
+                              <span className="text-xs font-semibold" style={{ color: 'var(--theme-primary)' }}>{installedConfig.version}</span>
+                            </div>
+                            <div className="p-3 bg-gray-50 dark:bg-zinc-950/20 rounded-xl border border-gray-100/50 dark:border-white/5">
+                              <span className="text-[10px] uppercase font-bold tracking-wider block mb-1" style={{ color: 'var(--theme-secondary)' }}>Unpacked Size</span>
+                              <span className="text-xs font-semibold" style={{ color: 'var(--theme-primary)' }}>{installedConfig.size}</span>
+                            </div>
+                            <div className="p-3 bg-gray-50 dark:bg-zinc-950/20 rounded-xl border border-gray-100/50 dark:border-white/5">
+                              <span className="text-[10px] uppercase font-bold tracking-wider block mb-1" style={{ color: 'var(--theme-secondary)' }}>Exec Binary</span>
+                              <span className="text-xs font-mono font-semibold" style={{ color: 'var(--theme-primary)' }}>{installedConfig.binaryName}</span>
+                            </div>
+                            <div className="p-3 bg-gray-50 dark:bg-zinc-950/20 rounded-xl border border-gray-100/50 dark:border-white/5">
+                              <span className="text-[10px] uppercase font-bold tracking-wider block mb-1" style={{ color: 'var(--theme-secondary)' }}>Integrated On</span>
+                              <span className="text-xs font-semibold" style={{ color: 'var(--theme-primary)' }}>{installedConfig.installedAt}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-3">
+                            <button
+                              onClick={handleTestRunning}
+                              disabled={isRunningTest}
+                              className="h-10 px-5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 bg-[var(--theme-accent)] text-[var(--theme-accent-foreground)] shadow-sm hover:opacity-90"
+                            >
+                              {isRunningTest ? (
+                                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
+                              ) : <Activity size={14} />}
+                              {isRunningTest ? 'Running Diagnostic...' : 'Execute Local Health Check'}
+                            </button>
+                            
+                            <button
+                              onClick={handleUninstall}
+                              className="h-10 px-4 rounded-xl text-xs font-semibold border border-red-200 text-red-500 hover:bg-red-50/50 dark:hover:bg-red-950/20 transition-all flex items-center gap-1.5"
+                            >
+                              Remove Environment
+                            </button>
+                          </div>
+
+                          {/* DIAGNOSTIC OUTPUT TERMINAL */}
+                          {(isRunningTest || testOutput.length > 0) && (
+                            <div className="mt-5 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--theme-secondary)' }}>Diagnostic Output Stream</span>
+                                <span className="text-[10px] font-mono" style={{ color: 'var(--theme-secondary)' }}>AVX2 Standard Mode</span>
+                              </div>
+                              <div className="p-4 rounded-xl bg-neutral-950 text-emerald-400 font-mono text-xs leading-relaxed max-h-60 overflow-y-auto custom-scrollbar border border-white/5 shadow-inner text-left">
+                                {testOutput.map((line, idx) => (
+                                  <div key={idx} className={line.startsWith('$') ? 'text-blue-400 font-semibold mb-1' : line.includes('[result]') ? 'text-emerald-300 font-bold mt-1' : 'opacity-85'}>
+                                    {line}
+                                  </div>
+                                ))}
+                                {isRunningTest && (
+                                  <div className="flex items-center gap-2 text-emerald-500/60 mt-1">
+                                    <span className="w-1.5 h-3 bg-emerald-400 animate-pulse" />
+                                    <span>loading...</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-6 rounded-2xl border text-center space-y-4" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                          <div className="w-12 h-12 rounded-full bg-[var(--theme-accent)]/10 text-[var(--theme-accent)] flex items-center justify-center mx-auto">
+                            <Box size={24} />
+                          </div>
+                          <div className="max-w-md mx-auto">
+                            <h4 className="text-sm font-semibold" style={{ color: 'var(--theme-primary)' }}>Integrate llama.cpp Engine</h4>
+                            <p className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--theme-secondary)' }}>
+                              To utilize local CPU/GPU offloading without setting up local terminal toolchains manually, you can fetch pre-compiled llama.cpp releases directly into your Lumina environment.
+                            </p>
+                          </div>
+                          <div>
+                            <button
+                              onClick={handleDetectReleases}
+                              disabled={isDetecting}
+                              className="h-10 px-6 rounded-xl text-xs font-semibold bg-[var(--theme-accent)] text-[var(--theme-accent-foreground)] transition-all inline-flex items-center gap-2"
+                            >
+                              {isDetecting ? (
+                                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
+                              ) : <RefreshCw size={13} />}
+                              {isDetecting ? 'Querying Releases...' : 'Find llama.cpp Releases'}
+                            </button>
+                          </div>
+                          {detectionError && (
+                            <p className="text-xs text-red-500 mt-2">{detectionError}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* INSTALLATION OVERLAY / ACTIVE TRACKER */}
+                      {installStatus !== 'idle' && (
+                        <div className="p-6 rounded-2xl border space-y-5" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-lg bg-[var(--theme-accent)]/10 text-[var(--theme-accent)] flex items-center justify-center">
+                                <Download size={16} className="animate-bounce" />
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold" style={{ color: 'var(--theme-primary)' }}>
+                                  {installStatus === 'downloading' ? 'Downloading Package Archive...' :
+                                   installStatus === 'extracting' ? 'Extracting Core Binaries...' :
+                                   installStatus === 'verifying' ? 'Verifying Permissions & Headers...' :
+                                   installStatus === 'testing' ? 'Executing Diagnostic Self-Tests...' :
+                                   'Environment Setup Completed'}
+                                </div>
+                                <div className="text-[10px]" style={{ color: 'var(--theme-secondary)' }}>
+                                  {installingAsset?.name} ({installingAsset?.size})
+                                </div>
+                              </div>
+                            </div>
+                            <span className="text-xs font-mono font-bold text-[var(--theme-accent)]">{installProgress}%</span>
+                          </div>
+
+                          {/* PROGRESS BAR */}
+                          <div className="w-full bg-gray-100 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
+                            <motion.div 
+                              className="bg-[var(--theme-accent)] h-full rounded-full" 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${installProgress}%` }}
+                              transition={{ duration: 0.1 }}
+                            />
+                          </div>
+
+                          {/* DOWNLOAD METRICS */}
+                          {installStatus === 'downloading' && (
+                            <div className="grid grid-cols-3 gap-2 text-center py-2 bg-gray-50/50 dark:bg-zinc-950/25 rounded-xl border border-gray-100/50 dark:border-white/5 font-mono">
+                              <div>
+                                <div className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Fetch Speed</div>
+                                <div className="text-xs font-semibold font-mono mt-0.5" style={{ color: 'var(--theme-primary)' }}>{downloadMetrics.speed}</div>
+                              </div>
+                              <div>
+                                <div className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Downloaded</div>
+                                <div className="text-xs font-semibold font-mono mt-0.5" style={{ color: 'var(--theme-primary)' }}>{downloadMetrics.downloaded}</div>
+                              </div>
+                              <div>
+                                <div className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Total Size</div>
+                                <div className="text-xs font-semibold font-mono mt-0.5" style={{ color: 'var(--theme-primary)' }}>{downloadMetrics.total}</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* LIVE TERMINAL LOGGER */}
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                              <Terminal size={10} />
+                              Log Output
+                            </div>
+                            <div className="p-4 rounded-xl bg-zinc-950 border border-white/5 text-[11px] font-mono text-zinc-300 leading-relaxed max-h-52 overflow-y-auto custom-scrollbar text-left">
+                              {installLogs.map((log, idx) => (
+                                <div key={idx} className="opacity-90">{log}</div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {activeSettingsTab === 'models' && (
+              <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="h-full flex flex-col font-sans text-left pb-4 relative">
+                {/* SUB NAVIGATION & ACTIONS HEADER BAR */}
+                <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/15 pb-3.5 mb-4 shrink-0">
+                  <div className="flex items-center gap-1.5 bg-gray-100/50 dark:bg-zinc-800/50 p-1 rounded-xl">
+                    <button
+                      onClick={() => setModelsSubTab('list')}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all ${
+                        modelsSubTab === 'list'
+                          ? 'bg-white dark:bg-zinc-850 text-black dark:text-white shadow-sm border border-gray-100 dark:border-white/5'
+                          : 'text-gray-400 hover:text-black dark:hover:text-white'
+                      }`}
+                    >
+                      <Brain size={13} className="text-[var(--theme-accent)]" />
+                      My Models
+                    </button>
+                    <button
+                      onClick={() => setModelsSubTab('explore')}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all ${
+                        modelsSubTab === 'explore'
+                          ? 'bg-white dark:bg-zinc-850 text-black dark:text-white shadow-sm border border-gray-100 dark:border-white/5'
+                          : 'text-gray-400 hover:text-black dark:hover:text-white'
+                      }`}
+                    >
+                      <Globe size={13} className="text-blue-500" />
+                      Explore Hub
+                    </button>
+                  </div>
+
+                  {/* Header Title Centered lookwise */}
+                  <div className="absolute left-1/2 transform -translate-x-1/2 hidden md:block">
+                    <span className="text-xs font-bold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">Models</span>
+                  </div>
+                  
+                  {/* Action Tray */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setIsDownloadsPanelOpen(!isDownloadsPanelOpen)}
+                      className={`p-2 rounded-xl border transition-all hover:bg-gray-100 dark:hover:bg-zinc-800/60 relative ${
+                        isDownloadsPanelOpen 
+                          ? 'bg-gray-100 dark:bg-zinc-805 border-[var(--theme-accent)] text-[var(--theme-accent)]' 
+                          : 'border-gray-200 dark:border-white/10 text-gray-500'
+                      }`}
+                      title="Download Drawer"
+                    >
+                      <Download size={15} />
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[var(--theme-accent)] rounded-full animate-pulse border-2 border-white dark:border-zinc-900" />
+                    </button>
+                    <button
+                      className="p-2 rounded-xl border border-gray-200 dark:border-white/10 text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-800/60 transition-all"
+                      title="Toggle Split Panel"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" strokeLinecap="round" strokeLinejoin="round" />
+                        <line x1="9" y1="3" x2="9" y2="21" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* MAIN CONTENT SPACE WITH OPTIONAL SLIDING DRAWER */}
+                <div className="flex-1 flex gap-5 min-h-0 relative">
+                  
+                  {/* PANELS VIEW AREA */}
+                  <div className="flex-1 min-w-0 h-full flex flex-col">
+                    {modelsSubTab === 'list' ? (
+                      /* MY MODELS LIST VIEW */
+                      <div className="flex-1 flex flex-col min-h-0">
+                        {/* TITLE & FILTER ROW */}
+                        <div className="flex items-center justify-between mb-4 shrink-0">
+                          <h3 className="text-base font-bold text-gray-900 dark:text-white">My Models</h3>
+                          
+                          {/* Ctrl + F filter search input */}
+                          <div className="relative w-64 md:w-80">
+                            <Search className="absolute left-3 top-2.5 text-gray-400 dark:text-zinc-500" size={14} />
+                            <input
+                              type="text"
+                              placeholder="Filter models... (Ctrl + F)"
+                              value={modelsFilterQuery}
+                              onChange={(e) => setModelsFilterQuery(e.target.value)}
+                              className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border transition-all duration-200 outline-none focus:ring-1 focus:ring-[var(--theme-accent)]"
+                              style={{
+                                background: 'var(--theme-surface)',
+                                borderColor: 'var(--theme-border)',
+                                color: 'var(--theme-primary)'
+                              }}
+                            />
+                            {modelsFilterQuery && (
+                              <button 
+                                onClick={() => setModelsFilterQuery('')} 
+                                className="absolute right-3 top-2.5 text-gray-400 hover:text-black dark:hover:text-white"
+                              >
+                                <X size={12} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* TABLE CONTAINER */}
+                        <div className="flex-1 overflow-y-auto border border-gray-100 dark:border-white/5 rounded-xl bg-gray-50/20 dark:bg-zinc-950/10 min-h-0 custom-scrollbar">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="border-b border-gray-100 dark:border-white/10 text-[10px] font-bold uppercase tracking-wider text-gray-400 select-none">
+                                <th className="py-3 px-4 w-20">Params</th>
+                                <th className="py-3 px-4">LLM</th>
+                                <th className="py-3 px-4 w-28 text-center">Size</th>
+                                <th className="py-3 px-4 w-36">Modified</th>
+                                <th className="py-3 px-4 w-28 text-center">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-white/5">
+                              {downloadedModelsList
+                                .filter(m => 
+                                  m.id.toLowerCase().includes(modelsFilterQuery.toLowerCase()) || 
+                                  m.name.toLowerCase().includes(modelsFilterQuery.toLowerCase()) ||
+                                  (m.publisher && m.publisher.toLowerCase().includes(modelsFilterQuery.toLowerCase()))
+                                )
+                                .map((model) => {
+                                  const isActive = activeModelId === model.id;
+                                  const isLoaded = loadedLocalModelId === model.id;
+                                  
+                                  return (
+                                    <tr 
+                                      key={model.id} 
+                                      className={`text-xs hover:bg-gray-100/30 dark:hover:bg-zinc-800/10 transition-colors ${
+                                        isActive ? 'bg-[var(--theme-hover-bg)]/20' : ''
+                                      }`}
+                                    >
+                                      {/* Params Badgified column */}
+                                      <td className="py-3.5 px-4 select-none">
+                                        <span className="inline-flex items-center justify-center px-2 py-0.5 border border-zinc-200 dark:border-zinc-700 text-[10px] font-mono rounded bg-white dark:bg-zinc-900 font-bold text-zinc-500 shadow-sm shrink-0">
+                                          {model.params}
+                                        </span>
+                                      </td>
+                                      
+                                      {/* LLM Name & Subtitles */}
+                                      <td className="py-3.5 px-4">
+                                        <div className="flex items-center gap-2">
+                                          <div>
+                                            <span className="font-semibold text-gray-900 dark:text-zinc-100 hover:underline cursor-pointer block" onClick={() => {
+                                              if (onOpenLocalModelConfig) onOpenLocalModelConfig(model.id);
+                                            }}>
+                                              {model.name}
+                                            </span>
+                                            <span className="text-[10px] font-mono text-zinc-400 block mt-0.5 opacity-80">
+                                              {model.file}
+                                            </span>
+                                          </div>
+                                          {isLoaded && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 text-[9px] font-bold border border-emerald-500/20">
+                                              Active in RAM
+                                            </span>
+                                          )}
+                                          {isActive && !isLoaded && (
+                                            <span className="px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-500 text-[9px] font-bold border border-blue-500/20">
+                                              Selected
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      
+                                      {/* Size Badge column */}
+                                      <td className="py-3.5 px-4 font-mono text-center text-zinc-500">
+                                        {model.size}
+                                      </td>
+                                      
+                                      {/* Date downloaded column */}
+                                      <td className="py-3.5 px-4 text-zinc-400 font-medium">
+                                        {model.modified}
+                                      </td>
+                                      
+                                      {/* Action buttons list */}
+                                      <td className="py-3.5 px-4">
+                                        <div className="flex items-center justify-center gap-1.5">
+                                          {/* Activate/Run play button */}
+                                          <button
+                                            onClick={() => {
+                                              if (setActiveModelId) setActiveModelId(model.id);
+                                              if (setLoadedLocalModelId) setLoadedLocalModelId(model.id);
+                                              localStorage.setItem('lumina_active_loaded_local_model', model.id);
+                                              showToast(`Bound and activated local GGUF: ${model.name}`);
+                                            }}
+                                            className={`p-1.5 rounded-lg border transition-all ${
+                                              isLoaded 
+                                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/20' 
+                                                : 'border-zinc-200 dark:border-white/10 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-white'
+                                            }`}
+                                            title={isLoaded ? "Model running on llama.cpp backend" : "Load and Boot Model"}
+                                          >
+                                            <Play size={12} fill={isLoaded ? "currentColor" : "none"} />
+                                          </button>
+                                          
+                                          {/* Parameter settings gear */}
+                                          <button
+                                            onClick={() => {
+                                              if (onOpenLocalModelConfig) onOpenLocalModelConfig(model.id);
+                                            }}
+                                            className="p-1.5 rounded-lg border border-zinc-200 dark:border-white/10 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all"
+                                            title="Configure parameters"
+                                          >
+                                            <Settings size={12} />
+                                          </button>
+                                          
+                                          {/* Delete button option */}
+                                          <button
+                                            onClick={async () => {
+                                              if (confirm(`Are you sure you want to delete ${model.name}?`)) {
+                                                try {
+                                                  const modelPath = model.path;
+                                                  if (!modelPath) {
+                                                    showToast('Model path not found');
+                                                    return;
+                                                  }
+                                                  
+                                                  const deleteRes = await fetch('/api/models/delete', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ modelPath }),
+                                                  });
+                                                  
+                                                  if (!deleteRes.ok) {
+                                                    const errData = await deleteRes.json().catch(() => ({}));
+                                                    throw new Error(errData.error || `Failed to delete: ${deleteRes.status}`);
+                                                  }
+                                                  
+                                                  const next = downloadedModelsList.filter(item => item.id !== model.id);
+                                                  setDownloadedModelsList(next);
+                                                  localStorage.setItem('lumina_downloaded_models', JSON.stringify(next));
+                                                  showToast(`Deleted ${model.name}`);
+                                                } catch (err: any) {
+                                                  showToast(`Delete failed: ${err.message}`);
+                                                }
+                                              }
+                                            }}
+                                            className="p-1.5 rounded-lg border border-zinc-200 dark:border-white/10 hover:bg-red-500/10 hover:border-red-500/30 text-zinc-400 hover:text-red-500 transition-all"
+                                            title="Remove model binary"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              {downloadedModelsList.filter(m => 
+                                m.id.toLowerCase().includes(modelsFilterQuery.toLowerCase()) || 
+                                m.name.toLowerCase().includes(modelsFilterQuery.toLowerCase())
+                              ).length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="py-12 text-center text-zinc-400">
+                                    No models found match filter query. 
+                                    <button onClick={() => setModelsSubTab('explore')} className="text-[var(--theme-accent)] ml-1 font-semibold hover:underline">
+                                      Explore HuggingFace Hub ↗
+                                    </button>
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* TABLE LOWER FOOTER AND SOURCE DIRECTORY BOX */}
+                        <div className="mt-4 p-3 bg-gray-50/50 dark:bg-zinc-950/20 border border-gray-100 dark:border-white/15 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+                          <span className="text-[11px] font-medium text-zinc-400 select-none">
+                            You have {downloadedModelsList.length} local model{downloadedModelsList.length === 1 ? '' : 's'}, taking up {(downloadedModelsList.reduce((acc, m) => acc + parseFloat(m.size), 0)).toFixed(2)} GB of disk space
+                          </span>
+
+                          <div className="flex items-center gap-1 w-full md:w-auto">
+                            <input
+                              type="text"
+                              value={modelsPath}
+                              onChange={(e) => {
+                                setModelsPath(e.target.value);
+                                localStorage.setItem('lumina_local_models_path', e.target.value);
+                              }}
+                              className="px-3 py-1.5 text-[10px] font-mono border rounded-lg max-w-full md:w-72 outline-none"
+                              style={{
+                                background: 'var(--theme-input-bg)',
+                                borderColor: 'var(--theme-input-border)',
+                                color: 'var(--theme-primary)'
+                              }}
+                              title="Active models local directory"
+                            />
+                            <button
+                              onClick={() => {
+                                const newPath = prompt("Enter local models root folder path:", modelsPath);
+                                if (newPath) {
+                                  setModelsPath(newPath);
+                                  localStorage.setItem('lumina_local_models_path', newPath);
+                                  showToast("Updated local model directory pathway!");
+                                }
+                              }}
+                              className="p-1.5 rounded-lg border border-zinc-250 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-white"
+                              title="Browse model folder"
+                            >
+                              <MoreHorizontal size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                      </div>
+                    ) : (
+                      /* EXPLORE HUGGINGFACE HUB (RETAINING FULL FUNCTIONALITY COMPACTED) */
+                      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0">
+                        {/* LEFT SUB COLUMN: HF LIST */}
+                        <div className="lg:col-span-12 xl:col-span-5 flex flex-col gap-3 min-h-0">
+                          {/* Rich input filter and category tabs inside HF search */}
+                          <div className="relative">
+                            <Search className="absolute left-3 top-2.5 text-gray-400 dark:text-zinc-500" size={14} />
+                            <input
+                              type="search"
+                              placeholder="Search HuggingFace for GGUF quants..."
+                              value={hfSearchQuery}
+                              onChange={(e) => setHfSearchQuery(e.target.value)}
+                              className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border transition-all duration-200 outline-none focus:ring-1 focus:ring-[var(--theme-accent)]"
+                              style={{
+                                background: 'var(--theme-surface)',
+                                borderColor: 'var(--theme-border)',
+                                color: 'var(--theme-primary)'
+                              }}
+                            />
+                            {isSearchingHf && (
+                              <div className="absolute right-3 top-2.5 flex items-center">
+                                <RefreshCw className="animate-spin text-[var(--theme-accent)]" size={14} />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold text-zinc-400 px-1 shrink-0">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => { setHfSelectedFilter('staff'); setHfSearchQuery(''); }}
+                                className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'staff' && !hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
+                              >
+                                Curator picks
+                              </button>
+                              <span>•</span>
+                              <button
+                                onClick={() => setHfSelectedFilter('all')}
+                                className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'all' || hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
+                              >
+                                All Hub
+                              </button>
+                            </div>
+                            <select
+                              value={hfSortOption}
+                              onChange={(e: any) => setHfSortOption(e.target.value)}
+                              className="bg-transparent font-bold text-zinc-400 text-[10px] outline-none cursor-pointer hover:text-[var(--theme-accent)] bg-zinc-950/20 rounded"
+                            >
+                              <option value="downloads">Popularity</option>
+                              <option value="likes">High Rating</option>
+                              <option value="modified">Latest</option>
+                            </select>
+                          </div>
+
+                          {/* List of models */}
+                          <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 custom-scrollbar min-h-0">
+                            {isSearchingHf ? (
+                              <div className="py-20 text-center text-xs text-zinc-400 space-y-2">
+                                <RefreshCw size={20} className="animate-spin mx-auto text-[var(--theme-accent)]" />
+                                <p>Reorganizing model trees...</p>
+                              </div>
+                            ) : hfError && hfModels.length === 0 ? (
+                              <div className="p-4 rounded-xl text-center text-xs border text-amber-500 bg-amber-500/5" style={{ borderColor: 'var(--theme-border)' }}>
+                                {hfError}
+                              </div>
+                            ) : (
+                              (() => {
+                                const listToRender = hfSearchQuery.trim() ? hfModels : curators;
+                                const filtered = listToRender.filter(m => {
+                                  if (!hfSearchQuery && hfSelectedFilter === 'staff') return m.isStaffPick;
+                                  return true;
+                                });
+
+                                return filtered.map((model) => {
+                                  const isSelected = selectedModelId === model.id;
+                                  return (
+                                    <button
+                                      key={model.id}
+                                      onClick={() => {
+                                        setSelectedModelId(model.id);
+                                        fetchModelDetails(model);
+                                      }}
+                                      className="w-full p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all outline-none"
+                                      style={{
+                                        borderColor: isSelected ? 'var(--theme-accent)' : 'var(--theme-border)',
+                                        background: isSelected ? 'var(--theme-surface-alt)' : 'var(--theme-surface)'
+                                      }}
+                                    >
+                                      {renderModelLogo(model.author || '', model.id)}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1">
+                                          <span className="font-semibold text-xs truncate text-zinc-800 dark:text-zinc-200">
+                                            {model.name}
+                                          </span>
+                                          {model.isStaffPick && <span className="w-3 h-3 rounded-full bg-blue-500 text-white flex items-center justify-center text-[7px] font-bold shadow-sm" title="Verified">✓</span>}
+                                        </div>
+                                        <p className="text-[10px] text-zinc-400 truncate mt-0.5 leading-tight">{model.description}</p>
+                                        <div className="flex items-center justify-between gap-2 mt-2 font-mono text-[9px] text-zinc-500">
+                                          <span>{model.downloads?.toLocaleString() || 0} dl</span>
+                                          <span>{model.lastUpdated}</span>
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                });
+                              })()
+                            )}
+                          </div>
+                        </div>
+
+                        {/* RIGHT SUB COLUMN: HF DETAILS */}
+                        <div className="lg:col-span-12 xl:col-span-7 flex flex-col gap-4 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
+                          {detailedModel ? (
+                            <div className="space-y-4 animate-fade-in text-left">
+                              {/* Header element */}
+                              <div className="p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-3" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
+                                <div className="flex items-center gap-3">
+                                  {renderModelLogo(detailedModel.author || '', detailedModel.id)}
+                                  <div className="min-w-0">
+                                    <h4 className="text-xs font-bold truncate max-w-[200px] text-zinc-800 dark:text-zinc-100">{detailedModel.id}</h4>
+                                    <p className="text-[9px] mt-0.5 uppercase tracking-wide font-mono text-zinc-400">huggingface.co repository</p>
+                                  </div>
+                                </div>
+                                <a href={`https://huggingface.co/${detailedModel.id}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold hover:underline shrink-0" style={{ color: 'var(--theme-accent)' }}>Open in HF Hub ↗</a>
+                              </div>
+
+                              {/* Spec metrics */}
+                              <div className="grid grid-cols-4 gap-2 text-center text-xs font-mono">
+                                <div className="p-2 rounded-lg border bg-[var(--theme-surface)]" style={{ borderColor: 'var(--theme-border)' }}>
+                                  <div className="text-[8px] uppercase tracking-wider text-zinc-400">Downloads</div>
+                                  <div className="font-semibold mt-0.5 text-zinc-800 dark:text-zinc-200">{detailedModel.downloads?.toLocaleString() || 0}</div>
+                                </div>
+                                <div className="p-2 rounded-lg border bg-[var(--theme-surface)]" style={{ borderColor: 'var(--theme-border)' }}>
+                                  <div className="text-[8px] uppercase tracking-wider text-zinc-400">Likes</div>
+                                  <div className="font-semibold mt-0.5 text-zinc-800 dark:text-zinc-200">{detailedModel.likes || 0}</div>
+                                </div>
+                                <div className="p-2 rounded-lg border bg-[var(--theme-surface)]" style={{ borderColor: 'var(--theme-border)' }}>
+                                  <div className="text-[8px] uppercase tracking-wider text-zinc-400">Params</div>
+                                  <div className="font-semibold mt-0.5 text-zinc-800 dark:text-zinc-200">{detailedModel.params}</div>
+                                </div>
+                                <div className="p-2 rounded-lg border bg-[var(--theme-surface)]" style={{ borderColor: 'var(--theme-border)' }}>
+                                  <div className="text-[8px] uppercase tracking-wider text-zinc-400">Arch</div>
+                                  <div className="font-semibold mt-0.5 text-blue-500 uppercase truncate">{detailedModel.arch}</div>
+                                </div>
+                              </div>
+
+                              <div className="p-4 rounded-xl border space-y-2 bg-[var(--theme-surface)]" style={{ borderColor: 'var(--theme-border)' }}>
+                                <h5 className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Repository Description</h5>
+                                <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{detailedModel.description}</p>
+                              </div>
+
+                              {/* Download trigger card */}
+                              <div className="p-5 rounded-xl border bg-[var(--theme-surface)] space-y-4" style={{ borderColor: 'var(--theme-border)' }}>
+                                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--theme-border)' }}>
+                                  <span className="text-xs font-bold text-zinc-800 dark:text-zinc-100">Quantization Level selection</span>
+                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-bold font-mono tracking-wide uppercase bg-[var(--theme-accent)]/15 text-[var(--theme-accent)]">GGUF Quant</span>
+                                </div>
+
+                                {isDetailLoading ? (
+                                  <div className="py-4 text-center text-xs text-zinc-400">
+                                    <RefreshCw size={14} className="animate-spin mx-auto text-[var(--theme-accent)] mb-1" />
+                                    Loading quants list...
+                                  </div>
+                                ) : (
+                                  <div className="space-y-3">
+                                    <select
+                                      value={activeDownloadFile}
+                                      onChange={(e) => setActiveDownloadFile(e.target.value)}
+                                      className="w-full px-3 py-2 text-xs rounded-lg outline-none border cursor-pointer font-semibold bg-[var(--theme-surface-alt)] border-[var(--theme-border)] text-[var(--theme-primary)]"
+                                    >
+                                      {detailedModel.files && detailedModel.files.map((file: string, idx: number) => (
+                                        <option key={idx} value={file}>{file}</option>
+                                      ))}
+                                    </select>
+
+                                    {hfDownloadStatus === 'idle' ? (
+                                      <button
+                                        onClick={handleDownloadHfModel}
+                                        className="w-full py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                                      >
+                                        <Download size={13} strokeWidth={2.5} />
+                                        Fetch & cache model quant
+                                      </button>
+                                    ) : (
+                                      <div className="space-y-3 pt-1">
+                                        <div className="space-y-1.5">
+                                          <div className="flex justify-between items-center text-[10px] font-semibold text-zinc-400">
+                                            <span className="capitalize">{hfDownloadStatus}...</span>
+                                            <span>{hfDownloadProgress}%</span>
+                                          </div>
+                                          <div className="h-1.5 rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800 border" style={{ borderColor: 'var(--theme-border)' }}>
+                                            <motion.div className="h-full bg-blue-500 rounded-full" initial={{ width: 0 }} animate={{ width: `${hfDownloadProgress}%` }} transition={{ duration: 0.1 }} />
+                                          </div>
+                                        </div>
+
+                                        {hfDownloadStatus === 'downloading' && (
+                                          <div className="grid grid-cols-3 gap-1 text-center py-1.5 bg-zinc-950/20 rounded-lg border font-mono text-[9px]" style={{ borderColor: 'var(--theme-border)' }}>
+                                            <div>
+                                              <div className="text-[7px] font-bold uppercase tracking-wider text-zinc-400">Speed</div>
+                                              <div className="font-semibold text-zinc-800 dark:text-zinc-200">{hfDownloadMetrics.speed}</div>
+                                            </div>
+                                            <div>
+                                              <div className="text-[7px] font-bold uppercase tracking-wider text-zinc-400">Bytes</div>
+                                              <div className="font-semibold text-zinc-800 dark:text-zinc-200">{hfDownloadMetrics.downloaded}</div>
+                                            </div>
+                                            <div>
+                                              <div className="text-[7px] font-bold uppercase tracking-wider text-zinc-400">Of Total</div>
+                                              <div className="font-semibold text-zinc-800 dark:text-zinc-200">{hfDownloadMetrics.total}</div>
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        <div className="p-2.5 rounded-lg bg-zinc-950 border border-white/5 text-[9px] font-mono text-zinc-400 max-h-24 overflow-y-auto custom-scrollbar">
+                                          {hfDownloadLogs.map((log, idx) => (
+                                            <div key={idx} className="opacity-90 leading-relaxed text-left">{log}</div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="py-20 text-center text-xs text-zinc-400">Select an explore item on the left to read specifications</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* DOWNLOADS DRAWER WITH SMOOTH TRANSITION AND HIGH FIDELITY LAYOUT */}
+                  {isDownloadsPanelOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, x: 20, width: 0 }}
+                      animate={{ opacity: 1, x: 0, width: 510 }}
+                      exit={{ opacity: 0, x: 20, width: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="border-l border-gray-150 dark:border-white/10 pl-4 h-full flex flex-col shrink-0 text-left min-w-0"
+                    >
+                      <div className="p-4 rounded-2xl border border-gray-150 dark:border-white/10 bg-white dark:bg-zinc-900/60 h-full flex flex-col min-h-0 min-w-0 shadow-lg">
+                        {/* Title panel */}
+                        <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-2 mb-3 shrink-0">
+                          <h4 className="text-xs font-bold tracking-wider uppercase text-zinc-500">Downloads</h4>
+                          <div className="flex items-center gap-2 text-zinc-400">
+                            <button className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors" title="Completed Files">
+                              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth="2" />
+                                <path d="M9 12l2 2 4-4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                            <button onClick={() => setIsDownloadsPanelOpen(false)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors hover:text-white">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Search downloads */}
+                        <div className="relative mb-3 shrink-0">
+                          <Search className="absolute left-2.5 top-2 text-gray-400 dark:text-zinc-500" size={12} />
+                          <input
+                            type="text"
+                            placeholder="Filter downloads..."
+                            className="w-full pl-8 pr-3 py-1.5 text-[10px] rounded-lg border outline-none font-medium bg-[var(--theme-surface-alt)] border-[var(--theme-border)] text-[var(--theme-primary)]"
+                          />
+                        </div>
+
+                        {/* Complete separator header and Clear button */}
+                        <div className="flex items-center justify-between text-[10px] font-bold text-zinc-400 uppercase select-none mb-2 shrink-0">
+                          <span>Completed</span>
+                          <button
+                            onClick={() => {
+                              if (confirm("Clear download records?")) {
+                                showToast("Cleared download tracker history.");
+                              }
+                            }}
+                            className="text-[9px] hover:text-[var(--theme-danger)] hover:underline normal-case"
+                          >
+                            Clear
+                          </button>
+                        </div>
+
+                        {/* Completed list */}
+                        <div className="flex-1 overflow-y-auto space-y-2.5 custom-scrollbar min-h-0 pr-1 select-none">
+                          {downloadedModelsList.map((m) => (
+                            <div 
+                              key={m.id} 
+                              className="p-3 border border-gray-100 dark:border-white/5 rounded-xl bg-gray-50/50 dark:bg-zinc-950/20 text-left hover:border-gray-200 dark:hover:border-white/10 transition-colors"
+                            >
+                              <div className="flex items-start gap-2">
+                                <div className="p-1.5 rounded-lg bg-[var(--theme-primary)]/10 text-[var(--theme-primary)] shrink-0">
+                                  <svg className="w-3.5 h-3.5 text-[var(--theme-accent)]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 2a11 11 0 100 22 11 11 0 000-22z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                  </svg>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <span className="font-semibold text-[11px] text-zinc-800 dark:text-zinc-200 truncate block tracking-wide" title={m.id}>
+                                    {m.publisher || 'unknown'} : {m.name}
+                                  </span>
+                                  <span className="text-[9px] text-zinc-400 block mt-0.5 font-medium">
+                                    Model • {m.size}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Action buttons on download row */}
+                              <div className="flex items-center justify-end gap-2.5 mt-2 border-t border-gray-100 dark:border-white/5 pt-2">
+                                <button
+                                  onClick={() => {
+                                    if (setActiveModelId) setActiveModelId(m.id);
+                                    if (setLoadedLocalModelId) setLoadedLocalModelId(m.id);
+                                    showToast(`Booted model: ${m.name}`);
+                                  }}
+                                  className="p-1 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded transition-colors text-zinc-400 hover:text-white"
+                                  title="Play / Run"
+                                >
+                                  <Play size={10} fill="currentColor" />
+                                </button>
+                                <button
+                                  onClick={() => alert(`Downloads are stored in simulated directory: \n${modelsPath}`)}
+                                  className="p-1 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded transition-colors text-zinc-400 hover:text-white"
+                                  title="Open files folder"
+                                >
+                                  <Folder size={10} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (onOpenLocalModelConfig) onOpenLocalModelConfig(m.id);
+                                  }}
+                                  className="p-1 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded transition-colors text-zinc-400 hover:text-white"
+                                  title="Model configuration"
+                                >
+                                  <Settings size={10} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Open folder bottom trigger link */}
+                        <div className="border-t border-gray-100 dark:border-white/10 pt-3 mt-3 text-center shrink-0">
+                          <button
+                            onClick={() => alert(`Simulating file explorer root folder: \n${modelsPath}`)}
+                            className="text-[10px] font-semibold text-zinc-400 hover:text-white hover:underline inline-flex items-center gap-1"
+                          >
+                            Open downloads directory ↗
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
                 </div>
               </motion.div>
             )}

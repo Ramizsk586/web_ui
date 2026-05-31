@@ -146,12 +146,15 @@ export function useAppSettings({
   const [useTurboQuant, setUseTurboQuant] = useState(() => {
     return localStorage.getItem('lumina_turboquant') === 'true';
   });
+  const [useLocalModelsOnly, setUseLocalModelsOnly] = useState(() => {
+    return localStorage.getItem('lumina_use_local_models') === 'true';
+  });
   const [modelSelectorMode, setModelSelectorMode] = useState<'popup' | 'drawer'>(() => {
     const saved = localStorage.getItem('lumina_model_selector_mode');
     return saved === 'drawer' ? 'drawer' : 'popup';
   });
 
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools'>('general');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'lumina_tools' | 'project' | 'skills' | 'style'>('main');
   const [mcpMode, setMcpMode] = useState<'local' | 'remote'>('local');
   const [remoteMcpConfig, setRemoteMcpConfig] = useState({ url: '', status: 'disconnected' as 'disconnected' | 'connecting' | 'connected', error: '' });
@@ -421,6 +424,7 @@ export function useAppSettings({
     handleVerifyAI,
     handleSaveSearch,
     handleVerifySearch,
-    handleSaveMcp
+    handleSaveMcp,
+    useLocalModelsOnly, setUseLocalModelsOnly
   };
 }

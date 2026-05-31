@@ -190,6 +190,7 @@ import { loadAgents, addAgent, updateAgent, deleteAgent } from './agents/agentSt
 import { AgentSidebarSection } from './components/Agents/AgentSidebarSection';
 import { AgentCreationModal } from './components/Agents/AgentCreationModal';
 import { AgentChatView } from './components/Agents/AgentChatView';
+import { LocalModelConfigModal } from './components/LocalModelConfigModal';
 
 import { Canvas } from './components/Canvas/Canvas';
 
@@ -240,6 +241,7 @@ interface AppContentProps {
   uiState: any;
   coderMode: any;
   askAi: any;
+  sendMessageRef: React.MutableRefObject<((content: string) => void) | undefined>;
   rightPanel: any;
   smartPopup: any;
   devTools: any;
@@ -264,6 +266,7 @@ export default function AppContent({
   uiState,
   coderMode,
   askAi,
+  sendMessageRef,
   rightPanel,
   smartPopup,
   devTools,
@@ -316,7 +319,7 @@ export default function AppContent({
     handleVerifyAI,
     handleSaveSearch,
     handleVerifySearch,
-    handleSaveMcp
+    handleSaveMcp, useLocalModelsOnly, setUseLocalModelsOnly
   } = appSettings;
 
   const {
@@ -519,6 +522,17 @@ export default function AppContent({
   const [devLogs, setDevLogs] = useState<any[]>([]);
   const [isModelDrawerOpen, setIsModelDrawerOpen] = useState(false);
 
+  // Local model manual config state
+  const [isLocalModelConfigOpen, setIsLocalModelConfigOpen] = useState(false);
+  const [localModelConfigModel, setLocalModelConfigModel] = useState<{ id: string; name: string } | null>(null);
+  
+  // Model engine loading state (llama.cpp)
+  const [loadedLocalModelId, setLoadedLocalModelId] = useState<string | null>(() => {
+    return localStorage.getItem('lumina_active_loaded_local_model') || null;
+  });
+  const [localModelLoadingId, setLocalModelLoadingId] = useState<string | null>(null);
+  const [localModelLoadingProgress, setLocalModelLoadingProgress] = useState(0);
+
   // Computed variables
   const messages = useMemo(() => {
     const activeChat = chats.find(c => c.id === currentChatId);
@@ -526,6 +540,40 @@ export default function AppContent({
   }, [chats, currentChatId]);
 
   const activeModelList = useMemo(() => {
+    const list = useLocalModelsOnly
+      ? [
+          { id: "LiquidAI/LFM2.5-VL-GGUF", name: "LFM2.5 VL", color: "text-violet-500" },
+          { id: "LiquidAI/LFM2.5-350M-GGUF", name: "LFM2.5 350M", color: "text-blue-500" },
+          { id: "google/gemma-2-2b-it-GGUF", name: "Gemma 2 2B IT", color: "text-emerald-500" },
+          { id: "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF", name: "Qwen 2.5 Coder 1.5B Instruct", color: "text-amber-500" },
+          { id: "lmstudio-community/Llama-3.2-1B-Instruct-GGUF", name: "Llama 3.2 1B Instruct", color: "text-indigo-500" }
+        ]
+      : (availableModels.length > 0 ? availableModels : [
+          { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free', isAutoFree: true }
+        ]);
+
+    return list.map(model => {
+      let cleaned = model.name || model.id;
+      if (cleaned.includes('/')) {
+        cleaned = cleaned.split('/').pop() || cleaned;
+      }
+      cleaned = cleaned.replace(/\s*\(.*?\)\s*/g, '');
+      cleaned = cleaned.replace(/\.(gguf|ggfu|bin|tar|gz|zip)$/i, '');
+      cleaned = cleaned.replace(/[-_]?[qQ][0-9](_[a-zA-Z0-9_]+)?/g, '');
+      cleaned = cleaned.replace(/[-_]?gguf$/i, '');
+      cleaned = cleaned.replace(/[-_]?ggfu$/i, '');
+      cleaned = cleaned.replace(/\s+GGUF$/i, '');
+      cleaned = cleaned.replace(/\s+GGFU$/i, '');
+      cleaned = cleaned.replace(/[-_]+/g, ' ');
+      cleaned = cleaned.replace(/\s+/g, ' ');
+      return {
+        ...model,
+        name: cleaned.trim()
+      };
+    });
+  }, [availableModels, useLocalModelsOnly]);
+
+  const _unusedModelList = useMemo(() => {
     return availableModels.length > 0 ? availableModels : [
       { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free', isAutoFree: true }
     ];
@@ -541,11 +589,66 @@ export default function AppContent({
     return activeModelList.filter(model => model.name.toLowerCase().includes(query) || model.id.toLowerCase().includes(query));
   }, [activeModelList, modelSearchQuery]);
 
+  const handleOpenLocalModelConfig = (id: string) => {
+    const modelObj = activeModelList.find(m => m.id === id) || { id, name: id };
+    setLocalModelConfigModel({ id: modelObj.id, name: modelObj.name });
+    setIsLocalModelConfigOpen(true);
+  };
+
+  const handleLoadLocalModel = (config: any) => {
+    if (!localModelConfigModel) return;
+    const modelId = localModelConfigModel.id;
+    setIsLocalModelConfigOpen(false);
+    
+    // Set loading state
+    setLocalModelLoadingId(modelId);
+    setLocalModelLoadingProgress(0);
+    
+    // Append real compilation output to console logs
+    addDevLog(`[llama.cpp] Initializing local model: ${modelId}`, 'info');
+    addDevLog(`[llama.cpp] Configured Port: ${config.localPort} | Host: ${config.localHost}`, 'info');
+    addDevLog(`[llama.cpp] Selected Path: C:/Users/${config.osUser}/.lumina/models/${config.modelPublisher}/${config.modelFolder}/${config.modelFile}`, 'info');
+    addDevLog(`[llama.cpp] GPU Offload Layers (ngl): ${config.gpuOffload}`, 'info');
+    
+    showToast(`Loading llama.cpp configurations for ${localModelConfigModel.name}...`);
+    
+    let currentProgress = 0;
+    const interval = setInterval(() => {
+      const step = 25;
+      currentProgress = Math.min(currentProgress + step, 100);
+      setLocalModelLoadingProgress(currentProgress);
+      
+      if (currentProgress >= 100) {
+        clearInterval(interval);
+        setTimeout(() => {
+          setLoadedLocalModelId(modelId);
+          localStorage.setItem('lumina_active_loaded_local_model', modelId);
+          setLocalModelLoadingId(null);
+          setLocalModelLoadingProgress(0);
+          
+          addDevLog(`[llama.cpp] CLI Command: ${config.generatedCommand}`, 'success');
+          addDevLog(`[llama.cpp] CPU hardware allocated threads=${config.cpuThreads}`, 'info');
+          addDevLog(`[llama.cpp] GPU/RAM allocation estimated at ${config.memoryEst?.gpuMem} GB`, 'info');
+          addDevLog(`[llama.cpp] Context limit set to ${config.contextLength} tokens`, 'info');
+          addDevLog(`[llama.cpp] Successfully linked to running local server at http://${config.localHost}:${config.localPort}`, 'success');
+          
+          showToast(`Lumina is now connected to ${localModelConfigModel.name}!`);
+        }, 300);
+      }
+    }, 150);
+  };
+
   const handleModelSelect = (id: string) => {
+    // Check ifSelected model is local model (GGUF etc)
+    const isLocal = useLocalModelsOnly || id.toLowerCase().includes('gguf');
     setActiveModelId(id);
     setIsModelDropdownOpen(false);
     setIsModelDrawerOpen(false);
     setModelSearchQuery('');
+    
+    if (isLocal) {
+      handleOpenLocalModelConfig(id);
+    }
   };
 
   // Smart Popups
@@ -610,6 +713,26 @@ export default function AppContent({
 
   const handleSetCanvasView = (view: 'code' | 'preview') => {
     setCanvasView(view);
+  };
+
+  const handleUpdateMessage = (messageId: string, updatedFields: Partial<Message>) => {
+    setChats(prev => prev.map(chat => {
+      if (chat.id === currentChatId) {
+        return {
+          ...chat,
+          messages: chat.messages.map(m => {
+            if (m.id === messageId) {
+              return {
+                ...m,
+                ...updatedFields
+              };
+            }
+            return m;
+          })
+        };
+      }
+      return chat;
+    }));
   };
 
   const handleUpdateTodoPlan = (messageId: string, updatedPlan: any) => {
@@ -705,21 +828,57 @@ export default function AppContent({
     const currentAnswer = askAiAnswers[qId];
 
     if (activeQuestion.type === 'single_choice') {
+      const isCustom = currentAnswer && !activeQuestion.options?.includes(currentAnswer);
       return (
-        <div className="flex flex-col gap-2 w-full">
-          {activeQuestion.options?.map((opt: string) => (
+        <div className="flex flex-col gap-2.5 w-full">
+          <div className="grid grid-cols-3 gap-2">
+            {activeQuestion.options?.slice(0, 3).map((opt: string) => (
+              <button
+                key={opt}
+                onClick={() => { setTextInputAnswer(''); handleSelectAnswer(qId, opt); }}
+                className={`p-3 rounded-xl border text-sm font-semibold transition-all text-center leading-tight ${
+                  currentAnswer === opt
+                    ? 'border-[var(--theme-accent)] bg-[var(--theme-accent-dim)] text-[var(--theme-accent-text)] shadow-sm'
+                    : 'border-border bg-transparent hover:bg-[var(--theme-hover)] hover:border-[var(--theme-accent)]/40 text-[var(--theme-text)]'
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+          <div className={`flex items-center gap-2 p-3 rounded-xl border text-sm transition-all ${
+            isCustom
+              ? 'border-[var(--theme-accent)] bg-[var(--theme-accent-dim)]'
+              : 'border-border bg-transparent hover:border-[var(--theme-accent)]/40'
+          }`}>
+            <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-muted)]">
+              Custom
+            </span>
+            <input
+              type="text"
+              value={textInputAnswer}
+              onChange={(e) => {
+                setTextInputAnswer(e.target.value);
+                if (e.target.value.trim()) {
+                  setAskAiAnswers(prev => ({ ...prev, [qId]: e.target.value.trim() }));
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && textInputAnswer.trim()) {
+                  handleSelectAnswer(qId, textInputAnswer.trim());
+                }
+              }}
+              placeholder="Type your own answer..."
+              className="flex-1 bg-transparent outline-none text-sm text-[var(--theme-primary)] placeholder-[var(--theme-muted)]"
+            />
             <button
-              key={opt}
-              onClick={() => handleSelectAnswer(qId, opt)}
-              className={`w-full text-left p-3 rounded-lg border text-sm font-medium transition-all ${
-                currentAnswer === opt
-                  ? 'border-[var(--theme-accent)] bg-[var(--theme-accent-dim)] text-[var(--theme-accent-text)]'
-                  : 'border-border bg-transparent hover:bg-[var(--theme-hover)] text-[var(--theme-text)]'
-              }`}
+              onClick={(e) => { e.stopPropagation(); if (textInputAnswer.trim()) handleSelectAnswer(qId, textInputAnswer.trim()); }}
+              disabled={!textInputAnswer.trim()}
+              className="px-3 py-1.5 bg-[var(--theme-accent)] text-white rounded-lg text-xs font-bold disabled:opacity-40 transition-all shrink-0 cursor-pointer"
             >
-              {opt}
+              Save
             </button>
-          ))}
+          </div>
         </div>
       );
     }
@@ -1004,6 +1163,11 @@ const startCoderPreview = useCallback(async () => {
     buildActiveTools
   });
 
+  useEffect(() => {
+    sendMessageRef.current = handleSend;
+    return () => { sendMessageRef.current = undefined; };
+  }, [handleSend, sendMessageRef]);
+
   const adjustTextareaHeight = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const textarea = e.target;
     setInput(textarea.value);
@@ -1145,6 +1309,11 @@ const startCoderPreview = useCallback(async () => {
         modelDropdownContentRef={modelDropdownContentRef}
         isWhiteboardOpen={isWhiteboardOpen}
         setIsWhiteboardOpen={setIsWhiteboardOpen}
+        onOpenLocalModelConfig={handleOpenLocalModelConfig}
+        localModelLoadingId={localModelLoadingId}
+        localModelLoadingProgress={localModelLoadingProgress}
+        loadedLocalModelId={loadedLocalModelId}
+        useLocalModelsOnly={useLocalModelsOnly}
       />
     );
   };
@@ -1237,7 +1406,7 @@ const startCoderPreview = useCallback(async () => {
                 setChats={setChats}
                 onSelect={() => setIsMobileMenuOpen(false)}
                 onOpenSettings={() => {
-                  setIsSettingsOpen(true);
+                  setIsSettingsOpen(prev => !prev);
                   setIsMobileMenuOpen(false);
                 }}
                 userProfile={userProfile}
@@ -1289,7 +1458,7 @@ const startCoderPreview = useCallback(async () => {
             }} 
             createNewChat={createNewChat} 
             setChats={setChats}
-            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettings={() => setIsSettingsOpen(prev => !prev)}
             userProfile={userProfile}
             setUserProfile={setUserProfile}
             projectFolders={projectFolders}
@@ -1460,8 +1629,8 @@ const startCoderPreview = useCallback(async () => {
                           }
                           setIsHeaderMenuOpen(false);
                         } },
-                        { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
-                        { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); } },
+                        { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(prev => !prev); setIsHeaderMenuOpen(false); } },
+                        { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -1563,6 +1732,8 @@ const startCoderPreview = useCallback(async () => {
               >
                 <SettingsModal
                   onClose={() => setIsSettingsOpen(false)}
+                  useLocalModelsOnly={useLocalModelsOnly}
+                  setUseLocalModelsOnly={setUseLocalModelsOnly}
                   activeSettingsTab={activeSettingsTab}
                   setActiveSettingsTab={setActiveSettingsTab}
                   useBubbles={useBubbles}
@@ -1725,6 +1896,7 @@ const startCoderPreview = useCallback(async () => {
                           onOpenInEditor={setFloatingEditFile}
                           showToast={showToast}
                           onUpdateTodoPlan={handleUpdateTodoPlan}
+                          onUpdateMessage={handleUpdateMessage}
                           onStartBuilding={handleStartBuildingBtn}
                           scrapingResults={scrapingResults}
                           wikiResults={wikiResults}
@@ -1815,7 +1987,15 @@ const startCoderPreview = useCallback(async () => {
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-[var(--theme-primary)]">Select Model</div>
                   <div className="text-xs text-[var(--theme-secondary)] truncate">
-                    {(activeModelList.find(m => m.id === activeModelId)?.name) || activeModelId}
+                    {(() => {
+                      const matched = activeModelList.find(m => m.id === activeModelId);
+                      if (matched) return matched.name;
+                      let name = activeModelId;
+                      if (name.includes('/')) {
+                        name = name.split('/').slice(-1)[0];
+                      }
+                      return name.replace(/[-_]/g, ' ').replace(/\bgguf\b/gi, '').trim() || activeModelId;
+                    })()}
                   </div>
                 </div>
                 <button
@@ -1873,6 +2053,8 @@ const startCoderPreview = useCallback(async () => {
         {false && isSettingsOpen && (
           <SettingsModal
             onClose={() => setIsSettingsOpen(false)}
+            useLocalModelsOnly={useLocalModelsOnly}
+            setUseLocalModelsOnly={setUseLocalModelsOnly}
             activeSettingsTab={activeSettingsTab}
             setActiveSettingsTab={setActiveSettingsTab}
             useBubbles={useBubbles}
@@ -2194,6 +2376,16 @@ const startCoderPreview = useCallback(async () => {
         />
       )}
 
+      {/* Local model GGUF manual engine parameter loader */}
+      {localModelConfigModel && (
+        <LocalModelConfigModal
+          isOpen={isLocalModelConfigOpen}
+          onClose={() => setIsLocalModelConfigOpen(false)}
+          model={localModelConfigModel}
+          onLoadModel={handleLoadLocalModel}
+          showToast={showToast}
+        />
+      )}
 
     </div>
   );

@@ -9,8 +9,9 @@ import axios from 'axios';
 import { search } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
-import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, spawnSync, type ChildProcessByStdio, type ChildProcessWithoutNullStreams } from "child_process";
 import Tesseract from 'tesseract.js';
+import si from 'systeminformation';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -355,7 +356,7 @@ async function startServer() {
 
   // Live Compiler/Transpiler Sandbox Interceptor for React / JSX / TSX and JS
   app.get('/coder-preview/*', (req, res, next) => {
-    const subpath = req.params[0] || '';
+    const subpath = (req.params as Record<string, string>)['0'] || '';
     if (!subpath) {
       return next();
     }
@@ -725,7 +726,7 @@ async function startServer() {
         success: true,
         text,
         confidence,
-        words: result?.data?.words?.map(w => ({
+        words: result?.data?.words?.map((w: any) => ({
           text: w.text,
           confidence: w.confidence,
           bbox: w.bbox
@@ -1676,18 +1677,21 @@ async function startServer() {
       // Basic static analysis by file type
       if (['.ts', '.tsx', '.js', '.jsx', '.mjs'].includes(ext)) {
         const importRegex = /import\s+(?:(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+)?['"]([^'"]+)['"]/g;
-        let match;
-        while ((match = importRegex.exec(content)) !== null) {
-          imports.push(match[1]);
+        let importMatch: RegExpExecArray | null;
+        while ((importMatch = importRegex.exec(content)) !== null) {
+          imports.push(importMatch[1]);
         }
         const exportRegex = /export\s+(?:default\s+)?(?:function|class|const|let|var|interface|type|enum)\s+(\w+)/g;
-        while ((match = exportRegex.exec(content)) !== null) {
-          symbols.push({ name: match[1], kind: 'export', line: content.substring(0, match.index).split('\n').length });
+        let exportMatch: RegExpExecArray | null;
+        while ((exportMatch = exportRegex.exec(content)) !== null) {
+          symbols.push({ name: exportMatch[1], kind: 'export', line: content.substring(0, exportMatch.index).split('\n').length });
         }
         const funcRegex = /(?:function|const)\s+(\w+)\s*(?:[=:]\s*(?:\([^)]*\)\s*=>|function)?)/g;
-        while ((match = funcRegex.exec(content)) !== null) {
-          if (!symbols.find(s => s.name === match[1])) {
-            symbols.push({ name: match[1], kind: 'function', line: content.substring(0, match.index).split('\n').length });
+        let funcMatch: RegExpExecArray | null;
+        while ((funcMatch = funcRegex.exec(content)) !== null) {
+          const funcName = funcMatch[1];
+          if (!symbols.find(s => s.name === funcName)) {
+            symbols.push({ name: funcName, kind: 'function', line: content.substring(0, funcMatch.index).split('\n').length });
           }
         }
       }
@@ -1970,7 +1974,7 @@ async function startServer() {
   });
 
   app.get('/preview-static/*', (req, res) => {
-    const subpath = req.params[0] || '';
+    const subpath = (req.params as Record<string, string>)['0'] || '';
     const resolved = path.resolve(activePreviewRoot, subpath);
     if (resolved !== activePreviewRoot && !resolved.startsWith(activePreviewRoot + path.sep)) {
       return res.status(403).send('Path escapes preview workspace');
@@ -2623,8 +2627,83 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         requestBody.tool_choice = 'auto';
       }
 
+      const MAX_RETRIES = 3;
+      const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+
       if (stream === false) {
         let response;
+        let lastError: any;
+
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            response = await axios.post(
+              `${baseUrl}/chat/completions`,
+              requestBody,
+              {
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+                },
+                timeout: 60000
+              }
+            );
+            break;
+          } catch (toolChoiceError: any) {
+            lastError = toolChoiceError;
+
+            // Retry on rate limit (429) with exponential backoff
+            if (toolChoiceError.response?.status === 429 && attempt < MAX_RETRIES) {
+              const delay = Math.pow(2, attempt) * 1000;
+              console.warn(`Rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+              await wait(delay);
+              continue;
+            }
+
+            const upstreamDetail = JSON.stringify(toolChoiceError.response?.data || '').toLowerCase();
+            const canRetryWithoutToolChoice = requestBody.tool_choice && (
+              upstreamDetail.includes('tool_choice') ||
+              upstreamDetail.includes('unsupported') ||
+              upstreamDetail.includes('extra_forbidden') ||
+              upstreamDetail.includes('unrecognized')
+            );
+            if (!canRetryWithoutToolChoice) throw toolChoiceError;
+
+            const retryBody = { ...requestBody };
+            delete retryBody.tool_choice;
+            try {
+              response = await axios.post(
+                `${baseUrl}/chat/completions`,
+                retryBody,
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
+                  },
+                  timeout: 60000
+                }
+              );
+              break;
+            } catch (retryError: any) {
+              lastError = retryError;
+              if (retryError.response?.status === 429 && attempt < MAX_RETRIES) {
+                const delay = Math.pow(2, attempt) * 1000;
+                console.warn(`Rate limited (429) on tool_choice fallback, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+                await wait(delay);
+                continue;
+              }
+              throw retryError;
+            }
+          }
+        }
+
+        if (!response) throw lastError || new Error('Chat completion failed after retries');
+        return res.json(response.data);
+      }
+
+      let response;
+      let lastError: any;
+
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           response = await axios.post(
             `${baseUrl}/chat/completions`,
@@ -2634,49 +2713,24 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
                 'Content-Type': 'application/json',
                 ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
               },
+              responseType: 'stream',
               timeout: 60000
             }
           );
-        } catch (toolChoiceError: any) {
-          const upstreamDetail = JSON.stringify(toolChoiceError.response?.data || '').toLowerCase();
-          const canRetryWithoutToolChoice = requestBody.tool_choice && (
-            upstreamDetail.includes('tool_choice') ||
-            upstreamDetail.includes('unsupported') ||
-            upstreamDetail.includes('extra_forbidden') ||
-            upstreamDetail.includes('unrecognized')
-          );
-          if (!canRetryWithoutToolChoice) throw toolChoiceError;
-
-          const retryBody = { ...requestBody };
-          delete retryBody.tool_choice;
-          response = await axios.post(
-            `${baseUrl}/chat/completions`,
-            retryBody,
-            {
-              headers: {
-                'Content-Type': 'application/json',
-                ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
-              },
-              timeout: 60000
-            }
-          );
+          break;
+        } catch (error: any) {
+          lastError = error;
+          if (error.response?.status === 429 && attempt < MAX_RETRIES) {
+            const delay = Math.pow(2, attempt) * 1000;
+            console.warn(`Rate limited (429) on stream, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+            await wait(delay);
+            continue;
+          }
+          throw error;
         }
-
-        return res.json(response.data);
       }
 
-      const response = await axios.post(
-        `${baseUrl}/chat/completions`,
-        requestBody,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
-          },
-          responseType: 'stream',
-          timeout: 60000
-        }
-      );
+      if (!response) throw lastError || new Error('Chat completion failed after retries');
 
       // Stream the response back to the client
       res.setHeader('Content-Type', 'text/event-stream');
@@ -2729,6 +2783,794 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
 
   app.post("/api/list_tools", (req, res) => {
     res.json({ tools: [] });
+  });
+
+  // ─── llama.cpp Management ─────────────────────────────────────────────────────
+  let llamaServerProcess: ChildProcessWithoutNullStreams | null = null;
+
+  const getLlamaInstallDir = () => {
+    return path.join(getLuminaDataDir(), 'llama');
+  };
+
+  const extractZip = async (zipPath: string, destDir: string): Promise<void> => {
+    fs.mkdirSync(destDir, { recursive: true });
+    if (process.platform === 'win32') {
+      await new Promise<void>((resolve, reject) => {
+        const ps = spawn('powershell', [
+          '-NoProfile', '-NonInteractive',
+          '-Command',
+          `Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force`
+        ]);
+        ps.on('close', (code) => code === 0 ? resolve() : reject(new Error(`Extract-Archive exited with code ${code}`)));
+        ps.on('error', reject);
+      });
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('unzip', ['-o', zipPath, '-d', destDir]);
+        proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`unzip exited with code ${code}`)));
+        proc.on('error', reject);
+      });
+    }
+  };
+
+  const killProcess = (proc: ChildProcessWithoutNullStreams | null) => {
+    if (!proc) return;
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', proc.pid?.toString() || '', '/f', '/t']);
+      } else {
+        proc.kill('SIGTERM');
+        setTimeout(() => proc.kill('SIGKILL'), 3000);
+      }
+    } catch {}
+  };
+
+  // Download and extract a llama.cpp release
+  app.post("/api/llama/download", async (req, res) => {
+    const { url, fileName, releaseTag } = req.body;
+    if (!url || !fileName) {
+      return res.status(400).json({ error: 'url and fileName are required' });
+    }
+
+    const installDir = getLlamaInstallDir();
+    const releaseDir = path.join(installDir, `llama.cpp-release-${releaseTag || 'latest'}`);
+    fs.mkdirSync(releaseDir, { recursive: true });
+
+    const zipPath = path.join(installDir, fileName);
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      logs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+    };
+
+    try {
+      addLog(`Starting download: ${fileName}`);
+      addLog(`Target: ${url}`);
+
+      const writer = fs.createWriteStream(zipPath);
+      const response = await axios({
+        method: 'GET',
+        url,
+        responseType: 'stream',
+        timeout: 300000,
+        onDownloadProgress: (progressEvent) => {
+          // optional: could store progress in-memory for polling
+        },
+      });
+
+      const contentLength = response.headers['content-length'];
+      const totalSize = parseInt(String(contentLength || '0'), 10);
+      let downloaded = 0;
+
+      response.data.on('data', (chunk: Buffer) => {
+        downloaded += chunk.length;
+      });
+
+      response.data.pipe(writer);
+
+      await new Promise<void>((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+
+      addLog(`Download complete (${(downloaded / 1024 / 1024).toFixed(1)} MB)`);
+      addLog(`Extracting to: ${releaseDir}`);
+
+      await extractZip(zipPath, releaseDir);
+      addLog('Extraction complete');
+
+      try { fs.unlinkSync(zipPath); } catch {}
+
+      // Find binary files in the extracted directory
+      const findBinaries = (dir: string, depth = 0): string[] => {
+        if (depth > 4) return [];
+        const results: string[] = [];
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              results.push(...findBinaries(fullPath, depth + 1));
+            } else if (entry.isFile()) {
+              const lower = entry.name.toLowerCase();
+              if (lower.includes('llama-') || lower.endsWith('.exe')) {
+                results.push(fullPath);
+              }
+            }
+          }
+        } catch {}
+        return results;
+      };
+
+      const binaries = findBinaries(releaseDir);
+      addLog(`Found ${binaries.length} binaries`);
+
+      // Make binaries executable on non-Windows
+      if (process.platform !== 'win32') {
+        for (const bin of binaries) {
+          try {
+            fs.chmodSync(bin, 0o755);
+            addLog(`chmod +x ${path.basename(bin)}`);
+          } catch {}
+        }
+      }
+
+      const config = {
+        version: releaseTag || 'latest',
+        fileName,
+        installedAt: new Date().toISOString(),
+        path: releaseDir,
+        binaries,
+        size: `${(totalSize / 1024 / 1024).toFixed(1)} MB`,
+        url,
+      };
+
+      res.json({ success: true, config, logs });
+    } catch (err: any) {
+      addLog(`Error: ${err.message}`);
+      try { fs.unlinkSync(zipPath); } catch {}
+      res.status(500).json({ error: err.message, logs });
+    }
+  });
+
+  // Calculate GPU layers and read model metadata using 'gguf'
+  app.post("/api/llama/gpu-recommendation", async (req, res) => {
+    const { modelPath, reserveVRAM = 512 * 1024 * 1024 } = req.body;
+    if (!modelPath) {
+      return res.status(400).json({ error: "modelPath is required" });
+    }
+
+    // Resolve path: support mapped Windows user format and absolute/relative maps
+    let resolvedPath = modelPath.replace(/\\/g, '/');
+    const match = resolvedPath.match(/^C:\/Users\/([^\/]+)\/(.*)$/i);
+    if (match) {
+      resolvedPath = path.join(os.homedir(), match[2]);
+    } else {
+      resolvedPath = path.resolve(resolvedPath);
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({ error: `Model file not found at: ${resolvedPath}` });
+    }
+
+    try {
+      const getGPUDetails = async () => {
+        const results: { gpus: any[]; summary: any } = {
+          gpus: [],
+          summary: {}
+        };
+
+        const detectGPUType = (gpu: any) => {
+          const model = (gpu.model || "").toLowerCase();
+          const vendor = (gpu.vendor || "").toLowerCase();
+          if (gpu.vramDynamic) return "Integrated (Shared VRAM)";
+          if (model.includes("intel") || vendor.includes("intel")) return "Integrated";
+          if (model.includes("radeon") && model.includes("graphics")) return "Integrated (APU)";
+          return "Discrete";
+        };
+
+        const detectTypeFromName = (name = "") => {
+          const n = name.toLowerCase();
+          if (n.includes("intel") || n.includes("iris") || n.includes("uhd")) return "Integrated";
+          if (n.includes("rtx") || n.includes("gtx") || n.includes("rx 6") || n.includes("rx 7")) return "Discrete";
+          if (n.includes("radeon") && !n.includes("rx")) return "Integrated (APU)";
+          return "Unknown";
+        };
+
+        // 1. systeminformation
+        try {
+          const graphics = await si.graphics();
+          if (graphics && graphics.controllers) {
+            for (const gpu of graphics.controllers) {
+              results.gpus.push({
+                vendor: gpu.vendor,
+                model: gpu.model,
+                vramMB: gpu.vram,
+                vramDynamic: gpu.vramDynamic,
+                bus: gpu.bus,
+                driverVersion: gpu.driverVersion,
+                type: detectGPUType(gpu),
+                source: "systeminformation"
+              });
+            }
+          }
+        } catch (e) {
+          console.error("si.graphics error:", e);
+        }
+
+        // 2. nvidia-smi
+        try {
+          const raw = spawnSync(
+            "nvidia-smi",
+            ["--query-gpu=name,memory.total,memory.free,memory.used", "--format=csv,noheader,nounits"],
+            { timeout: 5000, encoding: "utf8" }
+          ).stdout?.trim();
+
+          if (raw) {
+            raw.split("\n").forEach((line) => {
+              const [name, total, free, used] = line.split(",").map(s => s.trim());
+              const existing = results.gpus.find(g =>
+                g.model?.toLowerCase().includes(name?.toLowerCase().split(" ")[1])
+              );
+              const nvidiaData = {
+                vendor: "NVIDIA",
+                model: name,
+                type: "Discrete",
+                vramTotalMB: parseInt(total, 10),
+                vramFreeMB: parseInt(free, 10),
+                vramUsedMB: parseInt(used, 10),
+                vramMB: parseInt(total, 10),
+                source: "nvidia-smi",
+              };
+              if (existing) {
+                Object.assign(existing, nvidiaData);
+              } else {
+                results.gpus.push(nvidiaData);
+              }
+            });
+          }
+        } catch {}
+
+        // 3. WMIC (Windows fallback)
+        if (process.platform === "win32") {
+          try {
+            const raw = spawnSync(
+              "wmic",
+              ["path", "Win32_VideoController", "get", "Name,AdapterRAM,AdapterDACType,VideoProcessor", "/format:csv"],
+              { timeout: 5000, encoding: "utf8" }
+            ).stdout;
+
+            if (raw) {
+              const lines = raw.split("\n").filter(l => l.includes(",") && !l.startsWith("Node"));
+              for (const line of lines) {
+                const parts = line.split(",");
+                const adapterRAM = parseInt(parts[2], 10);
+                const name = parts[3]?.trim();
+                if (!name) continue;
+
+                const vramMB = adapterRAM > 0 ? Math.round(adapterRAM / 1024 / 1024) : 0;
+                const existing = results.gpus.find(g =>
+                  g.model?.toLowerCase().includes(name.toLowerCase().substring(0, 10))
+                );
+                const wmicData = {
+                  model: name,
+                  vramMB,
+                  vramNote: adapterRAM === 0
+                    ? "Shared/Dynamic (actual size set by OS)"
+                    : `${vramMB} MB`,
+                  source: "wmic",
+                  type: detectTypeFromName(name),
+                };
+                if (existing) {
+                  Object.assign(existing, wmicData);
+                } else {
+                  results.gpus.push(wmicData);
+                }
+              }
+            }
+          } catch {}
+
+          // 4. PowerShell Windows fallback
+          try {
+            const psCmd = `Get-CimInstance Win32_VideoController | Select-Object -Property Name, AdapterRAM, CurrentHorizontalResolution, AdapterCompatibility | ConvertTo-Json`.replace(/\n/g, " ");
+            const raw = spawnSync(`powershell.exe`, ["-Command", psCmd], { timeout: 8000, encoding: "utf8" }).stdout;
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const gpuList = Array.isArray(parsed) ? parsed : [parsed];
+
+              for (const g of gpuList) {
+                if (!g || !g.Name) continue;
+                const existing = results.gpus.find(gpu =>
+                  gpu.model?.toLowerCase().includes(g.Name?.toLowerCase().substring(0, 10))
+                );
+                const psData = {
+                  model: g.Name,
+                  adapterCompatibility: g.AdapterCompatibility,
+                  vramMB: g.AdapterRAM ? Math.round(g.AdapterRAM / 1024 / 1024) : 0,
+                  source: "powershell",
+                };
+                if (existing) {
+                  Object.assign(existing, psData);
+                } else {
+                  results.gpus.push(psData);
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // 5. Linux AMD / lspci fallback
+        if (process.platform === "linux") {
+          try {
+            const amd = fs.readFileSync("/sys/class/drm/card0/device/mem_info_vram_total", "utf8").trim();
+            if (amd) {
+              const vramBytes = parseInt(amd, 10);
+              const vramMB = Math.round(vramBytes / 1024 / 1024);
+              results.gpus.push({
+                vendor: "AMD",
+                model: "AMD Radeon GPU (Linux Core)",
+                type: "Discrete",
+                vramMB,
+                vramTotalMB: vramMB,
+                source: "/sys/class/drm"
+              });
+            }
+          } catch {}
+        }
+
+        // Calculate summary
+        results.summary = {
+          totalGPUs: results.gpus.length,
+          hasNvidiaDiscrete: results.gpus.some(g => g.vendor?.includes("NVIDIA") || g.model?.includes("NVIDIA")),
+          hasAMDDiscrete: results.gpus.some(g => g.vendor?.includes("AMD") && g.type === "Discrete"),
+          hasIntegrated: results.gpus.some(g => g.type === "Integrated"),
+          totalDedicatedVRAM_MB: results.gpus
+            .filter(g => g.type === "Discrete")
+            .reduce((sum, g) => sum + (g.vramTotalMB || g.vramMB || 0), 0),
+        };
+
+        return results;
+      };
+
+      const details = await getGPUDetails();
+      let vramTotal = 8192 * 1024 * 1024; // Default fallback to 8GB
+
+      // Determine the best VRAM output
+      const discreteGPUs = details.gpus.filter(g => g.type === "Discrete" && (g.vramTotalMB || g.vramMB));
+      if (discreteGPUs.length > 0) {
+        const bestGPU = discreteGPUs.reduce((prev, current) => {
+          const prevVal = prev.vramTotalMB || prev.vramMB || 0;
+          const currVal = current.vramTotalMB || current.vramMB || 0;
+          return prevVal > currVal ? prev : current;
+        });
+        vramTotal = (bestGPU.vramTotalMB || bestGPU.vramMB) * 1024 * 1024;
+      } else {
+        const anyGPU = details.gpus.find(g => (g.vramTotalMB || g.vramMB));
+        if (anyGPU) {
+          vramTotal = (anyGPU.vramTotalMB || anyGPU.vramMB) * 1024 * 1024;
+        } else if (process.platform === 'darwin') {
+          vramTotal = Math.floor(os.totalmem() * 0.6);
+        } else {
+          vramTotal = Math.floor(os.totalmem() * 0.4);
+        }
+      }
+
+      const { parseRawMetadata } = (await import("gguf")) as any;
+      const { metadata } = await parseRawMetadata(resolvedPath);
+
+      let numLayers = 0;
+      for (const key of Object.keys(metadata)) {
+        if (key.endsWith('.block_count')) {
+          numLayers = Number(metadata[key]);
+          break;
+        }
+      }
+      if (!numLayers) {
+        numLayers = Number(
+          metadata["llama.block_count"] ||
+          metadata["phi3.block_count"] ||
+          metadata["mistral.block_count"] ||
+          metadata["gemma.block_count"] ||
+          metadata["qwen2.block_count"] ||
+          32
+        );
+      }
+
+      const architecture = metadata["general.architecture"] || "unknown";
+      const name = metadata["general.name"] || path.basename(resolvedPath, '.gguf');
+
+      const modelSizeBytes = fs.statSync(resolvedPath).size;
+      const bytesPerLayer = modelSizeBytes / numLayers;
+      const usableVRAM = vramTotal - reserveVRAM;
+      const maxLayers = Math.floor(usableVRAM / bytesPerLayer);
+      const recommendedLayers = Math.max(0, Math.min(maxLayers, numLayers));
+
+      res.json({
+        success: true,
+        vramTotal: (vramTotal / 1024 / 1024).toFixed(0) + " MB",
+        modelSize: (modelSizeBytes / 1024 / 1024).toFixed(0) + " MB",
+        totalLayers: numLayers,
+        bytesPerLayer: (bytesPerLayer / 1024 / 1024).toFixed(1) + " MB",
+        recommendedLayers,
+        fullyOffloaded: recommendedLayers >= numLayers,
+        architecture,
+        name,
+        metadata: {
+          file_size: modelSizeBytes,
+          context_length: metadata["llama.context_length"] || metadata["gemma.context_length"] || null,
+          attention_head_count: metadata["llama.attention.head_count"] || null,
+          feed_forward_length: metadata["llama.feed_forward_length"] || null,
+        }
+      });
+    } catch (err: any) {
+      console.error("GGUF Calculation Error:", err);
+      res.status(500).json({ error: `GGUF metadata parsing error: ${err.message}` });
+    }
+  });
+
+  // Start llama-server process
+  app.post("/api/llama/start", async (req, res) => {
+    const {
+      binaryPath: customBinaryPath,
+      modelPath,
+      gpuOffload = 99,
+      contextLength = 32768,
+      cacheTypeK = 'q8_0',
+      cacheTypeV = 'q8_0',
+      threads = 8,
+      host = '127.0.0.1',
+      port = 1234,
+      flashAttn = false,
+      noMmap = false,
+      seed,
+      maxConcurrent,
+      unifiedKVCache,
+      ropeFreqBase,
+      ropeFreqScale,
+      offloadKV,
+      keepInMemory,
+      evalBatchSize,
+      physicalBatchSize,
+    } = req.body;
+
+    if (!modelPath) {
+      return res.status(400).json({ error: 'modelPath is required' });
+    }
+
+    // Kill existing process if any
+    killProcess(llamaServerProcess);
+    llamaServerProcess = null;
+
+    // Find the llama-server binary
+    let llamaServerBin = customBinaryPath || '';
+    if (!llamaServerBin) {
+      const installConfig = req.headers['x-llama-config']
+        ? JSON.parse(req.headers['x-llama-config'] as string)
+        : null;
+      if (installConfig?.binaries) {
+        llamaServerBin = installConfig.binaries.find((b: string) => {
+          const base = path.basename(b).toLowerCase();
+          return base.includes('llama-server') || base === 'server.exe' || base === 'server';
+        }) || installConfig.binaries[0] || '';
+      }
+    }
+
+    if (!llamaServerBin) {
+      // Search in default install dir
+      const installDir = getLlamaInstallDir();
+      const allFiles: string[] = [];
+      const walkDir = (dir: string) => {
+        try {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) walkDir(full);
+            else allFiles.push(full);
+          }
+        } catch {}
+      };
+      walkDir(installDir);
+      llamaServerBin = allFiles.find(f => {
+        const base = path.basename(f).toLowerCase();
+        return base.includes('llama-server') || base === 'server.exe' || base === 'server';
+      }) || '';
+    }
+
+    if (!llamaServerBin || !fs.existsSync(llamaServerBin)) {
+      return res.status(404).json({ error: 'llama-server binary not found. Please install llama.cpp first.' });
+    }
+
+    const args: string[] = [
+      '-m', modelPath,
+      '-ngl', String(gpuOffload),
+      '-c', String(contextLength),
+      '--cache-type-k', cacheTypeK,
+      '--cache-type-v', cacheTypeV,
+      '-t', String(threads),
+      '--host', host,
+      '--port', String(port),
+    ];
+
+    // --flash-attn removed
+    if (noMmap) args.push('--no-mmap');
+    if (seed && seed !== 'Random Seed' && seed !== '-1' && seed !== -1) args.push('--seed', String(seed));
+
+    if (maxConcurrent && Number(maxConcurrent) > 0) {
+      args.push('--parallel', String(maxConcurrent));
+    }
+    if (unifiedKVCache) {
+      args.push('--slot-save-state');
+    }
+    if (ropeFreqBase && ropeFreqBase !== 'Auto' && String(ropeFreqBase).trim() !== '') {
+      args.push('--rope-freq-base', String(ropeFreqBase));
+    }
+    if (ropeFreqScale && ropeFreqScale !== 'Auto' && String(ropeFreqScale).trim() !== '') {
+      args.push('--rope-freq-scale', String(ropeFreqScale));
+    }
+    if (offloadKV === false) {
+      args.push('--no-kv-offload');
+    }
+    if (keepInMemory) {
+      args.push('--mlock');
+    }
+    if (evalBatchSize && Number(evalBatchSize) > 0) {
+      args.push('--batch-size', String(evalBatchSize));
+    }
+    if (physicalBatchSize && Number(physicalBatchSize) > 0) {
+      args.push('--ubatch-size', String(physicalBatchSize));
+    }
+
+    const serverUrl = `http://${host}:${port}`;
+
+    try {
+      const logStream = fs.createWriteStream(
+        path.join(getLlamaInstallDir(), 'llama-server.log'),
+        { flags: 'a' }
+      );
+
+      if (process.platform === 'win32') {
+        const pArgs = [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `& "${llamaServerBin}" ${args.map(arg => {
+            if (arg.includes(' ') || arg.includes('/') || arg.includes('\\')) {
+              return `"${arg.replace(/"/g, '`"')}"`;
+            }
+            return arg;
+          }).join(' ')}`
+        ];
+        llamaServerProcess = spawn('powershell.exe', pArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }) as unknown as ChildProcessWithoutNullStreams;
+      } else {
+        llamaServerProcess = spawn(llamaServerBin, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }) as unknown as ChildProcessWithoutNullStreams;
+      }
+
+      const proc = llamaServerProcess;
+      proc.stdout.on('data', (data: Buffer) => {
+        logStream.write(`[stdout] ${data.toString()}`);
+      });
+      proc.stderr.on('data', (data: Buffer) => {
+        logStream.write(`[stderr] ${data.toString()}`);
+      });
+
+      proc.on('error', (err) => {
+        console.error('llama-server error:', err);
+        logStream.write(`[error] ${err.message}\n`);
+        logStream.end();
+      });
+
+      proc.on('exit', (code) => {
+        console.log(`llama-server exited with code ${code}`);
+        logStream.write(`[exit] code ${code}\n`);
+        logStream.end();
+        llamaServerProcess = null;
+      });
+
+      // Wait for the server to be ready (poll health endpoint)
+      let ready = false;
+      const maxRetries = 30;
+      for (let i = 0; i < maxRetries; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const healthRes = await axios.get(`${serverUrl}/v1/models`, { timeout: 2000 });
+          if (healthRes.status === 200 || healthRes.status === 405) {
+            ready = true;
+            break;
+          }
+        } catch {}
+      }
+
+      if (!ready) {
+        if (proc) {
+          killProcess(proc);
+        }
+        llamaServerProcess = null;
+        logStream.end();
+        return res.status(500).json({ error: 'llama-server started but did not become ready within 30s' });
+      }
+
+      res.json({
+        success: true,
+        serverUrl,
+        command: process.platform === 'win32'
+          ? `& "${llamaServerBin}" ${args.map(a => (a.includes(' ') || a.includes('/') || a.includes('\\')) ? `"${a}"` : a).join(' ')}`
+          : `${llamaServerBin} ${args.join(' ')}`,
+        pid: proc.pid,
+      });
+    } catch (err: any) {
+      if (llamaServerProcess) {
+        killProcess(llamaServerProcess);
+      }
+      llamaServerProcess = null;
+      res.status(500).json({ error: `Failed to start llama-server: ${err.message}` });
+    }
+  });
+
+  // Stop llama-server process
+  app.post("/api/llama/stop", async (_req, res) => {
+    if (!llamaServerProcess) {
+      return res.json({ success: true, message: 'No server running' });
+    }
+    killProcess(llamaServerProcess);
+    llamaServerProcess = null;
+    res.json({ success: true, message: 'Server stopped' });
+  });
+
+  // Get llama-server status
+  app.get("/api/llama/status", async (_req, res) => {
+    const running = llamaServerProcess !== null && !llamaServerProcess.killed;
+    res.json({ running, pid: running ? llamaServerProcess?.pid : null });
+  });
+
+  // Delete llama.cpp install directory
+  app.post("/api/llama/delete", async (_req, res) => {
+    const installDir = getLlamaInstallDir();
+    try {
+      // Kill server if running
+      if (llamaServerProcess) {
+        killProcess(llamaServerProcess);
+        llamaServerProcess = null;
+      }
+      if (fs.existsSync(installDir)) {
+        fs.rmSync(installDir, { recursive: true, force: true });
+      }
+      res.json({ success: true, message: 'llama.cpp installation deleted' });
+    } catch (err: any) {
+      res.status(500).json({ error: `Failed to delete llama.cpp: ${err.message}` });
+    }
+  });
+
+  // Verify llama-server binary by running it with --version
+  app.post("/api/llama/verify", async (req, res) => {
+    const { binaryPath } = req.body;
+    if (!binaryPath) {
+      return res.status(400).json({ success: false, error: 'binaryPath is required' });
+    }
+    if (!fs.existsSync(binaryPath)) {
+      return res.status(404).json({ success: false, error: `Binary not found at: ${binaryPath}` });
+    }
+    try {
+      const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const proc = spawn(binaryPath, ['--version'], { timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+        proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+          resolve({ stdout: stdout.trim(), stderr: stderr.trim() });
+        });
+      });
+      res.json({
+        success: true,
+        version: result.stdout || result.stderr || 'version info unavailable',
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: `Failed to run binary: ${err.message}` });
+    }
+  });
+
+  // Test a running llama-server health
+  app.get("/api/llama/test", async (req, res) => {
+    const host = (req.query.host as string) || '127.0.0.1';
+    const port = (req.query.port as string) || '1234';
+    try {
+      const response = await axios.get(`http://${host}:${port}/v1/models`, { timeout: 5000 });
+      res.json({
+        success: true,
+        status: response.status,
+        data: response.data,
+        serverUrl: `http://${host}:${port}`,
+      });
+    } catch (err: any) {
+      res.json({
+        success: false,
+        error: err.message,
+        serverUrl: `http://${host}:${port}`,
+      });
+    }
+  });
+
+  // Download a GGUF model from Hugging Face
+  app.post("/api/models/download", async (req, res) => {
+    const { modelId, fileName, publisher, modelFolder, modelFile } = req.body;
+    if (!modelId || !fileName) {
+      return res.status(400).json({ error: 'modelId and fileName are required' });
+    }
+
+    const modelsDir = path.join(getLuminaDataDir(), 'models', publisher || 'huggingface', modelFolder || modelId.split('/')[1] || modelId);
+    fs.mkdirSync(modelsDir, { recursive: true });
+
+    // Extract the actual filename from a string like "model-q4_k_m.gguf (4.15 GB)"
+    const actualFileName = fileName.split(' ')[0];
+    const savePath = path.join(modelsDir, modelFile || actualFileName);
+
+    // If file already exists, return immediately
+    if (fs.existsSync(savePath)) {
+      const sizeBytes = fs.statSync(savePath).size;
+      return res.json({
+        success: true,
+        path: savePath,
+        size: (sizeBytes / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+        alreadyExisted: true,
+        logs: [`[${new Date().toLocaleTimeString()}] File already exists at ${savePath}`],
+      });
+    }
+
+    const hfUrl = `https://huggingface.co/${modelId}/resolve/main/${actualFileName}`;
+    const logs: string[] = [];
+    const addLog = (msg: string) => {
+      logs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+    };
+
+    addLog(`Downloading: ${actualFileName}`);
+    addLog(`From: ${hfUrl}`);
+    addLog(`To: ${savePath}`);
+
+    try {
+      const response = await axios({
+        method: 'GET',
+        url: hfUrl,
+        responseType: 'stream',
+        timeout: 600000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      const totalSize = parseInt(String(response.headers['content-length'] || '0'), 10);
+      const writer = fs.createWriteStream(savePath);
+      let downloaded = 0;
+
+      response.data.on('data', (chunk: Buffer) => {
+        downloaded += chunk.length;
+      });
+
+      response.data.pipe(writer);
+
+      await new Promise<void>((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+
+      const sizeMb = (downloaded / 1024 / 1024).toFixed(1);
+      addLog(`Download complete: ${sizeMb} MB`);
+
+      res.json({
+        success: true,
+        path: savePath,
+        size: (downloaded / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+        bytes: downloaded,
+        logs,
+      });
+    } catch (err: any) {
+      // Clean up partial download
+      try { fs.unlinkSync(savePath); } catch {}
+      addLog(`Error: ${err.message}`);
+      res.status(500).json({ error: err.message, logs });
+    }
   });
 
   // Vite middleware for development

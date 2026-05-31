@@ -8,6 +8,17 @@ export interface UseLlamaBridgeProps {
   selectedProvider: string;
   activeModelId: string;
   showToast: (msg: string) => void;
+  useLocalModelsOnly: boolean;
+}
+
+function isRateLimitError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return lower.includes('429') ||
+    lower.includes('rate_limit') ||
+    lower.includes('rate-limited') ||
+    lower.includes('rate limited') ||
+    lower.includes('too many requests') ||
+    lower.includes('quota exceeded');
 }
 
 export function useLlamaBridge({
@@ -15,7 +26,8 @@ export function useLlamaBridge({
   apiKey,
   selectedProvider,
   activeModelId,
-  showToast
+  showToast,
+  useLocalModelsOnly
 }: UseLlamaBridgeProps) {
   const [llamaBridgeUrl, setLlamaBridgeUrl] = useState(() => 
     localStorage.getItem('lumina_llama_url') || 'http://localhost:8089'
@@ -163,6 +175,9 @@ export function useLlamaBridge({
             errorMsg = text.substring(0, 200);
           }
         }
+        if (isRateLimitError(errorMsg)) {
+          throw new Error(`Rate limited: ${errorMsg}. Try waiting, adding your own API key in Settings, or switching to a different model.`);
+        }
         throw new Error(errorMsg);
       }
 
@@ -171,6 +186,53 @@ export function useLlamaBridge({
         return JSON.parse(text);
       } catch {
         throw new Error(`Failed to parse response: ${text.substring(0, 100)}`);
+      }
+    }
+
+    const isLocalModelActive = useLocalModelsOnly || activeModelId.toLowerCase().includes('gguf');
+
+    if (isLocalModelActive) {
+      let localUrl = 'http://127.0.0.1:1234/v1';
+      try {
+        const stored = localStorage.getItem(`lumina_model_settings_${activeModelId}`);
+        if (stored) {
+          const config = JSON.parse(stored);
+          const port = config.localPort || 1234;
+          const host = config.localHost || '127.0.0.1';
+          localUrl = `http://${host}:${port}/v1`;
+        }
+      } catch (e) {
+        console.warn("Could not parse local model settings", e);
+      }
+
+      try {
+        const response = await fetch(`${localUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: activeModelId,
+            messages: messagesPrompt.map(m => ({
+              role: m.role,
+              content: m.content
+            })),
+            stream: false,
+            temperature: 0.7
+          }),
+          signal
+        });
+
+        if (!response.ok) {
+          throw new Error(`Local llama-server returned status ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data;
+      } catch (err: any) {
+        console.error("Local llama-server connection failed:", err);
+        const storedCmd = localStorage.getItem(`lumina_cmd_${activeModelId}`) || `llama-server -m "C:/Users/YOU/.lumina/models/...GGUF" -ngl 99 -c 32768 -t 8 --host 127.0.0.1 --port 1234`;
+        throw new Error(`Unable to reach your local llama.cpp server at ${localUrl.replace(/\/v1$/, '')}.\n\nPlease ensure your server is running by pasting this command into your terminal:\n\n${storedCmd}`);
       }
     }
 
@@ -205,6 +267,9 @@ export function useLlamaBridge({
         } else if (text) {
           errorMsg = text.substring(0, 200);
         }
+      }
+      if (isRateLimitError(errorMsg)) {
+        throw new Error(`Rate limited: ${errorMsg}. Try waiting, adding your own API key in Settings, or switching to a different model.`);
       }
       throw new Error(errorMsg);
     }

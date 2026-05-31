@@ -230,7 +230,13 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     if (isVoiceListening) {
       stopVoiceDictation();
     }
-    if (isTyping) return;
+    if (isTyping) {
+      if (!abortControllerRef.current) {
+        setIsTyping(false);
+      } else {
+        return;
+      }
+    }
     const controller = new AbortController();
     abortControllerRef.current = controller;
     const signal = controller.signal;
@@ -1414,13 +1420,28 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 }
               } else if (name === 'ask_user') {
                 const qs = args.questions || [];
-                setAskAiQuestions(qs);
-                setCurrentQuestionIndex(0);
-                setAskAiAnswers({});
-                setShowAskAiPanel(true);
+                // Attach to current message instead of show global panel
+                setShowAskAiPanel(false);
                 shouldStopAfterAsk = true;
-                resultValue = { status: "success", message: "Successfully presented clarify questions to the user. Generation has paused for user inputs." };
+                resultValue = { status: "success", message: "Successfully presented clarify questions to the user inline. Generation has paused for user inputs." };
                 showToast("AI is asking you clarifying questions!");
+                
+                setChats(prev => prev.map(chat => {
+                  if (chat.id === chatId) {
+                    return {
+                      ...chat,
+                      messages: chat.messages.map(m => m.id === thinkingId ? {
+                        ...m,
+                        askAiQuestions: qs,
+                        currentQuestionIndex: 0,
+                        askAiAnswers: {},
+                        isAskAiActive: true,
+                        thinking: undefined
+                      } : m)
+                    };
+                  }
+                  return chat;
+                }));
               } else if (name === 'web_scrape') {
                 const targetUrl = args.url;
                 if (!targetUrl) {
@@ -2048,10 +2069,14 @@ Store contract files at .lumina/contracts/ in the workspace.`;
         return;
       }
       console.error('Lumina API Error:', error);
+      const msg = error?.message || '';
+      const isRateLimit = /429|rate.li[mit]|too many requests|quota/i.test(msg);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Error: ${error?.message || 'Chat completion failed'}. Please check your API key, model, and server configuration in Settings.`,
+        content: isRateLimit
+          ? `Rate limit exceeded. The upstream provider is rate-limiting this model.\n\n**Suggestions:**\n- Wait a moment and try again\n- Add your own API key in **Settings → AI Provider**\n- Switch to a different model`
+          : `Error: ${msg || 'Chat completion failed'}. Please check your API key, model, and server configuration in Settings.`,
         timestamp: new Date(),
       };
       setChats(prev => prev.map(chat => {
@@ -2061,10 +2086,17 @@ Store contract files at .lumina/contracts/ in the workspace.`;
         }
         return chat;
       }));
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 100);
     } finally {
-      setIsTyping(false);
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        setIsTyping(false);
+      }
       setTypingMessageId(null);
-      abortControllerRef.current = null;
       setCoderTodos(prev => prev.map(t => ({ ...t, status: 'complete' })));
     }
   };
