@@ -926,6 +926,26 @@ const startCoderPreview = useCallback(async () => {
     showToast("Chat cleared successfully!");
   };
 
+  const isLikelyCoderTask = (message: string) => {
+    const trimmed = message.trim().toLowerCase();
+    if (!trimmed) return false;
+    if (trimmed.startsWith('/coder')) return true;
+    if (trimmed.length <= 24 && /^(hi|hey|hello|yo|sup|thanks|thank you|ok|okay|yes|no|hmm|hmmm|test)[!.? ]*$/.test(trimmed)) {
+      return false;
+    }
+
+    const coderTriggers = [
+      'build', 'create', 'make', 'implement', 'add', 'fix', 'debug', 'repair',
+      'change', 'modify', 'update', 'edit', 'refactor', 'remove', 'delete',
+      'file', 'folder', 'component', 'page', 'app', 'website', 'ui', 'bug',
+      'error', 'stack trace', 'typescript', 'css', 'html', 'react', 'electron',
+      'server', 'api', 'database', 'route', 'function', 'class', 'import',
+      'install', 'package', 'dependency', 'run', 'test', 'lint'
+    ];
+
+    return coderTriggers.some(trigger => trimmed.includes(trigger));
+  };
+
   const handleSend = async (contentOverride?: string) => {
     if (isVoiceListening) {
       stopVoiceDictation();
@@ -1101,7 +1121,8 @@ const startCoderPreview = useCallback(async () => {
     }));
 
     const isSlash = content.startsWith('/');
-    if (isSlash || isCoderMode) {
+    const shouldRunCoderAgent = isCoderMode && isLikelyCoderTask(content);
+    if (isSlash || shouldRunCoderAgent) {
       setIsGeneratingTodos(true);
       setShowTodoPanel(true);
       setTodoCollapsed(false);
@@ -1147,7 +1168,7 @@ const startCoderPreview = useCallback(async () => {
           { id: 'grill-4', text: 'Realigning architecture blueprint based on user responses', status: 'pending' }
         ]);
         setIsGeneratingTodos(false);
-      } else if (isCoderMode || cmdName === 'coder') {
+      } else if (shouldRunCoderAgent || cmdName === 'coder') {
         const queryPreview = (cmdQuery || content).substring(0, 42);
         setCoderTodos([
           { id: 'planning-1', text: `Understanding request: "${queryPreview}${(cmdQuery || content).length > 42 ? '...' : ''}"`, status: 'in_progress' },
@@ -1165,7 +1186,7 @@ const startCoderPreview = useCallback(async () => {
                 label: 'Generating coder TODO runbook',
                 type: 'tool',
                 status: 'active',
-                toolName: 'Todowrite',
+                toolName: 'manage_todos',
                 icon: <LuminaToolCallingAnimation />,
                 resultSummary: 'planning workspace steps'
               },
@@ -1213,7 +1234,7 @@ const startCoderPreview = useCallback(async () => {
                       label: 'Coder TODO runbook generated',
                       type: 'tool',
                       status: 'complete',
-                      toolName: 'Todowrite',
+                      toolName: 'manage_todos',
                       icon: <Check size={14} />,
                       resultSummary: `${mapped.length} tasks prepared`
                     },
@@ -1251,7 +1272,7 @@ const startCoderPreview = useCallback(async () => {
                   label: 'Fallback coder TODO runbook prepared',
                   type: 'tool',
                   status: 'complete',
-                  toolName: 'Todowrite',
+                  toolName: 'manage_todos',
                   icon: <Check size={14} />,
                   resultSummary: '3 tasks prepared'
                 },
@@ -1356,19 +1377,19 @@ const startCoderPreview = useCallback(async () => {
     try {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       
-      const activeTools = buildActiveTools();
-      if (isCoderMode) {
+      let activeTools = (!isCoderMode || shouldRunCoderAgent) ? buildActiveTools() : [];
+      if (shouldRunCoderAgent) {
         activeTools.push(
           {
             type: 'function',
             function: {
-              name: 'Edit_and_Write',
-              description: 'Modifies or writes new files in the project directory. Creates the file if it does not exist, overwrites if it does. Always read the file first before editing existing content.',
+              name: 'write_file',
+              description: 'Create or overwrite a file. Creates parent dirs automatically.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file from the project root (e.g. "src/components/Button.tsx").' },
-                  content: { type: 'string', description: 'Complete text contents to write into the file.' }
+                  filePath: { type: 'string', description: 'Relative path from project root.' },
+                  content: { type: 'string', description: 'File content to write.' }
                 },
                 required: ['filePath', 'content']
               }
@@ -1377,14 +1398,14 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Read',
-              description: 'Reads the contents of an existing file in the project directory. Optionally read a specific line range using offset (1-indexed line number) and limit (number of lines).',
+              name: 'read_file',
+              description: 'Read file contents. Optional line range with offset/limit.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file within the project folder to read.' },
-                  offset: { type: 'number', description: 'Optional 1-indexed starting line number. When set, returns content starting from this line.' },
-                  limit: { type: 'number', description: 'Optional maximum number of lines to return (default: all lines from offset).' }
+                  filePath: { type: 'string', description: 'Relative file path.' },
+                  offset: { type: 'number', description: 'Start line (1-indexed).' },
+                  limit: { type: 'number', description: 'Max lines to return.' }
                 },
                 required: ['filePath']
               }
@@ -1393,14 +1414,14 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Grep_and_Glob',
-              description: 'Searches through the codebase using regex patterns and matches file patterns. Use this to locate symbols, strings, components, styles, routes, or bugs before editing. Omit "query" to list all files by glob pattern.',
+              name: 'search_code',
+              description: 'Search files by regex or list files by glob pattern.',
               parameters: {
                 type: 'object',
                 properties: {
-                  query: { type: 'string', description: 'Optional regex or plain text pattern to search for in file contents. Omit to just list files matching the glob.' },
-                  fileGlob: { type: 'string', description: 'Optional glob/extension filter such as ".tsx", "*.css", "src/**/*.ts".' },
-                  maxResults: { type: 'number', description: 'Maximum results to return. Defaults to 30.' }
+                  query: { type: 'string', description: 'Regex/text to search for.' },
+                  fileGlob: { type: 'string', description: 'File filter like "*.tsx".' },
+                  maxResults: { type: 'number', description: 'Max results (default 30).' }
                 },
                 required: []
               }
@@ -1409,12 +1430,12 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'LSP_Experimental',
-              description: 'Accesses Language Server Protocol features for a file: returns imports, exported symbols, function declarations, class names, diagnostics (long lines, tabs), and file metadata. Use to understand file structure before editing.',
+              name: 'analyze_file',
+              description: 'LSP analysis: imports, symbols, diagnostics, metadata.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file to analyze.' }
+                  filePath: { type: 'string', description: 'Relative file path.' }
                 },
                 required: ['filePath']
               }
@@ -1423,15 +1444,15 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Apply_patch',
-              description: 'Applies code diffs and patches to existing files. Safer than full overwrite when making targeted changes. Searches for exact text segments and replaces them.',
+              name: 'edit_file',
+              description: 'Find and replace text in an existing file.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the target file to patch.' },
-                  search: { type: 'string', description: 'Exact text segment to find and replace.' },
-                  replace: { type: 'string', description: 'Replacement text for the matched segment.' },
-                  all: { type: 'boolean', description: 'Replace all occurrences instead of only the first.' }
+                  filePath: { type: 'string', description: 'Relative file path.' },
+                  search: { type: 'string', description: 'Exact text to find.' },
+                  replace: { type: 'string', description: 'Replacement text.' },
+                  all: { type: 'boolean', description: 'Replace all occurrences.' }
                 },
                 required: ['filePath', 'search', 'replace']
               }
@@ -1440,13 +1461,13 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Skill',
-              description: 'Accesses and executes reusable custom AI skills from the skill library. Use this to apply predefined skill templates like summarizing, translating, explaining code, brainstorming, or refactoring.',
+              name: 'run_skill',
+              description: 'Execute a skill template.',
               parameters: {
                 type: 'object',
                 properties: {
-                  skillId: { type: 'string', description: 'The skill ID to run (e.g. "summarize", "translate", "explain", "brainstorm", "refactor").' },
-                  input: { type: 'string', description: 'The text or code to process with the selected skill.' }
+                  skillId: { type: 'string', description: 'Skill ID.' },
+                  input: { type: 'string', description: 'Input text.' }
                 },
                 required: ['skillId', 'input']
               }
@@ -1455,21 +1476,20 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Todowrite',
-              description: 'Writes to and manages the task tracking todo list. Create, update, or complete todo items to track progress through multi-step tasks.',
+              name: 'manage_todos',
+              description: 'Manage task todo list.',
               parameters: {
                 type: 'object',
                 properties: {
-                  action: { type: 'string', enum: ['create', 'update', 'complete', 'list'], description: 'Action to perform on the todo list.' },
+                  action: { type: 'string', enum: ['create', 'update', 'complete', 'list'] },
                   items: {
                     type: 'array',
-                    description: 'List of todo items to create or update.',
                     items: {
                       type: 'object',
                       properties: {
-                        content: { type: 'string', description: 'Description of the task.' },
-                        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Current status of the task.' },
-                        priority: { type: 'string', enum: ['high', 'medium', 'low'], description: 'Priority level.' }
+                        content: { type: 'string' },
+                        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+                        priority: { type: 'string', enum: ['high', 'medium', 'low'] }
                       },
                       required: ['content', 'status']
                     }
@@ -1482,12 +1502,12 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Webfetch',
-              description: 'Fetches data from the internet by scraping a web page URL. Returns the page title, text content, links, and metadata.',
+              name: 'fetch_url',
+              description: 'Fetch and scrape a web page.',
               parameters: {
                 type: 'object',
                 properties: {
-                  url: { type: 'string', description: 'Full URL to fetch and scrape content from.' },
+                  url: { type: 'string', description: 'URL to fetch.' },
                   outputFormat: { type: 'string', enum: ['markdown', 'text', 'html'], description: 'Output format (default: markdown).' }
                 },
                 required: ['url']
@@ -1497,13 +1517,13 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Websearch',
-              description: 'Searches the web for current information. Use this when you need up-to-date data, documentation lookups, or to answer questions about recent events.',
+              name: 'web_search',
+              description: 'Search the web for current information.',
               parameters: {
                 type: 'object',
                 properties: {
-                  query: { type: 'string', description: 'Search query string.' },
-                  maxResults: { type: 'number', description: 'Maximum number of search results to return (default: 5).' }
+                  query: { type: 'string', description: 'Search query.' },
+                  maxResults: { type: 'number', description: 'Max results (default 5).' }
                 },
                 required: ['query']
               }
@@ -1512,22 +1532,20 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Question',
-              description: 'Asks the user 2 to 6 targeted clarifying questions to make sure the implementation aligns with their needs. Call this when requirements are ambiguous or you need to confirm design choices.',
+              name: 'ask_user',
+              description: 'Ask clarifying questions when requirements are ambiguous.',
               parameters: {
                 type: 'object',
                 properties: {
                   questions: {
                     type: 'array',
-                    description: 'The list of clarifying questions to ask the user.',
                     items: {
                       type: 'object',
                       properties: {
-                        id: { type: 'string', description: 'Unique identifier for this question (e.g. "theme", "database").' },
-                        question: { type: 'string', description: 'The actual question text to display.' },
-                        type: { type: 'string', enum: ['single_choice', 'multi_choice', 'text_input', 'confirm'], description: 'Type of input expected from the user.' },
-                        options: { type: 'array', items: { type: 'string' }, description: 'Options if type is single_choice or multi_choice.' },
-                        purpose: { type: 'string', description: 'Brief explanation of why this question is being asked.' }
+                        id: { type: 'string' },
+                        question: { type: 'string' },
+                        type: { type: 'string', enum: ['single_choice', 'multi_choice', 'text_input', 'confirm'] },
+                        options: { type: 'array', items: { type: 'string' } }
                       },
                       required: ['id', 'question', 'type']
                     }
@@ -1540,14 +1558,14 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Create',
-              description: 'Creates a new file or directory in the project workspace. Automatically creates parent directories if they do not exist.',
+              name: 'create_file',
+              description: 'Create a file or directory.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path for the new file or directory (e.g. "src/components/Button.tsx", "public/images").' },
-                  content: { type: 'string', description: 'File content (omit to create an empty file or use isDirectory for a folder).' },
-                  isDirectory: { type: 'boolean', description: 'Set to true to create a directory instead of a file.' }
+                  filePath: { type: 'string', description: 'Relative path.' },
+                  content: { type: 'string', description: 'File content.' },
+                  isDirectory: { type: 'boolean', description: 'Create directory instead.' }
                 },
                 required: ['filePath']
               }
@@ -1556,12 +1574,12 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Delete',
-              description: 'Deletes a file or directory from the project workspace. Use with caution — this permanently removes the target.',
+              name: 'delete_file',
+              description: 'Delete a file or directory.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Relative path of the file or directory to delete.' }
+                  filePath: { type: 'string', description: 'Relative path to delete.' }
                 },
                 required: ['filePath']
               }
@@ -1570,13 +1588,13 @@ const startCoderPreview = useCallback(async () => {
           {
             type: 'function',
             function: {
-              name: 'Rename',
-              description: 'Renames or moves a file or directory to a new location within the project workspace.',
+              name: 'rename_file',
+              description: 'Rename or move a file/directory.',
               parameters: {
                 type: 'object',
                 properties: {
-                  filePath: { type: 'string', description: 'Current relative path of the file or directory.' },
-                  newPath: { type: 'string', description: 'New relative path to move or rename to.' }
+                  filePath: { type: 'string', description: 'Current path.' },
+                  newPath: { type: 'string', description: 'New path.' }
                 },
                 required: ['filePath', 'newPath']
               }
@@ -1589,50 +1607,32 @@ const startCoderPreview = useCallback(async () => {
       let systemPrompt = personaLine;
 
       if (!isCoderMode) {
-        systemPrompt += `\n\n[CHAT MODE IS ACTIVE]
-You are in normal chat mode. Respond as a conversational assistant, not as an autonomous coding agent.
-- Do not claim to be in Builder, Planner, Debugger, or Coder Mode.
-- Do not say you are ready to modify files, run builds, or execute coding tasks unless the user explicitly asks about those capabilities.
-- If the user asks for code, you may explain, draft snippets, or give guidance, but do not imply that files were changed.
-- Keep the tone natural and helpful for general conversation.`;
+        systemPrompt += `\n[CHAT MODE] Respond as a conversational assistant. Do not claim to be in Coder/Builder mode unless asked.`;
       }
 
       if (activeTools.length > 0) {
-        systemPrompt += `\n\n[CRITICAL DIRECTIVE: ACTIVE TOOLS ENABLED]
-You have the following live tool calling APIs connected and active: ${activeTools.map(t => t.function.name).join(', ')}.
-You MUST proactively call the appropriate tools whenever they can provide grounding, web searches, scraper details, or specific Wikipedia insights to construct your answer.
-- Always call 'web_scrape' if the user specifies a URL or asks to extract/fetch content from a web link.
-- Always call Wikipedia tools ('wiki_search', 'wiki_get_page', 'wiki_get_summary', etc.) for any query that references Wikipedia, general metadata search, or historical/factual/scientific lookup.
-Never guess or pretend you do not have functions; execute them immediately and explain what details you retrieved.`;
+        systemPrompt += `\n[TOOLS] Active: ${activeTools.map(t => t.function.name).join(', ')}. Use relevant tools proactively.`;
       }
 
       if (isCoderMode) {
         const osName = (navigator as any)?.platform || 'unknown';
-        systemPrompt += `\n\n[CODER MODE IS ACTIVE — Host OS: ${osName}]
-You are a highly capable, autonomous, and professional software engineering agent running inside the root directory of our workspace on ${osName}.
-When the user asks you to build page(s), applications, interfaces, features, or modify codes:
-1. You MUST make real modifications in the file system using the tools provided: 'Edit_and_Write', 'Read', 'Grep_and_Glob', 'Create', 'Delete', 'Rename', 'Apply_patch', and 'Webfetch'. All file paths are relative to the project root directory!
-2. Do NOT just output a text response with code blocks of code changes. You MUST actually execute the tools to create or edit the actual files in real-time.
-3. If a file already exists, always use 'Read' first to understand its current content, then make edits with 'Edit_and_Write' or 'Apply_patch'.
-4. Use 'Grep_and_Glob' before editing when you need to find symbols, text, styles, routes, or error sources. Use 'Apply_patch' for precise snippet replacements.
-5. Use 'Create' to create new files/directories, 'Delete' to remove, 'Rename' to move or rename.
-6. Use 'Websearch' or 'Webfetch' to look up documentation, find solutions, or fetch reference code from the internet.
-7. Use 'Question' when requirements are ambiguous or you need user input on design decisions.
-8. Use 'Todowrite' to track multi-step progress through complex tasks.
-9. Use 'LSP_Experimental' to analyze file structure, symbols, and imports before making changes.
-10. Work agentically in repeated cycles: briefly reason about what you observed, call one or more tools, inspect the results, then decide the next tool call. Do not stop after a single tool batch if requirements, verification, or preview state remain incomplete.
-11. Do NOT use artifact/canvas output in Coder Mode. The right preview panel is the only app preview surface.
-12. In your final text response, give a clear scannable summary in markdown of what files and folders you created/changed, and guide the user on how they can preview their app or test its functionality. Maintain standard developer professionalism.`;
+        if (!shouldRunCoderAgent) {
+          systemPrompt += `\n[CODER CHAT MODE - ${osName}] Coder mode is open, but this message is conversational. Reply briefly. Do not call tools or discuss file changes unless the user asks for engineering work.`;
+        } else {
+        systemPrompt += `\n\n[CODER MODE — ${osName}]
+You are a software engineering agent. When asked to build/modify code:
+1. Use tools to make real file system changes. Always 'read_file' before editing.
+2. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
+3. Use 'search_code' to find symbols/errors. Use 'create_file'/'delete_file'/'rename_file' for file ops.
+4. Work in tool-call cycles until the task is complete. Give a summary when done.`;
 
         if (activeAssistantMode === 'builder') {
-          systemPrompt += `\n\n[CODER ASSISTANT MODE: BUILDER]
-Focus on implementing new application layers, creating files/components, writing modular code, and delivering working UI or feature changes. Ensure generated code has valid syntax, imports required dependencies, and matches the existing project patterns.`;
+          systemPrompt += `\n[MODE: BUILDER] Implement features, create files, write working code.`;
         } else if (activeAssistantMode === 'planner') {
-          systemPrompt += `\n\n[CODER ASSISTANT MODE: PLANNER]
-Focus on architecture, file planning, and sequencing. Prefer clear engineering blueprints and ask before large implementation work when the user has not requested execution.`;
+          systemPrompt += `\n[MODE: PLANNER] Plan architecture and sequencing. Ask before executing.`;
         } else if (activeAssistantMode === 'debugger') {
-          systemPrompt += `\n\n[CODER ASSISTANT MODE: DEBUGGER]
-Focus on tracing errors, inspecting code paths, and repairing bugs with minimal, targeted changes. Preserve existing behavior unless the bug fix requires changing it.`;
+          systemPrompt += `\n[MODE: DEBUGGER] Trace errors, fix bugs with minimal changes.`;
+        }
         }
       }
 
@@ -1692,7 +1692,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
       }
 
       // Inject search context into systemPrompt BEFORE building apiMessages,
-      if (searchResults.length > 0) {
+      if (searchResults.length > 0 && !isCoderMode) {
         const rawContextString = searchResults.slice(0, 8)
           .map((r, i) => `[${i+1}] ${r.title}: ${r.snippet} (URL: ${r.url})`)
           .join('\n\n');
@@ -1704,9 +1704,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
         systemPrompt += `\n\nWeb Search Results${useTurboQuant ? ' (TurboQuant compressed)' : ''}:\n${contextString}\n\nPlease use the above search results to provide a grounded, up-to-date response. Cite your sources using [number] notation when appropriate. If the results include an instant answer, prioritize that information.`;
       }
 
+      const recentContext = isCoderMode ? chatContext.slice(-4) : chatContext;
       const apiMessages = [
         { role: 'system', content: systemPrompt },
-        ...([...chatContext, userMessage]
+        ...([...recentContext, userMessage]
           .filter(m => (m.content && m.content.trim().length > 0) || (m.elementAttachments && m.elementAttachments.length > 0))
           .map(m => {
             let text = m.content || '';
@@ -1759,7 +1760,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
           }
           
           const activeToolNames = choice.tool_calls.map((t: any) => t.function?.name || '');
-          if (activeToolNames.some((n: string) => n === 'Read' || n === 'Grep_and_Glob' || n === 'LSP_Experimental')) {
+          if (activeToolNames.some((n: string) => n === 'read_file' || n === 'search_code' || n === 'analyze_file')) {
             setCoderTodos(prev => {
               if (prev.length > 0) {
                 return prev.map((item, idx) => {
@@ -1771,7 +1772,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
               return prev;
             });
           }
-          if (activeToolNames.some((n: string) => n === 'Edit_and_Write' || n === 'Apply_patch')) {
+          if (activeToolNames.some((n: string) => n === 'write_file' || n === 'edit_file')) {
             setCoderTodos(prev => {
               if (prev.length > 1) {
                 return prev.map((item, idx) => {
@@ -1803,8 +1804,8 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             const name = fn.name || 'unknown';
             const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
             
-              const isScrape = name === 'web_scrape' || name === 'Webfetch';
-              const readRange = name === 'Read' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
+              const isScrape = name === 'web_scrape' || name === 'fetch_url';
+              const readRange = name === 'read_file' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
               const node: ToolCallNode = {
                 id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
                 type: 'tool',
@@ -1813,25 +1814,25 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 toolName: name,
                 argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
                 icon: isScrape ? <Globe size={14} /> :
-                      name === 'Websearch' ? <Search size={14} /> :
-                      name === 'Grep_and_Glob' ? <Search size={14} /> :
-                      name === 'Read' ? <FileText size={14} /> :
-                      name === 'Edit_and_Write' ? <PenTool size={14} /> :
-                      name === 'Apply_patch' ? <PenTool size={14} /> :
-                      name === 'LSP_Experimental' ? <Code size={14} /> :
-                      name === 'Skill' ? <Sparkles size={14} /> :
-                      name === 'Todowrite' ? <Wrench size={14} /> :
-                      name === 'Question' ? <Sparkles size={14} /> :
-                      name === 'Create' ? <Sparkles size={14} /> :
-                      name === 'Delete' ? <Terminal size={14} /> :
-                      name === 'Rename' ? <PenTool size={14} /> :
+                      name === 'web_search' ? <Search size={14} /> :
+                      name === 'search_code' ? <Search size={14} /> :
+                      name === 'read_file' ? <FileText size={14} /> :
+                      name === 'write_file' ? <PenTool size={14} /> :
+                      name === 'edit_file' ? <PenTool size={14} /> :
+                      name === 'analyze_file' ? <Code size={14} /> :
+                      name === 'run_skill' ? <Sparkles size={14} /> :
+                      name === 'manage_todos' ? <Wrench size={14} /> :
+                      name === 'ask_user' ? <Sparkles size={14} /> :
+                      name === 'create_file' ? <Sparkles size={14} /> :
+                      name === 'delete_file' ? <Terminal size={14} /> :
+                      name === 'rename_file' ? <PenTool size={14} /> :
                       name.includes('grep') || name.includes('search') || name.includes('subtask') ? <Search size={14} /> :
                       name.includes('read') || name.includes('file') ? <FileText size={14} /> :
                       name.includes('edit') || name.includes('create') ? <PenTool size={14} /> :
                       <Sparkles size={14} />,
                 filePath: args.filePath || '',
-                addedCount: name === 'Edit_and_Write' ? (args.content ? args.content.split('\n').length : 15) : (name === 'Apply_patch' ? 45 : undefined),
-                removedCount: name === 'Edit_and_Write' ? 0 : (name === 'Apply_patch' ? 8 : undefined)
+                addedCount: name === 'write_file' ? (args.content ? args.content.split('\n').length : 15) : (name === 'edit_file' ? 45 : undefined),
+                removedCount: name === 'write_file' ? 0 : (name === 'edit_file' ? 8 : undefined)
               };
             currentCallNodes.push(node);
             toolCallNodes.push(node);
@@ -1858,11 +1859,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             let resultValue: any = null;
 
             try {
-              if (!isCoderMode && ['Edit_and_Write', 'Read', 'Grep_and_Glob', 'LSP_Experimental', 'Apply_patch', 'Skill', 'Todowrite', 'Webfetch', 'Websearch', 'Question', 'Create', 'Delete', 'Rename'].includes(name)) {
+              if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'search_code', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               }
               const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
-              if (name === 'Create') {
+              if (name === 'create_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 if (cleanedPath.includes('/') && !args.isDirectory) {
@@ -1879,7 +1880,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 });
                 resultValue = await createRes.json();
                 showToast(`Created ${cleanedPath}`);
-              } else if (name === 'Delete') {
+              } else if (name === 'delete_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 const delRes = await fetch('/api/fs/delete', {
@@ -1888,7 +1889,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 });
                 resultValue = await delRes.json();
                 showToast(`Deleted ${cleanedPath}`);
-              } else if (name === 'Rename') {
+              } else if (name === 'rename_file') {
                 const oldPath = args.filePath.replace(/^\/+/, '');
                 const newPath = args.newPath.replace(/^\/+/, '');
                 const fullOldPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${oldPath}` : `./${oldPath}`;
@@ -1899,7 +1900,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 });
                 resultValue = await moveRes.json();
                 showToast(`Renamed ${oldPath} → ${newPath}`);
-              } else if (name === 'Edit_and_Write') {
+              } else if (name === 'write_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 
@@ -1944,7 +1945,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   matchingNode.removedCount = diffValues.removed;
                 }
                 showToast(`Wrote ${cleanedPath}`);
-              } else if (name === 'Read') {
+              } else if (name === 'read_file') {
                 const cleanedPath = args.filePath.replace(/^\/+/, '');
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 const readBody: any = { filePath: fullPath, ...workspaceArg };
@@ -1959,7 +1960,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 resultValue = await readRes.json();
                 const range = args.offset ? ` [offset=${args.offset}${args.limit ? `, limit=${args.limit}` : ''}]` : '';
                 showToast(`Read ${cleanedPath}${range}`);
-              } else if (name === 'Grep_and_Glob') {
+              } else if (name === 'search_code') {
                 const maxResults = Math.max(1, Math.min(Number(args.maxResults || 30), 80));
                 const listRes = await fetch('/api/fs/list', {
                   method: 'POST',
@@ -2013,7 +2014,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   resultValue = { query, count: matches.length, matches };
                   showToast(`Found ${matches.length} match${matches.length === 1 ? '' : 'es'}`);
                 }
-              } else if (name === 'LSP_Experimental') {
+              } else if (name === 'analyze_file') {
                 const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
                 if (!cleanedPath) throw new Error("LSP_Experimental requires filePath");
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
@@ -2025,11 +2026,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 });
                 resultValue = await lspRes.json();
                 showToast(`LSP analyzed ${cleanedPath}`);
-              } else if (name === 'Apply_patch') {
+              } else if (name === 'edit_file') {
                 const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
                 const searchText = String(args.search || '');
                 const replaceText = String(args.replace ?? '');
-                if (!cleanedPath || !searchText) throw new Error("Apply_patch requires filePath and search");
+                if (!cleanedPath || !searchText) throw new Error("edit_file requires filePath and search");
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 const readRes = await fetch('/api/fs/read', {
                   method: 'POST',
@@ -2058,7 +2059,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 }
                 resultValue = { ...resultValue, replacements: args.all ? occurrences : 1 };
                 showToast(`Patched ${cleanedPath}`);
-              } else if (name === 'Skill') {
+              } else if (name === 'run_skill') {
                 const skillId = String(args.skillId || '');
                 const input = String(args.input || '');
                 const skill = SKILLS.find((s: any) => s.id === skillId);
@@ -2068,7 +2069,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   resultValue = { error: `Unknown skill: ${skillId}. Available: ${SKILLS.map((s: any) => s.id).join(', ')}` };
                 }
                 showToast(`Applied skill: ${skillId}`);
-              } else if (name === 'Todowrite') {
+              } else if (name === 'manage_todos') {
                 const action = String(args.action || '');
                 const items = (args.items || []).map((item: any, i: number) => ({
                   ...item,
@@ -2084,7 +2085,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   resultValue = { success: true, action: 'list', items: coderTodos };
                 }
                 showToast(`Todos: ${action} ${items.length} items`);
-              } else if (name === 'Webfetch') {
+              } else if (name === 'fetch_url') {
                 const targetUrl = args.url;
                 if (!targetUrl) throw new Error("Missing required 'url' parameter for Webfetch.");
                 setActiveScrapingJobs(prev => { const c = new Set(prev); c.add(tc.id); return c; });
@@ -2109,7 +2110,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                     content: processedText
                   };
                 }
-              } else if (name === 'Websearch') {
+              } else if (name === 'web_search') {
                 const searchQuery = String(args.query || '');
                 const maxRes = Math.min(Number(args.maxResults || 5), 10);
                 if (!searchQuery) throw new Error("Websearch requires query");
@@ -2128,7 +2129,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 } else {
                   resultValue = { error: 'No search API key configured. Configure Tavily or SerpAPI in Settings.' };
                 }
-              } else if (name === 'Question') {
+              } else if (name === 'ask_user') {
                 const qs = args.questions || [];
                 setAskAiQuestions(qs);
                 setCurrentQuestionIndex(0);
@@ -2767,7 +2768,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Error: Failed to connect to ${serverUrl}. Please check your API key and server configuration in Settings.`,
+        content: `Error: ${error?.message || 'Chat completion failed'}. Please check your API key, model, and server configuration in Settings.`,
         timestamp: new Date(),
       };
       setChats(prev => prev.map(chat => {

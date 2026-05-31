@@ -196,10 +196,9 @@ export function useLlamaBridge({
       let errorMsg = `Server returned status ${response.status}`;
       try {
         const parsed = JSON.parse(text);
-        errorMsg = parsed.error?.message || parsed.error || parsed.message || parsed.detail || errorMsg;
-        if (typeof errorMsg === 'object') {
-          errorMsg = JSON.stringify(errorMsg);
-        }
+        const baseMsg = parsed.error?.message || parsed.error || parsed.message || errorMsg;
+        const detail = parsed.detail ? (typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail)) : '';
+        errorMsg = detail ? `${baseMsg} — ${detail}` : (typeof baseMsg === 'object' ? JSON.stringify(baseMsg) : baseMsg);
       } catch {
         if (text.trim().startsWith('<')) {
           errorMsg = `Server error (HTML response with status ${response.status})`;

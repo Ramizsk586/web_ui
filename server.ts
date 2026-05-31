@@ -2479,10 +2479,19 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     if (systemPrompt) {
       apiMessages.push({ role: 'system', content: systemPrompt });
     }
-    apiMessages.push(...messages.map((m: any) => ({
-      role: m.role,
-      content: m.content
-    })));
+    apiMessages.push(...messages.map((m: any) => {
+      const msg: any = { role: m.role, content: m.content };
+      if (m.tool_calls && Array.isArray(m.tool_calls)) {
+        msg.tool_calls = m.tool_calls;
+      }
+      if (m.tool_call_id) {
+        msg.tool_call_id = m.tool_call_id;
+      }
+      if (m.name) {
+        msg.name = m.name;
+      }
+      return msg;
+    }));
 
     try {
       if (provider === 'anthropic' || provider === 'opencode') {

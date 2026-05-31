@@ -94,24 +94,21 @@ const humanizeToolName = (toolName?: string, rawLabel?: string) => {
   if (!toolName) return rawLabel || 'System action';
   const lower = toolName.toLowerCase();
   
-  if (lower === 'edit_coder_file') {
-    return 'Modify and upgrade template source file';
-  }
-  if (lower === 'create_coder_file') {
-    return 'Create new engineering component file';
-  }
-  if (lower === 'list_coder_files') {
-    return 'Query and analyze codebase project file tree';
-  }
-  if (lower === 'read_coder_file') {
-    return 'Inspect and parse file lines';
-  }
-  if (lower === 'delete_coder_file') {
-    return 'Remove deprecated files from directory';
-  }
-  if (lower === 'verify_changes') {
-    return 'Verify target changes';
-  }
+  if (lower === 'write_file') return 'Write file';
+  if (lower === 'edit_file') return 'Edit file';
+  if (lower === 'read_file') return 'Read file';
+  if (lower === 'search_code') return 'Search code';
+  if (lower === 'create_file') return 'Create file';
+  if (lower === 'delete_file') return 'Delete file';
+  if (lower === 'rename_file') return 'Rename file';
+  if (lower === 'analyze_file') return 'Analyze file';
+  if (lower === 'fetch_url') return 'Fetch URL';
+  if (lower === 'web_search') return 'Web search';
+  if (lower === 'ask_user') return 'Ask user';
+  if (lower === 'manage_todos') return 'Manage todos';
+  if (lower === 'run_skill') return 'Run skill';
+  if (lower === 'list_coder_files') return 'Query and analyze codebase project file tree';
+  if (lower === 'verify_changes') return 'Verify target changes';
   return rawLabel || toolName;
 };
 
@@ -437,7 +434,7 @@ export const NodeGraph = React.memo(({
           )}
 
           {displayNodes.map((node, i) => {
-            const isEditNode = node.toolName === 'edit_coder_file' || node.toolName === 'create_coder_file';
+            const isEditNode = node.toolName === 'write_file' || node.toolName === 'edit_file' || node.toolName === 'create_file';
             const isScriptNode = node.toolName === 'verify_changes' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
             const isCollapsedLocally = collapsedToolNodes[node.id] !== false;
             
