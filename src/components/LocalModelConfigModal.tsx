@@ -233,6 +233,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionState, setConnectionState] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle');
   const [copiedCommand, setCopiedCommand] = useState(false);
+  const [visionVerificationState, setVisionVerificationState] = useState<'idle' | 'verifying' | 'active' | 'inactive' | 'error'>('idle');
 
   // Auto-start state
   const [serverStarting, setServerStarting] = useState(false);
@@ -652,6 +653,37 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
       }
     } finally {
       setTestingConnection(false);
+    }
+  };
+
+  const handleVerifyVision = async () => {
+    setVisionVerificationState('verifying');
+    try {
+      const res = await fetch('/api/llama/verify-vision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: localHost, port: Number(localPort) }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.visionActive) {
+          setVisionVerificationState('active');
+          showToast(`Vision verified! Model response: "${data.modelResponse.trim()}"`);
+          localStorage.setItem(`lumina_server_mmproj_${model.id}`, 'true');
+        } else {
+          setVisionVerificationState('inactive');
+          showToast(`Vision failed: ${data.detail || data.error || 'Check that mmproj is loaded'}`);
+          localStorage.removeItem(`lumina_server_mmproj_${model.id}`);
+        }
+      } else {
+        setVisionVerificationState('error');
+        showToast('Vision verification request failed');
+      }
+    } catch (e: any) {
+      console.error(e);
+      setVisionVerificationState('error');
+      showToast(`Error connecting to verify endpoint: ${e.message}`);
     }
   };
 
@@ -1706,6 +1738,55 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
                     Override Active
                   </button>
                 </div>
+
+                {detectedCapabilities.isVision && connectionState === 'connected' && (
+                  <div className="mt-3 p-3.5 rounded-xl border border-dashed border-[var(--theme-border)] bg-[var(--theme-surface-alt)]/30 space-y-2.5 animate-fade-in">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-[var(--theme-primary)] flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        Vision Transduction Probe
+                      </span>
+                      
+                      {visionVerificationState === 'verifying' ? (
+                        <span className="text-[10px] text-amber-500 font-bold font-mono animate-pulse">Verifying...</span>
+                      ) : visionVerificationState === 'active' ? (
+                        <span className="text-[10px] text-emerald-500 font-bold font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/15">Active & Ready</span>
+                      ) : visionVerificationState === 'inactive' ? (
+                        <span className="text-[10px] text-red-500 font-bold font-mono bg-red-500/10 px-2 py-0.5 rounded border border-red-500/15">Inactive Projector</span>
+                      ) : (
+                        <span className="text-[10px] text-[var(--theme-muted)] font-mono">Not Probed</span>
+                      )}
+                    </div>
+                    
+                    <p className="text-[10px] text-[var(--theme-secondary)] leading-relaxed">
+                      Sends a solid 1x1 base64 red PNG probe request to test base LLM & projector compatibility.
+                    </p>
+                    
+                    <button
+                      onClick={handleVerifyVision}
+                      disabled={visionVerificationState === 'verifying'}
+                      className={`w-full text-center py-1.5 text-xs font-bold rounded-lg transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 ${
+                        visionVerificationState === 'active'
+                          ? 'bg-emerald-500/15 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/20'
+                          : 'bg-[var(--theme-accent,#3b82f6)] hover:bg-[var(--theme-accent,#3b82f6)]/90 text-white shadow-sm'
+                      }`}
+                    >
+                      {visionVerificationState === 'verifying' ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Testing Transduction...</span>
+                        </>
+                      ) : visionVerificationState === 'active' ? (
+                        <>
+                          <Check size={12} />
+                          <span>Vision Officially Active!</span>
+                        </>
+                      ) : (
+                        <span>Test Vision Pipeline</span>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

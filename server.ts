@@ -3518,6 +3518,56 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     }
   });
 
+  // Verify if a local server supports and has successfully activated vision processing
+  app.post("/api/llama/verify-vision", async (req, res) => {
+    const { host = '127.0.0.1', port = 1234 } = req.body;
+    const url = `http://${host}:${port}/v1/chat/completions`;
+    
+    // Tiny 1x1 solid red pixel base64 PNG
+    const probeImageBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    
+    try {
+      const response = await axios.post(url, {
+        model: "active-model",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What color is this 1x1 image? Respond in one word." },
+              { type: "image_url", image_url: { url: probeImageBase64 } }
+            ]
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 10
+      }, {
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const content = response.data?.choices?.[0]?.message?.content || "";
+      const isRed = content.toLowerCase().includes("red");
+      
+      res.json({
+        success: true,
+        visionActive: true,
+        isRed,
+        modelResponse: content
+      });
+    } catch (e: any) {
+      const errorMsg = e.response?.data 
+        ? (typeof e.response.data === 'object' ? JSON.stringify(e.response.data) : String(e.response.data)) 
+        : e.message;
+        
+      res.json({
+        success: false,
+        visionActive: false,
+        error: "Vision verification failed",
+        detail: errorMsg
+      });
+    }
+  });
+
   // Download a GGUF model from Hugging Face
   app.post("/api/models/download", async (req, res) => {
     const { modelId, fileName, publisher, modelFolder, modelFile } = req.body;

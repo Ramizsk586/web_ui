@@ -318,6 +318,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       content = content + docBlocks;
     }
 
+    const pendingImages: { title: string; url: string }[] = [];
     // Collect image files for multimodal LLM input and read text-only files
     const pendingImageDataUrls: string[] = [];
     console.log('[LUMINA_DEBUG] handleSend attachedFiles count:', attachedFiles.length);
@@ -333,6 +334,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
           });
           if (dataUrl) {
             pendingImageDataUrls.push(dataUrl);
+            pendingImages.push({ title: file.name, url: dataUrl });
             console.log('[LUMINA_DEBUG] Image converted to data URL, length:', dataUrl.length);
           }
         } else {
@@ -359,7 +361,8 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       role: 'user',
       content: content,
       timestamp: new Date(),
-      elementAttachments: [...localElementAttachments]
+      elementAttachments: [...localElementAttachments],
+      images: pendingImages.length > 0 ? pendingImages : undefined
     } as any;
 
     setAttachedFiles([]);
