@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { 
   Sidebar as SidebarIcon, 
@@ -15,7 +15,8 @@ import {
   Code, 
   Activity, 
   FileText, 
-  FileJson 
+  FileJson,
+  GitBranch
 } from 'lucide-react';
 import { CoderLeftExplorer } from '../CoderLeftExplorer';
 import { MessageItem } from '../Chat/MessageItem';
@@ -152,6 +153,8 @@ export default function CoderWorkspaceView({
 }: CoderWorkspaceViewProps) {
   
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('overview');
+  const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
 
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
@@ -304,15 +307,45 @@ export default function CoderWorkspaceView({
             </button>
 
             <button
-              onClick={() => setIsCoderRightPanelOpen(!isCoderRightPanelOpen)}
+              onClick={() => {
+                if (!isCoderRightPanelOpen) {
+                  setIsCoderRightPanelOpen(true);
+                  setRightPanelTab('review');
+                } else if (rightPanelTab === 'review') {
+                  setIsCoderRightPanelOpen(false);
+                } else {
+                  setRightPanelTab('review');
+                }
+              }}
               className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
-                isCoderRightPanelOpen 
+                isCoderRightPanelOpen && rightPanelTab === 'review'
                   ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
                   : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
               }`}
-              title={isCoderRightPanelOpen ? "Collapse App Live Preview" : "Expand App Live Preview"}
+              title={isCoderRightPanelOpen && rightPanelTab === 'review' ? "Collapse Changes Review" : "Expand Changes Review"}
             >
-              <Play size={14} className={isCoderRightPanelOpen ? 'animate-pulse text-[#D97756]' : ''} />
+              <GitBranch size={14} className={isCoderRightPanelOpen && rightPanelTab === 'review' ? 'text-[#D97756]' : ''} />
+            </button>
+
+            <button
+              onClick={() => {
+                if (!isCoderRightPanelOpen) {
+                  setIsCoderRightPanelOpen(true);
+                  setRightPanelTab('overview');
+                } else if (rightPanelTab === 'overview') {
+                  setIsCoderRightPanelOpen(false);
+                } else {
+                  setRightPanelTab('overview');
+                }
+              }}
+              className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+                isCoderRightPanelOpen && rightPanelTab === 'overview'
+                  ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
+                  : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
+              }`}
+              title={isCoderRightPanelOpen && rightPanelTab === 'overview' ? "Collapse App Live Preview" : "Expand App Live Preview"}
+            >
+              <Play size={14} className={isCoderRightPanelOpen && rightPanelTab === 'overview' ? 'animate-pulse text-[#D97756]' : ''} />
             </button>
           </div>
         </div>
@@ -463,6 +496,10 @@ export default function CoderWorkspaceView({
           rightIsInspectMode={rightIsInspectMode}
           setRightIsInspectMode={setRightIsInspectMode}
           startCoderPreview={startCoderPreview}
+          activeTab={rightPanelTab}
+          setActiveTab={setRightPanelTab}
+          openFileTabs={openFileTabs}
+          setOpenFileTabs={setOpenFileTabs}
         />
       </AnimatePresence>
 

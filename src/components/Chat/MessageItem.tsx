@@ -22,7 +22,7 @@ import remarkGfm from 'remark-gfm';
 import { Message, Artifact } from '../../types';
 import { ScrapeResult } from '../../services/scrapingService';
 import { CustomCodeBlockVisualizer, renderTextWithMath } from '../LuminaVisualizer';
-import { NodeGraph } from '../NodeGraph/NodeGraph';
+import { NodeGraph, InlineToolCallCard } from '../NodeGraph/NodeGraph';
 import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
@@ -72,6 +72,77 @@ export const MessageItem = React.memo(({
   const [copied, setCopied] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [textAnswer, setTextAnswer] = useState("");
+
+  const nonInlineToolCalls = useMemo(() => {
+    if (!message.toolCalls) return [];
+    return message.toolCalls.filter(node => !message.content?.includes(`[[tool_call:${node.id}]]`));
+  }, [message.toolCalls, message.content]);
+
+  const renderInlineContent = (content: string, isStreaming: boolean) => {
+    if (!content) return null;
+    const parts = content.split(/(\[\[tool_call:[a-zA-Z0-9_-]+\]\])/g);
+    const isLastPartToolCall = parts.length > 0 && !!parts[parts.length - 1].match(/^\[\[tool_call:[a-zA-Z0-9_-]+\]\]$/);
+    
+    return (
+      <>
+        {parts.map((part, idx) => {
+          const match = part.match(/^\[\[tool_call:([a-zA-Z0-9_-]+)\]\]$/);
+          if (match) {
+            const toolCallId = match[1];
+            const node = message.toolCalls?.find(n => n.id === toolCallId);
+            if (!node) {
+              return (
+                <div key={idx} className="my-2 p-3 border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl flex items-center gap-2">
+                  <Loader2 size={12} className="animate-spin text-emerald-500" />
+                  <span className="text-xs text-zinc-550 font-mono">Initializing tool execution...</span>
+                </div>
+              );
+            }
+            
+            return (
+              <div key={idx} className="my-3 w-full">
+                <InlineToolCallCard 
+                  node={node}
+                  scrapingResults={scrapingResults}
+                  wikiResults={wikiResults}
+                  onSendMessage={onSendMessage}
+                />
+              </div>
+            );
+          }
+          
+          if (!part.trim()) return null;
+          
+          const isLastPart = idx === parts.length - 1;
+          
+          return (
+            <span key={idx} className="block text-left">
+              <Markdown 
+                remarkPlugins={[remarkGfm]} 
+                components={messageComponents}
+              >
+                {part}
+              </Markdown>
+              {isStreaming && isLastPart && !isLastPartToolCall && (
+                <motion.span
+                  animate={{ opacity: [1, 0] }}
+                  transition={{ repeat: Infinity, duration: 0.6 }}
+                  className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle"
+                />
+              )}
+            </span>
+          );
+        })}
+        {isStreaming && isLastPartToolCall && (
+          <motion.span
+            animate={{ opacity: [1, 0] }}
+            transition={{ repeat: Infinity, duration: 0.6 }}
+            className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle mt-1"
+          />
+        )}
+      </>
+    );
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -391,9 +462,9 @@ export const MessageItem = React.memo(({
         </motion.div>
       ) : (
         <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-4xl xl:max-w-[1100px]">
-          {((message.toolCalls && message.toolCalls.length > 0) || (message.thinkContent !== undefined && message.thinkContent.length > 0) || message.searchQuery || message.isSearching) && (
+          {((nonInlineToolCalls && nonInlineToolCalls.length > 0) || (message.thinkContent !== undefined && message.thinkContent.length > 0) || message.searchQuery || message.isSearching) && (
             <NodeGraph 
-              nodes={message.toolCalls || []} 
+              nodes={nonInlineToolCalls} 
               isStreaming={message.isStreaming} 
               thinkContent={message.thinkContent}
               isStreamingThinking={message.isThinking}
@@ -413,20 +484,7 @@ export const MessageItem = React.memo(({
           )}
           <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined, paddingLeft: '-1px' }}>
             {message.content ? (
-              message.isStreaming ? (
-                <span className="streaming-content text-left block">
-                  <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
-                  <motion.span
-                    animate={{ opacity: [1, 0] }}
-                    transition={{ repeat: Infinity, duration: 0.6 }}
-                    className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle"
-                  />
-                </span>
-              ) : (
-                <>
-                  <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
-                </>
-              )
+              renderInlineContent(message.content, message.isStreaming)
             ) : message.isStreaming ? (
               <span className="text-zinc-400 animate-pulse text-left block">Generating...</span>
             ) : null}

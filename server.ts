@@ -44,6 +44,45 @@ async function startServer() {
     res.json({ status: 'ok', server: 'Lumina Web UI Server' });
   });
 
+  const getUpstreamErrorDetail = (e: any) => {
+    const raw = e?.response?.data ?? e?.message ?? String(e);
+    return typeof raw === 'string' ? raw : JSON.stringify(raw);
+  };
+
+  const getUpstreamErrorStatus = (e: any) => {
+    const status = Number(e?.response?.status);
+    if (status === 429) return 429;
+    if (status >= 400 && status < 500) return status;
+    const detail = getUpstreamErrorDetail(e).toLowerCase();
+    if (
+      detail.includes('rate_limit') ||
+      detail.includes('rate limit') ||
+      detail.includes('rate-limited') ||
+      detail.includes('too many requests') ||
+      detail.includes('quota exceeded')
+    ) {
+      return 429;
+    }
+    return 502;
+  };
+
+  const getRetryDelayMs = (e: any, fallbackMs: number) => {
+    const retryAfter = Number(e?.response?.headers?.['retry-after']);
+    if (Number.isFinite(retryAfter) && retryAfter > 0) {
+      return Math.min(30000, Math.ceil(retryAfter * 1000) + 500);
+    }
+    const detail = getUpstreamErrorDetail(e);
+    const match = detail.match(/try again in\s+([0-9.]+)\s*s/i) ||
+      detail.match(/retry(?:-after| after)?\s*:?\s*([0-9.]+)\s*s?/i);
+    if (match) {
+      const seconds = Number(match[1]);
+      if (Number.isFinite(seconds) && seconds > 0) {
+        return Math.min(30000, Math.ceil(seconds * 1000) + 500);
+      }
+    }
+    return fallbackMs;
+  };
+
   const getLuminaDataDir = () => {
     return process.env.LUMINA_DATA_DIR || path.join(os.homedir(), '.lumina');
   };
@@ -100,6 +139,51 @@ async function startServer() {
     fs.writeFileSync(audioPath, audioBuffer);
 
     try {
+      // Windows Auto-Heal: If whisper-cli.exe is missing, download prebuilt whisper.cpp binary
+      if (process.platform === 'win32') {
+        const whisperCppPath = path.join(process.cwd(), 'node_modules', 'nodejs-whisper', 'cpp', 'whisper.cpp');
+        const execName = 'whisper-cli.exe';
+        const possiblePaths = [
+          path.join(whisperCppPath, 'build', 'bin', execName),
+          path.join(whisperCppPath, 'build', 'bin', 'Release', execName),
+          path.join(whisperCppPath, 'build', 'bin', 'Debug', execName),
+          path.join(whisperCppPath, 'build', execName),
+          path.join(whisperCppPath, execName)
+        ];
+        const exists = possiblePaths.some(p => fs.existsSync(p));
+        if (!exists) {
+          console.log('[Lumina Server] Local Whisper CLI binary not found on Windows. Downloading prebuilt binary...');
+          const zipUrl = 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip';
+          const targetDir = path.join(whisperCppPath, 'build', 'bin', 'Release');
+          fs.mkdirSync(targetDir, { recursive: true });
+          const zipPath = path.join(whisperCppPath, 'whisper-bin-x64.zip');
+          
+          const response = await axios({
+            method: 'get',
+            url: zipUrl,
+            responseType: 'arraybuffer'
+          });
+          fs.writeFileSync(zipPath, response.data);
+          
+          const { execSync } = await import('child_process');
+          execSync(`powershell.exe -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${targetDir}' -Force"`);
+          fs.unlinkSync(zipPath);
+          
+          // The zip has a nested Release/ directory: move its content up one level if it exists
+          const nestedReleaseDir = path.join(targetDir, 'Release');
+          if (fs.existsSync(nestedReleaseDir) && fs.statSync(nestedReleaseDir).isDirectory()) {
+            const files = fs.readdirSync(nestedReleaseDir);
+            for (const file of files) {
+              const src = path.join(nestedReleaseDir, file);
+              const dest = path.join(targetDir, file);
+              fs.renameSync(src, dest);
+            }
+            fs.rmdirSync(nestedReleaseDir);
+          }
+          console.log('[Lumina Server] Prebuilt Whisper CLI binary downloaded and configured successfully.');
+        }
+      }
+
       const whisperModule: any = await import('nodejs-whisper');
       const nodewhisper = whisperModule.nodewhisper || whisperModule.default?.nodewhisper;
       if (typeof nodewhisper !== 'function') {
@@ -1300,8 +1384,8 @@ async function startServer() {
       }
       res.json(response.data);
     } catch (e: any) {
-      const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
-      res.status(502).json({ error: 'Bridge chat failed', detail });
+      const detail = getUpstreamErrorDetail(e);
+      res.status(getUpstreamErrorStatus(e)).json({ error: 'Bridge chat failed', detail });
     }
   });
 
@@ -1540,6 +1624,154 @@ async function startServer() {
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to move or rename", detail: e.message });
+    }
+  });
+
+  app.post("/api/git/changes", (req, res) => {
+    const { workspaceRoot } = req.body;
+    const targetDir = workspaceRoot ? path.resolve(workspaceRoot) : process.cwd();
+    
+    try {
+      const { execSync } = require('child_process');
+      let isGit = true;
+      try {
+        execSync('git rev-parse --is-inside-work-tree', { cwd: targetDir, stdio: 'ignore' });
+      } catch {
+        isGit = false;
+      }
+
+      if (!isGit) {
+        return res.json({ success: true, changes: [] });
+      }
+
+      const statusOutput = execSync('git status --porcelain', { cwd: targetDir, encoding: 'utf8' });
+      const lines = statusOutput.split('\n').filter(Boolean);
+      
+      let numstatMap = new Map<string, { added: number, removed: number }>();
+      try {
+        const numstatOutput = execSync('git diff --numstat', { cwd: targetDir, encoding: 'utf8' });
+        numstatOutput.split('\n').filter(Boolean).forEach(line => {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 3) {
+            const added = parseInt(parts[0], 10) || 0;
+            const removed = parseInt(parts[1], 10) || 0;
+            const file = parts[2];
+            numstatMap.set(file.replace(/\\/g, '/'), { added, removed });
+          }
+        });
+      } catch (err) {
+        console.warn('git diff --numstat failed:', err);
+      }
+
+      const changes = lines.map(line => {
+        const status = line.substring(0, 2);
+        const filePath = line.substring(3).trim().replace(/"/g, '');
+        const normPath = filePath.replace(/\\/g, '/');
+        
+        let fileStatus: 'modified' | 'added' | 'deleted' = 'modified';
+        let added = 0;
+        let removed = 0;
+        
+        if (status.includes('M')) {
+          fileStatus = 'modified';
+          const stats = numstatMap.get(normPath);
+          if (stats) {
+            added = stats.added;
+            removed = stats.removed;
+          }
+        } else if (status.includes('A') || status.includes('?')) {
+          fileStatus = 'added';
+          const fullPath = path.join(targetDir, normPath);
+          if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+            try {
+              const content = fs.readFileSync(fullPath, 'utf8');
+              added = content.split('\n').length;
+            } catch {
+              added = 0;
+            }
+          }
+        } else if (status.includes('D')) {
+          fileStatus = 'deleted';
+          const stats = numstatMap.get(normPath);
+          if (stats) {
+            removed = stats.removed;
+          }
+        }
+        
+        const lastSlash = normPath.lastIndexOf('/');
+        const fileName = lastSlash !== -1 ? normPath.substring(lastSlash + 1) : normPath;
+        const folder = lastSlash !== -1 ? normPath.substring(0, lastSlash) : '/';
+        
+        return {
+          filePath: normPath,
+          fileName,
+          folder,
+          status: fileStatus,
+          added,
+          removed
+        };
+      });
+      
+      res.json({ success: true, changes });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to get git changes", detail: e.message });
+    }
+  });
+
+  app.post("/api/git/diff", (req, res) => {
+    const { filePath, workspaceRoot } = req.body;
+    if (!filePath) {
+      return res.status(400).json({ error: "filePath is required" });
+    }
+    const targetDir = workspaceRoot ? path.resolve(workspaceRoot) : process.cwd();
+    const fullPath = path.resolve(targetDir, filePath);
+    
+    try {
+      const { execSync } = require('child_process');
+      let diffOutput = '';
+      
+      let isUntracked = false;
+      try {
+        const statusOutput = execSync(`git status --porcelain "${filePath}"`, { cwd: targetDir, encoding: 'utf8' });
+        isUntracked = statusOutput.startsWith('??');
+      } catch {
+        // ignore
+      }
+      
+      if (isUntracked) {
+        if (fs.existsSync(fullPath)) {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          const lines = content.split('\n');
+          diffOutput = [
+            `--- /dev/null`,
+            `+++ b/${filePath}`,
+            `@@ -0,0 +1,${lines.length} @@`,
+            ...lines.map(l => `+${l}`)
+          ].join('\n');
+        }
+      } else {
+        try {
+          diffOutput = execSync(`git diff --unified=3 -- "${filePath}"`, { cwd: targetDir, encoding: 'utf8' });
+          if (!diffOutput.trim()) {
+            diffOutput = execSync(`git diff --cached --unified=3 -- "${filePath}"`, { cwd: targetDir, encoding: 'utf8' });
+          }
+        } catch {
+          if (fs.existsSync(fullPath)) {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            const lines = content.split('\n');
+            diffOutput = [
+              `--- a/${filePath}`,
+              `+++ b/${filePath}`,
+              `@@ -0,0 +1,${lines.length} @@`,
+              ...lines.map(l => `+${l}`)
+            ].join('\n');
+          }
+        }
+      }
+      
+      res.json({ success: true, diff: diffOutput });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to get git diff", detail: e.message });
     }
   });
 
@@ -2579,15 +2811,16 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       }
 
       // Default: OpenAI-compatible streaming
+      const hasTools = tools && Array.isArray(tools) && tools.length > 0;
       const requestBody: any = {
         model: model || 'gpt-4o-mini',
         messages: apiMessages,
         stream: stream !== false,
-        max_tokens: 4096,
+        max_tokens: hasTools ? 2048 : 4096,
         temperature: 0.7
       };
 
-      if (tools && Array.isArray(tools) && tools.length > 0) {
+      if (hasTools) {
         requestBody.tools = tools;
         requestBody.tool_choice = 'auto';
       }
@@ -2618,7 +2851,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
 
             // Retry on rate limit (429) with exponential backoff
             if (toolChoiceError.response?.status === 429 && attempt < MAX_RETRIES) {
-              const delay = Math.pow(2, attempt) * 1000;
+              const delay = getRetryDelayMs(toolChoiceError, Math.pow(2, attempt) * 1000);
               console.warn(`Rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
               await wait(delay);
               continue;
@@ -2651,7 +2884,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
             } catch (retryError: any) {
               lastError = retryError;
               if (retryError.response?.status === 429 && attempt < MAX_RETRIES) {
-                const delay = Math.pow(2, attempt) * 1000;
+                const delay = getRetryDelayMs(retryError, Math.pow(2, attempt) * 1000);
                 console.warn(`Rate limited (429) on tool_choice fallback, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
                 await wait(delay);
                 continue;
@@ -2686,7 +2919,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         } catch (error: any) {
           lastError = error;
           if (error.response?.status === 429 && attempt < MAX_RETRIES) {
-            const delay = Math.pow(2, attempt) * 1000;
+            const delay = getRetryDelayMs(error, Math.pow(2, attempt) * 1000);
             console.warn(`Rate limited (429) on stream, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
             await wait(delay);
             continue;
@@ -2730,11 +2963,11 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       });
 
     } catch (e: any) {
-      const detail = e.response?.data ? JSON.stringify(e.response.data) : e.message;
+      const detail = getUpstreamErrorDetail(e);
       console.error('Chat API Error:', detail);
       // If streaming headers haven't been set yet, send JSON error
       if (!res.headersSent) {
-        res.status(502).json({ error: 'Chat completion failed', detail });
+        res.status(getUpstreamErrorStatus(e)).json({ error: 'Chat completion failed', detail });
       } else {
         res.end();
       }

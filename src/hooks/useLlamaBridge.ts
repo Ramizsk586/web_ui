@@ -21,6 +21,122 @@ function isRateLimitError(msg: string): boolean {
     lower.includes('quota exceeded');
 }
 
+function getRateLimitRetryMs(msg: string): number {
+  const match = msg.match(/try again in\s+([0-9.]+)\s*s/i) ||
+    msg.match(/retry(?:-after| after)?\s*:?\s*([0-9.]+)\s*s?/i);
+  if (!match) return 8000;
+  const seconds = Number(match[1]);
+  if (!Number.isFinite(seconds) || seconds <= 0) return 8000;
+  return Math.min(30000, Math.ceil(seconds * 1000) + 750);
+}
+
+function summarizeContentForLog(content: any): any {
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (part?.type === 'image_url') {
+        const url = part.image_url?.url || '';
+        return {
+          ...part,
+          image_url: {
+            ...part.image_url,
+            url: url.startsWith('data:')
+              ? `${url.substring(0, 80)}...[base64 ${url.length} chars]`
+              : url
+          }
+        };
+      }
+      return part;
+    });
+  }
+  return content;
+}
+
+function logLlmPayload(label: string, payload: {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  messages: any[];
+  tools?: any[];
+  stream?: boolean;
+}) {
+  try {
+    const safeMessages = (payload.messages || []).map((message, index) => {
+      const content = summarizeContentForLog(message.content);
+      const textLength = typeof message.content === 'string'
+        ? message.content.length
+        : JSON.stringify(content || '').length;
+
+      return {
+        index,
+        role: message.role,
+        textLength,
+        content,
+        tool_calls: message.tool_calls,
+        tool_call_id: message.tool_call_id,
+        name: message.name
+      };
+    });
+
+    const totalTextChars = safeMessages.reduce((sum, message) => sum + (message.textLength || 0), 0);
+    const toolNames = (payload.tools || []).map(tool => tool?.function?.name || tool?.name).filter(Boolean);
+
+    console.groupCollapsed(
+      `[LUMINA_LLM_PAYLOAD] ${label} -> ${payload.provider} / ${payload.model} ` +
+      `(${safeMessages.length} messages, ${totalTextChars} chars, ${toolNames.length} tools)`
+    );
+    console.log('Route:', label);
+    console.log('Provider:', payload.provider);
+    console.log('Model:', payload.model);
+    console.log('Base URL:', payload.baseUrl);
+    console.log('Stream:', payload.stream);
+    console.log('Tools:', toolNames);
+    console.log('Messages sent to LLM:', safeMessages);
+    console.log('Full request payload sent to LLM:', {
+      provider: payload.provider,
+      model: payload.model,
+      baseUrl: payload.baseUrl,
+      stream: payload.stream,
+      tools: payload.tools,
+      messages: safeMessages
+    });
+    console.groupEnd();
+  } catch (error) {
+    console.warn('[LUMINA_LLM_PAYLOAD] Failed to log outbound LLM payload:', error);
+  }
+}
+
+function compactToolSchema(schema: any): any {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    return schema;
+  }
+
+  const compact: any = {};
+  const allowedKeys = ['type', 'properties', 'required', 'items', 'enum', 'additionalProperties'];
+
+  for (const key of allowedKeys) {
+    if (schema[key] === undefined) continue;
+
+    if (key === 'properties' && schema.properties && typeof schema.properties === 'object') {
+      compact.properties = Object.fromEntries(
+        Object.entries(schema.properties).map(([propName, propSchema]) => [
+          propName,
+          compactToolSchema(propSchema)
+        ])
+      );
+      continue;
+    }
+
+    if (key === 'items') {
+      compact.items = compactToolSchema(schema.items);
+      continue;
+    }
+
+    compact[key] = schema[key];
+  }
+
+  return compact;
+}
+
 export function useLlamaBridge({
   serverUrl,
   apiKey,
@@ -46,17 +162,17 @@ export function useLlamaBridge({
     const parameters = tool.function?.parameters && typeof tool.function.parameters === 'object'
       ? tool.function.parameters
       : { type: 'object', properties: {}, required: [] };
+    const compactParameters = compactToolSchema({
+      type: parameters.type || 'object',
+      properties: parameters.properties || {},
+      required: Array.isArray(parameters.required) ? parameters.required : []
+    });
 
     return {
       type: 'function' as const,
       function: {
         name: tool.function.name,
-        description: tool.function.description || tool.function.name,
-        parameters: {
-          type: parameters.type || 'object',
-          properties: parameters.properties || {},
-          required: Array.isArray(parameters.required) ? parameters.required : []
-        }
+        parameters: compactParameters
       }
     };
   });
@@ -149,6 +265,14 @@ export function useLlamaBridge({
       if (messagesPrompt.some(m => Array.isArray(m.content))) {
         console.log('[LUMINA_DEBUG] Bridge path has array content messages');
       }
+      logLlmPayload('BRIDGE PATH', {
+        provider: 'llama-bridge',
+        model: selectedLlamaModel,
+        baseUrl,
+        messages: messagesPrompt,
+        tools: requestTools,
+        stream: false
+      });
       const response = await fetch('/api/bridge/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -358,8 +482,16 @@ export function useLlamaBridge({
         console.log('[LUMINA_DEBUG] Has vision content:', hasVisionContent);
         if (hasVisionContent) {
           const visionMsg = messagesPrompt.find(m => Array.isArray(m.content));
-          console.log('[LUMINA_DEBUG] Vision message content types:', visionMsg?.content?.map((c: any) => c.type));
+            console.log('[LUMINA_DEBUG] Vision message content types:', visionMsg?.content?.map((c: any) => c.type));
         }
+        logLlmPayload('LOCAL DIRECT PATH', {
+          provider: 'local-llama.cpp',
+          model: activeModelId,
+          baseUrl: localUrl,
+          messages: messagesPrompt,
+          tools: [],
+          stream: false
+        });
         const response = await fetch(`${localUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -457,7 +589,15 @@ export function useLlamaBridge({
     console.log('[LUMINA_DEBUG] Provider:', selectedProvider, 'Base URL:', baseUrl);
     const hasArrayContent = messagesPrompt.some(m => Array.isArray(m.content));
     console.log('[LUMINA_DEBUG] Has array content in messages:', hasArrayContent);
-    const response = await fetch('/api/chat', {
+    logLlmPayload('/api/chat FALLBACK PATH', {
+      provider: selectedProvider,
+      model: activeModelId,
+      baseUrl,
+      messages: messagesPrompt,
+      tools: requestTools,
+      stream: false
+    });
+    const makeFallbackRequest = () => fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -473,6 +613,8 @@ export function useLlamaBridge({
       }),
       signal,
     });
+
+    let response = await makeFallbackRequest();
 
     if (!response.ok) {
       const text = await response.text();
@@ -490,6 +632,15 @@ export function useLlamaBridge({
         }
       }
       if (isRateLimitError(errorMsg)) {
+        const retryMs = getRateLimitRetryMs(errorMsg);
+        if (!signal?.aborted && retryMs > 0) {
+          showToast(`Rate limited. Retrying in ${Math.ceil(retryMs / 1000)}s...`);
+          await new Promise(resolve => setTimeout(resolve, retryMs));
+          response = await makeFallbackRequest();
+          if (response.ok) {
+            return response.json();
+          }
+        }
         throw new Error(`Rate limited: ${errorMsg}. Try waiting, adding your own API key in Settings, or switching to a different model.`);
       }
       throw new Error(errorMsg);

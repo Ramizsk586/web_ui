@@ -31,6 +31,47 @@ import {
   wikiGetRelated
 } from '../services/wikiService';
 
+const compressToolResultForApi = (name: string, result: any): string => {
+  if (!result) return '';
+  const str = typeof result === 'string' ? result : JSON.stringify(result);
+  
+  if (str.length <= 2500) {
+    return str;
+  }
+  
+  if (name === 'read_file') {
+    return `${str.substring(0, 2000)}\n\n... [Content truncated to save token rate limits. Total length: ${str.length} characters]`;
+  }
+  
+  if (name === 'run_command') {
+    if (typeof result === 'object' && result) {
+      const stdout = result.stdout || '';
+      const stderr = result.stderr || '';
+      const exitCode = result.exitCode ?? 0;
+      
+      const truncStdout = stdout.length > 1500 
+        ? `${stdout.substring(0, 800)}\n... [truncated] ...\n${stdout.substring(stdout.length - 700)}`
+        : stdout;
+      const truncStderr = stderr.length > 1000 
+        ? `${stderr.substring(0, 500)}\n... [truncated] ...\n${stderr.substring(stderr.length - 500)}`
+        : stderr;
+        
+      return JSON.stringify({
+        exitCode,
+        stdout: truncStdout,
+        stderr: truncStderr,
+        info: `[Output truncated to save Groq TPM rate limits. Total stdout: ${stdout.length} chars, stderr: ${stderr.length} chars]`
+      });
+    }
+  }
+  
+  if (name === 'web_scrape' || name === 'fetch_url') {
+    return `${str.substring(0, 2000)}\n\n... [Webpage content truncated to save token rate limits. Total length: ${str.length} characters]`;
+  }
+  
+  return `${str.substring(0, 2500)}\n\n... [Truncated to save token rate limits]`;
+};
+
 export interface UseAppHandlersParams {
   input: string;
   setInput: (v: string) => void;
@@ -407,7 +448,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
             : (isWebSearchEnabled ? 'Searching the web...' : `${persona.name} - thinking...`),
           type: 'ai',
           status: 'active',
-          icon: isCoderPlanning ? React.createElement(LuminaToolCallingAnimation) : (isWebSearchEnabled ? React.createElement(Globe, { size: 14 }) : React.createElement(Sparkles, { size: 14 }))
+          icon: isCoderPlanning ? 'manage_todos' : (isWebSearchEnabled ? 'globe' : 'sparkles')
         }
       ]
     };
@@ -491,7 +532,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                 type: 'tool',
                 status: 'active',
                 toolName: 'manage_todos',
-                icon: React.createElement(LuminaToolCallingAnimation),
+                icon: 'manage_todos',
                 resultSummary: 'planning workspace steps'
               },
               {
@@ -499,7 +540,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                 label: `${persona.name} - preparing agent path`,
                 type: 'ai',
                 status: 'active',
-                icon: React.createElement(Sparkles, { size: 14 })
+                icon: 'sparkles'
               }
             ]
           } : m)
@@ -539,7 +580,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                       type: 'tool',
                       status: 'complete',
                       toolName: 'manage_todos',
-                      icon: React.createElement(Check, { size: 14 }),
+                      icon: 'check',
                       resultSummary: `${mapped.length} tasks prepared`
                     },
                     {
@@ -547,7 +588,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                       label: `${persona.name} - starting tool execution`,
                       type: 'ai',
                       status: 'active',
-                      icon: React.createElement(LuminaToolCallingAnimation)
+                      icon: 'terminal'
                     }
                   ]
                 } : m)
@@ -577,7 +618,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                   type: 'tool',
                   status: 'complete',
                   toolName: 'manage_todos',
-                  icon: React.createElement(Check, { size: 14 }),
+                  icon: 'check',
                   resultSummary: '3 tasks prepared'
                 },
                 {
@@ -585,7 +626,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                   label: `${persona.name} - starting tool execution`,
                   type: 'ai',
                   status: 'active',
-                  icon: React.createElement(LuminaToolCallingAnimation)
+                  icon: 'terminal'
                 }
               ]
             } : m)
@@ -903,6 +944,20 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                 required: ['filePath', 'newPath']
               }
             }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'run_command',
+              description: 'Run a shell/terminal command in the workspace. Suitable for running tests, build scripts, installing packages, or general shell commands.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  command: { type: 'string', description: 'The command line string to execute.' }
+                },
+                required: ['command']
+              }
+            }
           }
         );
       }
@@ -927,8 +982,13 @@ export function useAppHandlers(params: UseAppHandlersParams) {
 You are a software engineering agent. When asked to build/modify code:
 1. Use tools to make real file system changes. Always 'read_file' before editing.
 2. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
-3. Use 'search_code' to find symbols/errors. Use 'create_file'/'delete_file'/'rename_file' for file ops.
-4. Work in tool-call cycles until the task is complete. Give a summary when done.`;
+3. Use 'search_code' to find symbols/errors. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
+4. Work in tool-call cycles until the task is complete. Give a summary when done.
+
+[ASK USER TOOL INSTRUCTIONS]
+- Do NOT call 'ask_user' to ask trivial or basic questions (e.g. asking for file paths, project names, or generic things you can check yourself using tools like 'search_code', 'read_file', or by running commands).
+- Only ask clarifying questions if there is a critical ambiguity in the requirements that prevents you from proceeding.
+- When calling 'ask_user', prefer using 'single_choice', 'multi_choice', or 'confirm' types and provide clear, actionable selectable options (e.g., in the 'options' field) rather than open-ended 'text_input'. This provides a premium, interactive experience.`;
 
           if (activeAssistantMode === 'builder') {
             systemPrompt += `\n[MODE: BUILDER] Implement features, create files, write working code.`;
@@ -1148,27 +1208,28 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             const node: ToolCallNode = {
               id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
               type: 'tool',
-              label: isScrape ? `Web Scraper (${args.url})` : `${name} ${args.filePath ? `(${args.filePath})` : ''}${readRange}`,
+              label: isScrape ? `Web Scraper (${args.url})` : name === 'run_command' ? `Terminal command (${args.command})` : `${name} ${args.filePath ? `(${args.filePath})` : ''}${readRange}`,
               status: 'active',
               toolName: name,
               argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
-              icon: isScrape ? React.createElement(Globe, { size: 14 }) :
-                    name === 'web_search' ? React.createElement(Search, { size: 14 }) :
-                    name === 'search_code' ? React.createElement(Search, { size: 14 }) :
-                    name === 'read_file' ? React.createElement(FileText, { size: 14 }) :
-                    name === 'write_file' ? React.createElement(PenTool, { size: 14 }) :
-                    name === 'edit_file' ? React.createElement(PenTool, { size: 14 }) :
-                    name === 'analyze_file' ? React.createElement(Code, { size: 14 }) :
-                    name === 'run_skill' ? React.createElement(Sparkles, { size: 14 }) :
-                    name === 'manage_todos' ? React.createElement(Wrench, { size: 14 }) :
-                    name === 'ask_user' ? React.createElement(Sparkles, { size: 14 }) :
-                    name === 'create_file' ? React.createElement(Sparkles, { size: 14 }) :
-                    name === 'delete_file' ? React.createElement(Terminal, { size: 14 }) :
-                    name === 'rename_file' ? React.createElement(PenTool, { size: 14 }) :
-                    name.includes('grep') || name.includes('search') || name.includes('subtask') ? React.createElement(Search, { size: 14 }) :
-                    name.includes('read') || name.includes('file') ? React.createElement(FileText, { size: 14 }) :
-                    name.includes('edit') || name.includes('create') ? React.createElement(PenTool, { size: 14 }) :
-                    React.createElement(Sparkles, { size: 14 }),
+              icon: isScrape ? 'globe' :
+                    name === 'web_search' ? 'search' :
+                    name === 'search_code' ? 'search' :
+                    name === 'read_file' ? 'file' :
+                    name === 'write_file' ? 'write' :
+                    name === 'edit_file' ? 'edit' :
+                    name === 'analyze_file' ? 'code' :
+                    name === 'run_skill' ? 'sparkles' :
+                    name === 'manage_todos' ? 'wrench' :
+                    name === 'ask_user' ? 'sparkles' :
+                    name === 'create_file' ? 'sparkles' :
+                    name === 'delete_file' ? 'terminal' :
+                    name === 'rename_file' ? 'edit' :
+                    name === 'run_command' ? 'terminal' :
+                    name.includes('grep') || name.includes('search') || name.includes('subtask') ? 'search' :
+                    name.includes('read') || name.includes('file') ? 'file' :
+                    name.includes('edit') || name.includes('create') ? 'edit' :
+                    'sparkles',
               filePath: args.filePath || '',
               addedCount: name === 'write_file' ? (args.content ? args.content.split('\n').length : 15) : (name === 'edit_file' ? 45 : undefined),
               removedCount: name === 'write_file' ? 0 : (name === 'edit_file' ? 8 : undefined)
@@ -1177,12 +1238,16 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             toolCallNodes.push(node);
           }
 
+          const currentPlaceholders = currentCallNodes.map(node => `[[tool_call:${node.id}]]`).join('\n\n');
+          agentTraceContent += `${agentTraceContent ? '\n\n' : ''}${currentPlaceholders}`;
+
           setChats(prev => prev.map(chat => {
             if (chat.id === chatId) {
               return {
                 ...chat,
                 messages: chat.messages.map(m => m.id === thinkingId ? {
                   ...m,
+                  content: `${m.content || ''}${m.content ? '\n\n' : ''}${currentPlaceholders}`,
                   toolCalls: [...toolCallNodes]
                 } : m)
               };
@@ -1198,7 +1263,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             let resultValue: any = null;
 
             try {
-              if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'search_code', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file'].includes(name)) {
+              if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'search_code', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               }
               const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
@@ -1467,6 +1532,32 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   resultValue = { query: searchQueryVal, provider: searchData.provider, count: sliced.length, results: sliced };
                 } else {
                   resultValue = { error: 'No search API key configured. Configure Tavily or SerpAPI in Settings.' };
+                }
+              } else if (name === 'run_command') {
+                const commandText = args.command;
+                if (!commandText) throw new Error("run_command requires command parameter");
+                showToast(`Running: ${commandText.substring(0, 30)}...`);
+                const runRes = await fetch('/api/terminal/execute', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ command: commandText, currentPath: coderWorkspacePath }),
+                  signal
+                });
+                if (!runRes.ok) {
+                  const errText = await runRes.text();
+                  throw new Error(`Command execution error: ${errText}`);
+                }
+                const runData = await runRes.json();
+                resultValue = {
+                  exitCode: runData.exitCode,
+                  stdout: runData.stdout,
+                  stderr: runData.stderr
+                };
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = runData.exitCode === 0
+                    ? 'Command completed successfully (exit code 0)'
+                    : `Command failed with exit code ${runData.exitCode}`;
                 }
               } else if (name === 'ask_user') {
                 const qs = args.questions || [];
@@ -1761,7 +1852,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
               role: 'tool',
               tool_call_id: tc.id,
               name: name,
-              content: JSON.stringify(resultValue)
+              content: compressToolResultForApi(name, resultValue)
             });
 
             setChats(prev => prev.map(chat => {
@@ -1795,6 +1886,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
         triggerWorkspaceRefresh();
       } else {
         if (Array.isArray(toolCallsRaw) && toolCallsRaw.length > 0) {
+          const chatPlaceholders = toolCallsRaw.map((tc: any, idx: number) => {
+            return `[[tool_call:${tc.id || `tc-${idx}`}]]`;
+          }).join('\n\n');
+          agentTraceContent = chatPlaceholders;
+
           toolCallsRaw.forEach((tc: any, idx: number) => {
             const fn = tc.function || {};
             const name = fn.name || 'unknown';
@@ -1807,22 +1903,26 @@ Store contract files at .lumina/contracts/ in the workspace.`;
               status: 'complete',
               argsCount: typeof args === 'object' && Object.keys(args).length === 0 ? 0 : Object.keys(args).length,
               toolName: name,
-              icon: name.includes('search') || name.includes('research') ? React.createElement(Search, { size: 14 }) :
-                    name.includes('wikipedia') ? React.createElement(Globe, { size: 14 }) :
-                    name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs') ? React.createElement(FileText, { size: 14 }) :
-                    name.includes('write') || name.includes('edit') ? React.createElement(PenTool, { size: 14 }) :
-                    name.includes('github') ? React.createElement(Box, { size: 14 }) :
-                    name.includes('weather') ? React.createElement(CloudMoon, { size: 14 }) :
-                    React.createElement(Sparkles, { size: 14 })
+              icon: name.includes('search') || name.includes('research') ? 'search' :
+                    name.includes('wikipedia') || name.includes('globe') ? 'globe' :
+                    name.includes('read') || name.includes('view') || name.includes('file') || name.includes('fs') ? 'file' :
+                    name.includes('write') || name.includes('edit') ? 'edit' :
+                    name.includes('github') || name.includes('box') ? 'box' :
+                    name.includes('weather') || name.includes('cloud') ? 'cloud' :
+                    name.includes('shell') || name.includes('terminal') ? 'terminal' :
+                    name.includes('manage_todos') || name.includes('wrench') ? 'wrench' :
+                    name.includes('git-branch') || name.includes('git') ? 'git' :
+                    'sparkles'
             });
           });
         }
       }
 
       const responseContent = choice?.content;
+      const hasAskUser = toolCallsRaw && toolCallsRaw.some((tc: any) => tc.function?.name === 'ask_user');
       const finalContent = [agentTraceContent, responseContent]
         .filter((part, idx, arr) => part && (idx === 0 || part !== arr[0]))
-        .join('\n\n') || (toolCallsRaw?.length > 0 ? `Running ${toolCallsRaw.length} tool(s)...` : '');
+        .join('\n\n') || (toolCallsRaw?.length > 0 && !hasAskUser ? `Running ${toolCallsRaw.length} tool(s)...` : '');
       
       const scavengedImages: any[] = [];
       toolCallNodes.forEach(tc => {
@@ -1901,7 +2001,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
           type: 'sub-tool',
           label: 'injected search context',
           status: 'complete',
-          icon: React.createElement(Globe, { size: 12 }),
+          icon: 'globe',
           resultSummary: `${searchResults.length} result${searchResults.length > 1 ? 's' : ''} grounded`
         });
       }
@@ -1912,7 +2012,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
           type: 'sub-tool',
           label: `applied style: ${writingStyle}`,
           status: 'complete',
-          icon: React.createElement(Sparkles, { size: 12 })
+          icon: 'sparkles'
         });
       }
 
@@ -1923,7 +2023,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
           type: 'result',
           label: `output generated`,
           status: 'complete',
-          icon: React.createElement(Sparkles, { size: 12 }),
+          icon: 'sparkles',
           resultSummary: `~${approxTokens} tokens`
         });
       }
@@ -1948,7 +2048,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
         type: 'ai',
         label: synthLabel,
         status: 'complete',
-        icon: React.createElement(Sparkles, { size: 12 }),
+        icon: 'sparkles',
         subNodes: synthesisSubNodes.length > 0 ? synthesisSubNodes : undefined,
         resultSummary: synthesisSubNodes.length > 0
           ? `${synthesisSubNodes.length} sub-step${synthesisSubNodes.length > 1 ? 's' : ''} completed`
