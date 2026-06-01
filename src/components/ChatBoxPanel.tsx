@@ -100,7 +100,6 @@ export interface ChatBoxPanelProps {
   setLocalElementAttachments: React.Dispatch<React.SetStateAction<any[]>>;
   attachedUrlDocs: any[];
   setAttachedUrlDocs: React.Dispatch<React.SetStateAction<any[]>>;
-  isOcrProcessing: boolean;
   setAttachmentContextMenu: (ctx: any) => void;
   setSelectedModalAttachment: (att: any) => void;
   setTranscriptionOptionsDoc: (doc: any) => void;
@@ -220,7 +219,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   setLocalElementAttachments,
   attachedUrlDocs,
   setAttachedUrlDocs,
-  isOcrProcessing,
   setAttachmentContextMenu,
   setSelectedModalAttachment,
   setTranscriptionOptionsDoc,
@@ -393,11 +391,19 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
         )}
       </AnimatePresence>
 
-      <div className={`relative border border-[var(--theme-input-border)] bg-[var(--theme-input-bg)] focus-within:border-[var(--theme-accent)]/40 overflow-visible flex flex-col p-2 min-h-[100px] justify-between transition-all duration-300 shadow-[0_12px_45px_rgba(0,0,0,0.6)] ${
-        isCenteredState 
-          ? 'rounded-[24px] border-[var(--theme-input-border)] z-10' 
-          : 'rounded-[24px] border-[var(--theme-input-border)] z-10'
-      }`}>
+      <div
+        className={`relative border border-[var(--theme-input-border)] bg-[var(--theme-input-bg)] focus-within:border-[var(--theme-accent)]/40 overflow-visible flex flex-col p-2 min-h-[100px] justify-between transition-all duration-300 shadow-[0_12px_45px_rgba(0,0,0,0.6)] cursor-text ${
+          isCenteredState
+            ? 'rounded-[24px] border-[var(--theme-input-border)] z-10'
+            : 'rounded-[24px] border-[var(--theme-input-border)] z-10'
+        }`}
+        onClick={(e) => {
+          // Forward clicks on the padding area to the textarea
+          if ((e.target as HTMLElement) === e.currentTarget) {
+            if (inputRef && 'current' in inputRef) inputRef.current?.focus();
+          }
+        }}
+      >
 
         {/* Nested Panel: Todo Checklist Strategy */}
         <AnimatePresence>
@@ -772,7 +778,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
         </AnimatePresence>
 
         <div className="flex-1 px-3 pt-2">
-          {(attachedFiles.length > 0 || localElementAttachments.length > 0 || attachedUrlDocs.length > 0 || isOcrProcessing) && (
+          {(attachedFiles.length > 0 || localElementAttachments.length > 0 || attachedUrlDocs.length > 0) && (
             <div className="flex flex-wrap gap-2 pt-1 pb-3 items-center">
               {attachedFiles.map((file, idx) => {
                 const isImage = file.type.startsWith('image/');
@@ -865,18 +871,12 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     setTranscriptionOptionsDoc(doc);
                   }}
                   className="relative flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 active:scale-95 border border-blue-500/30 text-blue-300 text-xs font-semibold shrink-0 max-w-[210px] font-sans transition-all cursor-pointer animate-fade-in"
-                  title={doc.isOcr ? `Click to view or edit OCR text for: ${doc.title}` : "Click to open or view in virtual code editor"}
+                  title="Click to open or view in virtual code editor"
                 >
-                  {doc.isOcr ? (
-                    doc.favicon ? (
-                      <img src={doc.favicon} alt="" className="w-5 h-5 rounded object-cover shrink-0 border border-blue-500/40" referrerPolicy="no-referrer" />
-                    ) : (
-                      <Sparkles size={11} className="shrink-0 text-blue-400 animate-pulse" />
-                    )
-                  ) : doc.favicon ? (
+                  {doc.favicon ? (
                     <img src={doc.favicon} alt="" className="w-4 h-4 rounded-sm shrink-0" referrerPolicy="no-referrer" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                   ) : null}
-                  {!doc.isOcr && <LinkIcon size={12} className="shrink-0 text-blue-400" />}
+                  <LinkIcon size={12} className="shrink-0 text-blue-400" />
                   <span className="truncate">{doc.title.slice(0, 30) || doc.url}</span>
                   <button
                     type="button"
@@ -890,19 +890,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                   </button>
                 </motion.div>
               ))}
-
-              {isOcrProcessing && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-blue-500/30 bg-blue-500/5 text-blue-300 h-10 shadow-sm shrink-0 animate-pulse font-sans"
-                >
-                  <Sparkles size={13} className="animate-spin text-blue-400" />
-                  <div className="flex flex-col text-left">
-                    <span className="text-[10px] font-bold">OCR Transcribing...</span>
-                  </div>
-                </motion.div>
-              )}
             </div>
           )}
 
@@ -1144,7 +1131,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                   : "Trace syntax errors, explain complex codes, or hot-fix bugs..."
             }
             rows={1}
-            className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[16px] p-0 resize-none min-h-[40px] text-[var(--theme-primary)] placeholder-zinc-500/70 scroll-none"
+            className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[16px] p-0 resize-none min-h-[40px] text-[var(--theme-primary)] placeholder-zinc-500/70 scroll-none cursor-text pointer-events-auto"
           />
         </div>
         

@@ -64,9 +64,6 @@ export default defineConfig(({mode}) => {
               if (id.includes('react-syntax-highlighter') || id.includes('prismjs')) {
                 return 'syntax-highlighter-pkg';
               }
-              if (id.includes('tesseract.js')) {
-                return 'ocr-tesseract-engine';
-              }
               if (id.includes('react-markdown') || id.includes('remark-') || id.includes('turndown') || id.includes('cheerio')) {
                 return 'content-parsers-suite';
               }

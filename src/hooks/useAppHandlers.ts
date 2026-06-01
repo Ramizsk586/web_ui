@@ -85,8 +85,6 @@ export interface UseAppHandlersParams {
   transcriptToolError: string | null;
   setTranscriptToolError: (v: string | null) => void;
   setTranscriptionOptionsDoc: (v: any) => void;
-  isOcrProcessing: boolean;
-  setIsOcrProcessing: (v: boolean) => void;
   setActiveArtifact: (v: any) => void;
   setIsCanvasOpen: (v: boolean) => void;
   setCanvasView: (v: any) => void;
@@ -186,7 +184,6 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     transcriptToolLoading, setTranscriptToolLoading,
     transcriptToolError, setTranscriptToolError,
     setTranscriptionOptionsDoc,
-    isOcrProcessing, setIsOcrProcessing,
     setActiveArtifact, setIsCanvasOpen, setCanvasView,
     showToast,
     isCoderMode, setIsCoderMode,
@@ -321,17 +318,32 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       content = content + docBlocks;
     }
 
-    // Read attached files (non-image) into content
+    // Collect image files for multimodal LLM input and read text-only files
+    const pendingImageDataUrls: string[] = [];
+    console.log('[LUMINA_DEBUG] handleSend attachedFiles count:', attachedFiles.length);
     if (attachedFiles.length > 0) {
       const fileBlocks: string[] = [];
       for (const file of attachedFiles) {
-        const isLikelyBinary = file.type && !file.type.startsWith('text/') &&
-          !/\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh)$/i.test(file.name);
-        if (!isLikelyBinary && file.size < 2 * 1024 * 1024) {
-          const fileContent = await file.text();
-          fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${fileContent}\n[END FILE]`);
+        if (file.type.startsWith('image/')) {
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(file);
+          });
+          if (dataUrl) {
+            pendingImageDataUrls.push(dataUrl);
+            console.log('[LUMINA_DEBUG] Image converted to data URL, length:', dataUrl.length);
+          }
         } else {
-          fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+          const isLikelyBinary = file.type && !file.type.startsWith('text/') &&
+            !/\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh)$/i.test(file.name);
+          if (!isLikelyBinary && file.size < 2 * 1024 * 1024) {
+            const fileContent = await file.text();
+            fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${fileContent}\n[END FILE]`);
+          } else {
+            fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+          }
         }
       }
       content = content + fileBlocks.join('');
@@ -994,10 +1006,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
       }
 
       const recentContext = isCoderMode ? chatContext.slice(-4) : chatContext;
+      const hasPendingImages = pendingImageDataUrls.length > 0;
       const apiMessages = [
         { role: 'system', content: systemPrompt },
         ...([...recentContext, userMessage]
-          .filter(m => (m.content && m.content.trim().length > 0) || (m.elementAttachments && m.elementAttachments.length > 0))
+          .filter(m => (m.content && m.content.trim().length > 0) || (m.elementAttachments && m.elementAttachments.length > 0) || hasPendingImages)
           .map(m => {
             let text = m.content || '';
             if (m.elementAttachments && m.elementAttachments.length > 0) {
@@ -1012,7 +1025,41 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             };
           }))
       ];
+
+      // Attach images as multimodal content to the last user message
+      if (pendingImageDataUrls.length > 0) {
+        const userMsgIdx = apiMessages.length - 1;
+        console.log('[LUMINA_DEBUG] Attaching', pendingImageDataUrls.length, 'images to apiMessages index', userMsgIdx);
+        console.log('[LUMINA_DEBUG] apiMessages[userMsgIdx] role:', apiMessages[userMsgIdx]?.role);
+        if (apiMessages[userMsgIdx]?.role === 'user') {
+          const textContent = apiMessages[userMsgIdx].content || '';
+          const contentParts: any[] = [];
+          if (textContent) {
+            contentParts.push({ type: 'text', text: textContent });
+          }
+          contentParts.push(...pendingImageDataUrls.map(url => ({ type: 'image_url', image_url: { url } })));
+          (apiMessages[userMsgIdx] as any).content = contentParts;
+          console.log('[LUMINA_DEBUG] Content array length:', (apiMessages[userMsgIdx] as any).content.length);
+          console.log('[LUMINA_DEBUG] Content types:', (apiMessages[userMsgIdx] as any).content.map((c: any) => c.type));
+        }
+      }
       
+      // Log the final apiMessages structure (truncate base64)
+      if (pendingImageDataUrls.length > 0) {
+        const logSafe = JSON.parse(JSON.stringify(apiMessages));
+        for (const msg of logSafe) {
+          if (Array.isArray(msg.content)) {
+            msg.content = msg.content.map((c: any) => {
+              if (c.type === 'image_url' && c.image_url?.url) {
+                return { type: 'image_url', image_url: { url: c.image_url.url.substring(0, 80) + '...[truncated]' } };
+              }
+              return c;
+            });
+          }
+        }
+        console.log('[LUMINA_DEBUG] Final apiMessages structure:', JSON.stringify(logSafe, null, 2));
+      }
+
       // Direct call to Llama Bridge
       let rawResponse: any = await callLlamaBridge(apiMessages, activeTools, signal);
 
@@ -2161,36 +2208,22 @@ Store contract files at .lumina/contracts/ in the workspace.`;
   const ensureScrapedFilesOnDisk = async (doc: any) => {
     if (!doc.id) return;
     const docId = doc.id;
-    const isOcr = !!doc.isOcr;
     const title = doc.title;
     const url = doc.url;
     const text = doc.content;
     
-    const rawTitle = isOcr ? url.replace(/^\[OCR Image Attachment\]:\s*/, '') : title;
-    const safeTitle = rawTitle.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
+    const safeTitle = title.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
 
-    const folder = isOcr ? 'ocr_transcripts' : 'scraped_pages';
-    const prefix = isOcr ? 'ocr_' : '';
-    const markdownPath = `${folder}/${prefix}${safeTitle}_${docId}.md`;
-    const jsonPath = `${folder}/${prefix}${safeTitle}_${docId}.json`;
+    const markdownPath = `scraped_pages/${safeTitle}_${docId}.md`;
+    const jsonPath = `scraped_pages/${safeTitle}_${docId}.json`;
 
-    const markdownContent = isOcr ? (
-      `# OCR Image Transcript: ${rawTitle}\n\n` +
-      `- **Source Image:** ${rawTitle}\n` +
-      `- **Captured/Uploaded On:** ${new Date().toLocaleString()}\n` +
-      `- **OCR Parser Confidence:** 100%\n` +
-      `- **Extracted Char Count:** ${text.length}\n\n` +
-      `---\n\n` +
-      `// Transcribed Text Extracted by Node.js OCR Engine\n\n` +
-      `${text || '*[No textual content found in image background]*'}`
-    ) : (
+    const markdownContent =
       `# Scraped Page: ${title}\n\n` +
       `- **URL:** ${url}\n` +
       `- **Attached On:** ${new Date().toLocaleString()}\n` +
       `- **Char Count:** ${text.length}\n\n` +
       `## Full Scraped Content\n\n` +
-      `${text}`
-    );
+      `${text}`;
 
     try {
       await fetch('/api/fs/write', {
@@ -2199,12 +2232,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
         body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
       });
 
-      const jsonContent = isOcr ? JSON.stringify({
-        id: docId,
-        sourceFile: rawTitle,
-        processedAt: new Date().toISOString(),
-        extractedText: text
-      }, null, 2) : JSON.stringify({
+      const jsonContent = JSON.stringify({
         id: docId,
         url,
         title,
@@ -2224,121 +2252,9 @@ Store contract files at .lumina/contracts/ in the workspace.`;
     }
   };
 
-  const processOcrForJoinedImage = async (file: File) => {
-    setIsOcrProcessing(true);
-    showToast(`🔍 Background OCR started for: ${file.name}...`);
-    
-    try {
-      // 1. Read file as Base64 helper
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = (e) => reject(e);
-        reader.readAsDataURL(file);
-      });
-
-      // 2. POST to our custom backend
-      const res = await fetch('/api/ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64Data })
-      });
-
-      if (!res.ok) {
-        throw new Error(`Server returned error: ${res.statusText}`);
-      }
-
-      const data = await res.json();
-      const extractedText = data.text || '';
-      const confidence = data.confidence || 0;
-
-      if (!extractedText.trim()) {
-        showToast(`⚠️ OCR scan completed, but no readable characters were extracted from ${file.name}.`);
-      } else {
-        showToast(`✨ OCR transcribed ${file.name} successfully (${Math.round(confidence)}% confidence)!`);
-      }
-
-      const docId = Date.now().toString();
-      const safeTitle = file.name.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
-      const markdownPath = `ocr_transcripts/ocr_${safeTitle}_${docId}.md`;
-      const jsonPath = `ocr_transcripts/ocr_${safeTitle}_${docId}.json`;
-
-      // Formulate detailed layout markdown
-      const markdownContent = `# OCR Image Transcript: ${file.name}\n\n` +
-        `- **Source Image:** ${file.name}\n` +
-        `- **Captured/Uploaded On:** ${new Date().toLocaleString()}\n` +
-        `- **OCR Parser Confidence:** ${Math.round(confidence)}%\n` +
-        `- **Extracted Words:** ${data.words?.length || 0}\n\n` +
-        `---\n\n` +
-        `## Transcribed Text Extracted by Node.js OCR Engine\n\n` +
-        `${extractedText || '*[No textual content found in image background]*'}\n\n` +
-        `---\n\n` +
-        `## Character Positioning Matrix\n\n` +
-        `| Text Element | Confidence | Layout Bounding Box |\n` +
-        `| :--- | :--- | :--- |\n` +
-        (data.words?.slice(0, 100).map((w: any) => `| **${w.text}** | ${w.confidence}% | x0: ${w.bbox.x0}, y0: ${w.bbox.y0}, x1: ${w.bbox.x1}, y1: ${w.bbox.y1} |`).join('\n') || '| N/A | N/A | N/A |') +
-        (data.words?.length > 100 ? `\n| ... and ${data.words.length - 100} more words | | |` : '');
-
-      // Write files in background
-      await fetch('/api/fs/write', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: markdownPath, content: markdownContent })
-      });
-
-      await fetch('/api/fs/write', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filePath: jsonPath,
-          content: JSON.stringify({
-            id: docId,
-            sourceFile: file.name,
-            fileSize: file.size,
-            fileType: file.type,
-            processedAt: new Date().toISOString(),
-            confidence,
-            extractedText,
-            words: data.words || []
-          }, null, 2)
-        })
-      });
-
-      // 4. Create and attach document
-      const newDoc = {
-        id: docId,
-        url: `[OCR Image Attachment]: ${file.name}`,
-        title: `OCR Data: ${file.name}`,
-        content: extractedText,
-        favicon: base64Data, // Show real thumbnail preview
-        isOcr: true
-      };
-
-      setAttachedUrlDocs(prev => [...prev, newDoc]);
-      setTranscriptionOptionsDoc(newDoc); // Prompt options to edit/view right away!
-      triggerWorkspaceRefresh();
-    } catch (err: any) {
-      console.error("OCR background execution error: ", err);
-      showToast(`❌ OCR processing failed: ${err?.message || err}`);
-    } finally {
-      setIsOcrProcessing(false);
-    }
-  };
-
   const handleFileAttach = async (files: File[]) => {
-    const images = files.filter(f => f.type.startsWith('image/'));
-    const nonImages = files.filter(f => !f.type.startsWith('image/'));
-
-    // Attach non-images as regular files
-    if (nonImages.length > 0) {
-      setAttachedFiles(prev => [...prev, ...nonImages]);
-      showToast(`${nonImages.length} file(s) attached successfully!`);
-    }
-
-    // Process images sequentially with OCR of Node.js Server in background
-    for (const img of images) {
-      await processOcrForJoinedImage(img);
-    }
+    setAttachedFiles(prev => [...prev, ...files]);
+    showToast(`${files.length} file(s) attached successfully!`);
   };
 
   const handleAttachUrl = async () => {
@@ -2481,6 +2397,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
     } finally {
       setTranscriptToolLoading(false);
     }
+  };
+
+  const processOcrForJoinedImage = async (_imageFile: File): Promise<string | null> => {
+    return null;
   };
 
   return {

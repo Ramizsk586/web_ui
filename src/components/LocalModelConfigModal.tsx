@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronLeft, 
@@ -133,6 +133,102 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
   const [modelFolder, setModelFolder] = useState(() => localStorage.getItem(`lumina_local_folder_${model.id}`) || defaultPathInfo.modelFolder);
   const [modelFile, setModelFile] = useState(() => localStorage.getItem(`lumina_local_file_${model.id}`) || defaultPathInfo.modelFile);
 
+  // Resolve actual model path: prefer stored path from downloadedModels, fall back to constructed path
+  const resolvedModelPath = useMemo(() => {
+    try {
+      const downloaded = JSON.parse(localStorage.getItem('lumina_downloaded_models') || '[]');
+      const match = downloaded.find((m: any) => m.id === model.id);
+      if (match?.path) return match.path.replace(/\\/g, '/');
+    } catch {}
+    return `C:/Users/${osUser || 'skabd'}/.lumina/models/${modelPublisher}/${modelFolder}/${modelFile}`;
+  }, [model.id, modelPublisher, modelFolder, modelFile, osUser]);
+
+  // Detect model capabilities from model ID/name keywords
+  const detectedCapabilities = useMemo(() => {
+    const combined = (model.id + ' ' + model.name).toLowerCase();
+    const isVision = /vlm|vision|\bvl\b|llava|clip|moondream|smolvlm|minicpm-v|qwen-vl|internvl|cogvlm|paligemma|idefics|bakllava|fuyu/.test(combined);
+    const isVideo = /video/.test(combined);
+    const isAudio = /\baudio\b|whisper|\bspeech\b|\basr\b|\btts\b|wav2vec/.test(combined);
+    return { isVision, isVideo, isAudio, isMultimodal: isVision || isVideo || isAudio };
+  }, [model.id, model.name]);
+
+  // Projector file found — check downloads list AND scan disk via server
+  const [foundProjectorPath, setFoundProjectorPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const findProjector = async () => {
+      // 1. Check lumina_downloaded_models list first (fast, synchronous)
+      try {
+        const downloaded = JSON.parse(localStorage.getItem('lumina_downloaded_models') || '[]');
+        const match = downloaded.find((m: any) => m.id === model.id);
+        if (match?.path) {
+          const sep = match.path.includes('\\') ? '\\' : '/';
+          const dir = match.path.substring(0, match.path.lastIndexOf(sep));
+          const files = downloaded.filter((m: any) => m.path && (m.path.startsWith(dir + '\\') || m.path.startsWith(dir + '/')));
+          const projFile = files.find((m: any) => {
+            const f = (m.file || m.path?.split(/[\\/]/).pop() || '').toLowerCase();
+            return f.includes('mmproj') || f.includes('projector');
+          });
+          if (projFile?.path) {
+            if (!cancelled) setFoundProjectorPath(projFile.path.replace(/\\/g, '/'));
+            return;
+          }
+        }
+      } catch {}
+
+      // 2. Ask server to scan the model's actual directory on disk
+      try {
+        const res = await fetch('/api/llama/find-mmproj', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelPath: resolvedModelPath }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setFoundProjectorPath(data.found ? data.path : null);
+          return;
+        }
+      } catch {}
+
+      if (!cancelled) setFoundProjectorPath(null);
+    };
+
+    findProjector();
+    return () => { cancelled = true; };
+  }, [model.id, resolvedModelPath]);
+
+  // Suggested projector path based on naming conventions (may not exist yet)
+  const suggestedProjectorPath = useMemo(() => {
+    const modelDir = resolvedModelPath.substring(0, resolvedModelPath.lastIndexOf('/'));
+    const modelBase = resolvedModelPath.substring(resolvedModelPath.lastIndexOf('/') + 1);
+    const baseName = modelBase.replace(/[-_](Q\d[^.]*|q\d[^.]*|f16|f32|fp16|fp32)\.gguf$/i, '').replace(/\.gguf$/i, '');
+    return `${modelDir}/${baseName}-mmproj-f16.gguf`;
+  }, [resolvedModelPath]);
+
+  const [useProjector, setUseProjector] = useState(false);
+  const [projectorPath, setProjectorPath] = useState('');
+  // Track whether user has manually edited the projector path
+  const [projectorPathManual, setProjectorPathManual] = useState(false);
+
+  useEffect(() => {
+    if (projectorPathManual) return;
+    if (foundProjectorPath) {
+      // Actual file found in downloads — enable automatically
+      setProjectorPath(foundProjectorPath);
+      setUseProjector(true);
+    } else if (detectedCapabilities.isMultimodal) {
+      // Model name signals vision/video/audio — pre-fill suggested path so user notices it's needed
+      setProjectorPath(suggestedProjectorPath);
+      setUseProjector(true);
+    } else {
+      // No projector found and model doesn't appear multimodal — pre-fill but leave disabled
+      setProjectorPath(suggestedProjectorPath);
+      setUseProjector(false);
+    }
+  }, [foundProjectorPath, suggestedProjectorPath, detectedCapabilities.isMultimodal, projectorPathManual]);
+
   // Connection tester state
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionState, setConnectionState] = useState<'idle' | 'testing' | 'connected' | 'failed'>('idle');
@@ -143,6 +239,34 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
   const [serverPid, setServerPid] = useState<number | null>(null);
   const [serverLog, setServerLog] = useState<string[]>([]);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [serverChecking, setServerChecking] = useState(false);
+
+  const checkServerStatus = useCallback(async () => {
+    setServerChecking(true);
+    try {
+      const res = await fetch('/api/llama/status');
+      const data = await res.json();
+      if (data.running && data.pid) {
+        setServerPid(data.pid);
+        setConnectionState('connected');
+        setServerLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Server already running (PID: ${data.pid})`]);
+      } else {
+        setServerPid(null);
+        setConnectionState('idle');
+      }
+    } catch {
+      // Server endpoint unavailable - keep current state
+    } finally {
+      setServerChecking(false);
+    }
+  }, []);
+
+  // Check server status when modal opens or user navigates to serverGuide
+  useEffect(() => {
+    if (isOpen || setupStep === 'serverGuide') {
+      checkServerStatus();
+    }
+  }, [isOpen, setupStep, checkServerStatus]);
 
   // GGUF GPU layers recommended auto-tuner state
   const [metadataLoading, setMetadataLoading] = useState(false);
@@ -161,13 +285,12 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
   const fetchGpuRecommendation = async () => {
     setMetadataLoading(true);
     try {
-      const fullPath = `C:/Users/${osUser || 'skabd'}/.lumina/models/${modelPublisher}/${modelFolder}/${modelFile}`;
       const res = await fetch("/api/llama/gpu-recommendation", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ modelPath: fullPath }),
+        body: JSON.stringify({ modelPath: resolvedModelPath }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -323,20 +446,30 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
 
   // Handle Dynamic Memory calculation
   const memoryUsage = useMemo(() => {
-    const baseWeightSize = modelSpecs.fallbackSizeGb;
-    const layerFraction = gpuOffload / modelSpecs.layersCount;
-    
-    // Estimate KV cache size based on context length and active features
-    let kvCacheSizeGb = (contextLength * 0.00018) * (flashAttn ? 0.75 : 1.0);
-    if (kCacheQuant !== 'Auto' && kCacheQuant !== '4-bit') {
-      kvCacheSizeGb *= 0.5;
-    }
+    // Model weights on GPU (fraction of total model size)
+    const totalModelSizeGb = gpuRecommendation?.modelSize
+      ? parseFloat(gpuRecommendation.modelSize) / 1024
+      : modelSpecs.fallbackSizeGb;
+    const layerFraction = modelSpecs.layersCount > 0 ? gpuOffload / modelSpecs.layersCount : 1;
+    const gpuWeightMem = totalModelSizeGb * layerFraction;
+    const cpuWeightMem = totalModelSizeGb * (1 - layerFraction);
 
-    const gpuWeightMem = baseWeightSize * layerFraction;
-    const cpuWeightMem = baseWeightSize * (1 - layerFraction);
+    // KV cache: 2 (K+V) * layers * hidden_dim * context_len * bytes_per_elem / 1e9
+    // We don't always know hidden_dim, so derive from bytes-per-layer if available.
+    // Empirical: bytes_per_layer ≈ bytesPerLayer from GGUF scan (in MB) → per-layer KV cost.
+    // KV per layer per token ≈ 2 * head_size_bytes  (K + V vectors).
+    // Without exact dims use a conservative empirical ratio: ~0.5 MB per layer per 1K tokens at f16,
+    // halved for q8_0, quartered for q4_0.
+    let kvBytesPerLayerPer1kTokens = 0.5; // MB, f16 baseline
+    const kvQuant = kCacheQuant === 'Auto' ? 'q8_0' : kCacheQuant;
+    if (kvQuant === 'q8_0') kvBytesPerLayerPer1kTokens = 0.25;
+    else if (kvQuant === 'q4_0') kvBytesPerLayerPer1kTokens = 0.125;
+    // Flash attention cuts KV memory roughly in half due to not materialising the full attention matrix
+    if (flashAttn) kvBytesPerLayerPer1kTokens *= 0.5;
+    const kvCacheSizeGb = (kvBytesPerLayerPer1kTokens * modelSpecs.layersCount * (contextLength / 1000)) / 1024;
 
-    let gpuMemory = gpuWeightMem;
-    let cpuMemory = cpuWeightMem;
+    let gpuMemory = gpuWeightMem + 0.1; // 100 MB overhead
+    let cpuMemory = cpuWeightMem + 0.15;
 
     if (offloadKV) {
       gpuMemory += kvCacheSizeGb;
@@ -344,15 +477,13 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
       cpuMemory += kvCacheSizeGb;
     }
 
-    gpuMemory += 0.08; 
-    cpuMemory += 0.12; 
-
     return {
       gpuMem: gpuMemory.toFixed(2),
       cpuMem: cpuMemory.toFixed(2),
-      totalMem: (gpuMemory + cpuMemory).toFixed(2)
+      totalMem: (gpuMemory + cpuMemory).toFixed(2),
+      kvCacheGb: kvCacheSizeGb.toFixed(2),
     };
-  }, [modelSpecs, gpuOffload, contextLength, offloadKV, flashAttn, kCacheQuant]);
+  }, [modelSpecs, gpuOffload, contextLength, offloadKV, flashAttn, kCacheQuant, gpuRecommendation]);
 
   // Generate the CLI parameters on the fly matching user specifications
   const generatedCommand = useMemo(() => {
@@ -383,7 +514,10 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
 
     // PowerShell call operator formatting & "exe" -m "model" ...
     let cmd = `& "${binaryPath}"`;
-    cmd += ` -m "C:/Users/${osUser || 'skabd'}/.lumina/models/${modelPublisher}/${modelFolder}/${modelFile}"`;
+    cmd += ` -m "${resolvedModelPath}"`;
+    if (useProjector && projectorPath) {
+      cmd += ` --mmproj "${projectorPath}"`;
+    }
     cmd += ` -ngl ${gpuOffload}`;
     cmd += ` -c ${contextLength}`;
     cmd += ` --cache-type-k ${kCache}`;
@@ -444,7 +578,10 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
     offloadKV,
     keepInMemory,
     evalBatchSize,
-    physicalBatchSize
+    physicalBatchSize,
+    resolvedModelPath,
+    useProjector,
+    projectorPath
   ]);
 
   // Reset to default
@@ -554,13 +691,14 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
         throw new Error('llama-server binary not found in installed package. Try reinstalling.');
       }
 
-      const modelPath = `C:/Users/${osUser}/.lumina/models/${modelPublisher}/${modelFolder}/${modelFile}`;
+      const modelPath = resolvedModelPath;
       const kCache = kCacheQuant === 'Auto' ? 'q8_0' : kCacheQuant.toLowerCase();
       const vCache = vCacheQuant === 'Auto' ? 'q8_0' : vCacheQuant.toLowerCase();
 
       addLog('Starting llama-server...');
       addLog(`Binary: ${binaryPath}`);
       addLog(`Model: ${modelPath}`);
+      if (useProjector && projectorPath) addLog(`MMProj: ${projectorPath}`);
       addLog(`Port: ${localPort}`);
 
       const response = await fetch('/api/llama/start', {
@@ -587,6 +725,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
           keepInMemory,
           evalBatchSize,
           physicalBatchSize,
+          mmprojPath: useProjector && projectorPath ? projectorPath : undefined,
         }),
       });
 
@@ -599,6 +738,12 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
       setServerPid(result.pid);
       addLog(`Server started (PID: ${result.pid})`);
       addLog(`Server URL: ${result.serverUrl}`);
+      // Track whether this server instance has mmproj loaded (for auto-restart on vision messages)
+      if (useProjector && projectorPath) {
+        localStorage.setItem(`lumina_server_mmproj_${model.id}`, 'true');
+      } else {
+        localStorage.removeItem(`lumina_server_mmproj_${model.id}`);
+      }
       setConnectionState('connected');
       showToast('llama-server is running and ready!');
     } catch (err: any) {
@@ -690,6 +835,8 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
       useLocalServer: true,
       serverPid,
       serverAutoStarted: serverPid !== null,
+      useProjector,
+      projectorPath: useProjector ? projectorPath : '',
     };
 
     localStorage.setItem(`lumina_local_os_user`, osUser);
@@ -729,17 +876,26 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
             <ChevronLeft size={18} />
           </button>
           
-          <h1 className="text-sm font-semibold font-sans text-[var(--theme-primary)] max-w-[320px] truncate flex items-center gap-1.5">
+          <h1 className="text-sm font-semibold font-sans text-[var(--theme-primary)] max-w-[320px] truncate flex items-center gap-1.5 flex-wrap">
             {setupStep === 'config' ? (
               <>
-                <Cpu size={14} className="text-[var(--theme-accent,#3b82f6)] animate-pulse" />
-                <span>Configure {model.name}</span>
+                <Cpu size={14} className="text-[var(--theme-accent,#3b82f6)] animate-pulse shrink-0" />
+                <span className="truncate">Configure {model.name}</span>
               </>
             ) : (
               <>
-                <Terminal size={14} className="text-emerald-500" />
+                <Terminal size={14} className="text-emerald-500 shrink-0" />
                 <span>Start Llama Server & Connect</span>
               </>
+            )}
+            {detectedCapabilities.isVideo && (
+              <span className="text-[8px] font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded uppercase shrink-0">Video</span>
+            )}
+            {detectedCapabilities.isVision && !detectedCapabilities.isVideo && (
+              <span className="text-[8px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded uppercase shrink-0">Vision</span>
+            )}
+            {detectedCapabilities.isAudio && (
+              <span className="text-[8px] font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded uppercase shrink-0">Audio</span>
             )}
           </h1>
 
@@ -759,19 +915,30 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
         </div>
 
         {/* Estimation parameters box */}
-        <div className="px-5 py-3.5 bg-[var(--theme-accent,#3b82f6)]/5 border-b border-[var(--theme-border)]/50 flex items-center justify-between select-none">
-          <div className="flex items-center gap-2">
-            <Cpu size={14} className="text-[var(--theme-accent,#3b82f6)]" />
-            <span className="text-xs font-semibold text-[var(--theme-primary)]">Estimated Memory Usage</span>
-            <span className="text-[9px] px-1.5 py-0.5 bg-[var(--theme-accent,#3b82f6)]/10 text-[var(--theme-accent,#3b82f6)] font-bold border border-[var(--theme-accent,#3b82f6)]/20 rounded">VRAM</span>
+        <div className="px-5 py-3 bg-[var(--theme-accent,#3b82f6)]/5 border-b border-[var(--theme-border)]/50 select-none">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cpu size={14} className="text-[var(--theme-accent,#3b82f6)]" />
+              <span className="text-xs font-semibold text-[var(--theme-primary)]">Estimated VRAM Usage</span>
+              {gpuRecommendation && !gpuRecommendation.error && (
+                <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20 rounded">GGUF Scan</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3.5 font-mono text-xs">
+              <div className="text-[var(--theme-secondary)]">
+                GPU: <span className="text-[var(--theme-primary)] font-bold">{memoryUsage.gpuMem} GB</span>
+              </div>
+              <div className="text-[var(--theme-secondary)] border-l border-[var(--theme-border)]/60 pl-3.5">
+                Total: <span className="text-[var(--theme-accent,#3b82f6)] font-bold">{memoryUsage.totalMem} GB</span>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3.5 font-mono text-xs">
-            <div className="text-[var(--theme-secondary)]">
-              GPU: <span className="text-[var(--theme-primary)] font-bold">{memoryUsage.gpuMem} GB</span>
-            </div>
-            <div className="text-[var(--theme-secondary)] border-l border-[var(--theme-border)]/60 pl-3.5">
-              Total: <span className="text-[var(--theme-accent,#3b82f6)] font-bold">{memoryUsage.totalMem} GB</span>
-            </div>
+          <div className="flex items-center gap-3 mt-1.5 text-[10px] text-[var(--theme-muted)] font-mono">
+            <span>Weights (GPU): {(parseFloat(memoryUsage.gpuMem) - 0.1 - (offloadKV ? parseFloat(memoryUsage.kvCacheGb) : 0)).toFixed(2)} GB</span>
+            <span className="text-[var(--theme-border)]">·</span>
+            <span>KV Cache: {memoryUsage.kvCacheGb} GB</span>
+            <span className="text-[var(--theme-border)]">·</span>
+            <span>CPU: {memoryUsage.cpuMem} GB</span>
           </div>
         </div>
 
@@ -1111,6 +1278,54 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
                       placeholder="e.g. model-Q4_K_M.gguf"
                     />
                   </div>
+
+                  {/* Vision/Video mmproj path */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] uppercase font-bold text-[var(--theme-secondary)] flex items-center gap-1.5">
+                        Multimodal Projector (mmproj)
+                        {detectedCapabilities.isVideo ? (
+                          <span className="text-[8px] font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded uppercase">Video</span>
+                        ) : detectedCapabilities.isVision ? (
+                          <span className="text-[8px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded uppercase">Vision</span>
+                        ) : (
+                          <span className="text-[8px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded uppercase">Vision</span>
+                        )}
+                        {foundProjectorPath && (
+                          <span className="text-[8px] font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded uppercase">Found</span>
+                        )}
+                      </label>
+                      <button
+                        onClick={() => setUseProjector(!useProjector)}
+                        className={`relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-250 ease-in-out border border-transparent ${useProjector ? 'bg-emerald-500' : 'bg-[var(--theme-border)]'}`}
+                      >
+                        <span className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform duration-250 ease-in-out ${useProjector ? 'translate-x-[14px]' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={projectorPath}
+                      onChange={(e) => {
+                        setProjectorPath(e.target.value);
+                        setProjectorPathManual(true);
+                        if (e.target.value) setUseProjector(true);
+                      }}
+                      className={`w-full bg-[var(--theme-input-bg)] border text-[10px] font-mono rounded-xl px-3 py-2 outline-none transition-all text-[var(--theme-primary)] ${useProjector ? 'border-emerald-500/40 focus:border-emerald-500' : 'border-[var(--theme-border)] opacity-50'}`}
+                      placeholder="e.g. SmolVLM2-500M-Video-Instruct-mmproj-f16.gguf (full path)"
+                      disabled={!useProjector}
+                    />
+                    <p className="text-[9px] text-[var(--theme-muted)]">
+                      {useProjector
+                        ? foundProjectorPath
+                          ? '✓ mmproj file found in downloads — vision/video inputs enabled'
+                          : projectorPath
+                            ? detectedCapabilities.isMultimodal
+                              ? '⚠ mmproj not yet downloaded — download it alongside the model'
+                              : '✓ mmproj path set — vision inputs enabled'
+                            : '⚠ Paste the full path to your mmproj file'
+                        : 'Enable to attach a projector for image / video understanding'}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -1310,6 +1525,56 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
               <div className="space-y-1 select-none">
                 <p className="text-xs text-[var(--theme-secondary)] leading-relaxed">
                   Start the <span className="font-semibold text-[var(--theme-accent,#3b82f6)]">llama-server</span> binary directly from the app. The server will be launched automatically and Lumina will connect to it.
+                </p>
+              </div>
+
+              {/* Vision/Video Projector (mmproj) — always shown */}
+              <div className={`rounded-2xl border p-4 transition-colors ${useProjector && projectorPath ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-[var(--theme-border)] bg-[var(--theme-surface-alt)]/30'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setUseProjector(!useProjector)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-250 ease-in-out border border-transparent ${useProjector ? 'bg-emerald-500' : 'bg-[var(--theme-border)]'}`}
+                    >
+                      <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-transform duration-250 ease-in-out ${useProjector ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                    </button>
+                    <span className="text-xs font-semibold text-[var(--theme-primary)]">
+                      {detectedCapabilities.isVideo ? 'Video/Vision Projector (--mmproj)' : 'Vision Projector (--mmproj)'}
+                    </span>
+                    {useProjector && projectorPath && (
+                      <span className="text-[8px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded uppercase select-none">
+                        {foundProjectorPath ? 'Found' : 'Active'}
+                      </span>
+                    )}
+                    {useProjector && !projectorPath && (
+                      <span className="text-[8px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded uppercase select-none">Path needed</span>
+                    )}
+                    {detectedCapabilities.isMultimodal && !foundProjectorPath && (
+                      <span className="text-[8px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded uppercase select-none">Download mmproj</span>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <input
+                    type="text"
+                    value={projectorPath}
+                    onChange={(e) => {
+                      setProjectorPath(e.target.value);
+                      setProjectorPathManual(true);
+                      if (e.target.value) setUseProjector(true);
+                    }}
+                    className={`w-full bg-[var(--theme-input-bg)] border text-[10px] font-mono text-[var(--theme-primary)] rounded-xl px-3 py-2 outline-none transition-all ${useProjector ? 'border-emerald-500/40 focus:border-emerald-500' : 'border-[var(--theme-border)] focus:border-[var(--theme-accent,#3b82f6)]'}`}
+                    placeholder="Full path to mmproj-*.gguf (auto-filled if detected)"
+                  />
+                </div>
+                <p className="mt-1.5 text-[9px] text-[var(--theme-muted)]">
+                  {useProjector && projectorPath
+                    ? foundProjectorPath
+                      ? '✓ Projector file found — --mmproj will be added to launch command'
+                      : detectedCapabilities.isMultimodal
+                        ? '⚠ Projector not downloaded yet — download the mmproj file alongside the model'
+                        : '✓ Vision enabled — --mmproj will be added to the launch command'
+                    : 'Toggle on and set path to enable image / video inputs for this model'}
                 </p>
               </div>
 

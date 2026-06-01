@@ -82,7 +82,6 @@ export function AgentChatView({
   // States for document and file attachments in Agent Mode
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachedUrlDocs, setAttachedUrlDocs] = useState<any[]>([]);
-  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const readFileAsText = (file: File): Promise<string> => {
@@ -97,53 +96,7 @@ export function AgentChatView({
   };
 
   const handleFileAttach = async (files: File[]) => {
-    const images = files.filter(f => f.type.startsWith('image/'));
-    const nonImages = files.filter(f => !f.type.startsWith('image/'));
-
-    if (nonImages.length > 0) {
-      setAttachedFiles(prev => [...prev, ...nonImages]);
-    }
-
-    for (const img of images) {
-      await processOcrForImage(img);
-    }
-  };
-
-  const processOcrForImage = async (file: File) => {
-    setIsOcrProcessing(true);
-    try {
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = (e) => reject(e);
-        reader.readAsDataURL(file);
-      });
-
-      const res = await fetch('/api/ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64Data })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const extractedText = data.text || '';
-        const docId = Date.now().toString();
-        
-        setAttachedUrlDocs(prev => [
-          ...prev,
-          {
-            id: docId,
-            title: `OCR Transcript: ${file.name}`,
-            content: extractedText,
-          }
-        ]);
-      }
-    } catch (err) {
-      console.error("Error processing OCR in AgentChatView: ", err);
-    } finally {
-      setIsOcrProcessing(false);
-    }
+    setAttachedFiles(prev => [...prev, ...files]);
   };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -195,28 +148,31 @@ export function AgentChatView({
 
     let combinedContent = text;
 
-    // Read all non-image attached files sequentially
+    // Read all non-image attached files sequentially and collect images
+    const pendingImageDataUrls: string[] = [];
     if (attachedFiles.length > 0) {
       const fileBlocks = [];
       for (const file of attachedFiles) {
-        const isLikelyBinary = file.type && !file.type.startsWith('text/') && 
-          !/\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh)$/i.test(file.name);
-        
-        if (!isLikelyBinary && file.size < 2 * 1024 * 1024) {
-          const fileContent = await readFileAsText(file);
-          fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${fileContent}\n[END FILE]`);
+        if (file.type.startsWith('image/')) {
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(file);
+          });
+          if (dataUrl) pendingImageDataUrls.push(dataUrl);
         } else {
-          fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+          const isLikelyBinary = file.type && !file.type.startsWith('text/') && 
+            !/\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh)$/i.test(file.name);
+          if (!isLikelyBinary && file.size < 2 * 1024 * 1024) {
+            const fileContent = await readFileAsText(file);
+            fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${fileContent}\n[END FILE]`);
+          } else {
+            fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+          }
         }
       }
       combinedContent = combinedContent + fileBlocks.join('');
-    }
-
-    if (attachedUrlDocs.length > 0) {
-      const docBlocks = attachedUrlDocs.map(doc => {
-        return `\n\n[ATTACHED OCR PROTOCOL: ${doc.title}]\nContent Extracted:\n${doc.content}\n[END DOCUMENT]`;
-      }).join('');
-      combinedContent = combinedContent + docBlocks;
     }
 
     // Clear attached states synchronously
@@ -407,8 +363,9 @@ export function AgentChatView({
           ...agent,
           systemPrompt: finalSystemPrompt
         },
-        userMessage: text,
+        userMessage: combinedContent,
         history: agent.chatHistory,
+        imageUrls: pendingImageDataUrls.length > 0 ? pendingImageDataUrls : undefined,
         onToken: (token) => {
           setStreamingText(prev => prev + token);
         },
@@ -749,8 +706,8 @@ export function AgentChatView({
       <div className="p-4 md:px-6 md:pb-6 md:pt-2 border-t border-[var(--theme-border)]/30 bg-[var(--theme-bg)] shrink-0 select-none">
         <div className="relative border border-[var(--theme-input-border)] bg-[var(--theme-input-bg)] focus-within:border-[var(--theme-accent)]/45 overflow-visible flex flex-col p-2.5 min-h-[110px] justify-between transition-all duration-300 rounded-[24px] shadow-[0_12px_40px_rgba(0,0,0,0.65)] max-w-4xl mx-auto w-full z-10 text-left">
           
-          {/* File Attachments List (OCR & Text/Log sheets) */}
-          {(attachedFiles.length > 0 || attachedUrlDocs.length > 0 || isOcrProcessing) && (
+          {/* File Attachments List */}
+          {attachedFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 pt-1 pb-3 items-center border-b border-[var(--theme-border)]/35 mb-2">
               {attachedFiles.map((file, idx) => {
                 const isImage = file.type.startsWith('image/');
@@ -795,40 +752,6 @@ export function AgentChatView({
                   </motion.div>
                 );
               })}
-
-              {attachedUrlDocs.map((doc) => (
-                <motion.div
-                  key={doc.id}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="relative flex items-center gap-2 px-3 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-semibold shrink-0 max-w-[210px] font-sans transition-all animate-fade-in"
-                  title="Extracted Text Document Attachment"
-                >
-                  <span className="truncate">{doc.title.slice(0, 30)}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAttachedUrlDocs(prev => prev.filter(d => d.id !== doc.id));
-                    }}
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-zinc-900 border border-cyan-500/50 text-cyan-300 hover:text-white flex items-center justify-center transition-all z-10 cursor-pointer animate-fade-in"
-                  >
-                    <X size={9} />
-                  </button>
-                </motion.div>
-              ))}
-
-              {isOcrProcessing && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/5 text-cyan-300 h-10 shadow-sm shrink-0 animate-pulse font-sans"
-                >
-                  <div className="w-3.5 h-3.5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                  <div className="flex flex-col text-left">
-                    <span className="text-[10px] font-bold">OCR Transcribing...</span>
-                  </div>
-                </motion.div>
-              )}
             </div>
           )}
 

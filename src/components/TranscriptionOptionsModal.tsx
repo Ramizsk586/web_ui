@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Video, Sparkles, Link as LinkIcon, X, Play, FileText, FileJson } from 'lucide-react';
+import { Video, Link as LinkIcon, X, Play, FileText, FileJson } from 'lucide-react';
 
 interface TranscriptionOptionsModalProps {
   transcriptionOptionsDoc: any;
@@ -22,18 +22,12 @@ const TranscriptionOptionsModalComponent = ({
   if (!transcriptionOptionsDoc) return null;
 
   const isVideo = !!transcriptionOptionsDoc.videoId && !!transcriptionOptionsDoc.segments;
-  const isOcr = !!transcriptionOptionsDoc.isOcr;
-  const rawTitle = isOcr ? transcriptionOptionsDoc.url.replace(/^\[OCR Image Attachment\]:\s*/, '') : transcriptionOptionsDoc.title;
+  const rawTitle = transcriptionOptionsDoc.title;
   const safeTitle = rawTitle.replace(/[^a-zA-Z0-9-_.]/g, '_').slice(0, 50);
   const docId = transcriptionOptionsDoc.id;
   
-  const markdownPath = isOcr 
-    ? `ocr_transcripts/ocr_${safeTitle}_${docId}.md`
-    : `scraped_pages/${safeTitle || 'page'}_${docId}.md`;
-    
-  const jsonPath = isOcr
-    ? `ocr_transcripts/ocr_${safeTitle}_${docId}.json`
-    : `scraped_pages/${safeTitle || 'page'}_${docId}.json`;
+  const markdownPath = `scraped_pages/${safeTitle || 'page'}_${docId}.md`;
+  const jsonPath = `scraped_pages/${safeTitle || 'page'}_${docId}.json`;
 
   return (
     <div className="fixed inset-0 bg-zinc-950/80 z-[600] flex items-center justify-center p-4">
@@ -48,20 +42,17 @@ const TranscriptionOptionsModalComponent = ({
           <div className="flex items-center gap-3">
             <div className={`p-2.5 rounded-xl border shrink-0 ${
               isVideo ? 'bg-rose-500/10 text-rose-500 border-rose-500/10' :
-              isOcr ? 'bg-amber-500/10 text-amber-500 border-amber-500/10' :
               'bg-blue-500/10 text-blue-400 border-blue-500/10'
             }`}>
               {isVideo ? <Video className="w-5 h-5" /> : 
-               isOcr ? <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" /> : 
                <LinkIcon className="w-5 h-5" />}
             </div>
             <div className="text-left min-w-0">
               <h3 className="text-sm font-bold text-zinc-100 font-sans truncate max-w-[220px]">
-                {isOcr ? `OCR Data: ${rawTitle}` : transcriptionOptionsDoc.title}
+                {transcriptionOptionsDoc.title}
               </h3>
               <p className="text-[10px] text-zinc-500 font-mono tracking-wider mt-0.5">
                 {isVideo ? `VIDEO ID: ${transcriptionOptionsDoc.videoId}` : 
-                 isOcr ? `OCR IMAGE SCAN` : 
                  `SOURCE URL: ${transcriptionOptionsDoc.url.replace(/https?:\/\/(www\.)?/, '').slice(0, 30)}...`}
               </p>
             </div>
@@ -77,9 +68,7 @@ const TranscriptionOptionsModalComponent = ({
         <p className="text-xs text-zinc-400 font-sans text-left mb-6 leading-relaxed">
           {isVideo 
             ? "This YouTube video transcript and playhead metrics have been processed & written to disk. How would you like to explore this collected data?"
-            : isOcr
-              ? "This image attachment has been fully transcribed using our background OCR engine. Extracted text and layout bounding matrices are saved to disk. How would you like to open it?"
-              : "This webpage has been scraped, compressed, and written to disk as custom markdown/json formats. How would you like to open it in your workspace code editor?"
+            : "This webpage has been scraped, compressed, and written to disk as custom markdown/json formats. How would you like to open it in your workspace code editor?"
           }
         </p>
 
@@ -112,8 +101,6 @@ const TranscriptionOptionsModalComponent = ({
               if (isVideo) {
                 await ensureTranscriptFilesOnDisk(transcriptionOptionsDoc);
                 setFloatingEditFile(`transcripts/transcript_${transcriptionOptionsDoc.videoId}.md`);
-              } else if (isOcr) {
-                setFloatingEditFile(markdownPath);
               } else {
                 await ensureScrapedFilesOnDisk(transcriptionOptionsDoc);
                 setFloatingEditFile(markdownPath);
@@ -140,8 +127,6 @@ const TranscriptionOptionsModalComponent = ({
               if (isVideo) {
                 await ensureTranscriptFilesOnDisk(transcriptionOptionsDoc);
                 setFloatingEditFile(`transcripts/transcript_${transcriptionOptionsDoc.videoId}.json`);
-              } else if (isOcr) {
-                setFloatingEditFile(jsonPath);
               } else {
                 await ensureScrapedFilesOnDisk(transcriptionOptionsDoc);
                 setFloatingEditFile(jsonPath);
@@ -158,9 +143,7 @@ const TranscriptionOptionsModalComponent = ({
                 📊 Open Captured JSON in Code Editor
               </h4>
               <p className="text-[11px] text-zinc-400 mt-1 font-sans leading-normal">
-                {isOcr 
-                  ? "Analyze OCR character confidence, pixel dimensions, word layouts, and bounding coordinates."
-                  : "Analyze, map, or modify playhead metrics and parsed dialogue segments under standard JSON formatting."}
+                Analyze, map, or modify playhead metrics and parsed dialogue segments under standard JSON formatting.
               </p>
             </div>
           </button>

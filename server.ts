@@ -10,7 +10,6 @@ import { search } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
 import { spawn, spawnSync, type ChildProcessByStdio, type ChildProcessWithoutNullStreams } from "child_process";
-import Tesseract from 'tesseract.js';
 import si from 'systeminformation';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,7 +25,7 @@ async function startServer() {
   let previewLogs: string[] = [];
   let activePreviewRoot = process.cwd();
 
-  // Handle JSON and CORS with increased body limits for OCR image payloads
+  // Handle JSON and CORS with increased body limits for large payloads
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -677,70 +676,6 @@ async function startServer() {
     return { allowed: true };
   };
 
-  // Node.js based OCR system utilizing Tesseract
-  app.post("/api/ocr", async (req, res) => {
-    const { image } = req.body; // base64 formatted data string or image URL
-    if (!image) {
-      return res.status(400).json({ error: "Image data (base64 or URL) is required" });
-    }
-
-    try {
-      let imageInput: Buffer | string = image;
-      
-      // If base64 data URL, extract the raw base64 and create a buffer
-      if (typeof image === 'string' && image.startsWith('data:image')) {
-        const matches = image.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
-        if (matches && matches.length === 3) {
-          const base64Data = matches[2];
-          imageInput = Buffer.from(base64Data, 'base64');
-        } else {
-          const base64Data = image.split(',')[1];
-          if (base64Data) {
-            imageInput = Buffer.from(base64Data, 'base64');
-          }
-        }
-      } else if (typeof image === 'string' && image.startsWith('data:')) {
-        const base64Data = image.split(',')[1];
-        if (base64Data) {
-          imageInput = Buffer.from(base64Data, 'base64');
-        }
-      }
-
-      console.log(`[OCR SERVER] Running Tesseract character recognition...`);
-      const result = (await Tesseract.recognize(
-        imageInput,
-        'eng',
-        {
-          logger: m => {
-            // progress tracking logs if necessary in development
-          }
-        }
-      ) as any);
-
-      const text = result?.data?.text || '';
-      const confidence = result?.data?.confidence || 0;
-      
-      console.log(`[OCR SERVER] Processed successfully. Confidence: ${confidence}%. Text length: ${text.length}`);
-
-      res.json({
-        success: true,
-        text,
-        confidence,
-        words: result?.data?.words?.map((w: any) => ({
-          text: w.text,
-          confidence: w.confidence,
-          bbox: w.bbox
-        })) || []
-      });
-    } catch (error: any) {
-      console.error("[OCR SERVER] Error during OCR parsing:", error);
-      res.status(500).json({
-        error: "Failed to perform OCR on the provided image.",
-        details: error?.message || String(error)
-      });
-    }
-  });
-
   // Web Scraping API proxy endpoint
   app.post("/api/scrape", async (req, res) => {
     const { url, selectors, extractLinks, extractTables, outputFormat, usePuppeteer } = req.body;
@@ -1325,6 +1260,23 @@ async function startServer() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
       const body: Record<string, any> = { model, messages, stream: !!stream };
+
+      // Debug: log content types in messages
+      const hasArrayContent = Array.isArray(messages) && messages.some((m: any) => Array.isArray(m.content));
+      console.log('[LUMINA_DEBUG] /api/bridge/chat received messages with array content:', hasArrayContent);
+      if (hasArrayContent) {
+        const visionMsg = messages.find((m: any) => Array.isArray(m.content));
+        if (visionMsg) {
+          console.log('[LUMINA_DEBUG] Bridge proxy content types:', visionMsg.content.map((c: any) => c.type));
+          const imgPart = visionMsg.content.find((c: any) => c.type === 'image_url');
+          if (imgPart) {
+            console.log('[LUMINA_DEBUG] Image URL length:', imgPart.image_url?.url?.length || 0);
+            console.log('[LUMINA_DEBUG] Image URL prefix:', (imgPart.image_url?.url || '').substring(0, 60));
+          }
+        }
+      }
+      console.log('[LUMINA_DEBUG] Forwarding to:', `${bridgeUrl}/v1/chat/completions`);
+
       if (tools && tools.length > 0) {
         body.tools = tools;
         body.tool_choice = 'auto';
@@ -2398,6 +2350,19 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       return res.status(400).json({ error: "messages array is required" });
     }
 
+    // Debug: check for vision content
+    const hasArrayContent = messages.some((m: any) => Array.isArray(m.content));
+    if (hasArrayContent) {
+      const visionMsg = messages.find((m: any) => Array.isArray(m.content));
+      console.log('[LUMINA_DEBUG] /api/chat received vision message');
+      console.log('[LUMINA_DEBUG] Content types:', visionMsg?.content?.map((c: any) => c.type));
+      const imgPart = visionMsg?.content?.find((c: any) => c.type === 'image_url');
+      if (imgPart) {
+        console.log('[LUMINA_DEBUG] Image URL length:', imgPart.image_url?.url?.length || 0);
+        console.log('[LUMINA_DEBUG] Image URL prefix:', (imgPart.image_url?.url || '').substring(0, 60));
+      }
+    }
+
     // Determine provider configuration
     let provider = 'openai-compatible';
     let baseUrl = '';
@@ -2832,6 +2797,15 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       return res.status(400).json({ error: 'url and fileName are required' });
     }
 
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const sendEvent = (data: any) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
     const installDir = getLlamaInstallDir();
     const releaseDir = path.join(installDir, `llama.cpp-release-${releaseTag || 'latest'}`);
     fs.mkdirSync(releaseDir, { recursive: true });
@@ -2852,14 +2826,32 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         url,
         responseType: 'stream',
         timeout: 300000,
-        onDownloadProgress: (progressEvent) => {
-          // optional: could store progress in-memory for polling
-        },
       });
 
       const contentLength = response.headers['content-length'];
       const totalSize = parseInt(String(contentLength || '0'), 10);
       let downloaded = 0;
+      let lastChunkTime = Date.now();
+      let lastDownloaded = 0;
+
+      const progressInterval = setInterval(() => {
+        const now = Date.now();
+        const elapsed = (now - lastChunkTime) / 1000;
+        const chunkBytes = downloaded - lastDownloaded;
+        const speed = elapsed > 0 ? chunkBytes / elapsed : 0;
+
+        sendEvent({
+          type: 'progress',
+          stage: 'download',
+          percent: totalSize > 0 ? Math.min(Math.round((downloaded / totalSize) * 100), 99) : 0,
+          downloaded: (downloaded / 1024 / 1024).toFixed(1) + ' MB',
+          total: totalSize > 0 ? (totalSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown',
+          speed: speed > 0 ? (speed / 1024 / 1024).toFixed(1) + ' MB/s' : 'Calculating...',
+        });
+
+        lastChunkTime = now;
+        lastDownloaded = downloaded;
+      }, 200);
 
       response.data.on('data', (chunk: Buffer) => {
         downloaded += chunk.length;
@@ -2869,13 +2861,41 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
 
       await new Promise<void>((resolve, reject) => {
         writer.on('finish', resolve);
-        writer.on('error', reject);
+        writer.on('error', (err) => {
+          clearInterval(progressInterval);
+          reject(err);
+        });
+      });
+
+      clearInterval(progressInterval);
+
+      sendEvent({
+        type: 'progress',
+        stage: 'download',
+        percent: 100,
+        downloaded: (downloaded / 1024 / 1024).toFixed(1) + ' MB',
+        total: totalSize > 0 ? (totalSize / 1024 / 1024).toFixed(1) + ' MB' : (downloaded / 1024 / 1024).toFixed(1) + ' MB',
+        speed: 'Done',
       });
 
       addLog(`Download complete (${(downloaded / 1024 / 1024).toFixed(1)} MB)`);
+      sendEvent({ type: 'status', message: 'Extracting...' });
+
       addLog(`Extracting to: ${releaseDir}`);
+      sendEvent({
+        type: 'progress',
+        stage: 'extract',
+        percent: 0,
+      });
 
       await extractZip(zipPath, releaseDir);
+
+      sendEvent({
+        type: 'progress',
+        stage: 'extract',
+        percent: 100,
+      });
+
       addLog('Extraction complete');
 
       try { fs.unlinkSync(zipPath); } catch {}
@@ -2924,11 +2944,13 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         url,
       };
 
-      res.json({ success: true, config, logs });
+      sendEvent({ type: 'complete', success: true, config, logs });
+      res.end();
     } catch (err: any) {
       addLog(`Error: ${err.message}`);
       try { fs.unlinkSync(zipPath); } catch {}
-      res.status(500).json({ error: err.message, logs });
+      sendEvent({ type: 'error', message: err.message, logs });
+      res.end();
     }
   });
 
@@ -3212,6 +3234,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     const {
       binaryPath: customBinaryPath,
       modelPath,
+      mmprojPath,
       gpuOffload = 99,
       contextLength = 32768,
       cacheTypeK = 'q8_0',
@@ -3288,6 +3311,10 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       '--host', host,
       '--port', String(port),
     ];
+
+    if (mmprojPath) {
+      args.push('--mmproj', mmprojPath);
+    }
 
     // --flash-attn removed
     if (noMmap) args.push('--no-mmap');
@@ -3517,6 +3544,15 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       });
     }
 
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const sendEvent = (data: any) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
     const hfUrl = `https://huggingface.co/${modelId}/resolve/main/${actualFileName}`;
     const logs: string[] = [];
     const addLog = (msg: string) => {
@@ -3541,6 +3577,27 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
       const totalSize = parseInt(String(response.headers['content-length'] || '0'), 10);
       const writer = fs.createWriteStream(savePath);
       let downloaded = 0;
+      let lastChunkTime = Date.now();
+      let lastDownloaded = 0;
+
+      const progressInterval = setInterval(() => {
+        const now = Date.now();
+        const elapsed = (now - lastChunkTime) / 1000;
+        const chunkBytes = downloaded - lastDownloaded;
+        const speed = elapsed > 0 ? chunkBytes / elapsed : 0;
+
+        sendEvent({
+          type: 'progress',
+          stage: 'download',
+          percent: totalSize > 0 ? Math.min(Math.round((downloaded / totalSize) * 100), 99) : 0,
+          downloaded: (downloaded / 1024 / 1024).toFixed(1) + ' MB',
+          total: totalSize > 0 ? (totalSize / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown',
+          speed: speed > 0 ? (speed / 1024 / 1024).toFixed(1) + ' MB/s' : 'Calculating...',
+        });
+
+        lastChunkTime = now;
+        lastDownloaded = downloaded;
+      }, 200);
 
       response.data.on('data', (chunk: Buffer) => {
         downloaded += chunk.length;
@@ -3550,25 +3607,109 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
 
       await new Promise<void>((resolve, reject) => {
         writer.on('finish', resolve);
-        writer.on('error', reject);
+        writer.on('error', (err) => {
+          clearInterval(progressInterval);
+          reject(err);
+        });
       });
+
+      clearInterval(progressInterval);
 
       const sizeMb = (downloaded / 1024 / 1024).toFixed(1);
       addLog(`Download complete: ${sizeMb} MB`);
 
-      res.json({
+      sendEvent({
+        type: 'complete',
         success: true,
         path: savePath,
         size: (downloaded / 1024 / 1024 / 1024).toFixed(2) + ' GB',
         bytes: downloaded,
         logs,
       });
+      res.end();
     } catch (err: any) {
       // Clean up partial download
       try { fs.unlinkSync(savePath); } catch {}
       addLog(`Error: ${err.message}`);
-      res.status(500).json({ error: err.message, logs });
+      sendEvent({ type: 'error', message: err.message, logs });
+      res.end();
     }
+  });
+
+  // Find mmproj file for a given model path by scanning its directory
+  app.post("/api/llama/find-mmproj", async (req, res) => {
+    const { modelPath } = req.body;
+    if (!modelPath) return res.status(400).json({ error: 'modelPath is required' });
+
+    // Resolve to actual filesystem path
+    let resolvedModel = modelPath.replace(/\\/g, '/');
+    const cwMatch = resolvedModel.match(/^C:\/Users\/([^\/]+)\/(.*)$/i);
+    if (cwMatch) {
+      resolvedModel = path.join(os.homedir(), cwMatch[2]);
+    } else {
+      resolvedModel = path.resolve(resolvedModel);
+    }
+
+    const dir = path.dirname(resolvedModel);
+    if (!fs.existsSync(dir)) {
+      return res.json({ found: false, path: null });
+    }
+
+    const isMmproj = (name: string) => {
+      const l = name.toLowerCase();
+      return l.includes('mmproj') || l.includes('projector') || l.includes('clip-vision') || l.includes('siglip');
+    };
+
+    try {
+      const entries = fs.readdirSync(dir);
+      const match = entries.find(e => e.toLowerCase().endsWith('.gguf') && isMmproj(e));
+      if (match) {
+        return res.json({ found: true, path: path.join(dir, match).replace(/\\/g, '/') });
+      }
+      return res.json({ found: false, path: null });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Scan models directory and return all locally available models
+  app.get("/api/models/list", async (_req, res) => {
+    const modelsDir = path.join(getLuminaDataDir(), 'models');
+    const results: { id: string; name: string; publisher: string; folder: string; file: string; path: string; size: string }[] = [];
+
+    const isProjectorFile = (name: string) => {
+      const lower = name.toLowerCase();
+      return lower.includes('mmproj') || lower.includes('projector') || lower.includes('clip-vision') || lower.includes('siglip');
+    };
+
+    const scanDir = (dir: string, publisher: string, folder: string) => {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scanDir(fullPath, publisher || entry.name, entry.name);
+          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.gguf') && !isProjectorFile(entry.name)) {
+            const sizeBytes = fs.statSync(fullPath).size;
+            results.push({
+              id: `${publisher}/${folder}`,
+              name: entry.name.replace(/\.gguf$/i, '').replace(/[-_]/g, ' '),
+              publisher,
+              folder,
+              file: entry.name,
+              path: fullPath,
+              size: (sizeBytes / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+            });
+          }
+        }
+      } catch {}
+    };
+
+    if (fs.existsSync(modelsDir)) {
+      scanDir(modelsDir, '', '');
+    }
+
+    res.json({ success: true, models: results });
   });
 
   // Vite middleware for development

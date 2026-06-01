@@ -420,7 +420,6 @@ export default function AppContent({
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,
-    isOcrProcessing, setIsOcrProcessing,
     isVoiceListening, setIsVoiceListening,
     voiceInterimText, setVoiceInterimText,
     voiceLanguage, setVoiceLanguage,
@@ -533,6 +532,31 @@ export default function AppContent({
   const [localModelLoadingId, setLocalModelLoadingId] = useState<string | null>(null);
   const [localModelLoadingProgress, setLocalModelLoadingProgress] = useState(0);
 
+  // Downloaded local models list (synced from localStorage + server scan)
+  const [downloadedModels, setDownloadedModels] = useState<any[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lumina_downloaded_models') || '[]');
+    } catch { return []; }
+  });
+  const refreshLocalModels = useCallback(async () => {
+    try {
+      const res = await fetch('/api/models/list');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.models)) {
+          setDownloadedModels(data.models);
+          localStorage.setItem('lumina_downloaded_models', JSON.stringify(data.models));
+          return;
+        }
+      }
+    } catch {}
+    // Fallback to localStorage if server scan fails
+    try {
+      const models = JSON.parse(localStorage.getItem('lumina_downloaded_models') || '[]');
+      setDownloadedModels(models);
+    } catch {}
+  }, []);
+
   // Computed variables
   const messages = useMemo(() => {
     const activeChat = chats.find(c => c.id === currentChatId);
@@ -541,13 +565,9 @@ export default function AppContent({
 
   const activeModelList = useMemo(() => {
     const list = useLocalModelsOnly
-      ? [
-          { id: "LiquidAI/LFM2.5-VL-GGUF", name: "LFM2.5 VL", color: "text-violet-500" },
-          { id: "LiquidAI/LFM2.5-350M-GGUF", name: "LFM2.5 350M", color: "text-blue-500" },
-          { id: "google/gemma-2-2b-it-GGUF", name: "Gemma 2 2B IT", color: "text-emerald-500" },
-          { id: "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF", name: "Qwen 2.5 Coder 1.5B Instruct", color: "text-amber-500" },
-          { id: "lmstudio-community/Llama-3.2-1B-Instruct-GGUF", name: "Llama 3.2 1B Instruct", color: "text-indigo-500" }
-        ]
+      ? downloadedModels.length > 0
+        ? downloadedModels.map(m => ({ id: m.id, name: m.name || m.id }))
+        : []
       : (availableModels.length > 0 ? availableModels : [
           { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free', isAutoFree: true }
         ]);
@@ -571,7 +591,7 @@ export default function AppContent({
         name: cleaned.trim()
       };
     });
-  }, [availableModels, useLocalModelsOnly]);
+  }, [availableModels, useLocalModelsOnly, downloadedModels]);
 
   const _unusedModelList = useMemo(() => {
     return availableModels.length > 0 ? availableModels : [
@@ -1137,7 +1157,6 @@ const startCoderPreview = useCallback(async () => {
     transcriptToolLoading, setTranscriptToolLoading,
     transcriptToolError, setTranscriptToolError,
     setTranscriptionOptionsDoc,
-    isOcrProcessing, setIsOcrProcessing,
     setActiveArtifact, setIsCanvasOpen, setCanvasView,
     showToast,
     isCoderMode, setIsCoderMode,
@@ -1196,6 +1215,133 @@ const startCoderPreview = useCallback(async () => {
     return () => window.removeEventListener('contextmenu', handleContextMenu);
   }, []);
 
+  // Scan models directory on startup to discover downloaded models
+  useEffect(() => {
+    refreshLocalModels();
+  }, [refreshLocalModels]);
+
+  // Auto-start local llama-server on app startup
+  useEffect(() => {
+    let cancelled = false;
+
+    const autoStart = async () => {
+      const modelId = selectedModel;
+      const isLocalModel = useLocalModelsOnly || (modelId && modelId.toLowerCase().includes('gguf'));
+      if (!isLocalModel || !modelId) return;
+
+      const savedConfigStr = localStorage.getItem(`lumina_model_settings_${modelId}`);
+      const installedConfigStr = localStorage.getItem('lumina_llama_installed_config');
+
+      if (!installedConfigStr) {
+        addDevLog('[llama.cpp] Cannot auto-start: llama.cpp not installed', 'warn');
+        return;
+      }
+
+      let installedConfig: any;
+      let savedConfig: any;
+      try {
+        installedConfig = JSON.parse(installedConfigStr);
+        savedConfig = savedConfigStr ? JSON.parse(savedConfigStr) : null;
+      } catch {
+        addDevLog('[llama.cpp] Cannot auto-start: invalid config', 'error');
+        return;
+      }
+
+      const binaryPath = installedConfig.binaries
+        ? installedConfig.binaries.find((b: string) => {
+            const lower = b.toLowerCase();
+            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
+          }) || installedConfig.binaries.find((b: string) => {
+            const lower = b.toLowerCase();
+            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
+          })
+        : null;
+
+      if (!binaryPath) {
+        addDevLog('[llama.cpp] Cannot auto-start: llama-server binary not found', 'warn');
+        return;
+      }
+
+      const osUser = savedConfig?.osUser || localStorage.getItem(`lumina_local_os_user`) || 'skabd';
+      const publisher = savedConfig?.modelPublisher || localStorage.getItem(`lumina_local_pub_${modelId}`) || '';
+      const modelFolder = savedConfig?.modelFolder || localStorage.getItem(`lumina_local_folder_${modelId}`) || '';
+      const modelFile = savedConfig?.modelFile || localStorage.getItem(`lumina_local_file_${modelId}`) || '';
+
+      if (!publisher || !modelFolder || !modelFile) {
+        addDevLog('[llama.cpp] Cannot auto-start: incomplete model path config', 'warn');
+        return;
+      }
+
+      const modelPath = `C:/Users/${osUser}/.lumina/models/${publisher}/${modelFolder}/${modelFile}`;
+
+      try {
+        const statusRes = await fetch('/api/llama/status');
+        const statusData = await statusRes.json();
+        if (statusData.running && !cancelled) {
+          addDevLog(`[llama.cpp] Server already running (PID: ${statusData.pid})`, 'success');
+          setLoadedLocalModelId(modelId);
+          localStorage.setItem('lumina_active_loaded_local_model', modelId);
+          return;
+        }
+      } catch {}
+
+      if (cancelled) return;
+
+      addDevLog(`[llama.cpp] Auto-starting server for ${modelId}...`, 'info');
+
+      try {
+        const response = await fetch('/api/llama/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            binaryPath,
+            modelPath,
+            gpuOffload: savedConfig?.gpuOffload ?? 99,
+            contextLength: savedConfig?.contextLength ?? 32768,
+            cacheTypeK: savedConfig?.kCacheQuant || 'q8_0',
+            cacheTypeV: savedConfig?.vCacheQuant || 'q8_0',
+            threads: savedConfig?.cpuThreads ?? 8,
+            host: savedConfig?.localHost || '127.0.0.1',
+            port: savedConfig?.localPort ? parseInt(String(savedConfig.localPort)) : 1234,
+            flashAttn: savedConfig?.flashAttn ?? false,
+            noMmap: savedConfig?.tryMmap != null ? !savedConfig.tryMmap : false,
+            seed: savedConfig?.seed === 'Random Seed' ? undefined : savedConfig?.seed,
+            maxConcurrent: savedConfig?.maxConcurrent,
+            unifiedKVCache: savedConfig?.unifiedKVCache,
+            ropeFreqBase: savedConfig?.ropeFreqBase,
+            ropeFreqScale: savedConfig?.ropeFreqScale,
+            offloadKV: savedConfig?.offloadKV,
+            keepInMemory: savedConfig?.keepInMemory,
+            evalBatchSize: savedConfig?.evalBatchSize,
+            physicalBatchSize: savedConfig?.physicalBatchSize,
+          }),
+        });
+
+        const result = await response.json();
+        if (cancelled) return;
+
+        if (result.success) {
+          addDevLog(`[llama.cpp] Server auto-started (PID: ${result.pid})`, 'success');
+          setLoadedLocalModelId(modelId);
+          localStorage.setItem('lumina_active_loaded_local_model', modelId);
+          showToast(`llama-server auto-started for ${modelId}!`);
+        } else {
+          addDevLog(`[llama.cpp] Auto-start failed: ${result.error || 'Unknown error'}`, 'error');
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          addDevLog(`[llama.cpp] Auto-start error: ${err.message}`, 'error');
+        }
+      }
+    };
+
+    const timer = setTimeout(autoStart, 800);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [selectedModel, useLocalModelsOnly, addDevLog, showToast]);
+
   const renderChatBox = (isCenteredState: boolean = false) => {
     return (
       <ChatBoxPanel
@@ -1250,7 +1396,6 @@ const startCoderPreview = useCallback(async () => {
         setLocalElementAttachments={setLocalElementAttachments}
         attachedUrlDocs={attachedUrlDocs}
         setAttachedUrlDocs={setAttachedUrlDocs}
-        isOcrProcessing={isOcrProcessing}
         setAttachmentContextMenu={setAttachmentContextMenu}
         setSelectedModalAttachment={setSelectedModalAttachment}
         setTranscriptionOptionsDoc={setTranscriptionOptionsDoc}
@@ -1790,6 +1935,7 @@ const startCoderPreview = useCallback(async () => {
                   handleTestLlamaConnection={handleTestLlamaConnection}
                   handleLoadLlamaModels={handleLoadLlamaModels}
                   handleLoadBridgeTools={handleLoadBridgeTools}
+                  onLocalModelsChange={refreshLocalModels}
                 />
               </motion.div>
             ) : showAgentCreation ? (

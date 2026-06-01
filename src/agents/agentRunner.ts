@@ -7,15 +7,23 @@ interface RunAgentParams {
   onToken: (token: string) => void;      // streaming callback
   onDone: (fullText: string) => void;
   onError: (err: string) => void;
+  imageUrls?: string[];                   // base64 data URLs for multimodal input
 }
 
 export async function runAgent({
-  agent, userMessage, history, onToken, onDone, onError
+  agent, userMessage, history, onToken, onDone, onError, imageUrls
 }: RunAgentParams): Promise<void> {
   // Build messages array from history + new user message
+  let userContent: any = userMessage;
+  if (imageUrls && imageUrls.length > 0) {
+    userContent = [
+      { type: 'text', text: userMessage },
+      ...imageUrls.map(url => ({ type: 'image_url', image_url: { url } }))
+    ];
+  }
   const messages = [
     ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user' as const, content: userMessage },
+    { role: 'user' as const, content: userContent },
   ];
 
   // Assemble compound systemPrompt by appending content of each custom markdown skill file

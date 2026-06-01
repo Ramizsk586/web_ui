@@ -90,7 +90,7 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const [urlToolLoading, setUrlToolLoading] = useState(false);
   const [urlToolError, setUrlToolError] = useState<string | null>(null);
   const [attachedUrlDocs, setAttachedUrlDocs] = useState<
-    Array<{ id: string; url: string; title: string; content: string; favicon?: string; segments?: any[]; videoId?: string; isOcr?: boolean }>
+    Array<{ id: string; url: string; title: string; content: string; favicon?: string; segments?: any[]; videoId?: string }>
   >([]);
 
   const [isTranscriptToolOpen, setIsTranscriptToolOpen] = useState(false);
@@ -101,7 +101,6 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const [transcriptionOptionsDoc, setTranscriptionOptionsDoc] = useState<any | null>(null);
 
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
-  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
 
   const [isVoiceListening, setIsVoiceListening] = useState(false);
   const [voiceInterimText, setVoiceInterimText] = useState('');
@@ -389,7 +388,6 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,
-    isOcrProcessing, setIsOcrProcessing,
     isVoiceListening, setIsVoiceListening,
     voiceInterimText, setVoiceInterimText,
     voiceLanguage, setVoiceLanguage,

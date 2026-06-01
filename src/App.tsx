@@ -47,16 +47,14 @@ export default function App() {
   const { serverUrl, apiKey, selectedProvider, useLocalModelsOnly } = appSettings;
   const activeModelId = React.useMemo(() => {
     if (useLocalModelsOnly) {
-      const localIds = [
-        "LiquidAI/LFM2.5-VL-GGUF",
-        "LiquidAI/LFM2.5-350M-GGUF",
-        "google/gemma-2-2b-it-GGUF",
-        "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
-        "lmstudio-community/Llama-3.2-1B-Instruct-GGUF"
-      ];
-      if (!localIds.includes(selectedModel)) {
-        return "LiquidAI/LFM2.5-350M-GGUF";
+      if (selectedModel && selectedModel.toLowerCase().includes('gguf')) {
+        return selectedModel;
       }
+      try {
+        const downloaded = JSON.parse(localStorage.getItem('lumina_downloaded_models') || '[]');
+        if (downloaded.length > 0) return downloaded[0].id;
+      } catch {}
+      return selectedModel || '';
     }
     return selectedModel || 'openprovider/auto-free';
   }, [selectedModel, useLocalModelsOnly]);

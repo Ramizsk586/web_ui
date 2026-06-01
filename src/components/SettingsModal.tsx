@@ -136,6 +136,7 @@ interface SettingsModalProps {
   onOpenLocalModelConfig?: (id: string) => void;
   activeModelId?: string;
   setActiveModelId?: (id: string) => void;
+  onLocalModelsChange?: () => void;
 }
 
 const renderModelLogo = (author: string, modelId: string) => {
@@ -295,7 +296,8 @@ export function SettingsModal({
   setLoadedLocalModelId,
   onOpenLocalModelConfig,
   activeModelId,
-  setActiveModelId
+  setActiveModelId,
+  onLocalModelsChange
 }: SettingsModalProps) {
   // Rich Profile State
   const [timezone, setTimezone] = React.useState(() => localStorage.getItem('lumina_profile_timezone') || 'GMT+05:30');
@@ -1047,6 +1049,7 @@ export function SettingsModal({
         return next;
       });
 
+      onLocalModelsChange?.();
       showToast(`Downloaded ${detailedModel.name}!`);
     } catch (err: any) {
       addLog(`ERROR: ${err.message}`);
@@ -2773,6 +2776,7 @@ export function SettingsModal({
                                                   const next = downloadedModelsList.filter(item => item.id !== model.id);
                                                   setDownloadedModelsList(next);
                                                   localStorage.setItem('lumina_downloaded_models', JSON.stringify(next));
+                                                  onLocalModelsChange?.();
                                                   showToast(`Deleted ${model.name}`);
                                                 } catch (err: any) {
                                                   showToast(`Delete failed: ${err.message}`);
