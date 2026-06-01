@@ -796,10 +796,20 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     key={`${file.name}-${idx}`}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="relative flex items-center gap-2.5 px-3 py-1.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-alt)] text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-all max-w-[215px] h-12 shadow-sm group/file"
+                    className={`relative flex items-center gap-2.5 px-3 py-1.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-alt)] text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-all max-w-[215px] h-12 shadow-sm group/file ${isImage ? 'cursor-pointer' : ''}`}
+                    onClick={() => {
+                      if (isImage && previewUrl) {
+                        if (typeof (window as any).openImageLightbox === 'function') {
+                          (window as any).openImageLightbox(previewUrl, file.name);
+                        }
+                      }
+                    }}
                   >
                     <button
-                      onClick={() => setAttachedFiles(prev => prev.filter((_, i) => i !== idx))}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAttachedFiles(prev => prev.filter((_, i) => i !== idx));
+                      }}
                       className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-[var(--theme-border)] text-gray-400 hover:text-white flex items-center justify-center transition-all z-10 shadow-lg cursor-pointer"
                     >
                       <X size={12} />

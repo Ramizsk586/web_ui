@@ -252,6 +252,35 @@ export const MessageItem = React.memo(({
             <div className="markdown-body text-left">
               <Markdown remarkPlugins={[remarkGfm]} components={messageComponents}>{message.content}</Markdown>
             </div>
+            {message.images && message.images.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {message.images.map((img, idx) => (
+                  <div 
+                    key={idx}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[var(--theme-border)] bg-[var(--theme-surface-alt)] text-[var(--theme-primary)] hover:bg-zinc-800/50 transition-all max-w-[215px] h-12 shadow-sm cursor-pointer"
+                    onClick={() => {
+                      if (typeof (window as any).openImageLightbox === 'function') {
+                        (window as any).openImageLightbox(img.url, img.title);
+                      }
+                    }}
+                  >
+                    <div className="w-8 h-8 bg-zinc-800 border border-[var(--theme-border)] rounded-lg overflow-hidden shrink-0">
+                      <img 
+                        src={img.url} 
+                        alt={img.title}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center text-left">
+                      <div className="truncate font-semibold text-xs text-zinc-100 leading-none">
+                        {img.title || 'Image'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {(message as any).elementAttachments && (message as any).elementAttachments.length > 0 && (
