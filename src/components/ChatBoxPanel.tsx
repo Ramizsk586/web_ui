@@ -29,9 +29,14 @@ import {
   Video,
   Palette,
   Box,
-  Cpu
+  Cpu,
+  Shield,
+  Hand,
+  ShieldCheck
 } from 'lucide-react';
 import { WRITING_STYLES, SKILLS } from '../constants';
+import { CoderPermissionMode, PendingCommandPermission } from '../types';
+import { permissionModeLabel } from '../utils/permissionUtils';
 
 const SUPPORTED_VOICE_LANGUAGES = [
   { code: 'en-US', label: 'English (US)' },
@@ -130,6 +135,11 @@ export interface ChatBoxPanelProps {
   setIsTranscriptToolOpen: (open: boolean) => void;
   handleScreenshot: () => void;
   activeAssistantMode: string;
+  coderPermissionMode: CoderPermissionMode;
+  setCoderPermissionMode: (mode: CoderPermissionMode) => void;
+  pendingCommandPermission: PendingCommandPermission | null;
+  setPendingCommandPermission: (request: PendingCommandPermission | null) => void;
+  permissionAuditLog: any[];
   isModeDropdownOpen: boolean;
   setIsModeDropdownOpen: (open: boolean) => void;
   modeDropdownRef: React.RefObject<HTMLDivElement | null>;
@@ -249,6 +259,11 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   setIsTranscriptToolOpen,
   handleScreenshot,
   activeAssistantMode,
+  coderPermissionMode,
+  setCoderPermissionMode,
+  pendingCommandPermission,
+  setPendingCommandPermission,
+  permissionAuditLog,
   isModeDropdownOpen,
   setIsModeDropdownOpen,
   modeDropdownRef,
@@ -281,6 +296,37 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   loadedLocalModelId,
   useLocalModelsOnly
 }) => {
+  const [isPermissionDropdownOpen, setIsPermissionDropdownOpen] = React.useState(false);
+  const permissionDropdownRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (permissionDropdownRef.current && !permissionDropdownRef.current.contains(event.target as Node)) {
+        setIsPermissionDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const permissionOptions: Array<{ id: CoderPermissionMode; label: string; icon: React.ReactNode }> = [
+    { id: 'default', label: 'Default permissions', icon: <Hand size={14} /> },
+    { id: 'auto-review', label: 'Auto-review', icon: <Shield size={14} /> },
+    { id: 'full-access', label: 'Full access', icon: <ShieldCheck size={14} /> }
+  ];
+
+  const resolvePendingPermission = (decision: 'allow-once' | 'allow-always' | 'deny') => {
+    pendingCommandPermission?.resolve(decision);
+    setPendingCommandPermission(null);
+    showToast(
+      decision === 'deny'
+        ? 'Command denied.'
+        : decision === 'allow-always'
+          ? 'Command allowed permanently.'
+          : 'Command allowed once.'
+    );
+  };
+
   return (
     <div className="w-full flex flex-col text-left">
       <AnimatePresence mode="popLayout">
@@ -1145,6 +1191,53 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
           />
         </div>
         
+        <AnimatePresence>
+          {isCoderMode && pendingCommandPermission && (
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              className="mx-3 mb-2 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 shadow-xl"
+            >
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-xl border border-amber-500/25 bg-amber-500/10 p-2 text-amber-400">
+                  <Shield size={16} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-[var(--theme-primary)]">Terminal permission required</div>
+                  <div className="mt-1 text-[11px] text-[var(--theme-secondary)]">{pendingCommandPermission.reason}</div>
+                  <pre className="mt-2 max-h-28 overflow-y-auto custom-scrollbar rounded-xl border border-[var(--theme-border)] bg-black/30 p-2 text-[11px] text-zinc-300 whitespace-pre-wrap break-words font-mono">
+                    $ {pendingCommandPermission.command}
+                  </pre>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => resolvePendingPermission('allow-once')}
+                      className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                    >
+                      Allow once
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => resolvePendingPermission('allow-always')}
+                      className="rounded-xl border border-blue-500/25 bg-blue-500/10 px-3 py-1.5 text-[11px] font-bold text-blue-400 hover:bg-blue-500/20 transition-colors"
+                    >
+                      Allow always
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => resolvePendingPermission('deny')}
+                      className="rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 text-[11px] font-bold text-rose-400 hover:bg-rose-500/20 transition-colors"
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="flex items-center justify-between px-3 pb-1.5 pt-1">
           <div className="flex items-center gap-2">
             <div className="relative" ref={plusMenuRef}>
@@ -1405,24 +1498,77 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
 
             {/* Assistant Mode Selection Dropdown */}
             {isCoderMode && (
-              <div className="relative" ref={modeDropdownRef}>
-                <motion.button 
-                  whileTap={{ scale: 0.95 }}
-                  transition={{ duration: 0.08 }}
-                  onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
-                  className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
-                  title="Select Assistant Mode"
-                >
-                  <div className="shrink-0 flex items-center justify-center">
-                    {activeAssistantMode === 'builder' && <Bot size={14} className="text-orange-500 animate-pulse" />}
-                    {activeAssistantMode === 'planner' && <Layers size={14} className="text-violet-500" />}
-                    {activeAssistantMode === 'debugger' && <Bug size={14} className="text-amber-500" />}
-                  </div>
-                  <span>
-                    {activeAssistantMode === 'builder' ? 'Builder' : activeAssistantMode === 'planner' ? 'Planner' : 'Debugger'}
-                  </span>
-                  <ChevronDown size={14} className="text-[var(--theme-muted)] transition-transform duration-200" style={{ transform: isModeDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
-                </motion.button>
+              <>
+                <div className="relative" ref={permissionDropdownRef}>
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    transition={{ duration: 0.08 }}
+                    onClick={() => setIsPermissionDropdownOpen(!isPermissionDropdownOpen)}
+                    className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
+                    title="Coder permissions"
+                  >
+                    {coderPermissionMode === 'full-access' ? <ShieldCheck size={14} className="text-emerald-400" /> : coderPermissionMode === 'auto-review' ? <Shield size={14} className="text-violet-400" /> : <Hand size={14} className="text-zinc-400" />}
+                    <span>{permissionModeLabel(coderPermissionMode)}</span>
+                    <ChevronDown size={14} className="text-[var(--theme-muted)] transition-transform duration-200" style={{ transform: isPermissionDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                  </motion.button>
+
+                  <AnimatePresence>
+                    {isPermissionDropdownOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                        className="absolute bottom-full left-0 mb-2 w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[190] p-1.5 text-left"
+                      >
+                        {permissionOptions.map(option => {
+                          const isActive = coderPermissionMode === option.id;
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => {
+                                setCoderPermissionMode(option.id);
+                                setIsPermissionDropdownOpen(false);
+                                showToast(`Coder permissions: ${option.label}`);
+                              }}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors cursor-pointer ${
+                                isActive
+                                  ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)]'
+                                  : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
+                              }`}
+                            >
+                              <span className="text-[var(--theme-secondary)]">{option.icon}</span>
+                              <span className="flex-1 text-left">{option.label}</span>
+                              {isActive && <Check size={14} className="text-[var(--theme-accent)]" />}
+                            </button>
+                          );
+                        })}
+                        <div className="mt-1.5 border-t border-[var(--theme-border)] pt-1.5 px-2 pb-1 text-[10px] text-[var(--theme-muted)] font-mono">
+                          {permissionAuditLog.length} permission action{permissionAuditLog.length === 1 ? '' : 's'} logged
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                <div className="relative" ref={modeDropdownRef}>
+                  <motion.button 
+                    whileTap={{ scale: 0.95 }}
+                    transition={{ duration: 0.08 }}
+                    onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
+                    className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
+                    title="Select Assistant Mode"
+                  >
+                    <div className="shrink-0 flex items-center justify-center">
+                      {activeAssistantMode === 'builder' && <Bot size={14} className="text-orange-500 animate-pulse" />}
+                      {activeAssistantMode === 'planner' && <Layers size={14} className="text-violet-500" />}
+                      {activeAssistantMode === 'debugger' && <Bug size={14} className="text-amber-500" />}
+                    </div>
+                    <span>
+                      {activeAssistantMode === 'builder' ? 'Builder' : activeAssistantMode === 'planner' ? 'Planner' : 'Debugger'}
+                    </span>
+                    <ChevronDown size={14} className="text-[var(--theme-muted)] transition-transform duration-200" style={{ transform: isModeDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                  </motion.button>
 
                 <AnimatePresence>
                   {isModeDropdownOpen && (
@@ -1503,7 +1649,8 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
+                </div>
+              </>
             )}
           </div>
 

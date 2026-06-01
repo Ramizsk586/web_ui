@@ -38,6 +38,7 @@ interface LivePreviewPanelProps {
   setActiveTab: (tab: 'overview' | 'review' | string) => void;
   openFileTabs: string[];
   setOpenFileTabs: React.Dispatch<React.SetStateAction<string[]>>;
+  workspaceRootPath?: string;
 }
 
 interface DiffLine {
@@ -143,7 +144,8 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   activeTab,
   setActiveTab,
   openFileTabs,
-  setOpenFileTabs
+  setOpenFileTabs,
+  workspaceRootPath
 }) => {
   const [gitChanges, setGitChanges] = useState<any[]>([]);
   const [fileDiffs, setFileDiffs] = useState<Record<string, string>>({});
@@ -156,7 +158,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       const res = await fetch('/api/git/changes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceRoot: '.' })
+        body: JSON.stringify({ workspaceRoot: workspaceRootPath || '.' })
       });
       if (res.ok) {
         const data = await res.json();
@@ -177,7 +179,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       const res = await fetch('/api/git/diff', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath, workspaceRoot: '.' })
+        body: JSON.stringify({ filePath, workspaceRoot: workspaceRootPath || '.' })
       });
       if (res.ok) {
         const data = await res.json();
@@ -196,7 +198,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
     if (isCoderRightPanelOpen) {
       fetchGitChanges();
     }
-  }, [isCoderRightPanelOpen, iframeKey]);
+  }, [isCoderRightPanelOpen, iframeKey, workspaceRootPath]);
 
   if (!isCoderRightPanelOpen) return null;
 
@@ -484,6 +486,9 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
             <div>
               <h2 className="text-sm font-bold text-white uppercase tracking-wider">Review Changes</h2>
               <p className="text-[10px] text-zinc-500 font-mono mt-0.5 uppercase">Workspace Modified Files List</p>
+              {workspaceRootPath && (
+                <p className="text-[9px] text-zinc-700 font-mono mt-1 truncate max-w-[360px]">{workspaceRootPath}</p>
+              )}
             </div>
             {gitChanges.length > 0 && (
               <span className="text-[10px] bg-[#D97756]/15 text-[#D97756] border border-[#D97756]/20 px-2.5 py-0.5 rounded-full font-bold">

@@ -500,6 +500,7 @@ export default function CoderWorkspaceView({
           setActiveTab={setRightPanelTab}
           openFileTabs={openFileTabs}
           setOpenFileTabs={setOpenFileTabs}
+          workspaceRootPath={coderWorkspacePath}
         />
       </AnimatePresence>
 

@@ -23,7 +23,7 @@ import { ScrapingResultArtifact } from '../ScrapingResultArtifact';
 import { ScrapingProgressIndicator } from '../ScrapingProgressIndicator';
 import { WikiArticleArtifact } from '../WikiArticleArtifact';
 import { WikiToolCallIndicator } from '../WikiToolCallIndicator';
-import { RealtimeEditCounter } from './FileDiffNode';
+import { InlineFileDiffPreview, RealtimeEditCounter } from './FileDiffNode';
 import { LuminaToolCallingAnimation, ToolCallingAnimation } from '../ui/Animations';
 
 const getDomain = (url: string) => {
@@ -119,6 +119,110 @@ const humanizeToolName = (toolName?: string, rawLabel?: string) => {
   if (lower === 'list_coder_files') return 'Query and analyze codebase project file tree';
   if (lower === 'verify_changes') return 'Verify target changes';
   return rawLabel || toolName;
+};
+
+const parseNodeResult = (result?: string) => {
+  if (!result) return null;
+  try {
+    return JSON.parse(result);
+  } catch {
+    return result;
+  }
+};
+
+const formatPath = (value?: string) => String(value || '').replace(/\\/g, '/');
+
+const getCommandFromLabel = (label?: string) => {
+  const match = String(label || '').match(/\(([\s\S]*)\)$/);
+  return match?.[1] || '';
+};
+
+const ToolLogBlock = ({ title, lines, tone = 'default' }: { title: string; lines: string[]; tone?: 'default' | 'error' | 'success' }) => (
+  <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-[#242424] dark:bg-[#242424] text-[12px] leading-relaxed font-mono max-h-72 overflow-y-auto custom-scrollbar shadow-inner select-text">
+    <div className="px-3 py-2 border-b border-white/5 text-zinc-400 bg-black/10 sticky top-0">
+      <span className={tone === 'error' ? 'text-rose-300' : tone === 'success' ? 'text-emerald-300' : 'text-zinc-300'}>{title}</span>
+    </div>
+    <pre className="p-3 whitespace-pre-wrap break-words text-zinc-300">{lines.join('\n')}</pre>
+  </div>
+);
+
+const renderPlainToolResult = (node: ToolCallNode) => {
+  const parsed = parseNodeResult(node.result);
+  const toolName = node.toolName || '';
+
+  if (toolName === 'run_command') {
+    const command = getCommandFromLabel(node.label);
+    const stdout = typeof parsed === 'object' && parsed ? String((parsed as any).stdout || '').trimEnd() : '';
+    const stderr = typeof parsed === 'object' && parsed ? String((parsed as any).stderr || '').trimEnd() : '';
+    const exitCode = typeof parsed === 'object' && parsed ? (parsed as any).exitCode : undefined;
+    const lines = [
+      `$ ${command || 'run command'}`,
+      stdout,
+      stderr ? `${stdout ? '\n' : ''}${stderr}` : '',
+      exitCode !== undefined ? `\nexit code: ${exitCode}` : ''
+    ].filter(Boolean);
+    return <ToolLogBlock title="Shell" lines={lines} tone={exitCode === 0 ? 'success' : exitCode ? 'error' : 'default'} />;
+  }
+
+  if (toolName === 'read_file') {
+    const filePath = typeof parsed === 'object' && parsed ? formatPath((parsed as any).filePath || node.filePath) : node.filePath;
+    const content = typeof parsed === 'object' && parsed ? String((parsed as any).content || '') : String(parsed || '');
+    const range = typeof parsed === 'object' && parsed && (parsed as any).offset
+      ? ` -Offset ${(parsed as any).offset}${(parsed as any).limit ? ` -TotalCount ${(parsed as any).limit}` : ''}`
+      : '';
+    return <ToolLogBlock title="Read file" lines={[`$ Get-Content -Path ${filePath}${range}`, '', content]} />;
+  }
+
+  if (toolName === 'search_code') {
+    const query = typeof parsed === 'object' && parsed ? String((parsed as any).query || '') : '';
+    const matches = typeof parsed === 'object' && parsed && Array.isArray((parsed as any).matches) ? (parsed as any).matches : [];
+    const files = typeof parsed === 'object' && parsed && Array.isArray((parsed as any).files) ? (parsed as any).files : [];
+    const lines = [
+      `$ rg -n ${query ? JSON.stringify(query) : '"<list files>"'}`,
+      '',
+      ...(matches.length > 0
+        ? matches.map((m: any) => `${formatPath(m.filePath)}:${m.line}:  ${m.text}`)
+        : files.map((f: any) => formatPath(f.filePath || f.path))),
+      matches.length === 0 && files.length === 0 ? 'No matches' : ''
+    ].filter(Boolean);
+    return <ToolLogBlock title="Shell" lines={lines} />;
+  }
+
+  if (['write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file'].includes(toolName)) {
+    const filePath = typeof parsed === 'object' && parsed ? formatPath((parsed as any).filePath || node.filePath) : node.filePath;
+    const replacements = typeof parsed === 'object' && parsed && (parsed as any).replacements ? ` (${(parsed as any).replacements} replacement${(parsed as any).replacements === 1 ? '' : 's'})` : '';
+    const action = toolName === 'edit_file' ? 'Edited file' :
+      toolName === 'write_file' ? 'Wrote file' :
+      toolName === 'create_file' ? 'Created file' :
+      toolName === 'delete_file' ? 'Deleted file' :
+      'Renamed file';
+    return (
+      <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-[#242424] dark:bg-[#242424] text-[12px] font-mono shadow-inner select-text overflow-hidden">
+        <div className="px-3 py-2 border-b border-white/5 text-zinc-300 bg-black/10">{action}{replacements}</div>
+        <div className="p-3 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2 py-1 rounded bg-zinc-900/70 border border-white/10 text-zinc-300">{filePath || node.filePath || 'workspace file'}</span>
+            {node.addedCount !== undefined && <span className="text-emerald-400">+{node.addedCount}</span>}
+            {node.removedCount !== undefined && <span className="text-rose-400">-{node.removedCount}</span>}
+          </div>
+          {['write_file', 'edit_file', 'create_file'].includes(toolName) && (
+            <InlineFileDiffPreview node={node} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (typeof parsed === 'string') {
+    return <ToolLogBlock title={humanizeToolName(node.toolName, node.label)} lines={[parsed]} />;
+  }
+
+  return (
+    <ToolLogBlock
+      title={humanizeToolName(node.toolName, node.label)}
+      lines={[JSON.stringify(parsed, null, 2)]}
+    />
+  );
 };
 
 interface NodeGraphProps {
@@ -477,9 +581,7 @@ export const NodeGraph = React.memo(({
                         <WikiToolCallIndicator node={node} />
                       )
                     ) : node.result ? (
-                      <div className="p-3 rounded-xl border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-white/[0.02] text-[12px] leading-relaxed text-zinc-600 dark:text-zinc-400 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar shadow-inner">
-                        {node.result}
-                      </div>
+                      renderPlainToolResult(node)
                     ) : node.filePath ? (
                       <div className="text-xs text-zinc-500 font-mono italic">
                         {node.filePath}
@@ -492,7 +594,7 @@ export const NodeGraph = React.memo(({
                       </div>
                     )}
                     
-                    {isEditNode && (
+                    {isEditNode && !node.result && (
                       <div className="mt-2.5">
                         <RealtimeEditCounter node={node} />
                       </div>
@@ -643,9 +745,7 @@ export const InlineToolCallCard = React.memo(({
                   <WikiToolCallIndicator node={node} />
                 )
               ) : node.result ? (
-                <div className="p-3 rounded-xl border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-white/[0.02] text-[12px] leading-relaxed text-zinc-600 dark:text-zinc-400 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar shadow-inner">
-                  {node.result}
-                </div>
+                renderPlainToolResult(node)
               ) : node.filePath ? (
                 <div className="text-xs text-zinc-500 font-mono italic">
                   {node.filePath}
@@ -658,7 +758,7 @@ export const InlineToolCallCard = React.memo(({
                 </div>
               )}
               
-              {isEditNode && (
+              {isEditNode && !node.result && (
                 <div className="mt-2.5">
                   <RealtimeEditCounter node={node} />
                 </div>

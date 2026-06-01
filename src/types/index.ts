@@ -15,6 +15,8 @@ export interface ToolCallNode {
   filePath?: string;
   addedCount?: number;
   removedCount?: number;
+  oldContent?: string;
+  newContent?: string;
 }
 
 export interface Artifact {
@@ -83,6 +85,14 @@ export interface ToolDefinition {
       required: string[];
     };
   };
+}
+
+export type CoderPermissionMode = 'default' | 'auto-review' | 'full-access';
+
+export interface PendingCommandPermission {
+  command: string;
+  reason: string;
+  resolve: (decision: 'allow-once' | 'allow-always' | 'deny') => void;
 }
 
 export interface Skill {

@@ -368,20 +368,30 @@ async function startServer() {
 
   // POST /api/terminal/execute — real OS shell command execution with session support
   app.post("/api/terminal/execute", async (req, res) => {
-    const { command, currentPath, sessionId: clientSessionId } = req.body;
+    const { command, currentPath, sessionId: clientSessionId, workspaceRoot } = req.body;
     if (!command || typeof command !== 'string') {
       return res.status(400).json({ stderr: 'No command provided.' });
     }
 
     const { id: sessionId, session } = getTerminalSession(clientSessionId);
+    const sandboxRoot = path.resolve(workspaceRoot || currentPath || process.cwd());
+
+    const isInsideSandbox = (candidate: string) => {
+      const resolved = path.resolve(candidate);
+      return resolved === sandboxRoot || resolved.startsWith(sandboxRoot + path.sep);
+    };
 
     if (currentPath && currentPath !== '.') {
       const resolved = resolveTermPath(process.cwd(), currentPath);
       try {
-        if (fs.statSync(resolved).isDirectory()) {
+        if (fs.statSync(resolved).isDirectory() && isInsideSandbox(resolved)) {
           session.cwd = resolved;
         }
       } catch {}
+    }
+
+    if (!isInsideSandbox(session.cwd)) {
+      session.cwd = sandboxRoot;
     }
 
     const trimmed = command.trim();
@@ -405,6 +415,15 @@ async function startServer() {
     // Built-in: cd
     if (firstWord === 'cd' || firstWord === 'set-location' || firstWord === 'sl') {
       const args = trimmed.slice(firstWord.length).trim();
+      const targetPath = resolveTermPath(session.cwd, args || os.homedir());
+      if (!isInsideSandbox(targetPath)) {
+        return res.status(403).json({
+          sessionId,
+          stdout: '',
+          stderr: `Permission denied: terminal is sandboxed to ${sandboxRoot}\n`,
+          newPath: toTermRelativePath(session.cwd),
+        });
+      }
       const result = handleTermCd(args, session);
       return res.json({
         sessionId,
@@ -421,6 +440,9 @@ async function startServer() {
 
     // Execute via real shell spawn
     try {
+      if (!isInsideSandbox(session.cwd)) {
+        return res.status(403).json({ sessionId, stderr: `Permission denied: terminal is sandboxed to ${sandboxRoot}\n`, stdout: '' });
+      }
       const result = await executeTermCommand(trimmed, session.cwd);
 
       try { fs.statSync(session.cwd); } catch { session.cwd = process.cwd(); }
@@ -1482,6 +1504,90 @@ async function startServer() {
     }
   };
 
+  type WorkspaceChangeRecord = {
+    filePath: string;
+    fileName: string;
+    folder: string;
+    status: 'modified' | 'added' | 'deleted';
+    added: number;
+    removed: number;
+    oldContent: string;
+    newContent: string;
+  };
+
+  const workspaceChangeLedger = new Map<string, Map<string, WorkspaceChangeRecord>>();
+
+  const normalizeWorkspaceKey = (workspaceRoot?: string) =>
+    path.resolve(workspaceRoot || process.cwd()).replace(/\\/g, '/').toLowerCase();
+
+  const toWorkspaceRelativePath = (absolutePath: string, workspaceRoot?: string) => {
+    const root = path.resolve(workspaceRoot || process.cwd());
+    const rel = path.relative(root, absolutePath);
+    return (!rel || rel.startsWith('..') || path.isAbsolute(rel) ? path.basename(absolutePath) : rel).replace(/\\/g, '/');
+  };
+
+  const countChangedLines = (oldContent: string, newContent: string) => {
+    const oldLines = oldContent ? oldContent.split('\n') : [];
+    const newLines = newContent ? newContent.split('\n') : [];
+    let commonPrefix = 0;
+    while (
+      commonPrefix < oldLines.length &&
+      commonPrefix < newLines.length &&
+      oldLines[commonPrefix] === newLines[commonPrefix]
+    ) {
+      commonPrefix++;
+    }
+    let oldSuffix = oldLines.length - 1;
+    let newSuffix = newLines.length - 1;
+    while (
+      oldSuffix >= commonPrefix &&
+      newSuffix >= commonPrefix &&
+      oldLines[oldSuffix] === newLines[newSuffix]
+    ) {
+      oldSuffix--;
+      newSuffix--;
+    }
+    return {
+      added: Math.max(0, newSuffix - commonPrefix + 1),
+      removed: Math.max(0, oldSuffix - commonPrefix + 1)
+    };
+  };
+
+  const buildLedgerDiff = (record: WorkspaceChangeRecord) => {
+    const oldLines = record.oldContent ? record.oldContent.split('\n') : [];
+    const newLines = record.newContent ? record.newContent.split('\n') : [];
+    return [
+      `--- a/${record.filePath}`,
+      `+++ b/${record.filePath}`,
+      `@@ -1,${Math.max(oldLines.length, 1)} +1,${Math.max(newLines.length, 1)} @@`,
+      ...oldLines.map(line => `-${line}`),
+      ...newLines.map(line => `+${line}`)
+    ].join('\n');
+  };
+
+  const recordWorkspaceChange = (absolutePath: string, workspaceRoot: string | undefined, oldContent: string, newContent: string, forcedStatus?: WorkspaceChangeRecord['status']) => {
+    const filePath = toWorkspaceRelativePath(absolutePath, workspaceRoot);
+    const workspaceKey = normalizeWorkspaceKey(workspaceRoot);
+    const lastSlash = filePath.lastIndexOf('/');
+    const fileName = lastSlash !== -1 ? filePath.substring(lastSlash + 1) : filePath;
+    const folder = lastSlash !== -1 ? filePath.substring(0, lastSlash) : '/';
+    const changedLines = countChangedLines(oldContent, newContent);
+    const status = forcedStatus || (!oldContent ? 'added' : 'modified');
+    const workspaceChanges = workspaceChangeLedger.get(workspaceKey) || new Map<string, WorkspaceChangeRecord>();
+
+    workspaceChanges.set(filePath, {
+      filePath,
+      fileName,
+      folder,
+      status,
+      added: status === 'deleted' ? 0 : changedLines.added,
+      removed: status === 'added' ? 0 : changedLines.removed,
+      oldContent,
+      newContent
+    });
+    workspaceChangeLedger.set(workspaceKey, workspaceChanges);
+  };
+
   // Filesystem Listing Endpoints
   app.post("/api/fs/list", (req, res) => {
     const { folderPath, workspaceRoot } = req.body;
@@ -1556,8 +1662,11 @@ async function startServer() {
     
     const resolvedPath = resolveCoderPath(filePath, workspaceRoot);
     try {
+      const existed = fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile();
+      const oldContent = existed ? fs.readFileSync(resolvedPath, 'utf8') : '';
       fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
       fs.writeFileSync(resolvedPath, content, 'utf8');
+      recordWorkspaceChange(resolvedPath, workspaceRoot, oldContent, String(content), existed ? 'modified' : 'added');
       res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to write file", detail: e.message });
@@ -1575,8 +1684,12 @@ async function startServer() {
       if (isDirectory) {
         fs.mkdirSync(resolvedPath, { recursive: true });
        } else {
+        const existed = fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile();
+        const oldContent = existed ? fs.readFileSync(resolvedPath, 'utf8') : '';
+        const nextContent = content !== undefined ? String(content) : '';
         fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
-        fs.writeFileSync(resolvedPath, content !== undefined ? content : '', 'utf8');
+        fs.writeFileSync(resolvedPath, nextContent, 'utf8');
+        recordWorkspaceChange(resolvedPath, workspaceRoot, oldContent, nextContent, existed ? 'modified' : 'added');
       }
       res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
     } catch (e: any) {
@@ -1595,11 +1708,13 @@ async function startServer() {
       return res.status(404).json({ error: "File or directory not found" });
     }
     try {
+      const oldContent = fs.statSync(resolvedPath).isFile() ? fs.readFileSync(resolvedPath, 'utf8') : '';
       if (fs.statSync(resolvedPath).isDirectory()) {
         fs.rmSync(resolvedPath, { recursive: true, force: true });
       } else {
         fs.unlinkSync(resolvedPath);
       }
+      recordWorkspaceChange(resolvedPath, workspaceRoot, oldContent, '', 'deleted');
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to delete", detail: e.message });
@@ -1641,7 +1756,9 @@ async function startServer() {
       }
 
       if (!isGit) {
-        return res.json({ success: true, changes: [] });
+        const ledgerChanges = Array.from((workspaceChangeLedger.get(normalizeWorkspaceKey(targetDir)) || new Map()).values())
+          .map(({ oldContent, newContent, ...change }) => change);
+        return res.json({ success: true, changes: ledgerChanges, source: 'workspace-ledger' });
       }
 
       const statusOutput = execSync('git status --porcelain', { cwd: targetDir, encoding: 'utf8' });
@@ -1712,7 +1829,11 @@ async function startServer() {
         };
       });
       
-      res.json({ success: true, changes });
+      const ledgerChanges = Array.from((workspaceChangeLedger.get(normalizeWorkspaceKey(targetDir)) || new Map()).values())
+        .filter(change => !changes.some(gitChange => gitChange.filePath === change.filePath))
+        .map(({ oldContent, newContent, ...change }) => change);
+
+      res.json({ success: true, changes: [...changes, ...ledgerChanges], source: 'git' });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to get git changes", detail: e.message });
     }
@@ -1729,6 +1850,7 @@ async function startServer() {
     try {
       const { execSync } = require('child_process');
       let diffOutput = '';
+      const ledgerRecord = workspaceChangeLedger.get(normalizeWorkspaceKey(targetDir))?.get(filePath.replace(/\\/g, '/'));
       
       let isUntracked = false;
       try {
@@ -1767,6 +1889,10 @@ async function startServer() {
             ].join('\n');
           }
         }
+      }
+
+      if (!diffOutput.trim() && ledgerRecord) {
+        diffOutput = buildLedgerDiff(ledgerRecord);
       }
       
       res.json({ success: true, diff: diffOutput });

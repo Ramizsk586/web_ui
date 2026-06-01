@@ -19,7 +19,9 @@ import { extractArtifacts } from '../utils/artifactUtils';
 import { extractYouTubeId, fetchYouTubeTranscript } from '../utils/youtubeUtils';
 import { SKILLS } from '../constants';
 import { Chat, Message, ToolCallNode } from '../types';
+import { CoderPermissionMode } from '../types';
 import { scrapeUrl, ScrapeResult } from '../services/scrapingService';
+import { explainCommandRestriction, shouldRequestCommandPermission } from '../utils/permissionUtils';
 import {
   wikiSearch,
   wikiGetPage,
@@ -175,6 +177,11 @@ export interface UseAppHandlersParams {
   createNewChat: (agentId: string | null, coderModeEnabled?: boolean) => string;
 
   buildActiveTools: () => any[];
+  coderPermissionMode: CoderPermissionMode;
+  alwaysAllowedCommands: string[];
+  setAlwaysAllowedCommands: React.Dispatch<React.SetStateAction<string[]>>;
+  requestCommandPermission: (command: string, reason: string) => Promise<'allow-once' | 'allow-always' | 'deny'>;
+  logPermissionAction: (entry: { command?: string; action: string; detail?: string; mode?: CoderPermissionMode }) => void;
 }
 
 const isLikelyCoderTask = (message: string) => {
@@ -247,7 +254,12 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     setAskAiQuestions, setCurrentQuestionIndex,
     setAskAiAnswers, setShowAskAiPanel,
     createNewChat,
-    buildActiveTools
+    buildActiveTools,
+    coderPermissionMode,
+    alwaysAllowedCommands,
+    setAlwaysAllowedCommands,
+    requestCommandPermission,
+    logPermissionAction
   } = params;
 
   const handleClearChat = () => {
@@ -1347,6 +1359,8 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 if (matchingNode) {
                   matchingNode.addedCount = diffValues.added;
                   matchingNode.removedCount = diffValues.removed;
+                  matchingNode.oldContent = oldContent;
+                  matchingNode.newContent = newContent;
                 }
                 showToast(`Wrote ${cleanedPath}`);
               } else if (name === 'read_file') {
@@ -1460,6 +1474,8 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 if (matchingNode) {
                   matchingNode.addedCount = diffValues.added;
                   matchingNode.removedCount = diffValues.removed;
+                  matchingNode.oldContent = oldContent;
+                  matchingNode.newContent = newContentVal;
                 }
                 resultValue = { ...resultValue, replacements: args.all ? occurrences : 1 };
                 showToast(`Patched ${cleanedPath}`);
@@ -1536,11 +1552,40 @@ Store contract files at .lumina/contracts/ in the workspace.`;
               } else if (name === 'run_command') {
                 const commandText = args.command;
                 if (!commandText) throw new Error("run_command requires command parameter");
+                const restrictionReason = explainCommandRestriction(commandText);
+                if (shouldRequestCommandPermission(commandText, coderPermissionMode, alwaysAllowedCommands)) {
+                  logPermissionAction({
+                    command: commandText,
+                    action: 'permission_requested',
+                    detail: restrictionReason,
+                    mode: coderPermissionMode
+                  });
+                  const decision = await requestCommandPermission(commandText, restrictionReason);
+                  logPermissionAction({
+                    command: commandText,
+                    action: decision,
+                    detail: restrictionReason,
+                    mode: coderPermissionMode
+                  });
+                  if (decision === 'deny') {
+                    throw new Error(`Permission denied for terminal command: ${commandText}`);
+                  }
+                  if (decision === 'allow-always') {
+                    setAlwaysAllowedCommands(prev => prev.includes(commandText.trim()) ? prev : [...prev, commandText.trim()]);
+                  }
+                } else {
+                  logPermissionAction({
+                    command: commandText,
+                    action: 'auto_allowed',
+                    detail: coderPermissionMode === 'full-access' ? 'Full access mode' : 'Safe command or previously allowed command',
+                    mode: coderPermissionMode
+                  });
+                }
                 showToast(`Running: ${commandText.substring(0, 30)}...`);
                 const runRes = await fetch('/api/terminal/execute', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ command: commandText, currentPath: coderWorkspacePath }),
+                  body: JSON.stringify({ command: commandText, currentPath: coderWorkspacePath, workspaceRoot: coderWorkspacePath }),
                   signal
                 });
                 if (!runRes.ok) {
@@ -1842,6 +1887,9 @@ Store contract files at .lumina/contracts/ in the workspace.`;
               toolCallNodes[matchedIdx].status = 'complete';
               const resultStr = JSON.stringify(resultValue, null, 2);
               toolCallNodes[matchedIdx].result = resultStr;
+              if (!toolCallNodes[matchedIdx].filePath && resultValue?.filePath) {
+                toolCallNodes[matchedIdx].filePath = String(resultValue.filePath).replace(/\\/g, '/');
+              }
               if (!toolCallNodes[matchedIdx].resultSummary) {
                 const preview = resultStr.length > 200 ? resultStr.slice(0, 200) + '...' : resultStr;
                 toolCallNodes[matchedIdx].resultSummary = preview;

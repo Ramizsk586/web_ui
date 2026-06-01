@@ -168,6 +168,7 @@ import {
 
 import { SidebarContent } from './components/Sidebar/SidebarContent';
 import { ChatBoxPanel } from './components/ChatBoxPanel';
+import { CoderPermissionMode, PendingCommandPermission } from './types';
 
 import {
   RealtimeEditCounter,
@@ -512,6 +513,18 @@ export default function AppContent({
 
   // Layout & UI helper states
   const [activeAssistantMode, setActiveAssistantMode] = useState<'builder' | 'planner' | 'debugger'>('builder');
+  const [coderPermissionMode, setCoderPermissionMode] = useState<CoderPermissionMode>(() => {
+    return (localStorage.getItem('lumina_coder_permission_mode') as CoderPermissionMode) || 'default';
+  });
+  const [alwaysAllowedCommands, setAlwaysAllowedCommands] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lumina_coder_allowed_commands') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [pendingCommandPermission, setPendingCommandPermission] = useState<PendingCommandPermission | null>(null);
+  const [permissionAuditLog, setPermissionAuditLog] = useState<any[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [retroFilter, setRetroFilter] = useState(false);
   const [verboseDebug, setVerboseDebug] = useState(false);
@@ -1119,6 +1132,31 @@ const startCoderPreview = useCallback(async () => {
     }
   }, [isCoderRightPanelOpen, isCoderMode, startCoderPreview]);
 
+  useEffect(() => {
+    localStorage.setItem('lumina_coder_permission_mode', coderPermissionMode);
+  }, [coderPermissionMode]);
+
+  useEffect(() => {
+    localStorage.setItem('lumina_coder_allowed_commands', JSON.stringify(alwaysAllowedCommands));
+  }, [alwaysAllowedCommands]);
+
+  const logPermissionAction = useCallback((entry: { command?: string; action: string; detail?: string; mode?: CoderPermissionMode }) => {
+    const logEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: new Date().toISOString(),
+      mode: coderPermissionMode,
+      ...entry
+    };
+    setPermissionAuditLog(prev => [logEntry, ...prev].slice(0, 80));
+    console.log('[LUMINA_PERMISSION]', logEntry);
+  }, [coderPermissionMode]);
+
+  const requestCommandPermission = useCallback((command: string, reason: string) => {
+    return new Promise<'allow-once' | 'allow-always' | 'deny'>((resolve) => {
+      setPendingCommandPermission({ command, reason, resolve });
+    });
+  }, []);
+
   const {
     handleSend,
     handleClearChat,
@@ -1179,7 +1217,12 @@ const startCoderPreview = useCallback(async () => {
     setAskAiQuestions, setCurrentQuestionIndex,
     setAskAiAnswers, setShowAskAiPanel,
     createNewChat,
-    buildActiveTools
+    buildActiveTools,
+    coderPermissionMode,
+    alwaysAllowedCommands,
+    setAlwaysAllowedCommands,
+    requestCommandPermission,
+    logPermissionAction
   });
 
   useEffect(() => {
@@ -1426,6 +1469,11 @@ const startCoderPreview = useCallback(async () => {
         setIsTranscriptToolOpen={setIsTranscriptToolOpen}
         handleScreenshot={handleScreenshot}
         activeAssistantMode={activeAssistantMode}
+        coderPermissionMode={coderPermissionMode}
+        setCoderPermissionMode={setCoderPermissionMode}
+        pendingCommandPermission={pendingCommandPermission}
+        setPendingCommandPermission={setPendingCommandPermission}
+        permissionAuditLog={permissionAuditLog}
         isModeDropdownOpen={isModeDropdownOpen}
         setIsModeDropdownOpen={setIsModeDropdownOpen}
         modeDropdownRef={modeDropdownRef}
