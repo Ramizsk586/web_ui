@@ -17,6 +17,14 @@ import { computeLineDiff } from '../components/NodeGraph/FileDiffNode';
 import { parseThinkTags, turboQuantCompress } from '../utils/textUtils';
 import { extractArtifacts } from '../utils/artifactUtils';
 import { extractYouTubeId, fetchYouTubeTranscript } from '../utils/youtubeUtils';
+import {
+  DEEP_RESEARCH_SYSTEM_PROMPT,
+  createDeepResearchReportTitle,
+  deepResearchTools,
+  formatDeepResearchSearchResults,
+  formatDeepResearchVisitResult,
+  sanitizeDeepResearchReport
+} from '../utils/deepResearchWorkflow';
 import { SKILLS } from '../constants';
 import { Chat, Message, ToolCallNode } from '../types';
 import { CoderPermissionMode } from '../types';
@@ -867,6 +875,14 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       
       let activeTools = (!isCoderMode || shouldRunCoderAgent) ? buildActiveTools() : [];
+      if (isDeepSearchEnabled && !isCoderMode) {
+        const existingNames = new Set(activeTools.map((tool: any) => tool?.function?.name).filter(Boolean));
+        for (const tool of deepResearchTools) {
+          if (!existingNames.has(tool.function.name)) {
+            activeTools.push(tool);
+          }
+        }
+      }
       if (shouldRunCoderAgent) {
         activeTools.push(
           {
@@ -1117,6 +1133,10 @@ export function useAppHandlers(params: UseAppHandlersParams) {
         systemPrompt += `\n[TOOLS] Active: ${activeTools.map(t => t.function.name).join(', ')}. Use relevant tools proactively.`;
       }
 
+      if (isDeepSearchEnabled && !isCoderMode) {
+        systemPrompt += `\n\n${DEEP_RESEARCH_SYSTEM_PROMPT}\nCurrent date: ${new Date().toISOString().slice(0, 10)}`;
+      }
+
       if (isCoderMode) {
         const osName = (navigator as any)?.platform || 'unknown';
         if (!shouldRunCoderAgent) {
@@ -1280,7 +1300,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
 
       const hasWebScrapeCall = toolCallsRaw && toolCallsRaw.some((tc: any) => {
         const name = tc.function?.name || '';
-        return name === 'web_scrape' || name.startsWith('wiki_');
+        return name === 'web_scrape' || name === 'search' || name === 'visit' || name === 'google_scholar' || name.startsWith('wiki_');
       });
       if (isCoderMode || hasWebScrapeCall) {
         let successfulScrapesCount = 0;
@@ -1830,6 +1850,89 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   }
                   return chat;
                 }));
+              } else if (name === 'search' || name === 'google_scholar') {
+                const rawQueries = Array.isArray(args.query) ? args.query : [args.query].filter(Boolean);
+                const queries = rawQueries.map((q: any) => String(q).trim()).filter(Boolean);
+                if (queries.length === 0) {
+                  throw new Error(`Missing required 'query' parameter for ${name}.`);
+                }
+
+                const batchedResults: string[] = [];
+                const collectedResults: any[] = [];
+                for (const query of queries) {
+                  const effectiveQuery = name === 'google_scholar'
+                    ? `${query} scholarly article OR paper OR publication`
+                    : query;
+                  const searchResp = await fetch(`/api/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      query: effectiveQuery,
+                      tavilyKey: tavilyApiKey,
+                      serpKey: serpApiKey,
+                      provider: searchProvider
+                    }),
+                    signal
+                  });
+
+                  if (!searchResp.ok) {
+                    batchedResults.push(`No results found for '${effectiveQuery}'. Search backend returned ${searchResp.status}.`);
+                    continue;
+                  }
+
+                  const searchData = await searchResp.json();
+                  const results = searchData.results || [];
+                  collectedResults.push(...results);
+                  batchedResults.push(formatDeepResearchSearchResults(effectiveQuery, results));
+                }
+
+                if (collectedResults.length > 0) {
+                  searchResults = [...searchResults, ...collectedResults].filter((result, index, arr) => {
+                    const url = result?.url || result?.link || '';
+                    return url && arr.findIndex(other => (other?.url || other?.link || '') === url) === index;
+                  });
+                  setChats(prev => prev.map(chat => {
+                    if (chat.id !== chatId) return chat;
+                    return {
+                      ...chat,
+                      messages: chat.messages.map(m => m.id === thinkingId ? {
+                        ...m,
+                        sources: searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })),
+                        thinking: `Reviewing ${searchResults.length} discovered source candidates...`
+                      } : m)
+                    };
+                  }));
+                }
+
+                resultValue = batchedResults.join('\n=======\n');
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${queries.length} quer${queries.length === 1 ? 'y' : 'ies'} searched, ${collectedResults.length} result candidates`;
+                }
+              } else if (name === 'visit') {
+                const rawUrls = Array.isArray(args.url) ? args.url : [args.url].filter(Boolean);
+                const urls = rawUrls.map((u: any) => String(u).trim()).filter(Boolean);
+                const goal = String(args.goal || content).trim();
+                if (urls.length === 0 || !goal) {
+                  throw new Error("Missing required 'url' or 'goal' parameter for visit.");
+                }
+
+                const visitOutputs: string[] = [];
+                for (const targetUrl of urls.slice(0, 5)) {
+                  const scrapeResult = await scrapeUrl({
+                    url: targetUrl,
+                    extractLinks: false,
+                    extractTables: false,
+                    outputFormat: 'markdown'
+                  });
+                  visitOutputs.push(formatDeepResearchVisitResult(targetUrl, goal, scrapeResult, useTurboQuant ? 4000 : 6000));
+                }
+
+                resultValue = visitOutputs.join('\n=======\n');
+                const currentN = toolCallNodes.find(n => n.id === tc.id);
+                if (currentN) {
+                  currentN.resultSummary = `${urls.slice(0, 5).length} page${urls.length === 1 ? '' : 's'} visited for targeted evidence`;
+                }
               } else if (name === 'web_scrape') {
                 if (successfulScrapesCount >= 3) {
                   resultValue = { error: "Scraping limit of 3 successful pages reached. Further web scrapes are blocked in this turn." };
@@ -2176,9 +2279,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
 
       const responseContent = choice?.content;
       const hasAskUser = toolCallsRaw && toolCallsRaw.some((tc: any) => tc.function?.name === 'ask_user');
-      const finalContent = [agentTraceContent, responseContent]
-        .filter((part, idx, arr) => part && (idx === 0 || part !== arr[0]))
-        .join('\n\n') || (toolCallsRaw?.length > 0 && !hasAskUser ? `Running ${toolCallsRaw.length} tool(s)...` : '');
+      const finalContent = isDeepSearchEnabled && !isCoderMode
+        ? (sanitizeDeepResearchReport(responseContent || agentTraceContent) || 'Deep Research completed, but no final report text was returned.')
+        : ([agentTraceContent, responseContent]
+          .filter((part, idx, arr) => part && (idx === 0 || part !== arr[0]))
+          .join('\n\n') || (toolCallsRaw?.length > 0 && !hasAskUser ? `Running ${toolCallsRaw.length} tool(s)...` : ''));
       
       const scavengedImages: any[] = [];
       toolCallNodes.forEach(tc => {
@@ -2412,11 +2517,26 @@ Store contract files at .lumina/contracts/ in the workspace.`;
         return;
       }
 
-      const finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
+      let finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
+      if (isDeepSearchEnabled && !isCoderMode) {
+        const cleanReport = sanitizeDeepResearchReport(finalDisplayContent || finalContent);
+        if (cleanReport.length > 80) {
+          finalArtifacts = [
+            {
+              id: 'deep-research-report-' + Date.now().toString(36),
+              title: createDeepResearchReportTitle(cleanReport),
+              language: 'markdown',
+              content: cleanReport,
+              type: 'report'
+            },
+            ...finalArtifacts.filter(artifact => artifact.type !== 'report' && artifact.type !== 'markdown')
+          ];
+        }
+      }
       if (finalArtifacts.length > 0) {
         setActiveArtifact(finalArtifacts[0]);
         setIsCanvasOpen(true);
-        setCanvasView(finalArtifacts[0].type === 'html' ? 'preview' : 'code');
+        setCanvasView(['html', 'markdown', 'report'].includes(finalArtifacts[0].type) ? 'preview' : 'code');
       }
 
       setChats(prev => prev.map(chat => {

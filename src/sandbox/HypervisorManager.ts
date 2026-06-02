@@ -6,6 +6,10 @@ import { createLogger } from './SandboxHealth';
 
 const log = createLogger('HypervisorManager');
 
+function hasPositiveWindowsSignal(value: string): boolean {
+  return /\b(true|yes|enabled|detected|running)\b/i.test(value);
+}
+
 export class HypervisorManager {
   private vmRootDir: string;
 
@@ -35,30 +39,42 @@ export class HypervisorManager {
     } catch {}
 
     try {
-      const cpuVirtStr = execSync(
-        'powershell -NoProfile -Command "(Get-CimInstance -ClassName Win32_Processor).VirtualizationFirmwareEnabled"',
-        { encoding: 'utf8', timeout: 5000 }
-      );
-      detection.cpuVirtualization = cpuVirtStr.trim() === 'True';
-    } catch {
-      try {
-        const cpuInfo = execSync('systeminfo | findstr /R /C:"Virtualization"', {
-          encoding: 'utf8',
-          timeout: 5000,
-        });
-        detection.cpuVirtualization = cpuInfo.toLowerCase().includes('yes');
-      } catch {}
-    }
-
-    try {
       const hvInfo = execSync(
         'powershell -NoProfile -Command "(Get-WmiObject -Class Win32_ComputerSystem).HypervisorPresent"',
         { encoding: 'utf8', timeout: 5000 }
       );
-      detection.hyperVSupported = hvInfo.trim() === 'True';
+      detection.hyperVSupported = hasPositiveWindowsSignal(hvInfo);
     } catch {}
 
     detection.hyperVEnabled = detection.hyperVSupported;
+
+    try {
+      const cpuVirtStr = execSync(
+        'powershell -NoProfile -Command "Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty VirtualizationFirmwareEnabled"',
+        { encoding: 'utf8', timeout: 5000 }
+      );
+      detection.cpuVirtualization = hasPositiveWindowsSignal(cpuVirtStr);
+    } catch {}
+
+    if (!detection.cpuVirtualization) {
+      try {
+        const cpuInfo = execSync(
+          'powershell -NoProfile -Command "systeminfo | Select-String -Pattern \'Virtualization\',\'Hyper-V Requirements\',\'hypervisor has been detected\',\'Virtualization-based security\'"',
+          { encoding: 'utf8', timeout: 10000 }
+        );
+        detection.cpuVirtualization =
+          hasPositiveWindowsSignal(cpuInfo) ||
+          /hypervisor has been detected/i.test(cpuInfo) ||
+          /virtualization-based security:\s*status:\s*running/i.test(cpuInfo);
+      } catch {}
+    }
+
+    // When Windows reports HypervisorPresent, Hyper-V/WSL virtualization is already usable.
+    // Some systems then report Win32_Processor.VirtualizationFirmwareEnabled as False,
+    // so do not show a false CPU warning if the hypervisor is active.
+    if (detection.hyperVEnabled) {
+      detection.cpuVirtualization = true;
+    }
 
     try {
       const totalRamStr = execSync(

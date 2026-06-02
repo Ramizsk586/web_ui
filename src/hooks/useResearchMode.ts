@@ -44,19 +44,19 @@ export function useResearchMode({
   const [customQueries, setCustomQueries] = useState<string>('fusion milestone 2026, academic fusion developments');
 
   const [agents, setAgents] = useState<ResearchAgent[]>([
-    { id: '1', name: 'Agent Alpha', role: 'Objective Planner & Scholar Searcher', status: 'idle', currentTask: 'Awaiting research goal', progress: 0, resultsFound: 0 },
-    { id: '2', name: 'Agent Beta', role: 'Web Page Extract Specialist', status: 'idle', currentTask: 'Awaiting resource assignment', progress: 0, resultsFound: 0 },
-    { id: '3', name: 'Agent Gamma', role: 'Correlator & Fact Checker', status: 'idle', currentTask: 'Awaiting context consolidation', progress: 0, resultsFound: 0 },
-    { id: '4', name: 'Agent Delta', role: 'Document Synthesizer', status: 'idle', currentTask: 'Awaiting compilation signal', progress: 0, resultsFound: 0 },
-    { id: '5', name: 'Agent Epsilon', role: 'Refinement Auditor', status: 'idle', currentTask: 'Awaiting draft evaluation', progress: 0, resultsFound: 0 },
+    { id: '1', name: 'Planner', role: 'Question Decomposer & Query Planner', status: 'idle', currentTask: 'Awaiting research goal', progress: 0, resultsFound: 0 },
+    { id: '2', name: 'Searcher', role: 'Batched Web and Scholar Searcher', status: 'idle', currentTask: 'Awaiting query batch', progress: 0, resultsFound: 0 },
+    { id: '3', name: 'Reader', role: 'Targeted Page Visitor & Evidence Extractor', status: 'idle', currentTask: 'Awaiting URL assignments', progress: 0, resultsFound: 0 },
+    { id: '4', name: 'Verifier', role: 'Cross-source Claim Checker', status: 'idle', currentTask: 'Awaiting collected evidence', progress: 0, resultsFound: 0 },
+    { id: '5', name: 'Synthesizer', role: 'Cited Answer Composer', status: 'idle', currentTask: 'Awaiting final evidence set', progress: 0, resultsFound: 0 },
   ]);
 
   const [toolChain, setToolChain] = useState<ToolChainNode[]>([
-    { id: '1', type: 'query', title: 'Target Objectives', description: 'Formulates multi-angle search queries', status: 'idle' },
-    { id: '2', type: 'search', title: 'SerpAPI Scan', description: 'Executes concurrent web and scholar searches', status: 'idle' },
-    { id: '3', type: 'scrape', title: 'Jina AI Extracting', description: 'Scrapes and distills raw markdown text of target sites', status: 'idle' },
-    { id: '4', type: 'correlate', title: 'Claims Validation', description: 'Cross-checks findings between sources', status: 'idle' },
-    { id: '5', type: 'synthesize', title: 'Compile Answers', description: 'Compiles cited comprehensive answers', status: 'idle' },
+    { id: '1', type: 'query', title: 'Objective Planning', description: 'Decomposes the question into complementary query angles', status: 'idle' },
+    { id: '2', type: 'search', title: 'Batched Search', description: 'Calls search/google_scholar with multiple query branches', status: 'idle' },
+    { id: '3', type: 'scrape', title: 'Targeted Visit', description: 'Visits high-value URLs with explicit extraction goals', status: 'idle' },
+    { id: '4', type: 'correlate', title: 'Evidence Validation', description: 'Cross-checks claims, dates, and source agreement', status: 'idle' },
+    { id: '5', type: 'synthesize', title: 'Final Answer', description: 'Writes the cited Markdown synthesis once evidence is sufficient', status: 'idle' },
   ]);
 
   const [researchLogs, setResearchLogs] = useState<string[]>([
@@ -100,29 +100,29 @@ export function useResearchMode({
         const logs = [...prev];
 
         if (step === 0) {
-          logs.push(`[${timestamp}] [Orchestrator] Formulating initial sub-queries...`);
-          setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'active', details: 'Formulated 4 query branches.' } : n));
-          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'searching', currentTask: 'Analyzing main query...', progress: 20 } : a));
+          logs.push(`[${timestamp}] [Orchestrator] Starting bounded ReAct research loop for objective: "${customQueries}"`);
+          setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'active', details: 'Building complementary query branches.' } : n));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'searching', currentTask: 'Planning search angles...', progress: 20 } : a));
         } else if (step === 1) {
-          logs.push(`[${timestamp}] [Agent Alpha] Dispatching queries: [${customQueries}]`);
-          setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'complete' } : n.type === 'search' ? { ...n, status: 'active', details: 'Scanning academic & news indices...' } : n));
+          logs.push(`[${timestamp}] [Searcher] Emitting batched <tool_call> search/google_scholar queries: [${customQueries}]`);
+          setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'complete' } : n.type === 'search' ? { ...n, status: 'active', details: 'Calling search tools and ranking URLs.' } : n));
           setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, progress: 40, resultsFound: 8 + i * 3 } : a));
         } else if (step === 2) {
-          logs.push(`[${timestamp}] [Agent Alpha] Found 14 matching entries via Web Search Client...`);
-          logs.push(`[${timestamp}] [Agent Beta] Launching Jina AI Extraction on top 4 high-relevance URLs...`);
-          setToolChain(tc => tc.map(n => n.type === 'search' ? { ...n, status: 'complete' } : n.type === 'scrape' ? { ...n, status: 'active', details: 'Visiting r.jina.ai for citations...' } : n));
-          setAgents(agts => agts.map((a, i) => i === 1 ? { ...a, status: 'reading', currentTask: 'Scraping Jina reader...', progress: 65 } : a));
+          logs.push(`[${timestamp}] [Searcher] Search responses appended as <tool_response> context.`);
+          logs.push(`[${timestamp}] [Reader] Visiting top high-relevance URLs with targeted extraction goals...`);
+          setToolChain(tc => tc.map(n => n.type === 'search' ? { ...n, status: 'complete' } : n.type === 'scrape' ? { ...n, status: 'active', details: 'Extracting evidence and page summaries.' } : n));
+          setAgents(agts => agts.map((a, i) => i === 2 ? { ...a, status: 'reading', currentTask: 'Reading selected sources...', progress: 65 } : a));
         } else if (step === 3) {
-          logs.push(`[${timestamp}] [Agent Beta] Jina AI extraction complete: 16,500 characters of raw context matched.`);
-          logs.push(`[${timestamp}] [Agent Gamma] Triggering comparative claim alignment...`);
-          setToolChain(tc => tc.map(n => n.type === 'scrape' ? { ...n, status: 'complete' } : n.type === 'correlate' ? { ...n, status: 'active', details: 'Cross-referencing claims...' } : n));
-          setAgents(agts => agts.map((a, i) => i === 2 ? { ...a, status: 'analyzing', currentTask: 'Cross-referencing parameters...', progress: 80 } : a));
+          logs.push(`[${timestamp}] [Reader] Visit responses returned evidence and summaries for source comparison.`);
+          logs.push(`[${timestamp}] [Verifier] Triggering comparative claim alignment...`);
+          setToolChain(tc => tc.map(n => n.type === 'scrape' ? { ...n, status: 'complete' } : n.type === 'correlate' ? { ...n, status: 'active', details: 'Cross-referencing claims and conflicts.' } : n));
+          setAgents(agts => agts.map((a, i) => i === 3 ? { ...a, status: 'analyzing', currentTask: 'Cross-checking evidence...', progress: 80 } : a));
         } else if (step === 4) {
-          logs.push(`[${timestamp}] [Agent Delta] Compiling comprehensive cited answer with [Google Scholar] footprints.`);
+          logs.push(`[${timestamp}] [Synthesizer] Evidence is sufficient; compiling final cited Markdown answer.`);
           setToolChain(tc => tc.map(n => n.type === 'correlate' ? { ...n, status: 'complete' } : n.type === 'synthesize' ? { ...n, status: 'active', details: 'Rendering Markdown Report...' } : n));
           setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'done', progress: 100 } : a));
         } else if (step === 5) {
-          logs.push(`[${timestamp}] [Orchestrator] Deep Research loop successfully complete.`);
+          logs.push(`[${timestamp}] [Orchestrator] Deep Research ReAct loop complete or awaiting model final answer.`);
           setToolChain(tc => tc.map(n => n.type === 'synthesize' ? { ...n, status: 'complete' } : n));
           setIsResearchActive(false);
           clearInterval(interval);

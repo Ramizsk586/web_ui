@@ -394,7 +394,7 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
     const steps = [
       { text: 'Loading modules...', progress: 10, delay: 400 },
       { text: 'Starting Lumina services...', progress: 25, delay: 500 },
-      { text: 'Initializing sandbox VMs...', progress: 45, delay: 800 },
+      { text: 'Checking workspace services...', progress: 45, delay: 500 },
       { text: 'Preparing interface...', progress: 65, delay: 600 },
       { text: 'Finalizing setup...', progress: 80, delay: 400 },
     ];
@@ -405,32 +405,51 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
       sendLoadingStatus(step.text, 'info', step.progress);
     }
 
-    // Attempt sandbox initialization after server is ready
-    try {
-      sendLoadingStatus('Connecting to sandbox...', 'info', 85);
-      const http = require('http');
-      await new Promise<void>((resolve) => {
-        http.get('http://localhost:3000/api/sandbox/initialize', (res: any) => {
+    sendLoadingStatus('Interface ready...', 'success', 90);
+  }
+
+  function initializeSandboxInBackground() {
+    if (sandboxInitializationAttempted) return;
+    sandboxInitializationAttempted = true;
+
+    setTimeout(() => {
+      try {
+        const postData = JSON.stringify({});
+        const req = http.request({
+          hostname: 'localhost',
+          port: SERVER_PORT,
+          path: '/api/sandbox/initialize',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData),
+          },
+          timeout: 30000,
+        }, (res) => {
           let data = '';
-          res.on('data', (chunk: string) => { data += chunk; });
+          res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
           res.on('end', () => {
             try {
               const result = JSON.parse(data);
-              sandboxReady = result.success;
-              if (sandboxReady) {
-                sendLoadingStatus('Sandbox VMs ready', 'success', 90);
-              }
-            } catch {}
-            resolve();
+              sandboxReady = !!result.success;
+            } catch {
+              sandboxReady = false;
+            }
           });
-        }).on('error', () => {
-          sendLoadingStatus('Sandbox unavailable (will start on demand)', 'info', 90);
-          resolve();
         });
-      });
-    } catch {
-      sendLoadingStatus('Sandbox unavailable', 'info', 90);
-    }
+        req.on('timeout', () => {
+          req.destroy();
+          sandboxReady = false;
+        });
+        req.on('error', () => {
+          sandboxReady = false;
+        });
+        req.write(postData);
+        req.end();
+      } catch {
+        sandboxReady = false;
+      }
+    }, 1500);
   }
 
   // Start both the loading animation sequence and server in parallel
@@ -448,13 +467,11 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
       }
 
       // Now signal completion — loading screen exits with crossfade
-      sendLoadingStatus('Launching application...', 'success', 100, true);
-      
-      // Wait for exit animation to play
-      await new Promise(r => setTimeout(r, 500));
+      sendLoadingStatus('Launching application...', 'success', 100);
       
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.loadURL(url);
+        initializeSandboxInBackground();
         if (isDev) {
           mainWindow?.webContents.on('did-finish-load', () => {
             mainWindow?.webContents.openDevTools({ mode: 'detach' });

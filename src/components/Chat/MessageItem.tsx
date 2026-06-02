@@ -1277,7 +1277,7 @@ export const MessageItem = React.memo(({
                     onOpen={(a) => {
                       setActiveArtifact(a);
                       setIsCanvasOpen(true);
-                      setCanvasView(a.type === 'html' ? 'preview' : 'code');
+                      setCanvasView(['html', 'markdown', 'report'].includes(a.type) ? 'preview' : 'code');
                     }} 
                   />
                 );

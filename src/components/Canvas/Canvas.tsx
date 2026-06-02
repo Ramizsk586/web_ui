@@ -747,57 +747,53 @@ export const Canvas = ({
                       </div>
                     </div>
                   ) : artifact.type === 'report' || artifact.type === 'markdown' ? (
-                    <div className="flex flex-col min-h-full bg-[#030303] text-zinc-300 font-mono select-none">
-                      <div className="flex items-center justify-between px-5 py-2.5 bg-[#0a0a0c] border-b border-zinc-900 text-xs text-zinc-400 shrink-0 select-none">
+                    <div className="flex flex-col min-h-full bg-zinc-100 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 select-none">
+                      <div className="flex items-center justify-between px-5 py-2.5 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 dark:text-zinc-400 shrink-0 select-none">
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1">
                             <span className="w-2.5 h-2.5 rounded-full bg-red-400/70" />
                             <span className="w-2.5 h-2.5 rounded-full bg-yellow-400/70" />
                             <span className="w-2.5 h-2.5 rounded-full bg-green-400/70" />
                           </div>
-                          <div className="w-px h-3.5 bg-zinc-800 mx-2" />
-                          <div className="flex items-center gap-1.5 bg-[#121215] text-zinc-100 px-3 py-1.5 rounded-t-lg border-t border-x border-zinc-900 text-[10px] font-bold">
-                            <FileText size={12} className="text-blue-500 animate-pulse" />
+                          <div className="w-px h-3.5 bg-zinc-200 dark:bg-zinc-800 mx-2" />
+                          <div className="flex items-center gap-1.5 bg-zinc-50 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 px-3 py-1.5 rounded-t-lg border-t border-x border-zinc-200 dark:border-zinc-800 text-[10px] font-bold">
+                            <FileText size={12} className="text-blue-500" />
                             <span>{artifact.title.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'document'}.md</span>
                           </div>
                         </div>
                         <div className="text-[9px] uppercase tracking-widest text-zinc-500 font-extrabold flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
-                          LUMINA DOCS ENGINE
+                          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                          MARKDOWN PREVIEW
                         </div>
                       </div>
 
-                      <div className="flex-1 flex overflow-y-auto bg-[#030303] custom-scrollbar">
-                        <div className="py-8 border-r border-zinc-900/65 flex flex-col items-end pr-4 text-[11px] text-zinc-700 font-mono select-none bg-[#030205] w-14 shrink-0">
-                          {Array.from({ length: Math.max(12, Math.ceil(artifact.content.split('\n').length * 1.05)) }).map((_, idx) => (
-                            <div key={idx} className="h-6 flex items-center justify-end font-medium">
-                              {idx + 1}
+                      <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-6 md:px-8 md:py-8">
+                        <article className="mx-auto max-w-4xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm rounded-lg px-6 py-7 md:px-10 md:py-10 select-text text-left">
+                          <div className="mb-8 border-b border-zinc-200 dark:border-zinc-800 pb-5">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-2">
+                              {artifact.type === 'report' ? 'Deep Research Report' : 'Markdown Document'}
                             </div>
-                          ))}
-                        </div>
-
-                        <div className="flex-1 py-8 px-8 select-text overflow-x-hidden text-left">
-                          <div className="text-zinc-600 select-none mb-6 font-mono text-[13px] md:text-[14px] italic border-b border-zinc-900 pb-4 text-left">
-                            <div>---</div>
-                            <div>document: {artifact.title}</div>
-                            <div>author: Lumina Core</div>
-                            <div>synthesized: {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                            <div>document_id: LUM-{(Math.random() * 100000).toFixed(0)}</div>
-                            <div>type: {artifact.type}</div>
-                            <div>---</div>
+                            <h1 className="text-2xl md:text-3xl font-bold tracking-normal text-zinc-950 dark:text-zinc-50 leading-tight">
+                              {artifact.title}
+                            </h1>
+                            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                              <span>Markdown</span>
+                              <span>{artifact.content.trim().split(/\s+/).filter(Boolean).length} words</span>
+                              <span>{new Date().toLocaleDateString()}</span>
+                            </div>
                           </div>
 
-                          <div className="markdown-body prose dark:prose-invert max-w-none prose-zinc dark:prose-zinc text-zinc-200 leading-relaxed text-sm md:text-base font-sans pb-12 text-left">
+                          <div className="markdown-body prose dark:prose-invert max-w-none prose-zinc dark:prose-zinc leading-relaxed text-sm md:text-base font-sans text-left">
                             <Markdown remarkPlugins={[remarkGfm]}>{artifact.content}</Markdown>
                           </div>
-                        </div>
+                        </article>
                       </div>
 
-                      <div className="px-4 py-1.5 bg-[#0a0a0c] border-t border-zinc-900 text-[10px] text-zinc-500 font-mono flex justify-between select-none shrink-0">
+                      <div className="px-4 py-1.5 bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-800 text-[10px] text-zinc-500 font-mono flex justify-between select-none shrink-0">
                         <div className="flex items-center gap-4">
                           <span>UTF-8</span>
                           <span>LF</span>
-                          <span className="text-blue-400 font-semibold">Markdown Live Preview</span>
+                          <span className="text-blue-500 dark:text-blue-400 font-semibold">Rendered Markdown</span>
                         </div>
                         <div className="flex items-center gap-4">
                           <span>Lines: {artifact.content.split('\n').length}</span>
