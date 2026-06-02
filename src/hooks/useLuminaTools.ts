@@ -12,13 +12,13 @@ export function useLuminaTools() {
     {
       id: 'web_scrape',
       name: 'Web Scraper',
-      description: 'Fetch and extract structured data from any webpage',
+      description: 'Fetch and extract structured data from any webpage. Prioritize scraping high-quality news articles, authentic repositories, and primary sources of content. Avoid social networks, sign-up forms, legal policy pages, empty portals, and invalid redirect links.',
       enabled: false,
       icon: React.createElement(Globe, { size: 16 }),
       parameters: {
         type: 'object',
         properties: {
-          url: { type: 'string', description: 'The URL to scrape' },
+          url: { type: 'string', description: 'The target URL to scrape. MUST be a valid direct content page, NOT a social media network profile, login page, document download, or tracking link. If you got this link from a search engine, ensure it is the fully resolved target URL and not a generic utility page like a privacy policy or contact form.' },
           selectors: { type: 'object', description: 'Optional CSS selectors to extract specific data' },
           usePuppeteer: { type: 'boolean', description: 'Set to true if page requires JavaScript execution' },
           extractLinks: { type: 'boolean', description: 'Whether to extract outgoing links' },

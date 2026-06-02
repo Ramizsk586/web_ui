@@ -14,6 +14,7 @@ import {
   Link as LinkIcon,
   MicOff,
   Mic,
+  Headphones,
   Trash2,
   Sparkles,
   Plus,
@@ -33,10 +34,113 @@ import {
   Shield,
   Hand,
   ShieldCheck,
+  Database,
+  LayoutGrid,
+  Settings,
+  BookOpen
 } from "lucide-react";
+import { DocumentSelector } from "./DocumentSelectorModal";
 import { WRITING_STYLES, SKILLS } from "../constants";
 import { CoderPermissionMode, PendingCommandPermission } from "../types";
 import { permissionModeLabel } from "../utils/permissionUtils";
+import { useSmartPopupPosition } from "../hooks/useSmartPopupPosition";
+
+const ModelImage = ({ 
+  src, 
+  fallback, 
+  title,
+  bgClass = "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800"
+}: { 
+  src: string; 
+  fallback: React.ReactNode; 
+  title?: string;
+  bgClass?: string;
+}) => {
+  const [error, setError] = React.useState(false);
+  if (error || !src) return <>{fallback}</>;
+  const isSvg = src.endsWith('.svg') || src.includes('.svg');
+  const imgClass = isSvg ? "w-[75%] h-[75%] object-contain" : "w-full h-full object-cover";
+  return (
+    <div 
+      className={`w-7 h-7 rounded-lg flex items-center justify-center overflow-hidden shrink-0 ${bgClass}`}
+      title={title}
+    >
+      <img
+        src={src}
+        alt="Model logo"
+        className={imgClass}
+        onError={() => setError(true)}
+        referrerPolicy="no-referrer"
+      />
+    </div>
+  );
+};
+
+const renderAppModelLogo = (fullName: string, modelId: string, fallback: React.ReactNode) => {
+  return fallback;
+  const normAuthor = (fullName || '').toLowerCase();
+  const normId = (modelId || '').toLowerCase();
+
+  // Define avatar mappings for requested specific brands
+  let avatarUrl = '';
+  let customTitle = '';
+  let bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+
+  if (normAuthor.includes('liquid') || normId.includes('lfm')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/61b8e2ba285851687028d395/EsTgVtnM2IqVRKgPdfqcB.png';
+    customTitle = 'Liquid Labs Model';
+    bgClass = "bg-[#201511] border border-[#E26D2E]/25 p-0.5";
+  } else if (normAuthor.includes('nvidia') || normId.includes('nemotron')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/65df9200dc3292a8983e5017/Vs5FPVCH-VZBipV3qKTuy.png';
+    customTitle = 'NVIDIA Model';
+    bgClass = "bg-black border border-zinc-850 p-0.5";
+  } else if (normAuthor.includes('qwen') || normId.includes('qwen')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/620760a26e3b7210c2ff1943/-s1gyJfvbE1RgO5iBeNOi.png';
+    customTitle = 'Qwen AI';
+    bgClass = "bg-[#1C1A2E] border border-indigo-500/20 p-0.5";
+  } else if (normAuthor.includes('deepseek') || normId.includes('deepseek')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6538815d1bdb3c40db94fbfa/xMBly9PUMphrFVMxLX4kq.png';
+    customTitle = 'DeepSeek Model';
+    bgClass = "bg-[#10192A] border border-blue-500/20 p-0.5";
+  } else if (normAuthor.includes('stepfun') || normId.includes('stepfun')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/644f7e6233ac8f46fa0b9e26/CmF2ocXhkr2UtHXgmwq7-.png';
+    customTitle = 'StepFun Model';
+    bgClass = "bg-[#0B152A] border border-blue-500/15 p-0.5";
+  } else if (normAuthor.includes('unsloth') || normId.includes('unsloth')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/62ecdc18b72a69615d6bd857/E4lkPz1TZNLzIFr_dR273.png';
+    customTitle = 'Unsloth Model';
+    bgClass = "bg-amber-500/5 border border-amber-500/15 p-0.5";
+  } else if (normAuthor.includes('openbmp') || normAuthor.includes('openbmb') || normId.includes('openbmp') || normId.includes('openbmb')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/1670387859384-633fe7784b362488336bbfad.png';
+    customTitle = 'OpenBMB Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('bytedance') || normId.includes('bytedance')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6535c9e88bde2fae19b6fb25/7a1zq0juEwFJVCIShnLI-.png';
+    customTitle = 'ByteDance Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('prism') || normId.includes('prism')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/635a0b777a8ece20fa001ad5/7_KshfAsW9T-U3GZzV2j_.png';
+    customTitle = 'Prism ML Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('meta') || normAuthor.includes('llama') || normId.includes('llama')) {
+    avatarUrl = 'https://upload.wikimedia.org/wikipedia/commons/7/7b/Meta_Platforms_Inc._logo.svg';
+    customTitle = 'Meta Llama Model';
+    bgClass = "bg-[#0B0F19] border border-blue-900/40 p-1.5";
+  }
+
+  if (avatarUrl) {
+    return (
+      <ModelImage
+        src={avatarUrl}
+        fallback={fallback}
+        title={customTitle}
+        bgClass={bgClass}
+      />
+    );
+  }
+
+  return fallback;
+};
 
 const SUPPORTED_VOICE_LANGUAGES = [
   { code: "en-US", label: "English (US)" },
@@ -59,6 +163,8 @@ export interface ChatBoxPanelProps {
   writingStyle: string;
   isWebSearchEnabled: boolean;
   setIsWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  isDeepSearchEnabled: boolean;
+  setIsDeepSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   activeSkills: string[];
   setActiveSkills: React.Dispatch<React.SetStateAction<string[]>>;
   useTurboQuant: boolean;
@@ -183,6 +289,8 @@ export interface ChatBoxPanelProps {
   localModelLoadingProgress?: number;
   loadedLocalModelId?: string | null;
   useLocalModelsOnly?: boolean;
+  isVoicePanelOpen?: boolean;
+  setIsVoicePanelOpen?: (open: boolean) => void;
 }
 
 export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
@@ -193,6 +301,8 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   writingStyle,
   isWebSearchEnabled,
   setIsWebSearchEnabled,
+  isDeepSearchEnabled,
+  setIsDeepSearchEnabled,
   activeSkills,
   setActiveSkills,
   useTurboQuant,
@@ -313,23 +423,78 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   localModelLoadingProgress,
   loadedLocalModelId,
   useLocalModelsOnly,
+  isVoicePanelOpen,
+  setIsVoicePanelOpen,
 }) => {
+  const [isRagSelectorOpen, setIsRagSelectorOpen] = React.useState(false);
+  const [ragEnabled, setRagEnabled] = React.useState(() => {
+    return localStorage.getItem('lumina_rag_enabled') !== 'false';
+  });
+  const [selectedDocIds, setSelectedDocIds] = React.useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lumina_rag_doc_ids') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const handleToggleRag = (enabled: boolean) => {
+    setRagEnabled(enabled);
+    localStorage.setItem('lumina_rag_enabled', String(enabled));
+  };
+
+  const handleSelectionChange = (ids: string[]) => {
+    setSelectedDocIds(ids);
+    localStorage.setItem('lumina_rag_doc_ids', JSON.stringify(ids));
+  };
+
   const [isPermissionDropdownOpen, setIsPermissionDropdownOpen] =
     React.useState(false);
   const permissionDropdownRef = React.useRef<HTMLDivElement | null>(null);
 
+  const [isGridMenuOpen, setIsGridMenuOpen] = React.useState(false);
+  const [activeGridSubMenu, setActiveGridSubMenu] = React.useState<"main" | "skills" | "style" | "lumina_tools" | "tools">("main");
+  const gridMenuButtonRef = React.useRef<HTMLDivElement | null>(null);
+  const gridMenuContentRef = React.useRef<HTMLDivElement | null>(null);
+
+  const gridMenuPopupPosition = useSmartPopupPosition({
+    triggerRef: gridMenuButtonRef,
+    popupRef: gridMenuContentRef,
+    isOpen: isGridMenuOpen,
+    align: "left",
+  });
+
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
       if (
         permissionDropdownRef.current &&
-        !permissionDropdownRef.current.contains(event.target as Node)
+        !permissionDropdownRef.current.contains(target)
       ) {
         setIsPermissionDropdownOpen(false);
+      }
+      if (
+        isGridMenuOpen &&
+        gridMenuButtonRef.current &&
+        !gridMenuButtonRef.current.contains(target) &&
+        gridMenuContentRef.current &&
+        !gridMenuContentRef.current.contains(target)
+      ) {
+        setIsGridMenuOpen(false);
+      }
+      if (
+        isPlusMenuOpen &&
+        plusMenuRef.current &&
+        !plusMenuRef.current.contains(target) &&
+        menuContentRef.current &&
+        !menuContentRef.current.contains(target)
+      ) {
+        setIsPlusMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [isGridMenuOpen, isPlusMenuOpen, plusMenuRef, menuContentRef]);
 
   const permissionOptions: Array<{
     id: CoderPermissionMode;
@@ -409,8 +574,8 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                   return (
                     <div key={`${category.id}-${model.id}`} className={`w-full min-h-[40px] flex items-center gap-2 px-2 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 border-l-[3px] ${isSelected ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] border-[var(--theme-accent)] shadow-sm" : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)]/60 hover:text-[var(--theme-primary)] border-transparent"}`}>
                       <button onClick={() => handleModelSelect(model.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left">
-                        <div className={`p-1.5 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? "bg-[var(--theme-surface)] shadow-sm" : "bg-[var(--theme-surface-alt)]"} ${model.color || ""}`}>
-                          {model.icon}
+                        <div className={`p-1 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? "bg-[var(--theme-surface)] shadow-sm" : "bg-[var(--theme-surface-alt)]"}`}>
+                          {renderAppModelLogo(model.author || model.providerProfileName || model.id.split('/')[0] || '', model.id, model.icon)}
                         </div>
                         <span className="flex-1 text-left min-w-0">
                           <span className={`block truncate ${isSelected ? "font-bold" : "font-semibold"}`}>{model.name}</span>
@@ -437,6 +602,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
       <AnimatePresence mode="popLayout">
         {(writingStyle !== "default" ||
           isWebSearchEnabled ||
+          isDeepSearchEnabled ||
           bridgeTools.some((t) => t.enabled) ||
           activeSkills.length > 0 ||
           useTurboQuant) && (
@@ -479,6 +645,25 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
               >
                 <Globe size={13} />
                 <span>Web Search</span>
+              </motion.button>
+            )}
+            {isDeepSearchEnabled && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsPlusMenuOpen(true);
+                  setActivePlusSubMenu("main");
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/30 shadow-xs cursor-pointer hover:bg-purple-500/25 text-xs font-semibold"
+              >
+                <Bot size={13} className="animate-pulse text-purple-400" />
+                <span className="flex items-center gap-1">
+                  Deep Search
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping" />
+                </span>
               </motion.button>
             )}
             {luminaTools.some((t) => t.enabled) && (
@@ -1566,104 +1751,38 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             label: "Take a screenshot",
                             icon: <Camera size={16} />,
                           },
-                          {
-                            id: "skills",
-                            label: "Skills",
-                            icon: <Box size={16} />,
-                            hasArrow: true,
-                          },
-                          {
-                            id: "style",
-                            label: "Writing Style",
-                            icon: <Palette size={16} />,
-                            hasArrow: true,
-                          },
-                          { type: "separator" },
-                          {
-                            id: "lumina_tools",
-                            label: "Lumina Tools",
-                            icon: <Hammer size={16} />,
-                            hasArrow: true,
-                          },
-                          {
-                            id: "tools",
-                            label: "Bridge Tools",
-                            icon: <Wrench size={16} />,
-                            hasArrow: true,
-                          },
-                          {
-                            id: "search",
-                            label: "Web search",
-                            icon: <Globe size={16} />,
-                            isSelected: isWebSearchEnabled,
-                          },
-                        ].map((item, idx) =>
-                          item.type === "separator" ? (
-                            <div
-                              key={idx}
-                              className="my-1 border-t border-[var(--theme-border)]"
-                            />
-                          ) : (
-                            <button
-                              key={item.id}
-                              onClick={() => {
-                                switch (item.id) {
-                                  case "files":
-                                    fileInputRef.current?.click();
-                                    setIsPlusMenuOpen(false);
-                                    break;
-                                  case "attach_url":
-                                    setIsPlusMenuOpen(false);
-                                    setIsUrlToolOpen(true);
-                                    break;
-                                  case "transcript":
-                                    setIsPlusMenuOpen(false);
-                                    setIsTranscriptToolOpen(true);
-                                    break;
-                                  case "screenshot":
-                                    handleScreenshot();
-                                    break;
-                                  case "skills":
-                                    setActivePlusSubMenu("skills");
-                                    break;
-                                  case "style":
-                                    setActivePlusSubMenu("style");
-                                    break;
-                                  case "search":
-                                    setIsWebSearchEnabled(!isWebSearchEnabled);
-                                    break;
-                                  case "lumina_tools":
-                                    setActivePlusSubMenu("lumina_tools");
-                                    break;
-                                  case "tools":
-                                    setActivePlusSubMenu("tools");
-                                    break;
-                                }
-                              }}
-                              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-colors group/item"
-                            >
-                              <div className="flex items-center gap-3">
-                                <span
-                                  className={`transition-colors ${(item as any).isSelected ? "text-blue-500" : "group-hover/item:text-[var(--theme-primary)]"}`}
-                                >
-                                  {item.icon}
-                                </span>
-                                {item.label}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {(item as any).isSelected && (
-                                  <Check size={14} className="text-blue-500" />
-                                )}
-                                {(item as any).hasArrow && (
-                                  <ChevronRight
-                                    size={14}
-                                    className="text-[var(--theme-secondary)] group-hover/item:text-[var(--theme-primary)]"
-                                  />
-                                )}
-                              </div>
-                            </button>
-                          ),
-                        )}
+                        ].map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              switch (item.id) {
+                                case "files":
+                                  fileInputRef.current?.click();
+                                  setIsPlusMenuOpen(false);
+                                  break;
+                                case "attach_url":
+                                  setIsPlusMenuOpen(false);
+                                  setIsUrlToolOpen(true);
+                                  break;
+                                case "transcript":
+                                  setIsPlusMenuOpen(false);
+                                  setIsTranscriptToolOpen(true);
+                                  break;
+                                case "screenshot":
+                                  handleScreenshot();
+                                  break;
+                              }
+                            }}
+                            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-colors group/item"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="transition-colors group-hover/item:text-[var(--theme-primary)]">
+                                {item.icon}
+                              </span>
+                              {item.label}
+                            </div>
+                          </button>
+                        ))}
                       </div>
                     ) : activePlusSubMenu === "lumina_tools" ? (
                       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -1680,49 +1799,100 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                         </div>
 
                         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
-                          {luminaTools.map((tool) => (
-                            <button
-                              key={tool.id}
-                              onClick={() => {
-                                setLuminaTools((prev) =>
-                                  prev.map((t) =>
-                                    t.id === tool.id
-                                      ? { ...t, enabled: !t.enabled }
-                                      : t,
-                                  ),
-                                );
-                                showToast(
-                                  `${tool.enabled ? "Disabled" : "Enabled"} ${tool.name}`,
-                                );
-                              }}
-                              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors group/tool"
-                            >
-                              <div className="flex items-center gap-3">
-                                <div
-                                  className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
-                                >
-                                  {tool.icon}
-                                </div>
-                                <div className="text-left">
-                                  <div
-                                    className={`transition-colors ${tool.enabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}
-                                  >
-                                    {tool.name}
-                                  </div>
-                                  <div className="text-[10px] text-[var(--theme-muted)] truncate w-32 font-medium">
-                                    {tool.description}
-                                  </div>
-                                </div>
-                              </div>
-                              <div
-                                className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                          <div className="space-y-2">
+                            {/* 1. Web Scraper */}
+                            {luminaTools.filter(t => !t.id.startsWith('wiki_')).map((tool) => (
+                              <button
+                                key={tool.id}
+                                onClick={() => {
+                                  setLuminaTools((prev) =>
+                                    prev.map((t) =>
+                                      t.id === tool.id
+                                        ? { ...t, enabled: !t.enabled }
+                                        : t,
+                                    ),
+                                  );
+                                  showToast(
+                                    `${tool.enabled ? "Disabled" : "Enabled"} ${tool.name}`,
+                                  );
+                                }}
+                                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors group/tool"
                               >
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                  >
+                                    {tool.icon}
+                                  </div>
+                                  <div className="text-left col-span-2">
+                                    <div
+                                      className={`transition-colors truncate w-24 ${tool.enabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}
+                                    >
+                                      {tool.name}
+                                    </div>
+                                    <div className="text-[10px] text-[var(--theme-muted)] truncate w-32 font-medium">
+                                      {tool.description}
+                                    </div>
+                                  </div>
+                                </div>
                                 <div
-                                  className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
-                                />
-                              </div>
-                            </button>
-                          ))}
+                                  className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                >
+                                  <div
+                                    className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
+                                  />
+                                </div>
+                              </button>
+                            ))}
+
+                            {/* 2. Grouped Wiki Scrab tool */}
+                            {(() => {
+                              const wikiSubTools = luminaTools.filter(t => t.id.startsWith('wiki_'));
+                              const isWikiScrabEnabled = wikiSubTools.some(t => t.enabled);
+                              
+                              return (
+                                <button
+                                  onClick={() => {
+                                    const nextState = !isWikiScrabEnabled;
+                                    setLuminaTools((prev) =>
+                                      prev.map((t) =>
+                                        t.id.startsWith('wiki_') ? { ...t, enabled: nextState } : t
+                                      )
+                                    );
+                                    showToast(
+                                      `${nextState ? "Enabled" : "Disabled"} Wiki Scrab (all sub-tools synchronized)`
+                                    );
+                                  }}
+                                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors group/tool"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div
+                                      className={`p-1.5 rounded-lg transition-colors ${isWikiScrabEnabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                    >
+                                      <BookOpen size={16} />
+                                    </div>
+                                    <div className="text-left col-span-2">
+                                      <div
+                                        className={`transition-colors font-bold ${isWikiScrabEnabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}
+                                      >
+                                        Wiki Scrab
+                                      </div>
+                                      <div className="text-[10px] text-[var(--theme-muted)] truncate w-32 font-medium">
+                                        Wikipedia Search & Scraper Tools
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div
+                                    className={`w-8 h-4 rounded-full transition-colors relative ${isWikiScrabEnabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                  >
+                                    <div
+                                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${isWikiScrabEnabled ? "right-0.5" : "left-0.5"}`}
+                                    />
+                                  </div>
+                                </button>
+                              );
+                            })()}
+                          </div>
                         </div>
                       </div>
                     ) : activePlusSubMenu === "tools" ? (
@@ -1858,6 +2028,433 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                 setWritingStyle(style.id);
                                 setIsPlusMenuOpen(false);
                                 setActivePlusSubMenu("main");
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                                writingStyle === style.id
+                                  ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold"
+                                  : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]"
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`p-1.5 rounded-lg transition-colors ${writingStyle === style.id ? "bg-blue-500/10 text-blue-500" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                >
+                                  {style.icon}
+                                </div>
+                                {style.label}
+                              </div>
+                              {writingStyle === style.id && (
+                                <Check size={14} className="text-blue-500" />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Vertical separator */}
+            <div className="w-[1px] h-4 bg-[var(--theme-border)] mx-0.5 opacity-60 shrink-0" />
+
+            {/* Custom Grid Button */}
+            <div className="relative" ref={gridMenuButtonRef}>
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                transition={{ duration: 0.08 }}
+                onClick={() => {
+                  setIsGridMenuOpen(!isGridMenuOpen);
+                  setActiveGridSubMenu("main");
+                }}
+                className={`p-2 rounded-2xl transition-all ${
+                  isGridMenuOpen
+                    ? "text-blue-500 bg-blue-500/10 hover:bg-blue-500/20"
+                    : isWebSearchEnabled || isDeepSearchEnabled || activeSkills.length > 0 || ragEnabled
+                      ? "text-blue-500 bg-blue-500/5 hover:bg-blue-500/15"
+                      : "text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]"
+                }`}
+                title="Cores & Features"
+              >
+                <LayoutGrid
+                  size={18}
+                  className={`transition-transform duration-200 rotate-45 ${isGridMenuOpen ? "scale-110" : ""}`}
+                />
+              </motion.button>
+              
+              <AnimatePresence>
+                {isGridMenuOpen && (
+                  <motion.div
+                    ref={gridMenuContentRef}
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    style={gridMenuPopupPosition.style}
+                    className="fixed w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl overflow-hidden z-[180] p-1.5 flex flex-col"
+                  >
+                    {activeGridSubMenu === "main" ? (
+                      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-0.5 p-0.5">
+                        {[
+                          {
+                            id: "rag_docs",
+                            label: `RAG Context (${selectedDocIds.length} active)`,
+                            icon: <Database size={16} />,
+                            isSelected: ragEnabled,
+                          },
+                          {
+                            id: "skills",
+                            label: "Skills",
+                            icon: <Box size={16} />,
+                            hasArrow: true,
+                          },
+                          {
+                            id: "style",
+                            label: "Writing Style",
+                            icon: <Palette size={16} />,
+                            hasArrow: true,
+                          },
+                          { type: "separator" },
+                          {
+                            id: "lumina_tools",
+                            label: "Lumina Tools",
+                            icon: <Hammer size={16} />,
+                            hasArrow: true,
+                          },
+                          {
+                            id: "tools",
+                            label: "Bridge Tools",
+                            icon: <Wrench size={16} />,
+                            hasArrow: true,
+                          },
+                          {
+                            id: "search",
+                            label: "Web search",
+                            icon: <Globe size={16} />,
+                            isSelected: isWebSearchEnabled,
+                          },
+                          {
+                            id: "deep_search",
+                            label: "Deep search",
+                            icon: <Bot size={16} />,
+                            isSelected: isDeepSearchEnabled,
+                          },
+                        ].map((item, idx) =>
+                          item.type === "separator" ? (
+                            <div
+                              key={idx}
+                              className="my-1 border-t border-[var(--theme-border)]"
+                            />
+                          ) : (
+                            <div
+                              key={item.id}
+                              onClick={() => {
+                                switch (item.id) {
+                                  case "rag_docs":
+                                    handleToggleRag(!ragEnabled);
+                                    break;
+                                  case "skills":
+                                    setActiveGridSubMenu("skills");
+                                    break;
+                                  case "style":
+                                    setActiveGridSubMenu("style");
+                                    break;
+                                  case "deep_search":
+                                    (() => { const newVal = !isDeepSearchEnabled; setIsDeepSearchEnabled(newVal); if (newVal) setIsWebSearchEnabled(false); })();
+                                    break;
+                                  case "search":
+                                    (() => { const newVal = !isWebSearchEnabled; setIsWebSearchEnabled(newVal); if (newVal) setIsDeepSearchEnabled(false); })()
+                                    break;
+                                  case "lumina_tools":
+                                    setActiveGridSubMenu("lumina_tools");
+                                    break;
+                                  case "tools":
+                                    setActiveGridSubMenu("tools");
+                                    break;
+                                }
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-colors group/item cursor-pointer select-none"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={`transition-colors ${(item as any).isSelected ? "text-blue-500" : "group-hover/item:text-[var(--theme-primary)]"}`}
+                                >
+                                  {item.icon}
+                                </span>
+                                {item.label}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {item.id === "rag_docs" && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setIsGridMenuOpen(false);
+                                      setIsRagSelectorOpen(true);
+                                    }}
+                                    className="p-1 rounded-lg hover:bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer flex items-center justify-center opacity-60 hover:opacity-100"
+                                    title="Configure documents"
+                                  >
+                                    <Settings size={14} />
+                                  </button>
+                                )}
+                                {(item as any).isSelected && (
+                                  <Check size={14} className="text-blue-500" />
+                                )}
+                                {(item as any).hasArrow && (
+                                  <ChevronRight
+                                    size={14}
+                                    className="text-[var(--theme-secondary)] group-hover/item:text-[var(--theme-primary)]"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    ) : activeGridSubMenu === "lumina_tools" ? (
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
+                          <button
+                            onClick={() => setActiveGridSubMenu("main")}
+                            className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest font-mono">
+                            Lumina Tools
+                          </span>
+                        </div>
+
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
+                          <div className="space-y-2">
+                            {/* 1. Web Scraper */}
+                            {luminaTools.filter(t => !t.id.startsWith('wiki_')).map((tool) => (
+                              <button
+                                key={tool.id}
+                                onClick={() => {
+                                  setLuminaTools((prev) =>
+                                    prev.map((t) =>
+                                      t.id === tool.id
+                                        ? { ...t, enabled: !t.enabled }
+                                        : t,
+                                    ),
+                                  );
+                                  showToast(
+                                    `${tool.enabled ? "Disabled" : "Enabled"} ${tool.name}`,
+                                  );
+                                }}
+                                className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors group/tool"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                  >
+                                    {tool.icon}
+                                  </div>
+                                  <div className="text-left col-span-2">
+                                    <div
+                                      className={`transition-colors truncate w-24 ${tool.enabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}
+                                    >
+                                      {tool.name}
+                                    </div>
+                                    <div className="text-[10px] text-[var(--theme-muted)] truncate w-32 font-medium">
+                                      {tool.description}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div
+                                  className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                >
+                                  <div
+                                    className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
+                                  />
+                                </div>
+                              </button>
+                            ))}
+
+                            {/* 2. Grouped Wiki Scrab tool */}
+                            {(() => {
+                              const wikiSubTools = luminaTools.filter(t => t.id.startsWith('wiki_'));
+                              const isWikiScrabEnabled = wikiSubTools.some(t => t.enabled);
+                              
+                              return (
+                                <button
+                                  onClick={() => {
+                                    const nextState = !isWikiScrabEnabled;
+                                    setLuminaTools((prev) =>
+                                      prev.map((t) =>
+                                        t.id.startsWith('wiki_') ? { ...t, enabled: nextState } : t
+                                      )
+                                    );
+                                    showToast(
+                                      `${nextState ? "Enabled" : "Disabled"} Wiki Scrab (all sub-tools synchronized)`
+                                    );
+                                  }}
+                                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors group/tool"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div
+                                      className={`p-1.5 rounded-lg transition-colors ${isWikiScrabEnabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                    >
+                                      <BookOpen size={16} />
+                                    </div>
+                                    <div className="text-left col-span-2">
+                                      <div
+                                        className={`transition-colors font-bold ${isWikiScrabEnabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}
+                                      >
+                                        Wiki Scrab
+                                      </div>
+                                      <div className="text-[10px] text-[var(--theme-muted)] truncate w-32 font-medium">
+                                        Wikipedia Search & Scraper Tools
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div
+                                    className={`w-8 h-4 rounded-full transition-colors relative ${isWikiScrabEnabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                  >
+                                    <div
+                                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${isWikiScrabEnabled ? "right-0.5" : "left-0.5"}`}
+                                    />
+                                  </div>
+                                </button>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    ) : activeGridSubMenu === "tools" ? (
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
+                          <button
+                            onClick={() => setActiveGridSubMenu("main")}
+                            className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest font-mono">
+                            Bridge Tools
+                          </span>
+                        </div>
+
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
+                          {bridgeTools.map((tool) => (
+                            <button
+                              key={tool.id}
+                              onClick={() => {
+                                setBridgeTools((prev) =>
+                                  prev.map((t) =>
+                                    t.id === tool.id
+                                      ? { ...t, enabled: !t.enabled }
+                                      : t,
+                                  ),
+                                );
+                                showToast(
+                                  `${tool.enabled ? "Disabled" : "Enabled"} ${tool.name}`,
+                                );
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors group/tool"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`p-1.5 rounded-lg transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                >
+                                  {tool.icon}
+                                </div>
+                                <div className="text-left">
+                                  <div
+                                    className={`transition-colors ${tool.enabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}
+                                  >
+                                    {tool.name}
+                                  </div>
+                                  <div className="text-[10px] text-[var(--theme-muted)] truncate w-32 font-medium">
+                                    {tool.description}
+                                  </div>
+                                </div>
+                              </div>
+                              <div
+                                className={`w-8 h-4 rounded-full transition-colors relative ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                              >
+                                <div
+                                  className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
+                                />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : activeGridSubMenu === "skills" ? (
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
+                          <button
+                            onClick={() => setActiveGridSubMenu("main")}
+                            className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest font-mono">
+                            Skills
+                          </span>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
+                          {SKILLS.map((skill) => (
+                            <button
+                              key={skill.id}
+                              onClick={() => {
+                                setActiveSkills((prev) =>
+                                  prev.includes(skill.id)
+                                    ? prev.filter((id) => id !== skill.id)
+                                    : [...prev, skill.id],
+                                );
+                                showToast(
+                                  `${activeSkills.includes(skill.id) ? "Deactivated" : "Activated"} ${skill.label}`,
+                                );
+                              }}
+                              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                                activeSkills.includes(skill.id)
+                                  ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)]"
+                                  : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]"
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`p-1.5 rounded-lg transition-colors ${activeSkills.includes(skill.id) ? "bg-indigo-500/10 text-indigo-500" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                >
+                                  {skill.icon}
+                                </div>
+                                {skill.label}
+                              </div>
+                              <div
+                                className={`w-8 h-4 rounded-full transition-colors relative ${activeSkills.includes(skill.id) ? "bg-indigo-500" : "bg-[var(--theme-hover-bg)]"}`}
+                              >
+                                <div
+                                  className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${activeSkills.includes(skill.id) ? "right-0.5" : "left-0.5"}`}
+                                />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : activeGridSubMenu === "style" ? (
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
+                          <button
+                            onClick={() => setActiveGridSubMenu("main")}
+                            className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest font-mono">
+                            Writing Style
+                          </span>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
+                          {WRITING_STYLES.map((style) => (
+                            <button
+                              key={style.id}
+                              onClick={() => {
+                                setWritingStyle(style.id);
+                                setIsGridMenuOpen(false);
+                                setActiveGridSubMenu("main");
                               }}
                               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
                                 writingStyle === style.id
@@ -2119,170 +2716,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="relative" ref={dropdownRef}>
-              <div className="flex items-center gap-0.5 bg-[var(--theme-hover-bg)] hover:bg-[var(--theme-border)]/20 rounded-2xl p-0.5 transition-all max-w-[210px] shrink-0 overflow-hidden relative border border-transparent">
-                {/* Progress bar overlay for loading state */}
-                {localModelLoadingId === activeModelId && (
-                  <div
-                    className="absolute bottom-0 left-0 h-1 bg-blue-500/85 transition-all duration-300 pointer-events-none rounded-b-2xl"
-                    style={{ width: `${localModelLoadingProgress}%` }}
-                  />
-                )}
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const isLocal =
-                      useLocalModelsOnly ||
-                      activeModelId.toLowerCase().includes("gguf");
-                    if (isLocal && onOpenLocalModelConfig) {
-                      onOpenLocalModelConfig(activeModelId);
-                    } else {
-                      if (modelSelectorMode === "drawer") {
-                        setIsModelDropdownOpen(false);
-                        setIsModelDrawerOpen(true);
-                        return;
-                      }
-                      setIsModelDropdownOpen(!isModelDropdownOpen);
-                    }
-                  }}
-                  className="flex items-center px-3 py-1.5 hover:bg-[var(--theme-hover-bg)]/65 rounded-xl cursor-pointer select-none transition-colors max-w-[155px]"
-                  title="Active Model"
-                >
-                  <span className="text-[11px] font-bold text-[var(--theme-primary)] truncate">
-                    {(() => {
-                      const matched = activeModelList.find(
-                        (m) => m.id === activeModelId,
-                      );
-                      if (matched) return matched.name;
-                      let name = activeModelId;
-                      if (name.includes("/")) {
-                        name = name.split("/").slice(-1)[0];
-                      }
-                      return (
-                        name
-                          .replace(/[-_]/g, " ")
-                          .replace(/\bgguf\b/gi, "")
-                          .trim() || activeModelId
-                      );
-                    })()}
-                  </span>
-                </button>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (modelSelectorMode === "drawer") {
-                      setIsModelDropdownOpen(false);
-                      setIsModelDrawerOpen(true);
-                      return;
-                    }
-                    setIsModelDropdownOpen(!isModelDropdownOpen);
-                  }}
-                  className="p-2 hover:bg-[var(--theme-hover-bg)]/85 rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] cursor-pointer shrink-0"
-                  title="Change model"
-                >
-                  <ChevronDown
-                    size={13}
-                    className={`transition-transform duration-200 ${isModelDropdownOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-              </div>
-              <AnimatePresence>
-                {isModelDropdownOpen && (
-                  <motion.div
-                    ref={modelDropdownContentRef as any}
-                    style={modelDropdownPosition.style}
-                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                    className="fixed w-[280px] bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
-                  >
-                    {/* Header Label Info */}
-                    <div className="px-3.5 pt-3 pb-1 select-none flex items-center justify-between shrink-0">
-                      <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-[var(--theme-secondary)]/70">
-                        System Model Cores
-                      </span>
-                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-[var(--theme-hover-bg)] font-bold text-[var(--theme-accent)]">
-                        {filteredModelList.length} Active
-                      </span>
-                    </div>
-
-                    {availableModels.length > 5 && (
-                      <div className="px-3 py-1.5 bg-[var(--theme-surface)] shrink-0">
-                        <div className="relative group">
-                          <Search
-                            size={12}
-                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--theme-muted)] group-focus-within:text-[var(--theme-accent)] transition-colors"
-                          />
-                          <input
-                            type="text"
-                            placeholder="Filter model name..."
-                            value={modelSearchQuery}
-                            onChange={(e) => setModelSearchQuery(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-full h-8 pl-8 pr-3 bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] rounded-xl text-[11px] outline-none placeholder-gray-400 focus:border-[var(--theme-accent)] focus:ring-1 focus:ring-[var(--theme-accent)]/15 text-[var(--theme-primary)] font-medium transition-all"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="h-[230px] overflow-y-auto p-1.5 space-y-1 custom-scrollbar shrink-0 border-t border-[var(--theme-border)]/30 mt-1">
-                      {filteredModelList.length > 0 ? (
-                        filteredModelList.map((model) => {
-                          const isSelected = activeModelId === model.id;
-                          const isLocal = model.id.toLowerCase().includes("gguf");
-
-                          return (
-                            <button
-                              key={model.id}
-                              onClick={() => handleModelSelect(model.id)}
-                              className={`w-full min-h-[40px] flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 border-l-[3px] cursor-pointer ${
-                                isSelected
-                                  ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] border-[var(--theme-accent)] shadow-sm"
-                                  : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)]/60 hover:text-[var(--theme-primary)] border-transparent"
-                              }`}
-                            >
-                              <div
-                                className={`p-1.5 rounded-lg flex items-center justify-center shrink-0 ${
-                                  isSelected ? "bg-[var(--theme-surface)] shadow-sm" : "bg-[var(--theme-surface-alt)]"
-                                } ${model.color || ""}`}
-                              >
-                                {model.icon}
-                              </div>
-
-                              <div className="flex-1 text-left min-w-0">
-                                <span className={`block truncate ${isSelected ? "font-bold" : "font-semibold"}`}>
-                                  {model.name}
-                                </span>
-                                <span className="block text-[8px] font-mono text-[var(--theme-secondary)]/60 truncate uppercase tracking-tight">
-                                  {isLocal ? "LOCAL GGUF • HOSTED" : model.id.split("/").slice(-1)[0]}
-                                </span>
-                              </div>
-
-                              {isSelected && (
-                                <motion.div
-                                  layoutId="activeModelCheckmark"
-                                  className="w-4 h-4 rounded-full bg-[var(--theme-accent)]/10 flex items-center justify-center ml-auto shrink-0"
-                                >
-                                  <Check size={11} className="text-[var(--theme-accent)]" strokeWidth={3} />
-                                </motion.div>
-                              )}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div className="py-8 text-center text-[11px] text-[var(--theme-muted)] select-none">
-                          No cores match criteria
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={() => {
@@ -2316,6 +2749,26 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                 />
               )}
             </motion.button>
+
+            {setIsVoicePanelOpen && (
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                onClick={() => {
+                  if (setIsVoicePanelOpen) {
+                    setIsVoicePanelOpen(true);
+                  }
+                }}
+                className={`p-2 rounded-2xl transition-all cursor-pointer mr-0.5 flex items-center justify-center shrink-0 border border-transparent ${
+                  isVoicePanelOpen
+                    ? "bg-teal-500/10 text-teal-400 border-teal-500/20"
+                    : "text-[var(--theme-secondary)] hover:text-teal-400 hover:bg-[var(--theme-hover-bg)] hover:border-teal-500/10"
+                }`}
+                title="Open Voice Assistant"
+                id="chat-voice-call-trigger-button"
+              >
+                <Headphones size={18} className={isVoicePanelOpen ? "text-teal-400 animate-pulse" : "text-zinc-550 hover:text-teal-400 transition-colors"} />
+              </motion.button>
+            )}
 
             {isTyping ? (
               <motion.button
@@ -2365,6 +2818,15 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
             handleFileAttach(Array.from(e.target.files || []));
             e.target.value = "";
           }}
+        />
+
+        <DocumentSelector
+          isOpen={isRagSelectorOpen}
+          onClose={() => setIsRagSelectorOpen(false)}
+          selectedDocIds={selectedDocIds}
+          onSelectionChange={handleSelectionChange}
+          ragEnabled={ragEnabled}
+          onToggleRag={handleToggleRag}
         />
       </div>
     </div>

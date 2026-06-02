@@ -58,6 +58,7 @@ import {
   MapPin,
   CloudSun,
   Book,
+  Database,
   Image as ImageIcon,
   Library,
   Link as LinkIcon,
@@ -107,10 +108,12 @@ import { fetchBridgeTools, callLlamaBridge as bridgeCall, checkBridgeHealth } fr
 import { useTheme } from './themes';
 import { CustomCodeBlockVisualizer, renderTextWithMath, InteractiveTableVisualizer } from './components/LuminaVisualizer';
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
+import ResearchWorkspacePanel from './components/ResearchWorkspacePanel';
 import { CoderLeftExplorer } from './components/CoderLeftExplorer';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
 import TerminalConsole from './components/TerminalConsole';
 import Whiteboard from './components/Whiteboard';
+import { ChatsManagerPanel } from './components/ChatsManagerPanel';
 
 import { scrapeUrl, ScrapeResult, ScrapeOptions } from './services/scrapingService';
 import { ScrapingResultArtifact } from './components/ScrapingResultArtifact';
@@ -168,6 +171,7 @@ import {
 
 import { SidebarContent } from './components/Sidebar/SidebarContent';
 import { ChatBoxPanel } from './components/ChatBoxPanel';
+import { VoiceAssistantPanel } from './components/VoiceAssistantPanel';
 import { CoderPermissionMode, PendingCommandPermission } from './types';
 
 import {
@@ -206,13 +210,113 @@ import { extractYouTubeId, fetchYouTubeTranscript } from './utils/youtubeUtils';
 import { OnboardingModal } from './components/OnboardingModal';
 import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
 import { SettingsModal } from './components/SettingsModal';
+import { ProjectsPage } from './components/ProjectsPage';
+import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 import { LivePreviewPanel } from './components/LivePreviewPanel';
 import { DevToolsPanel } from './components/DevToolsPanel';
 import { VmCorePanel } from './components/VmCorePanel';
+import { RAGPanel } from './components/RAGPanel';
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
 import TranscriptionOptionsModal from './components/TranscriptionOptionsModal';
 import CoderWorkspaceView from './components/Coder/CoderWorkspaceView';
+
+const ModelImage = ({ 
+  src, 
+  fallback, 
+  title,
+  bgClass = "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800"
+}: { 
+  src: string; 
+  fallback: React.ReactNode; 
+  title?: string;
+  bgClass?: string;
+}) => {
+  const [error, setError] = React.useState(false);
+  if (error || !src) return <>{fallback}</>;
+  const isSvg = src.endsWith('.svg') || src.includes('.svg');
+  const imgClass = isSvg ? "w-[75%] h-[75%] object-contain" : "w-full h-full object-cover";
+  return (
+    <div 
+      className={`w-7 h-7 rounded-lg flex items-center justify-center overflow-hidden shrink-0 ${bgClass}`}
+      title={title}
+    >
+      <img
+        src={src}
+        alt="Model logo"
+        className={imgClass}
+        onError={() => setError(true)}
+        referrerPolicy="no-referrer"
+      />
+    </div>
+  );
+};
+
+const renderAppModelLogo = (fullName: string, modelId: string, fallback: React.ReactNode) => {
+  return fallback;
+  const normAuthor = (fullName || '').toLowerCase();
+  const normId = (modelId || '').toLowerCase();
+
+  // Define avatar mappings for requested specific brands
+  let avatarUrl = '';
+  let customTitle = '';
+  let bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+
+  if (normAuthor.includes('liquid') || normId.includes('lfm')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/61b8e2ba285851687028d395/EsTgVtnM2IqVRKgPdfqcB.png';
+    customTitle = 'Liquid Labs Model';
+    bgClass = "bg-[#201511] border border-[#E26D2E]/25 p-0.5";
+  } else if (normAuthor.includes('nvidia') || normId.includes('nemotron')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/65df9200dc3292a8983e5017/Vs5FPVCH-VZBipV3qKTuy.png';
+    customTitle = 'NVIDIA Model';
+    bgClass = "bg-black border border-zinc-850 p-0.5";
+  } else if (normAuthor.includes('qwen') || normId.includes('qwen')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/620760a26e3b7210c2ff1943/-s1gyJfvbE1RgO5iBeNOi.png';
+    customTitle = 'Qwen AI';
+    bgClass = "bg-[#1C1A2E] border border-indigo-500/20 p-0.5";
+  } else if (normAuthor.includes('deepseek') || normId.includes('deepseek')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6538815d1bdb3c40db94fbfa/xMBly9PUMphrFVMxLX4kq.png';
+    customTitle = 'DeepSeek Model';
+    bgClass = "bg-[#10192A] border border-blue-500/20 p-0.5";
+  } else if (normAuthor.includes('stepfun') || normId.includes('stepfun')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/644f7e6233ac8f46fa0b9e26/CmF2ocXhkr2UtHXgmwq7-.png';
+    customTitle = 'StepFun Model';
+    bgClass = "bg-[#0B152A] border border-blue-500/15 p-0.5";
+  } else if (normAuthor.includes('unsloth') || normId.includes('unsloth')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/62ecdc18b72a69615d6bd857/E4lkPz1TZNLzIFr_dR273.png';
+    customTitle = 'Unsloth Model';
+    bgClass = "bg-amber-500/5 border border-amber-500/15 p-0.5";
+  } else if (normAuthor.includes('openbmp') || normAuthor.includes('openbmb') || normId.includes('openbmp') || normId.includes('openbmb')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/1670387859384-633fe7784b362488336bbfad.png';
+    customTitle = 'OpenBMB Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('bytedance') || normId.includes('bytedance')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6535c9e88bde2fae19b6fb25/7a1zq0juEwFJVCIShnLI-.png';
+    customTitle = 'ByteDance Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('prism') || normId.includes('prism')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/635a0b777a8ece20fa001ad5/7_KshfAsW9T-U3GZzV2j_.png';
+    customTitle = 'Prism ML Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('meta') || normAuthor.includes('llama') || normId.includes('llama')) {
+    avatarUrl = 'https://upload.wikimedia.org/wikipedia/commons/7/7b/Meta_Platforms_Inc._logo.svg';
+    customTitle = 'Meta Llama Model';
+    bgClass = "bg-[#0B0F19] border border-blue-900/40 p-1.5";
+  }
+
+  if (avatarUrl) {
+    return (
+      <ModelImage
+        src={avatarUrl}
+        fallback={fallback}
+        title={customTitle}
+        bgClass={bgClass}
+      />
+    );
+  }
+
+  return fallback;
+};
 
 const SUPPORTED_VOICE_LANGUAGES = [
   { code: 'en-US', label: 'English (US)' },
@@ -241,7 +345,7 @@ interface AppContentProps {
   inputState: any;
   workspace: any;
   uiState: any;
-  coderMode: any;
+  coderMode: any; researchMode: any;
   askAi: any;
   sendMessageRef: React.MutableRefObject<((content: string) => void) | undefined>;
   rightPanel: any;
@@ -266,7 +370,7 @@ export default function AppContent({
   inputState,
   workspace,
   uiState,
-  coderMode,
+  coderMode, researchMode,
   askAi,
   sendMessageRef,
   rightPanel,
@@ -434,7 +538,9 @@ export default function AppContent({
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,
+    isDeepSearchEnabled, setIsDeepSearchEnabled,
     isVoiceListening, setIsVoiceListening,
+    isVoicePanelOpen, setIsVoicePanelOpen,
     voiceInterimText, setVoiceInterimText,
     voiceLanguage, setVoiceLanguage,
     voiceContinuous, setVoiceContinuous,
@@ -456,6 +562,193 @@ export default function AppContent({
     canvasView, setCanvasView
   } = uiState;
 
+  const [showProjectsPage, setShowProjectsPage] = useState(false);
+  const [showAgentsPage, setShowAgentsPage] = useState(false);
+
+  const [selectedProjectForChats, setSelectedProjectForChats] = useState<any | null>(null);
+  const [selectedAgentForChats, setSelectedAgentForChats] = useState<any | null>(null);
+
+  // States and hooks for dragging / resizing live preview panel
+  const [canvasWidth, setCanvasWidth] = useState<number>(600); // stable pixel-based width
+  const [isCanvasResizing, setIsCanvasResizing] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (err) {
+      // safe fallback
+    }
+    setIsCanvasResizing(true);
+  }, []);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isCanvasResizing) return;
+    const clientX = e.clientX;
+    if (typeof clientX !== 'number' || isNaN(clientX)) return;
+
+    const newWidth = window.innerWidth - clientX;
+    // Mirror side panel architectural boundaries (keep between 300px and window width minus 300px)
+    if (newWidth >= 300 && newWidth <= window.innerWidth - 300) {
+      setCanvasWidth(newWidth);
+    }
+  }, [isCanvasResizing]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      // safe fallback
+    }
+    setIsCanvasResizing(false);
+  }, []);
+
+  useEffect(() => {
+    if (isCanvasResizing) {
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+    }
+    return () => {
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+    };
+  }, [isCanvasResizing]);
+
+  // Voice Assistant Speech Synthesis States and Effects
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const lastSpokenMessageIdRef = useRef<string | null>(null);
+  const shouldVoiceSpeakLastResponseRef = useRef<boolean>(false);
+  const lastMessagesLengthRef = useRef<number>(0);
+
+  const cleanTextForSpeech = (content: string): string => {
+    if (!content) return "";
+    let text = content;
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+    text = text.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/gi, '');
+    text = text.replace(/<[^>]*>/g, '');
+    text = text.replace(/```[a-zA-Z0-9-]*[\s\S]*?```/gi, '');
+    text = text.replace(/[\*_~`#]+/g, '');
+    text = text.replace(/\n+/g, ' ');
+    return text.trim();
+  };
+
+  const speakText = (text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    
+    try {
+      window.speechSynthesis.cancel();
+    } catch (e) {
+      console.warn("Cancel speech error", e);
+    }
+    setIsAiSpeaking(false);
+
+    if (!text) return;
+
+    try {
+      const isArabic = /[\u0600-\u06FF]/.test(text);
+      const u = new SpeechSynthesisUtterance(text);
+      currentUtteranceRef.current = u;
+      
+      if (window.speechSynthesis.getVoices) {
+        const voices = window.speechSynthesis.getVoices();
+        const preferredVoice = voices.find(v => isArabic ? v.lang.startsWith('ar') : v.lang.startsWith('en'));
+        if (preferredVoice) {
+          u.voice = preferredVoice;
+        }
+      }
+      
+      u.onstart = () => {
+        setIsAiSpeaking(true);
+      };
+      u.onend = () => {
+        setIsAiSpeaking(false);
+        currentUtteranceRef.current = null;
+      };
+      u.onerror = (e) => {
+        console.warn("Speech Synthesis error:", e);
+        setIsAiSpeaking(false);
+        currentUtteranceRef.current = null;
+      };
+
+      window.speechSynthesis.speak(u);
+    } catch (err) {
+      console.error("Speech Synthesis exception:", err);
+      setIsAiSpeaking(false);
+    }
+  };
+
+  const stopSpeaking = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    setIsAiSpeaking(false);
+    currentUtteranceRef.current = null;
+  };
+
+  // Flag that next reply should speak if voice continuous / listening was started
+  useEffect(() => {
+    if (isVoiceListening) {
+      shouldVoiceSpeakLastResponseRef.current = true;
+    }
+  }, [isVoiceListening]);
+
+  // Handle auto-speak completed assistant messages
+  useEffect(() => {
+    const activeMessages = chats.find(c => c.id === currentChatId)?.messages || [];
+    
+    if (activeMessages.length === 0) {
+      lastSpokenMessageIdRef.current = null;
+      lastMessagesLengthRef.current = 0;
+      return;
+    }
+
+    const lastMsg = activeMessages[activeMessages.length - 1];
+    
+    if (lastMsg && lastMsg.role === 'assistant') {
+      if (!isTyping) {
+        if (lastMsg.id !== lastSpokenMessageIdRef.current) {
+          lastSpokenMessageIdRef.current = lastMsg.id;
+          
+          if (isVoicePanelOpen || shouldVoiceSpeakLastResponseRef.current) {
+            const speechText = cleanTextForSpeech(lastMsg.content);
+            if (speechText) {
+              speakText(speechText);
+            }
+          }
+        }
+      }
+    } else if (lastMsg && lastMsg.role === 'user') {
+      stopSpeaking();
+    }
+    
+    lastMessagesLengthRef.current = activeMessages.length;
+  }, [chats, currentChatId, isTyping, isVoicePanelOpen]);
+
+  // If user types keyboard characters, lower the voice speak flag (unless the panel is wide open)
+  useEffect(() => {
+    if (input) {
+      shouldVoiceSpeakLastResponseRef.current = false;
+    }
+  }, [input]);
+
   const {
     isCoderMode, setIsCoderMode,
     isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen,
@@ -467,7 +760,7 @@ export default function AppContent({
     todoCollapsed, setTodoCollapsed,
     orchestrationState, setOrchestrationState,
     orchestrationCollapsed, setOrchestrationCollapsed
-  } = coderMode;
+  } = coderMode; const { isResearchMode, setIsResearchMode, isResearchWorkspaceOpen, setIsResearchWorkspaceOpen } = researchMode;
 
   const {
     askAiQuestions,
@@ -543,6 +836,7 @@ export default function AppContent({
   const [verboseDebug, setVerboseDebug] = useState(false);
   const [isDevToolsOpen, setIsDevToolsOpen] = useState(false);
   const [isVmCorePanelOpen, setIsVmCorePanelOpen] = useState(false);
+  const [isRagPanelOpen, setIsRagPanelOpen] = useState(false);
   const [simLatency, setSimLatency] = useState(120);
   const [activeDevTab, setActiveDevTab] = useState<'status' | 'console' | 'perf' | 'storage' | 'flags'>('status');
   const [devLogs, setDevLogs] = useState<any[]>([]);
@@ -1243,7 +1537,7 @@ const startCoderPreview = useCallback(async () => {
     selectedCommandIndex, setSelectedCommandIndex,
     setTypingMessageId,
     callLlamaBridge,
-    persona, writingStyle, useTurboQuant,
+    persona, writingStyle, useTurboQuant, isDeepSearchEnabled, setIsDeepSearchEnabled, researchMode,
     tavilyApiKey, serpApiKey, searchProvider,
     selectedModel, activeModelId, activeModelList,
     chats, setChats,
@@ -1458,7 +1752,7 @@ const startCoderPreview = useCallback(async () => {
         isCenteredState={isCenteredState}
         theme={theme}
         writingStyle={writingStyle}
-        isWebSearchEnabled={isWebSearchEnabled}
+        isWebSearchEnabled={isWebSearchEnabled} isDeepSearchEnabled={isDeepSearchEnabled} setIsDeepSearchEnabled={setIsDeepSearchEnabled}
         setIsWebSearchEnabled={setIsWebSearchEnabled}
         activeSkills={activeSkills}
         setActiveSkills={setActiveSkills}
@@ -1511,6 +1805,8 @@ const startCoderPreview = useCallback(async () => {
         setTranscriptionOptionsDoc={setTranscriptionOptionsDoc}
         showVoiceControlPanel={showVoiceControlPanel}
         setShowVoiceControlPanel={setShowVoiceControlPanel}
+        isVoicePanelOpen={isVoicePanelOpen}
+        setIsVoicePanelOpen={setIsVoicePanelOpen}
         isVoiceListening={isVoiceListening}
         stopVoiceDictation={stopVoiceDictation}
         startVoiceDictation={startVoiceDictation}
@@ -1662,19 +1958,57 @@ const startCoderPreview = useCallback(async () => {
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               className="fixed inset-y-0 left-0 w-72 bg-[var(--theme-sidebar)] border-r border-[var(--theme-sidebar-border)] z-[101] md:hidden flex flex-col p-4 shadow-2xl text-[var(--theme-primary)]"
             >
-              <SidebarContent 
+              <SidebarContent
+                showAgentsPage={showAgentsPage}
+                showProjectsPage={showProjectsPage}
                 chats={chats} 
                 currentChatId={currentChatId} 
                 setCurrentChatId={(id) => {
                   setCurrentChatId(id);
-                  setActiveAgent(null);
+                  setActiveAgent(null); setShowAgentsPage(false);
                   setIsMobileMenuOpen(false);
                 }} 
-                createNewChat={createNewChat} 
+                createNewChat={(projId) => {
+                  createNewChat(projId); setShowAgentsPage(false);
+                  setShowProjectsPage(false);
+                }} 
                 setChats={setChats}
                 onSelect={() => setIsMobileMenuOpen(false)}
-                onOpenSettings={() => {
-                  setIsSettingsOpen(prev => !prev);
+                onOpenAgentsPage={() => {
+                  setShowAgentsPage(prev => {
+                    if (prev) return false;
+                    setShowProjectsPage(false);
+                    setIsSettingsOpen(false);
+                    setIsVmCorePanelOpen(false);
+                    setIsRagPanelOpen(false);
+                    setShowAgentCreation(false);
+                    setIsResearchMode(false);
+                    setIsMobileMenuOpen(false);
+                    return true;
+                  });
+                }}
+                onOpenProjectsPage={() => {
+                  setShowProjectsPage(prev => {
+                    if (prev) return false;
+                    setShowAgentsPage(false);
+                    setIsSettingsOpen(false);
+                    setIsVmCorePanelOpen(false);
+                    setIsRagPanelOpen(false);
+                    setShowAgentCreation(false);
+                    setIsResearchMode(false);
+                    setIsMobileMenuOpen(false);
+                    return true;
+                  });
+                }}
+                onOpenSettings={(tab?: any) => { if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any);
+                  setIsSettingsOpen(prev => {
+                    const nextVal = !prev;
+                    if (nextVal) {
+                      setShowAgentsPage(false);
+                      setShowProjectsPage(false);
+                    }
+                    return nextVal;
+                  });
                   setIsMobileMenuOpen(false);
                 }}
                 userProfile={userProfile}
@@ -1685,6 +2019,11 @@ const startCoderPreview = useCallback(async () => {
                 setActiveProjectId={setActiveProjectId}
                 isSidebarOpen={isSidebarOpen}
                 setIsSidebarOpen={setIsSidebarOpen}
+                agents={agents}
+                activeAgentId={activeAgent?.id || null}
+                setActiveAgent={setActiveAgent}
+                onOpenProjectChats={(project) => setSelectedProjectForChats(project)}
+                onOpenAgentChats={(agent) => setSelectedAgentForChats(agent)}
               >
                 <AgentSidebarSection
                   agents={agents}
@@ -1717,16 +2056,61 @@ const startCoderPreview = useCallback(async () => {
         className={`hidden md:flex flex-col border-r border-[var(--theme-sidebar-border)] bg-[var(--theme-sidebar)] relative group/sidebar text-[var(--theme-primary)]`}
       >
         <div className="h-full flex flex-col p-4 shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
-          <SidebarContent 
+          {/* DESKTOP SIDEBAR MOUNT POINT */}
+          <SidebarContent
+            showAgentsPage={showAgentsPage}
+            showProjectsPage={showProjectsPage}
             chats={chats} 
             currentChatId={currentChatId} 
             setCurrentChatId={(id) => {
               setCurrentChatId(id);
               setActiveAgent(null);
             }} 
-            createNewChat={createNewChat} 
+            createNewChat={(projId) => {
+              createNewChat(projId);
+              setShowProjectsPage(false);
+            }} 
             setChats={setChats}
-            onOpenSettings={() => setIsSettingsOpen(prev => !prev)}
+            onOpenProjectsPage={() => {
+              setShowProjectsPage(prev => {
+                if (prev) return false;
+                setShowAgentsPage(false);
+                setIsSettingsOpen(false);
+                setIsVmCorePanelOpen(false);
+                setIsRagPanelOpen(false);
+                setShowAgentCreation(false);
+                setIsResearchMode(false);
+                return true;
+              });
+            }}
+            onOpenSettings={(tab?: any) => { 
+              if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any); 
+              setIsSettingsOpen(prev => {
+                const nextVal = !prev;
+                if (nextVal) {
+                  setShowAgentsPage(false);
+                  setShowProjectsPage(false);
+                }
+                return nextVal;
+              }); 
+            }}
+            agents={agents}
+            activeAgentId={activeAgent?.id || null}
+            setActiveAgent={setActiveAgent}
+            onOpenProjectChats={(project) => setSelectedProjectForChats(project)}
+            onOpenAgentChats={(agent) => setSelectedAgentForChats(agent)}
+            onOpenAgentsPage={() => {
+              setShowAgentsPage(prev => {
+                if (prev) return false;
+                setShowProjectsPage(false);
+                setIsSettingsOpen(false);
+                setIsVmCorePanelOpen(false);
+                setIsRagPanelOpen(false);
+                setShowAgentCreation(false);
+                setIsResearchMode(false);
+                return true;
+              });
+            }}
             userProfile={userProfile}
             setUserProfile={setUserProfile}
             projectFolders={projectFolders}
@@ -1776,7 +2160,8 @@ const startCoderPreview = useCallback(async () => {
             onOpenInEditor={setFloatingEditFile}
           />
         ) : (
-          <>
+          <div className="flex-1 flex flex-row overflow-hidden w-full h-full relative">
+            <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
 
         {!isCoderMode && (
           <header className={`h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md transition-all duration-300 ease-in-out ${
@@ -1784,7 +2169,7 @@ const startCoderPreview = useCallback(async () => {
               ? 'absolute top-0 left-0 right-0 z-[160] transform -translate-y-[48px] hover:translate-y-0 opacity-0 hover:opacity-100 hover:shadow-lg' 
               : 'sticky top-0 z-[150] shrink-0 opacity-100 shadow-none'
           }`}>
-            <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center justify-start min-w-0 gap-2">
               <button 
                 onClick={() => setIsMobileMenuOpen(true)}
                 className="md:hidden p-2 -ml-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors text-gray-500"
@@ -1802,7 +2187,159 @@ const startCoderPreview = useCallback(async () => {
                 Lumina Intelligence
               </h2>
             </div>
-            <div className="flex items-center gap-4">
+            {/* Center section: Model button */}
+            <div className="flex-none flex items-center justify-center" ref={dropdownRef}>
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const isLocal =
+                      useLocalModelsOnly ||
+                      activeModelId.toLowerCase().includes("gguf");
+                    if (isLocal && handleOpenLocalModelConfig) {
+                      handleOpenLocalModelConfig(activeModelId);
+                    } else if (modelSelectorMode === "drawer") {
+                      setIsModelDrawerOpen(true);
+                    } else {
+                      setIsModelDropdownOpen(!isModelDropdownOpen);
+                    }
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-gray-200/90 dark:hover:bg-zinc-700/90 border border-gray-200 dark:border-zinc-700/60 rounded-full transition-all text-xs font-bold shadow-sm cursor-pointer select-none max-w-[210px]"
+                  title="Change active model"
+                >
+                  <Sparkles size={11} className="text-amber-500 shrink-0" />
+                  <span className="truncate text-gray-700 dark:text-gray-200 font-bold">
+                    {(() => {
+                      const matched = activeModelList.find(
+                        (m) => m.id === activeModelId,
+                      );
+                      if (matched) return matched.name;
+                      let name = activeModelId;
+                      if (name.includes("/")) {
+                        name = name.split("/").slice(-1)[0];
+                      }
+                      return (
+                        name
+                          .replace(/[-_]/g, " ")
+                          .replace(/\bgguf\b/gi, "")
+                          .trim() || activeModelId
+                      );
+                    })()}
+                  </span>
+                  <ChevronDown
+                    size={11}
+                    className={`text-gray-400 shrink-0 transition-transform duration-150 ${(modelSelectorMode === "drawer" ? isModelDrawerOpen : isModelDropdownOpen) ? "rotate-180" : ""}`}
+                  />
+                </button>
+
+                {/* Progress bar overlay for loading state */}
+                {localModelLoadingId === activeModelId && (
+                  <div className="absolute inset-x-0 bottom-0 h-1 bg-blue-500/80 rounded-b-full overflow-hidden pointer-events-none">
+                    <div 
+                      className="h-full bg-blue-400 transition-all duration-300"
+                      style={{ width: `${localModelLoadingProgress}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <AnimatePresence>
+                {isModelDropdownOpen && (
+                  <motion.div
+                    ref={modelDropdownContentRef as any}
+                    style={modelDropdownPosition.style}
+                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
+                    className="fixed w-[280px] bg-white dark:bg-zinc-900 border border-gray-105 dark:border-white/10 rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
+                  >
+                    {/* Header Label Info */}
+                    <div className="px-3.5 pt-3 pb-1 select-none flex items-center justify-between shrink-0">
+                      <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-gray-400 dark:text-zinc-500">
+                        System Model Cores
+                      </span>
+                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-gray-50 dark:bg-zinc-800 font-bold text-blue-500">
+                        {filteredModelList.length} Active
+                      </span>
+                    </div>
+
+                    {availableModels.length > 5 && (
+                      <div className="px-3 py-1.5 bg-white dark:bg-zinc-900 shrink-0">
+                        <div className="relative group">
+                          <Search
+                            size={12}
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Filter model name..."
+                            value={modelSearchQuery}
+                            onChange={(e) => setModelSearchQuery(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full h-8 pl-8 pr-3 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700/60 rounded-xl text-[11px] outline-none placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/15 text-gray-800 dark:text-zinc-200 font-medium transition-all"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="h-[230px] overflow-y-auto p-1.5 space-y-1 custom-scrollbar shrink-0 border-t border-gray-100 dark:border-white/5 mt-1">
+                      {filteredModelList.length > 0 ? (
+                        filteredModelList.map((model) => {
+                          const isSelected = activeModelId === model.id;
+                          const isLocal = model.id.toLowerCase().includes("gguf");
+
+                          return (
+                            <button
+                              key={model.id}
+                              onClick={() => handleModelSelect(model.id)}
+                              className={`w-full min-h-[40px] flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 border-l-[3px] cursor-pointer ${
+                                isSelected
+                                  ? "bg-gray-50 dark:bg-zinc-800 text-gray-950 dark:text-white border-blue-500 shadow-sm"
+                                  : "text-gray-500 hover:bg-gray-50/60 dark:hover:bg-zinc-800/60 hover:text-gray-800 dark:hover:text-zinc-200 border-transparent"
+                              }`}
+                            >
+                              <div
+                                className={`p-1 rounded-lg flex items-center justify-center shrink-0 ${
+                                  isSelected ? "bg-white dark:bg-zinc-900 shadow-sm" : "bg-gray-50 dark:bg-zinc-800/40"
+                                }`}
+                              >
+                                {renderAppModelLogo(model.author || model.providerProfileName || model.id.split('/')[0] || '', model.id, model.icon)}
+                              </div>
+
+                              <div className="flex-1 text-left min-w-0">
+                                <span className={`block truncate ${isSelected ? "font-bold" : "font-semibold"}`}>
+                                  {model.name}
+                                </span>
+                                <span className="block text-[8px] font-mono text-gray-400 dark:text-zinc-500 truncate uppercase tracking-tight">
+                                  {isLocal ? "LOCAL GGUF • HOSTED" : model.id.split("/").slice(-1)[0]}
+                                </span>
+                              </div>
+
+                              {isSelected && (
+                                <motion.div
+                                  layoutId="activeModelCheckmark"
+                                  className="w-4 h-4 rounded-full bg-blue-500/10 flex items-center justify-center ml-auto shrink-0"
+                                >
+                                  <Check size={11} className="text-blue-500" strokeWidth={3} />
+                                </motion.div>
+                              )}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="py-8 text-center text-[11px] text-gray-400 select-none">
+                          No cores match criteria
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Right section */}
+            <div className="flex-1 flex items-center justify-end gap-4 min-w-0">
               <div className="relative flex items-center gap-1">
                   <button 
                     onClick={() => {
@@ -1845,6 +2382,7 @@ const startCoderPreview = useCallback(async () => {
                     <Search size={18} />
                   </button>
                 </div>
+
               {isCoderMode && (
                 <button
                   onClick={() => setIsCoderWorkspacePanelOpen(!isCoderWorkspacePanelOpen)}
@@ -1897,7 +2435,9 @@ const startCoderPreview = useCallback(async () => {
                           }
                           setIsHeaderMenuOpen(false);
                         } },
+                        { id: 'research_mode', label: isResearchMode ? 'Turn off Research Mode' : 'Turn on Deep Research', icon: <Bot size={16} className={isResearchMode ? 'text-teal-500' : ''} />, onClick: () => { const nextState = !isResearchMode; setIsResearchMode(nextState); setIsResearchWorkspaceOpen(nextState); if (nextState) { setIsCoderMode(false); setIsSidebarOpen(false); } createNewChat(null, false, nextState); setIsHeaderMenuOpen(false); } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(prev => !prev); setIsHeaderMenuOpen(false); } },
+                        { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'vm_core', label: 'VM Core Sandbox', icon: <Box size={16} />, onClick: () => { setIsVmCorePanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
@@ -1928,7 +2468,26 @@ const startCoderPreview = useCallback(async () => {
           </header>
         )}
 
-        {isCoderMode && !isSettingsOpen && !isVmCorePanelOpen && !showAgentCreation ? (
+        {isResearchMode && !isSettingsOpen && !isVmCorePanelOpen && !isRagPanelOpen && !showAgentCreation ? (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface-alt)]"
+          >
+            <div className="flex-1 h-full min-w-0">
+              <ResearchWorkspacePanel 
+                researchState={researchMode}
+                showToast={showToast}
+                onClose={() => {
+                  setIsResearchMode(false);
+                  setIsSidebarOpen(true);
+                }}
+              />
+            </div>
+          </motion.div>
+        ) : isCoderMode && !isSettingsOpen && !isVmCorePanelOpen && !isRagPanelOpen && !showAgentCreation ? (
           <CoderWorkspaceView
             isCoderLeftPanelOpen={isCoderLeftPanelOpen}
             setIsCoderLeftPanelOpen={setIsCoderLeftPanelOpen}
@@ -1991,7 +2550,82 @@ const startCoderPreview = useCallback(async () => {
             startCoderPreview={startCoderPreview}
           />) : (
           <>
-            {isSettingsOpen ? (
+            {showAgentCreation ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
+              >
+                <AgentCreationModal
+                  isOpen={showAgentCreation}
+                  onClose={() => {
+                    setShowAgentCreation(false);
+                    setEditingAgent(null);
+                  }}
+                  onAgentCreated={handleAgentCreated}
+                  onAgentUpdated={(id, patch) => {
+                    handleUpdateAgent(id, patch);
+                    setShowAgentCreation(false);
+                    setEditingAgent(null);
+                  }}
+                  editAgent={editingAgent}
+                  isPanel={true}
+                />
+              </motion.div>
+            ) : showAgentsPage ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
+              >
+                <AgentsPage
+                  agents={agents}
+                  activeAgentId={activeAgent?.id || null}
+                  onSelectAgent={(agent) => {
+                    handleSelectAgent(agent);
+                    setShowAgentsPage(false);
+                  }}
+                  onDeleteAgent={handleDeleteAgent}
+                  onEditAgent={(agent) => {
+                    setEditingAgent(agent);
+                    setShowAgentCreation(true);
+                  }}
+                  onCreateAgent={() => {
+                    setEditingAgent(null);
+                    setShowAgentCreation(true);
+                  }}
+                  onClose={() => setShowAgentsPage(false)}
+                  showToast={showToast}
+                  onOpenAgentChats={(agent) => setSelectedAgentForChats(agent)}
+                />
+              </motion.div>
+            ) : showProjectsPage ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
+              >
+                <ProjectsPage
+                  projectFolders={projectFolders}
+                  setProjectFolders={setProjectFolders}
+                  chats={chats}
+                  setChats={setChats}
+                  activeProjectId={activeProjectId}
+                  setActiveProjectId={setActiveProjectId}
+                  setCurrentChatId={setCurrentChatId}
+                  createNewChat={createNewChat}
+                  onClose={() => setShowProjectsPage(false)}
+                  showToast={showToast}
+                  onOpenProjectChats={(project) => setSelectedProjectForChats(project)}
+                />
+              </motion.div>
+            ) : isSettingsOpen ? (
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -2071,6 +2705,11 @@ const startCoderPreview = useCallback(async () => {
                   handleLoadLlamaModels={handleLoadLlamaModels}
                   handleLoadBridgeTools={handleLoadBridgeTools}
                   onLocalModelsChange={refreshLocalModels}
+                  loadedLocalModelId={loadedLocalModelId}
+                  setLoadedLocalModelId={setLoadedLocalModelId}
+                  onOpenLocalModelConfig={handleOpenLocalModelConfig}
+                  activeModelId={activeModelId}
+                  setActiveModelId={setActiveModelId}
                 />
               </motion.div>
             ) : isVmCorePanelOpen ? (
@@ -2087,7 +2726,19 @@ const startCoderPreview = useCallback(async () => {
                   showToast={showToast}
                 />
               </motion.div>
-            ) : showAgentCreation ? (
+            ) : isRagPanelOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
+              >
+                <RAGPanel
+                  onClose={() => setIsRagPanelOpen(false)}
+                />
+              </motion.div>
+            ) : false ? (
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -2222,6 +2873,7 @@ const startCoderPreview = useCallback(async () => {
                 )}
               </AnimatePresence>
 
+
               {isCoderMode && isCoderWorkspacePanelOpen && (
                 <div className="w-[450px] lg:w-[500px] h-full shrink-0 border-l border-[var(--theme-border)] bg-[var(--theme-surface-alt)] z-10">
                   <CoderWorkspacePanel 
@@ -2255,7 +2907,46 @@ const startCoderPreview = useCallback(async () => {
         )}
       </>
     )}
-          </>
+            </div>
+
+            {/* Right Split Column for Live Preview / Canvas */}
+            {!isCoderMode && isCanvasOpen && (
+              <div 
+                style={isMobile ? undefined : { width: canvasWidth }}
+                className="w-full md:w-auto h-full shrink-0 border-l border-zinc-200 dark:border-white/5 bg-white dark:bg-[#0a0a0a] relative z-30"
+              >
+                {/* Drag / Resize Handle using Pointer Events for standard iframe protection */}
+                <div 
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
+                  className="hidden md:flex absolute top-0 -left-1 w-2 hover:w-3 h-full cursor-col-resize hover:bg-black/10 dark:hover:bg-white/10 items-center justify-center transition-all z-50 select-none group touch-none"
+                >
+                  <div className="w-1 h-12 bg-zinc-400 dark:bg-zinc-600 rounded-full group-hover:scale-y-125 transition-all" />
+                </div>
+
+                {/* Overlay to prevent iframe pointer intercept during active dragging */}
+                {isCanvasResizing && (
+                  <div className="absolute inset-0 z-50 bg-transparent cursor-col-resize select-none" />
+                )}
+
+                <Canvas 
+                  artifact={activeArtifact} 
+                  isOpen={true} 
+                  inline={true}
+                  onClose={() => setIsCanvasOpen(false)} 
+                  view={canvasView}
+                  onSetView={setCanvasView}
+                  allArtifacts={chats.find(c => c.id === currentChatId)?.messages.flatMap(m => m.artifacts || []) || []}
+                />
+              </div>
+            )}
+
+            {isCanvasResizing && (
+              <div className="fixed inset-0 z-[9999] cursor-col-resize select-none bg-transparent" />
+            )}
+          </div>
         )}
   </main>
       </div>
@@ -2377,7 +3068,7 @@ const startCoderPreview = useCallback(async () => {
                                   activeModelId === model.id ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
                                 }`}>
                                   <button onClick={() => handleModelSelect(model.id)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
-                                    <div className={model.color || ''}>{model.icon}</div>
+                                    <div>{renderAppModelLogo(model.author || model.providerProfileName || model.id.split('/')[0] || '', model.id, model.icon)}</div>
                                     <span className="flex-1 min-w-0">
                                       <span className="block truncate">{model.name}</span>
                                       <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</span>
@@ -2506,7 +3197,7 @@ const startCoderPreview = useCallback(async () => {
 
       <Canvas 
         artifact={activeArtifact} 
-        isOpen={!isCoderMode && isCanvasOpen} 
+        isOpen={isCoderMode && isCanvasOpen} 
         onClose={() => setIsCanvasOpen(false)} 
         view={canvasView}
         onSetView={setCanvasView}
@@ -2576,6 +3267,88 @@ const startCoderPreview = useCallback(async () => {
       <VideoPlayerPopup
         video={activeVideo}
         onClose={() => setActiveVideo(null)}
+      />
+
+      {/* Chats Manager Panel for Projects */}
+      <ChatsManagerPanel
+        isOpen={Boolean(selectedProjectForChats)}
+        onClose={() => setSelectedProjectForChats(null)}
+        title="Project Chats"
+        contextName={selectedProjectForChats?.name || ''}
+        chats={chats.filter(c => c.projectId === selectedProjectForChats?.id)}
+        currentChatId={currentChatId}
+        onSelectChat={(chatId) => {
+          setCurrentChatId(chatId);
+          if (setActiveProjectId) {
+            setActiveProjectId(selectedProjectForChats.id);
+          }
+          if (setActiveAgent) {
+            setActiveAgent(null);
+          }
+          setShowProjectsPage(false);
+          setSelectedProjectForChats(null);
+          showToast(`Opened project chat session.`);
+        }}
+        onDeleteChat={(chatId) => {
+          setChats(prev => prev.filter(c => c.id !== chatId));
+          if (currentChatId === chatId) {
+            setCurrentChatId(null);
+          }
+          showToast(`Deleted chat session.`);
+        }}
+        onCreateNewChat={() => {
+          const newId = createNewChat(selectedProjectForChats.id, isCoderMode);
+          if (setActiveProjectId) {
+            setActiveProjectId(selectedProjectForChats.id);
+          }
+          if (setActiveAgent) {
+            setActiveAgent(null);
+          }
+          setShowProjectsPage(false);
+          setSelectedProjectForChats(null);
+          showToast(`Created new project chat.`);
+        }}
+      />
+
+      {/* Chats Manager Panel for Agents */}
+      <ChatsManagerPanel
+        isOpen={Boolean(selectedAgentForChats)}
+        onClose={() => setSelectedAgentForChats(null)}
+        title="Assistant Chats"
+        contextName={selectedAgentForChats?.name || ''}
+        chats={chats.filter(c => c.agentId === selectedAgentForChats?.id)}
+        currentChatId={currentChatId}
+        onSelectChat={(chatId) => {
+          setCurrentChatId(chatId);
+          if (setActiveAgent) {
+            setActiveAgent(selectedAgentForChats);
+          }
+          if (setActiveProjectId) {
+            setActiveProjectId(null);
+          }
+          setShowAgentsPage(false);
+          setSelectedAgentForChats(null);
+          showToast(`Opened "${selectedAgentForChats.name}" session.`);
+        }}
+        onDeleteChat={(chatId) => {
+          setChats(prev => prev.filter(c => c.id !== chatId));
+          if (currentChatId === chatId) {
+            setCurrentChatId(null);
+          }
+          showToast(`Deleted chat session.`);
+        }}
+        onCreateNewChat={() => {
+          const newId = createNewChat(null, false, false, selectedAgentForChats.id);
+          if (setActiveAgent) {
+            setActiveAgent(selectedAgentForChats);
+          }
+          if (setActiveProjectId) {
+            setActiveProjectId(null);
+          }
+          setShowAgentsPage(false);
+          setSelectedAgentForChats(null);
+          showToast(`Created new assistant chat.`);
+        }}
       />
 
       {/* URL Tool Modal */}
@@ -2746,6 +3519,24 @@ const startCoderPreview = useCallback(async () => {
           }}
         />
       )}
+
+      {/* Voice Assistant Full-Screen Panel */}
+      <VoiceAssistantPanel
+        isOpen={isVoicePanelOpen}
+        onClose={() => setIsVoicePanelOpen(false)}
+        isVoiceListening={isVoiceListening}
+        startVoiceDictation={startVoiceDictation}
+        stopVoiceDictation={stopVoiceDictation}
+        toggleVoiceDictation={toggleVoiceDictation}
+        micVolume={micVolume}
+        voiceInterimText={voiceInterimText}
+        voiceError={voiceError}
+        isAiSpeaking={isAiSpeaking}
+        stopSpeaking={stopSpeaking}
+        messages={messages}
+        isTyping={isTyping}
+        speakText={speakText}
+      />
 
       {/* Local model GGUF manual engine parameter loader */}
       {localModelConfigModel && (

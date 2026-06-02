@@ -1,5 +1,6 @@
 export * from './useAskAi';
 export * from './useCoderMode';
+export * from './useResearchMode';
 export * from './useRightPanel';
 export * from './useSmartPopupPosition';
 export * from './useAppSettings';

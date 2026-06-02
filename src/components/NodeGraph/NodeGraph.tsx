@@ -4,6 +4,7 @@ import {
   ChevronDown, 
   Globe, 
   Check, 
+  X,
   Loader2, 
   Brain, 
   FileText, 
@@ -393,6 +394,58 @@ interface NodeGraphProps {
   onSendMessage?: (msg: string) => void;
 }
 
+const getActionSummaryText = (nodes: ToolCallNode[], hasSearch: boolean, hasThoughts: boolean) => {
+  const parts: string[] = [];
+  if (hasThoughts) parts.push("viewed thought process");
+  if (hasSearch) parts.push("searched the web");
+  
+  const toolPartsMap: Record<string, number> = {};
+  nodes.forEach(n => {
+    const name = n.toolName || '';
+    if (name.includes('read') || name.includes('view')) {
+      toolPartsMap['viewed files'] = (toolPartsMap['viewed files'] || 0) + 1;
+    } else if (name.includes('edit') || name.includes('write')) {
+      toolPartsMap['modified files'] = (toolPartsMap['modified files'] || 0) + 1;
+    } else if (name.includes('create')) {
+      toolPartsMap['created files'] = (toolPartsMap['created files'] || 0) + 1;
+    } else if (name.includes('verify') || name.includes('compile') || name.includes('lint')) {
+      toolPartsMap['verified compilation'] = (toolPartsMap['verified compilation'] || 0) + 1;
+    } else if (name.includes('command') || name.includes('shell') || name.includes('terminal')) {
+      toolPartsMap['executed terminal commands'] = (toolPartsMap['executed terminal commands'] || 0) + 1;
+    } else {
+      const human = humanizeToolName(name).toLowerCase();
+      toolPartsMap[human] = (toolPartsMap[human] || 0) + 1;
+    }
+  });
+
+  Object.entries(toolPartsMap).forEach(([action, count]) => {
+    if (count === 1) {
+      if (action === 'viewed files') parts.push('read a file');
+      else if (action === 'modified files') parts.push('edited a file');
+      else if (action === 'created files') parts.push('created a file');
+      else parts.push(`${action}`);
+    } else {
+      if (action === 'viewed files') parts.push(`read ${count} files`);
+      else if (action === 'modified files') parts.push(`edited ${count} files`);
+      else if (action === 'created files') parts.push(`created ${count} files`);
+      else parts.push(`${action} (${count})`);
+    }
+  });
+
+  if (parts.length === 0) return "Executing system action...";
+  const joined = parts.join(', ');
+  return joined.charAt(0).toUpperCase() + joined.slice(1);
+};
+
+interface PipelineItem {
+  id: string;
+  type: 'think' | 'search' | 'tool' | 'done';
+  title: string;
+  icon: React.ReactNode;
+  status: 'pending' | 'active' | 'complete' | 'failed';
+  node?: ToolCallNode;
+}
+
 export const NodeGraph = React.memo(({ 
   nodes, 
   isStreaming,
@@ -434,28 +487,6 @@ export const NodeGraph = React.memo(({
   const hasThoughts = thinkContent !== undefined && thinkContent.length > 0;
   const hasTools = nodes.filter(n => n.id !== 'thinking-node').length > 0;
   const hasSearch = !!(isSearching || searchQuery || (sources && sources.length > 0));
-  
-  const headerText = useMemo(() => {
-    if (hasThoughts && hasTools && hasSearch) {
-      return 'Thoughts, search & system actions';
-    } else if (hasThoughts && hasSearch) {
-      return 'Thought process & web search';
-    } else if (hasThoughts && hasTools) {
-      return 'Thought process & system actions';
-    } else if (hasSearch && hasTools) {
-      return 'Web search & system actions';
-    } else if (hasThoughts) {
-      return isStreamingThinking ? 'Thinking...' : 'Thought process';
-    } else if (hasSearch) {
-      return isSearching ? 'Searching the web...' : 'Search completed';
-    } else if (hasTools) {
-      const toolNodes = nodes.filter(n => n.id !== 'thinking-node');
-      return toolNodes.length > 1 ? `System actions (${toolNodes.length})` : 'System action';
-    }
-    return 'Lumina thoughts';
-  }, [hasThoughts, hasTools, hasSearch, nodes, isStreamingThinking, isSearching]);
-
-  const allComplete = nodes.every(n => n.status === 'complete') && !isStreamingThinking && !isSearching;
 
   const displayNodes = useMemo(() => {
     if (hasThoughts) {
@@ -464,7 +495,7 @@ export const NodeGraph = React.memo(({
     return nodes;
   }, [nodes, hasThoughts]);
 
-  // Auto-expand any active/running nodes so the user can inspect progress in real time (and auto-collapse completed ones)
+  // Auto-expand active nodes & auto-collapse completed ones
   useEffect(() => {
     nodes.forEach(node => {
       if (node.status === 'active') {
@@ -481,304 +512,339 @@ export const NodeGraph = React.memo(({
     });
   }, [nodes]);
 
+  const pipelineItems = useMemo(() => {
+    const items: PipelineItem[] = [];
+
+    // 1. Thinking Process
+    if (hasThoughts) {
+      items.push({
+        id: 'think-item',
+        type: 'think',
+        title: isStreamingThinking ? 'Thinking...' : 'Formulated response plan',
+        icon: <Brain size={13} className={isStreamingThinking ? "text-blue-400 animate-pulse" : "text-zinc-500"} />,
+        status: isStreamingThinking ? 'active' : 'complete'
+      });
+    }
+
+    // 2. Web Search
+    if (hasSearch) {
+      items.push({
+        id: 'search-item',
+        type: 'search',
+        title: isSearching ? 'Searching the web...' : `Searched the web for "${searchQuery || 'information'}"`,
+        icon: <Globe size={13} className={isSearching ? "animate-spin-slow text-blue-500" : "text-emerald-500"} />,
+        status: isSearching ? 'active' : 'complete'
+      });
+    }
+
+    // 3. Tool Calls
+    displayNodes.forEach(node => {
+      items.push({
+        id: node.id,
+        type: 'tool',
+        title: humanizeToolName(node.toolName, node.label),
+        icon: node.status === 'active' ? (
+          node.toolName === 'web_search' || node.toolName === 'web_scrape' || node.toolName === 'fetch_url' ? (
+            <WebSearchAnimation />
+          ) : node.toolName?.startsWith('wiki_') ? (
+            <LuminaToolCallingAnimation />
+          ) : (
+            <ToolCallingAnimation />
+          )
+        ) : (
+          renderNodeIcon(node.icon)
+        ),
+        status: node.status as any,
+        node: node
+      });
+    });
+
+    // 4. Completed / Done
+    const allFinished = items.every(item => item.status === 'complete' || item.status === 'failed') && !isStreaming;
+    if (allFinished && items.length > 0) {
+      items.push({
+        id: 'done-item',
+        type: 'done',
+        title: 'Done',
+        icon: <Check size={12} className="text-emerald-400 font-bold" strokeWidth={3} />,
+        status: 'complete'
+      });
+    }
+
+    return items;
+  }, [hasThoughts, hasSearch, displayNodes, isStreamingThinking, isSearching, searchQuery, isStreaming]);
+
+  const headerText = useMemo(() => {
+    return getActionSummaryText(nodes, hasSearch, hasThoughts);
+  }, [nodes, hasSearch, hasThoughts]);
+
   return (
-    <div className="w-full flex flex-col gap-2.5 my-4 pr-1 text-left select-none">
-      {/* Search Step Accordion */}
-      {hasSearch && (
-        <div className="border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl overflow-hidden shadow-xs hover:border-zinc-200/20 transition-all duration-200">
-          <button
-            type="button"
-            onClick={() => setIsSearchExpanded(!isSearchExpanded)}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] font-semibold text-zinc-650 dark:text-zinc-300 hover:bg-zinc-150/5 dark:hover:bg-white/[0.02] cursor-pointer select-none text-left"
-          >
-            <div className="flex items-center gap-2.5 min-w-0 pr-4">
-              <Globe size={14} className={isSearching ? "animate-spin-slow text-blue-500" : "text-emerald-500"} />
-              <span className="truncate">
-                {isSearching ? 'Analyzing and scraping web sources...' : `Searched the web for "${searchQuery || 'information'}"`}
+    <div className="w-full my-3 pr-1 text-left select-none">
+      <div className="border border-zinc-200/10 dark:border-zinc-800/40 bg-zinc-550/[0.02] dark:bg-[#141414]/90 rounded-xl overflow-hidden shadow-sm transition-all duration-300">
+        <button
+          type="button"
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          className="w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors cursor-pointer select-none border-none bg-transparent"
+        >
+          <div className="flex items-center gap-2.5 min-w-0 pr-4">
+            {!isCollapsed && (isStreamingThinking || isSearching || nodes.some(n => n.status === 'active')) ? (
+              <span className="flex gap-0.5 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
               </span>
-              {isSearching && (
-                <span className="flex gap-0.5 ml-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                </span>
-              )}
-            </div>
-            <motion.div
-              animate={{ rotate: isSearchExpanded ? 0 : -90 }}
-              transition={{ duration: 0.15 }}
-              className="text-zinc-500 shrink-0"
-            >
-              <ChevronDown size={14} />
-            </motion.div>
-          </button>
-          
-          <AnimatePresence initial={false}>
-            {isSearchExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="overflow-hidden"
-              >
-                <div className="px-3.5 pb-3.5 pt-2.5 border-t border-zinc-200/10 dark:border-zinc-800/40 space-y-2.5 bg-black/5 dark:bg-black/10">
-                  <div className="flex items-center justify-between text-[10px] text-zinc-400 dark:text-zinc-500 font-mono font-bold tracking-wider mb-1">
-                    <span>{isSearching ? "LUMINA SEARCH AGENT RUNNING" : "SEARCH COMPLETED"}</span>
-                    <span>{sources.length === 1 ? '1 SOURCE FOUND' : `${sources.length} SOURCES BOUND`}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {sources.map((source, idx) => {
-                      const domain = getDomain(source.url);
-                      return (
-                        <motion.a 
-                          key={source.url + '-' + idx}
-                          href={source.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          initial={{ opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="flex items-center justify-between text-xs p-2.5 rounded-lg border border-zinc-200/10 dark:border-white/5 bg-white dark:bg-[#131110] hover:border-zinc-300 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 pr-4 min-w-0">
-                            <div className="p-1 rounded bg-zinc-50 dark:bg-white/5 border border-zinc-150 dark:border-white/10 shrink-0">
-                              {getFavicon(source.url) ? (
-                                <img src={getFavicon(source.url)!} alt="" className="w-3.5 h-3.5 object-contain" />
-                              ) : (
-                                <Globe size={11} className="text-zinc-400" />
-                              )}
-                            </div>
-                            <div className="flex flex-col min-w-0 text-left">
-                              <span className="font-semibold text-zinc-700 dark:text-zinc-350 truncate">{source.title || domain}</span>
-                              <span className="text-[9px] text-zinc-450 dark:text-zinc-500 font-mono truncate">{source.url}</span>
-                            </div>
-                          </div>
-                          <div className="shrink-0 flex items-center gap-1.5">
-                            <span className="text-[9px] text-zinc-450 dark:text-zinc-500 font-mono">100% parsed</span>
-                            <Check size={11} className="text-emerald-500" strokeWidth={3} />
-                          </div>
-                        </motion.a>
-                      );
-                    })}
-                  </div>
-                </div>
-              </motion.div>
+            ) : (
+              <Check size={13} className="text-emerald-500 shrink-0" strokeWidth={3.5} />
             )}
-          </AnimatePresence>
-        </div>
-      )}
-
-      {/* Thoughts Accordion */}
-      {hasThoughts && (
-        <div className="border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl overflow-hidden shadow-xs hover:border-zinc-200/20 transition-all duration-200">
-          <button
-            type="button"
-            onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] font-semibold text-zinc-650 dark:text-zinc-300 hover:bg-zinc-150/5 dark:hover:bg-white/[0.02] cursor-pointer select-none text-left"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <Brain size={14} className={isStreamingThinking ? "text-blue-500 animate-pulse animate-duration-1000" : "text-zinc-400"} />
-              <span className="truncate">
-                {isStreamingThinking ? 'Thinking...' : 'Thought process'}
-              </span>
-              {isStreamingThinking && (
-                <span className="flex gap-0.5 ml-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                </span>
-              )}
-            </div>
-            <motion.div
-              animate={{ rotate: isThinkingExpanded ? 0 : -90 }}
-              transition={{ duration: 0.15 }}
-              className="text-zinc-500 shrink-0"
-            >
-              <ChevronDown size={14} />
-            </motion.div>
-          </button>
-          
-          <AnimatePresence initial={false}>
-            {isThinkingExpanded && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-                className="overflow-hidden"
-              >
-                <div className="px-3.5 pb-3.5 pt-2 border-t border-zinc-200/10 dark:border-zinc-800/40 bg-black/5 dark:bg-black/10 text-left">
-                  <div className="text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-450 font-mono whitespace-pre-wrap max-h-60 overflow-y-auto custom-scrollbar italic">
-                    {thinkContent}
-                    {isStreamingThinking && (
-                      <motion.span
-                        animate={{ opacity: [1, 0] }}
-                        transition={{ repeat: Infinity, duration: 0.6 }}
-                        className="inline-block w-1.5 h-3 bg-blue-400 ml-0.5 rounded-sm align-middle"
-                      />
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
-
-      {/* Tool Call steps */}
-      {displayNodes.map((node, i) => {
-        const isEditNode = node.toolName === 'write_file' || node.toolName === 'edit_file' || node.toolName === 'create_file';
-        const isScriptNode = node.toolName === 'verify_changes' || node.toolName === 'run_command' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
-        const isCollapsedLocally = collapsedToolNodes[node.id] !== false;
-        
-        return (
+            <span className="truncate font-sans font-medium text-zinc-400 dark:text-zinc-350">{headerText}</span>
+          </div>
           <motion.div
-            key={node.id}
-            initial={(isStreaming || isStreamingThinking) ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className="border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl overflow-hidden shadow-xs hover:border-zinc-200/20 transition-all duration-200 w-full"
+            animate={{ rotate: isCollapsed ? -90 : 0 }}
+            transition={{ duration: 0.15 }}
+            className="text-zinc-500 shrink-0"
           >
-            <button
-              type="button"
-              onClick={() => {
-                setCollapsedToolNodes(prev => ({
-                  ...prev,
-                  [node.id]: !prev[node.id]
-                }));
-              }}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] font-semibold text-zinc-650 dark:text-zinc-300 hover:bg-zinc-150/5 dark:hover:bg-white/[0.02] cursor-pointer select-none text-left"
-            >
-              <div className="flex items-center gap-2.5 min-w-0 pr-4">
-                <div className="shrink-0 flex items-center justify-center">
-                  {node.status === 'active' ? (
-                    node.toolName === 'web_search' || node.toolName === 'web_scrape' || node.toolName === 'fetch_url' ? (
-                      <WebSearchAnimation />
-                    ) : node.toolName?.startsWith('wiki_') ? (
-                      <LuminaToolCallingAnimation />
-                    ) : (
-                      <ToolCallingAnimation />
-                    )
-                  ) : (
-                    renderNodeIcon(node.icon)
-                  )}
-                </div>
-                <span className={`truncate text-left ${
-                  node.status === 'active'
-                    ? 'text-emerald-500 font-bold'
-                    : 'text-zinc-750 dark:text-zinc-350'
-                }`}>
-                  {humanizeToolName(node.toolName, node.label)}
-                </span>
-                
-                {node.status === 'active' && (
-                  <motion.div
-                    animate={{ opacity: [0.4, 1, 0.4] }}
-                    transition={{ repeat: Infinity, duration: 1.5 }}
-                    className="w-1.5 h-1.5 rounded-full bg-emerald-550 dark:bg-emerald-500 shrink-0"
-                  />
-                )}
-                {node.status === 'complete' && (
-                  <Check size={12} className="text-emerald-500 shrink-0" strokeWidth={3} />
-                )}
-              </div>
-              <motion.div
-                animate={{ rotate: isCollapsedLocally ? -90 : 0 }}
-                transition={{ duration: 0.15 }}
-                className="text-zinc-500 shrink-0"
-              >
-                <ChevronDown size={14} />
-              </motion.div>
-            </button>
-            
-            <AnimatePresence initial={false}>
-              {!isCollapsedLocally && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2, ease: "easeInOut" }}
-                  className="overflow-hidden"
-                >
-                  <div className="px-3.5 pb-3.5 pt-2 border-t border-zinc-200/10 dark:border-zinc-800/40 bg-black/5 dark:bg-black/10 text-left w-full">
-                    {node.toolName === 'web_scrape' ? (
-                      node.status === 'complete' ? (
-                        (() => {
-                          const scrapeResult = scrapingResults.get(node.id);
-                          if (!scrapeResult) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving scraped content assets...</div>;
-                          return (
-                            <div className="w-full">
-                              <ScrapingResultArtifact 
-                                result={scrapeResult} 
-                                onReScrape={() => {}}
-                              />
-                            </div>
-                          );
-                        })()
-                      ) : (
-                        <ScrapingProgressIndicator 
-                          status={node.status} 
-                          url={node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
-                        />
-                      )
-                    ) : node.toolName?.startsWith('wiki_') ? (
-                      node.status === 'complete' ? (
-                        (() => {
-                          const wikiRes = wikiResults.get(node.id);
-                          if (!wikiRes) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving Wikipedia knowledge assets...</div>;
-                          return (
-                            <div className="w-full">
-                              <WikiArticleArtifact 
-                                data={wikiRes.data} 
-                                wikiType={wikiRes.wikiType as any}
-                                onFetchPage={(pageId) => {
-                                  onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`);
-                                }}
-                                onSearch={(query) => {
-                                  onSendMessage?.(`Search Wikipedia for: ${query}`);
-                                }}
-                              />
-                            </div>
-                          );
-                        })()
-                      ) : (
-                        <WikiToolCallIndicator node={node} />
-                      )
-                    ) : node.result ? (
-                      renderPlainToolResult(node)
-                    ) : node.filePath ? (
-                      <div className="text-xs text-zinc-500 font-mono italic">
-                        {node.filePath}
-                        {node.addedCount !== undefined && <span className="text-emerald-500 ml-2">+{node.addedCount}</span>}
-                        {node.removedCount !== undefined && <span className="text-red-500 ml-1">-{node.removedCount}</span>}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-zinc-500 font-mono italic">
-                        {node.status === 'complete' ? 'Completed' : node.status === 'failed' ? 'Failed' : 'Running...'}
-                      </div>
-                    )}
-                    
-                    {isEditNode && !node.result && (
-                      <div className="mt-2.5">
-                        <RealtimeEditCounter node={node} />
-                      </div>
-                    )}
-
-                    {isScriptNode && (
-                      <div className="flex items-center gap-2 mt-2.5">
-                        <span className="text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 bg-zinc-950 dark:bg-zinc-900 border border-emerald-550/25 dark:border-emerald-500/25 text-emerald-550 dark:text-emerald-400 rounded-md font-mono flex items-center gap-1.5 shadow-xs">
-                          <span className={`${node.status === 'active' ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500'} w-1.5 h-1.5 rounded-full inline-block`} />
-                          SHELL EXECUTION
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <ChevronDown size={14} />
           </motion.div>
-        );
-      })}
+        </button>
+
+        <AnimatePresence initial={false}>
+          {!isCollapsed && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.22, ease: "easeInOut" }}
+              className="overflow-hidden"
+            >
+              <div className="px-4 pb-4 pt-3 border-t border-zinc-200/10 dark:border-zinc-800/40 bg-zinc-950/20 dark:bg-black/30 flex flex-col gap-0.5">
+                {pipelineItems.map((item, idx) => {
+                  const isLast = idx === pipelineItems.length - 1;
+                  const isThink = item.type === 'think';
+                  const isSearch = item.type === 'search';
+                  const isTool = item.type === 'tool';
+                  
+                  return (
+                    <div key={item.id} className="relative flex gap-3 pl-1 select-none">
+                      {/* Vertical line column */}
+                      <div className="flex flex-col items-center shrink-0">
+                        <div className={`w-7 h-7 rounded-full border flex items-center justify-center transition-all duration-350
+                          ${item.status === 'active' ? 'border-blue-500/50 bg-[#1e1e1e] shadow-[0_0_10px_rgba(59,130,246,0.12)]' :
+                            item.status === 'complete' ? 'border-emerald-500/25 bg-[#141d18]' :
+                            item.status === 'failed' ? 'border-red-500/30 bg-[#241717]' :
+                            'border-zinc-800 bg-[#121212]'
+                          }
+                        `}>
+                          {item.status === 'active' && !isThink && !isSearch ? (
+                            <Loader2 size={12} className="animate-spin text-blue-500" />
+                          ) : item.type === 'done' ? (
+                            <div className="w-4 h-4 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                              <Check size={10} className="text-emerald-500 font-bold" strokeWidth={3.5} />
+                            </div>
+                          ) : (
+                            item.icon
+                          )}
+                        </div>
+                        {!isLast && (
+                          <div className={`w-px flex-1 my-1 
+                            ${item.status === 'complete' ? 'bg-gradient-to-b from-emerald-500/20 to-zinc-800/40' : 'bg-zinc-800/60'}
+                          `} style={{ minHeight: '18px' }} />
+                        )}
+                      </div>
+
+                      {/* Content column */}
+                      <div className="flex-1 pb-4 pt-0.5 text-left min-w-0">
+                        <div 
+                          onClick={() => {
+                            if (isThink) setIsThinkingExpanded(!isThinkingExpanded);
+                            else if (isSearch) setIsSearchExpanded(!isSearchExpanded);
+                            else if (isTool && item.node) {
+                              const nodeId = item.node.id;
+                              setCollapsedToolNodes(prev => ({
+                                ...prev,
+                                [nodeId]: !prev[nodeId]
+                              }));
+                            }
+                          }}
+                          className={`text-[13px] tracking-tight cursor-pointer font-sans select-none flex items-center gap-1.5 hover:text-zinc-100 transition-colors
+                            ${item.type === 'done' ? 'font-bold text-zinc-300 text-sm' : 'font-medium text-zinc-400'}
+                          `}
+                        >
+                          <span>{item.title}</span>
+                          {item.type !== 'done' && (
+                            <span className="text-zinc-650 hover:text-zinc-500 p-0.5 rounded cursor-pointer border-none bg-transparent">
+                              <ChevronDown 
+                                size={11} 
+                                className={`transition-transform duration-200 
+                                  ${isThink ? (isThinkingExpanded ? 'rotate-0' : '-rotate-90') :
+                                    isSearch ? (isSearchExpanded ? 'rotate-0' : '-rotate-90') :
+                                    (collapsedToolNodes[item.node?.id || ''] === false ? 'rotate-0' : '-rotate-90')
+                                  }
+                                `} 
+                              />
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Collapsible content layers */}
+                        <AnimatePresence initial={false}>
+                          {isThink && isThinkingExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden mt-1.5"
+                            >
+                              <div className="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-450 font-mono whitespace-pre-wrap max-h-52 overflow-y-auto custom-scrollbar italic bg-[#0c0c0e]/80 rounded-lg border border-zinc-900 p-2.5 shadow-inner">
+                                {thinkContent}
+                                {isStreamingThinking && (
+                                  <motion.span
+                                    animate={{ opacity: [1, 0] }}
+                                    transition={{ repeat: Infinity, duration: 0.6 }}
+                                    className="inline-block w-1.5 h-3 bg-blue-400 ml-0.5 rounded-sm align-middle"
+                                  />
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+
+                          {isSearch && isSearchExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden mt-1.5"
+                            >
+                              <div className="space-y-1 bg-[#0c0c0e]/80 rounded-lg border border-zinc-900 p-2.5 shadow-inner">
+                                <div className="flex items-center justify-between text-[9px] text-zinc-550 font-mono font-bold tracking-wider mb-1">
+                                  <span>{isSearching ? "SEARCH ENGINE ACTIVE" : "SEARCH COMPLETED"}</span>
+                                  <span>{sources.length === 1 ? '1 SOURCE BOUND' : `${sources.length} SOURCES BOUND`}</span>
+                                </div>
+                                <div className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar">
+                                  {sources.map((source, idx) => {
+                                    const domain = getDomain(source.url);
+                                    return (
+                                      <a 
+                                        key={source.url + '-' + idx}
+                                        href={source.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center justify-between text-[11px] p-2 rounded-md border border-zinc-900 bg-zinc-950/40 hover:bg-zinc-900/60 transition-colors cursor-pointer"
+                                      >
+                                        <div className="flex items-center gap-1.5 pr-4 min-w-0">
+                                          <div className="p-0.5 rounded bg-zinc-900 border border-zinc-800 shrink-0">
+                                            {getFavicon(source.url) ? (
+                                              <img src={getFavicon(source.url)!} alt="" className="w-3 h-3 object-contain" />
+                                            ) : (
+                                              <Globe size={10} className="text-zinc-500" />
+                                            )}
+                                          </div>
+                                          <span className="font-semibold text-zinc-400 truncate">{source.title || domain}</span>
+                                        </div>
+                                        <Check size={10} className="text-emerald-500 shrink-0" strokeWidth={3} />
+                                      </a>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+
+                          {isTool && item.node && collapsedToolNodes[item.node.id] === false && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden mt-1.5"
+                            >
+                              {item.node.filePath && (
+                                <div className="mb-1.5 flex items-center gap-1.5 flex-wrap text-left">
+                                  <span className="px-1.5 py-0.5 bg-zinc-900/90 border border-zinc-850 text-zinc-350 text-[10px] font-mono rounded-md font-medium">
+                                    {item.node.filePath}
+                                  </span>
+                                  {item.node.addedCount !== undefined && <span className="text-emerald-500 text-[10px] font-semibold">+{item.node.addedCount}</span>}
+                                  {item.node.removedCount !== undefined && <span className="text-rose-500 text-[10px] font-semibold">-{item.node.removedCount}</span>}
+                                </div>
+                              )}
+
+                              <div className="w-full text-left">
+                                {item.node.toolName === 'web_scrape' ? (
+                                  item.node.status === 'complete' ? (
+                                    (() => {
+                                      const scrapeResult = scrapingResults.get(item.node!.id);
+                                      if (!scrapeResult) return <div className="text-[11px] text-zinc-550 font-mono italic">Retrieving scraped content assets...</div>;
+                                      return (
+                                        <div className="w-full">
+                                          <ScrapingResultArtifact 
+                                            result={scrapeResult} 
+                                            onReScrape={() => {}}
+                                          />
+                                        </div>
+                                      );
+                                    })()
+                                  ) : (
+                                    <ScrapingProgressIndicator 
+                                      status={item.node.status} 
+                                      url={item.node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
+                                    />
+                                  )
+                                ) : item.node.toolName?.startsWith('wiki_') ? (
+                                  item.node.status === 'complete' ? (
+                                    (() => {
+                                      const wikiRes = wikiResults.get(item.node!.id);
+                                      if (!wikiRes) return <div className="text-[11px] text-zinc-550 font-mono italic">Retrieving Wikipedia knowledge assets...</div>;
+                                      return (
+                                        <div className="w-full">
+                                          <WikiArticleArtifact 
+                                            data={wikiRes.data} 
+                                            wikiType={wikiRes.wikiType as any}
+                                            onFetchPage={(pageId) => {
+                                              onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`);
+                                            }}
+                                            onSearch={(query) => {
+                                              onSendMessage?.(`Search Wikipedia for: ${query}`);
+                                            }}
+                                          />
+                                        </div>
+                                      );
+                                    })()
+                                  ) : (
+                                    <WikiToolCallIndicator node={item.node} />
+                                  )
+                                ) : item.node.result ? (
+                                  renderPlainToolResult(item.node)
+                                ) : (
+                                  <div className="text-[11px] text-zinc-500 font-mono italic p-2 bg-[#0c0c0e]/85 rounded-lg border border-zinc-900">
+                                    {item.node.status === 'complete' ? 'Execution completed.' : item.node.status === 'failed' ? 'Execution failed.' : 'Executing step...'}
+                                  </div>
+                                )}
+                                
+                                {(item.node.toolName === 'write_file' || item.node.toolName === 'edit_file' || item.node.toolName === 'create_file') && !item.node.result && (
+                                  <div className="mt-1.5 text-left">
+                                    <RealtimeEditCounter node={item.node} />
+                                  </div>
+                                )}
+
+                                {(item.node.toolName === 'verify_changes' || item.node.toolName === 'run_command' || item.node.toolName?.includes('script') || item.node.toolName?.includes('compile') || item.node.toolName?.includes('terminal') || item.node.toolName?.includes('shell')) && (
+                                  <div className="flex items-center gap-2 mt-1.5">
+                                    <span className="text-[9px] font-bold tracking-widest uppercase px-1.5 py-0.5 bg-zinc-950 border border-emerald-500/20 text-emerald-400 rounded-md font-mono flex items-center gap-1.5 shadow-xs select-none">
+                                      <span className={`${item.node.status === 'active' ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500'} w-1.2 h-1.2 rounded-full inline-block`} />
+                                      SHELL EXECUTION
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 });
@@ -849,8 +915,18 @@ export const InlineToolCallCard = React.memo(({
               className="w-1.5 h-1.5 rounded-full bg-emerald-550 dark:bg-emerald-500 shrink-0"
             />
           )}
-          {node.status === 'complete' && (
-            <Check size={12} className="text-emerald-500 shrink-0" strokeWidth={3} />
+          {node.status === 'complete' && (() => {
+            const isScrape = node.toolName === 'web_scrape' || node.toolName === 'fetch_url';
+            if (isScrape) {
+              const scrapeResult = scrapingResults.get(node.id);
+              if (scrapeResult && (scrapeResult.error || (scrapeResult.statusCode && scrapeResult.statusCode >= 400))) {
+                return <X size={12} className="text-rose-500 shrink-0" strokeWidth={3} />;
+              }
+            }
+            return <Check size={12} className="text-emerald-500 shrink-0" strokeWidth={3} />;
+          })()}
+          {node.status === 'failed' && (
+            <X size={12} className="text-rose-500 shrink-0" strokeWidth={3} />
           )}
         </div>
         <motion.div

@@ -86,6 +86,22 @@ export function getCombinedSrcDoc(htmlContent: string, allArtifacts: Artifact[])
     }
   }
 
+  // Check if the resulting HTML doc specifies an explicit background color/style or tailwind bg
+  const hasBackground = /background(?:-color)?\s*:/i.test(doc) || 
+                        /style\s*=\s*['"][^'"]*background/i.test(doc) ||
+                        /class\s*=\s*['"][^'"]*\bbg-[a-z0-9-]+/i.test(doc);
+
+  if (!hasBackground) {
+    const defaultStyle = '\n<style>\n  html, body {\n    background-color: #ffffff !important;\n    color: #000000;\n  }\n</style>\n';
+    if (doc.includes('<head>')) {
+      doc = doc.replace('<head>', `<head>${defaultStyle}`);
+    } else if (doc.includes('<html>')) {
+      doc = doc.replace('<html>', `<html>${defaultStyle}`);
+    } else {
+      doc = defaultStyle + doc;
+    }
+  }
+
   return doc;
 }
 

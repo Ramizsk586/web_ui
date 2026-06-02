@@ -31,13 +31,7 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     return [];
   });
 
-  const [currentChatId, setCurrentChatId] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('lumina_current_chat_id');
-    } catch {
-      return null;
-    }
-  });
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -101,8 +95,10 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const [transcriptionOptionsDoc, setTranscriptionOptionsDoc] = useState<any | null>(null);
 
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
+  const [isDeepSearchEnabled, setIsDeepSearchEnabled] = useState(false);
 
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [isVoicePanelOpen, setIsVoicePanelOpen] = useState(false);
   const [voiceInterimText, setVoiceInterimText] = useState('');
   const [voiceLanguage, setVoiceLanguage] = useState('en-US');
   const [voiceContinuous, setVoiceContinuous] = useState(false);
@@ -388,7 +384,9 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,
+    isDeepSearchEnabled, setIsDeepSearchEnabled,
     isVoiceListening, setIsVoiceListening,
+    isVoicePanelOpen, setIsVoicePanelOpen,
     voiceInterimText, setVoiceInterimText,
     voiceLanguage, setVoiceLanguage,
     voiceContinuous, setVoiceContinuous,

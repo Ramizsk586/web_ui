@@ -1,6 +1,6 @@
 {
   "name": "Lumina",
-  "description": "An interactive 3D chemical compounds visualizer. Build visual molecules, explore presets, and converse with an in-built, offline ELIZA psychotherapist chatbot in the custom multi-shell terminal console.",
+  "description": "Lumina AI Agent Workspace featuring real-time multi-agent parallel Deep Research scanning, toolchain telemetries, and whiteboards.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

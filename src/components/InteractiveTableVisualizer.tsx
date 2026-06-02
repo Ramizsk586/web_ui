@@ -3,7 +3,6 @@ import {
   LineChart, 
   Check, 
   Grid, 
-  Download, 
   Search, 
   ArrowUpDown
 } from 'lucide-react';
@@ -181,27 +180,6 @@ export const InteractiveTableVisualizer: React.FC<{ children: React.ReactNode }>
     });
   };
 
-  const exportCSV = () => {
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => {
-        const cleanedCell = cell.replace(/"/g, '""');
-        return cleanedCell.includes(',') || cleanedCell.includes('\n') || cleanedCell.includes('"')
-          ? `"${cleanedCell}"`
-          : cleanedCell;
-      }).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `lumina_export_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   // Setup dynamic dataset for charts
   const dynamicChartData: ChartData | null = isPlottable && selectedYCols.length > 0 ? {
     type: chartType,
@@ -226,8 +204,8 @@ export const InteractiveTableVisualizer: React.FC<{ children: React.ReactNode }>
   return (
     <div className="w-full bg-white dark:bg-zinc-900 border border-zinc-200/50 dark:border-white/5 rounded-2xl overflow-hidden shadow-xs my-6">
       {/* Visualizer header tabs */}
-      <div className="px-5 py-3 bg-zinc-50 dark:bg-zinc-950/40 border-b border-zinc-200/50 dark:border-white/5 flex flex-col xs:flex-row xs:items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-white/[0.02] border border-zinc-200/30 dark:border-white/5 rounded-xl self-start">
+      <div className="px-5 py-3 bg-zinc-50 dark:bg-zinc-950/40 border-b border-zinc-200/50 dark:border-white/5 flex flex-row items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-1.5 p-1 bg-zinc-100 dark:bg-white/[0.02] border border-zinc-200/30 dark:border-white/5 rounded-xl shrink-0">
           <button
             onClick={() => setActiveTab('table')}
             type="button"
@@ -257,36 +235,26 @@ export const InteractiveTableVisualizer: React.FC<{ children: React.ReactNode }>
           )}
         </div>
 
-        <button
-          onClick={exportCSV}
-          type="button"
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-white/[0.04] border border-zinc-200/80 dark:border-white/10 hover:bg-zinc-50 dark:hover:bg-white/5 rounded-xl font-bold text-zinc-700 dark:text-zinc-300 transition-all self-start cursor-pointer"
-          title="Export as CSV"
-        >
-          <Download size={13} />
-          <span>Export CSV</span>
-        </button>
+        {activeTab === 'table' && (
+          <div className="relative w-full max-w-xs">
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="text"
+              placeholder="Search table rows..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full text-xs pl-10 pr-4 py-2 border border-zinc-200/80 dark:border-white/10 rounded-xl bg-zinc-50/50 dark:bg-white/[0.02] text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
+            />
+          </div>
+        )}
       </div>
 
       {activeTab === 'table' ? (
         // TABLE MODE
         <div className="flex flex-col">
-          {/* Table Toolbar Search */}
-          <div className="p-4 border-b border-zinc-100 dark:border-white/5 bg-white dark:bg-zinc-900 flex justify-end">
-            <div className="relative w-full max-w-xs">
-              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-              <input
-                type="text"
-                placeholder="Search table rows..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full text-xs pl-10 pr-4 py-2 border border-zinc-200/80 dark:border-white/10 rounded-xl bg-zinc-50/50 dark:bg-white/[0.02] text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
-              />
-            </div>
-          </div>
 
           {/* Core HTML Table styled */}
           <div className="overflow-x-auto custom-scrollbar">

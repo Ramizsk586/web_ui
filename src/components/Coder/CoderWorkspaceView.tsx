@@ -163,7 +163,7 @@ export default function CoderWorkspaceView({
         {isCoderLeftPanelOpen && (
           <motion.div
             initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 280, opacity: 1 }}
+            animate={{ width: 420, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
             className="h-full border-r border-[#221B17] bg-[#110E0D] flex flex-col overflow-hidden shrink-0 z-10 shadow-xl"

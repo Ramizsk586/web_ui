@@ -62,7 +62,10 @@ export interface Chat {
   messages: Message[];
   updatedAt: Date;
   projectId?: string;
+  agentId?: string;
   isCoderMode?: boolean;
+  isResearchMode?: boolean;
+  isStarred?: boolean;
 }
 
 export interface Tool {

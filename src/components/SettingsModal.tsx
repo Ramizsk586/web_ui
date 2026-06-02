@@ -34,7 +34,8 @@ import {
   Server,
   Laptop,
   MoreHorizontal,
-  Trash2
+  Trash2,
+  Database
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
 
@@ -56,8 +57,8 @@ interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
   setUseLocalModelsOnly?: (val: boolean) => void;
-  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models';
-  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models') => void;
+  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag';
+  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag') => void;
   useBubbles: boolean;
   setUseBubbles: (val: boolean) => void;
   isCompactSidebar: boolean;
@@ -165,13 +166,93 @@ interface SettingsModalProps {
   onLocalModelsChange?: () => void;
 }
 
+const ModelImage = ({ 
+  src, 
+  fallback, 
+  title,
+  bgClass = "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800"
+}: { 
+  src: string; 
+  fallback: React.ReactNode; 
+  title?: string;
+  bgClass?: string;
+}) => {
+  const [error, setError] = React.useState(false);
+  if (error || !src) return <>{fallback}</>;
+  const isSvg = src.endsWith('.svg') || src.includes('.svg');
+  const imgClass = isSvg ? "w-[75%] h-[75%] object-contain" : "w-full h-full object-cover";
+  return (
+    <div 
+      className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm shrink-0 overflow-hidden ${bgClass}`}
+      title={title}
+    >
+      <img
+        src={src}
+        alt="Model logo"
+        className={imgClass}
+        onError={() => setError(true)}
+        referrerPolicy="no-referrer"
+      />
+    </div>
+  );
+};
+
 const renderModelLogo = (author: string, modelId: string) => {
   const normAuthor = (author || '').toLowerCase();
   const normId = (modelId || '').toLowerCase();
 
-  // 1. Google / Gemma
+  // Define avatar mappings for requested specific brands
+  let avatarUrl = '';
+  let customTitle = '';
+  let bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+
+  if (normAuthor.includes('liquid') || normId.includes('lfm')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/61b8e2ba285851687028d395/EsTgVtnM2IqVRKgPdfqcB.png';
+    customTitle = 'Liquid Labs Model';
+    bgClass = "bg-[#201511] border border-[#E26D2E]/25 p-0.5";
+  } else if (normAuthor.includes('nvidia') || normId.includes('nemotron')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/65df9200dc3292a8983e5017/Vs5FPVCH-VZBipV3qKTuy.png';
+    customTitle = 'NVIDIA Model';
+    bgClass = "bg-black border border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('qwen') || normId.includes('qwen')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/620760a26e3b7210c2ff1943/-s1gyJfvbE1RgO5iBeNOi.png';
+    customTitle = 'Qwen AI';
+    bgClass = "bg-[#1C1A2E] border border-indigo-500/20 p-0.5";
+  } else if (normAuthor.includes('deepseek') || normId.includes('deepseek')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6538815d1bdb3c40db94fbfa/xMBly9PUMphrFVMxLX4kq.png';
+    customTitle = 'DeepSeek Model';
+    bgClass = "bg-[#10192A] border border-blue-500/20 p-0.5";
+  } else if (normAuthor.includes('stepfun') || normId.includes('stepfun')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/644f7e6233ac8f46fa0b9e26/CmF2ocXhkr2UtHXgmwq7-.png';
+    customTitle = 'StepFun Model';
+    bgClass = "bg-[#0B152A] border border-blue-500/15 p-0.5";
+  } else if (normAuthor.includes('unsloth') || normId.includes('unsloth')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/62ecdc18b72a69615d6bd857/E4lkPz1TZNLzIFr_dR273.png';
+    customTitle = 'Unsloth Model';
+    bgClass = "bg-amber-500/5 border border-amber-500/15 p-0.5";
+  } else if (normAuthor.includes('openbmp') || normAuthor.includes('openbmb') || normId.includes('openbmp') || normId.includes('openbmb')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/1670387859384-633fe7784b362488336bbfad.png';
+    customTitle = 'OpenBMB Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('bytedance') || normId.includes('bytedance')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6535c9e88bde2fae19b6fb25/7a1zq0juEwFJVCIShnLI-.png';
+    customTitle = 'ByteDance Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('prism') || normId.includes('prism')) {
+    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/635a0b777a8ece20fa001ad5/7_KshfAsW9T-U3GZzV2j_.png';
+    customTitle = 'Prism ML Model';
+    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
+  } else if (normAuthor.includes('meta') || normAuthor.includes('llama') || normId.includes('llama')) {
+    avatarUrl = 'https://upload.wikimedia.org/wikipedia/commons/7/7b/Meta_Platforms_Inc._logo.svg';
+    customTitle = 'Meta Llama Model';
+    bgClass = "bg-[#0B0F19] border border-blue-900/40 p-1.5";
+  }
+
+  // Generate fallback react nodes matches
+  let fallbackNode: React.ReactNode = null;
+
   if (normAuthor.includes('google') || normId.includes('gemma')) {
-    return (
+    fallbackNode = (
       <div className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center shadow-sm shrink-0 border border-gray-100 dark:border-zinc-800">
         <svg viewBox="0 0 24 24" className="w-6 h-6">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -181,22 +262,16 @@ const renderModelLogo = (author: string, modelId: string) => {
         </svg>
       </div>
     );
-  }
-
-  // 2. NVIDIA / Nemotron
-  if (normAuthor.includes('nvidia') || normId.includes('nemotron')) {
-    return (
+  } else if (normAuthor.includes('nvidia') || normId.includes('nemotron')) {
+    fallbackNode = (
       <div className="w-10 h-10 rounded-xl bg-black flex items-center justify-center shadow-sm shrink-0 border border-zinc-800 p-1">
         <svg viewBox="0 0 100 100" className="w-full h-full">
           <path fill="#76B900" d="M85.4,36.4 C81.8,24.2 71.9,15.6 57.6,15.6 C42.1,15.6 28.6,26.5 28.6,44.9 C28.6,60 38.4,71.5 50.8,74.1 L50.8,66 C42.3,63.3 36.3,55.3 36.3,44.9 C36.3,31.6 45.4,22.8 56.6,22.8 C66.8,22.8 74.2,29.3 76.9,38 L85.4,36.4 Z M70.3,43 C67.4,37.3 62,33.5 55.4,33.5 C48.1,33.5 42,39.1 42,48 C42,55.4 46.8,61.1 52.8,62.1 L52.8,55.6 C49.2,54.7 46.8,51.8 46.8,48 C46.8,42.8 50.2,38.8 55.4,38.8 C59.8,38.8 62.6,41.9 63.8,45.8 L70.3,43 Z M48,48.5 L48,51.5 L55,51.5 L55,48.5 L48,48.5 Z" />
         </svg>
       </div>
     );
-  }
-
-  // 3. Qwen
-  if (normAuthor.includes('qwen') || normId.includes('qwen')) {
-    return (
+  } else if (normAuthor.includes('qwen') || normId.includes('qwen')) {
+    fallbackNode = (
       <div className="w-10 h-10 rounded-xl bg-[#1C1A2E] flex items-center justify-center shadow-sm shrink-0 border border-indigo-500/20">
         <svg viewBox="0 0 32 32" className="w-6 h-6">
           <path d="M16 2 L28 10 L28 22 L16 30 L4 22 L4 10 Z" fill="none" stroke="#818CF8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -205,18 +280,14 @@ const renderModelLogo = (author: string, modelId: string) => {
         </svg>
       </div>
     );
-  }
-
-  // 4. Liquid AI / LFM (Premium Orange neural-network nodes brain icon)
-  if (normAuthor.includes('liquid') || normId.includes('lfm')) {
-    return (
+  } else if (normAuthor.includes('liquid') || normId.includes('lfm')) {
+    fallbackNode = (
       <div className="w-10 h-10 rounded-xl bg-[#201511] flex items-center justify-center shadow-sm shrink-0 border border-[#E26D2E]/25 p-1.5" title="Liquid Labs Model">
         <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 text-[#E26D2E]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="5" r="2.5" fill="currentColor" fillOpacity="0.2" />
           <circle cx="12" cy="19" r="2.5" fill="currentColor" fillOpacity="0.2" />
           <circle cx="5" cy="12" r="2.5" fill="currentColor" fillOpacity="0.2" />
           <circle cx="19" cy="12" r="2.5" fill="currentColor" fillOpacity="0.2" />
-          
           <line x1="12" y1="7.5" x2="12" y2="16.5" />
           <line x1="7.5" y1="12" x2="16.5" y2="12" />
           <line x1="6.7" y1="10.3" x2="10.3" y2="6.7" />
@@ -226,36 +297,42 @@ const renderModelLogo = (author: string, modelId: string) => {
         </svg>
       </div>
     );
-  }
-
-  // 5. Meta / Llama
-  if (normAuthor.includes('meta') || normId.includes('llama')) {
-    return (
+  } else if (normAuthor.includes('meta') || normId.includes('llama')) {
+    fallbackNode = (
       <div className="w-10 h-10 rounded-xl bg-[#0B0F19] flex items-center justify-center shadow-sm shrink-0 border border-blue-900/40">
         <svg viewBox="0 0 24 24" className="w-6 h-6 text-[#1A73E8]" fill="currentColor">
           <path d="M16.5 6C14.57 6 12.92 7.08 12 8.68 11.08 7.08 9.43 6 7.5 6 4.46 6 2 8.46 2 11.5S4.46 17 7.5 17c1.93 0 3.58-1.08 4.5-2.68.92 1.6 2.57 2.68 4.5 2.68 3.04 0 5.5-2.46 5.5-5.5S19.54 6 16.5 6zm-9 9c-1.93 0-3.5-1.57-3.5-3.5S5.57 8 7.5 8s3.5 1.57 3.5 3.5S9.43 15 7.5 15zm9 0c-1.93 0-3.5-1.57-3.5-3.5S14.57 8 16.5 8s3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z" />
         </svg>
       </div>
     );
-  }
-
-  // 6. GLM / Zhipu / THUDM / ChatGLM
-  if (normAuthor.includes('glm') || normAuthor.includes('thudm') || normId.includes('glm') || normId.includes('chatglm')) {
-    return (
+  } else if (normAuthor.includes('glm') || normAuthor.includes('thudm') || normId.includes('glm') || normId.includes('chatglm')) {
+    fallbackNode = (
       <div className="w-10 h-10 rounded-xl bg-[#141417] flex items-center justify-center shadow-sm shrink-0 border border-zinc-800">
         <svg viewBox="0 0 24 24" className="w-6 h-6 text-white" fill="currentColor">
           <path d="M19 4H5v3h8.5L5 17v3h14v-3h-8.5L19 7V4z" />
         </svg>
       </div>
     );
+  } else {
+    fallbackNode = (
+      <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shadow-sm shrink-0 border border-amber-500/15 text-lg animate-fade-in-subtle">
+        🤗
+      </div>
+    );
   }
 
-  // 7. General Fallback with HuggingFace icon
-  return (
-    <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shadow-sm shrink-0 border border-amber-500/15 text-lg">
-      🤗
-    </div>
-  );
+  if (avatarUrl) {
+    return (
+      <ModelImage
+        src={avatarUrl}
+        fallback={fallbackNode}
+        title={customTitle || author || modelId}
+        bgClass={bgClass}
+      />
+    );
+  }
+
+  return fallbackNode;
 };
 
 export function SettingsModal({
@@ -443,7 +520,27 @@ export function SettingsModal({
   // Hugging Face Models State
   const [hfSearchQuery, setHfSearchQuery] = React.useState('');
   const [hfSelectedFilter, setHfSelectedFilter] = React.useState<'all' | 'staff'>('staff');
-  const [hfSortOption, setHfSortOption] = React.useState<'downloads' | 'likes' | 'modified'>('downloads');
+  const [hfSortOption, setHfSortOption] = React.useState<'downloads' | 'likes' | 'modified' | 'vram_fit'>('vram_fit');
+  const [detectedVramGb, setDetectedVramGb] = React.useState<number>(8.0);
+  const [hasDetectedVram, setHasDetectedVram] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    const fetchGpuInfo = async () => {
+      try {
+        const res = await fetch("/api/os/gpu-info");
+        if (res.ok) {
+          const data = await res.json();
+          if (data && typeof data.vramTotalGB === 'number') {
+            setDetectedVramGb(data.vramTotalGB);
+            setHasDetectedVram(true);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch initial GPU VRAM information:", err);
+      }
+    };
+    fetchGpuInfo();
+  }, []);
   
   const curators = React.useMemo(() => [
     {
@@ -617,6 +714,45 @@ export function SettingsModal({
     const sorted = [...files].sort((a, b) => (parseModelSizeGb(a) || Number.MAX_VALUE) - (parseModelSizeGb(b) || Number.MAX_VALUE));
     return estimateGpuOffloadFit(sorted[0]);
   }, [estimateGpuOffloadFit, parseModelSizeGb]);
+
+  const getSmallestModelSizeGb = React.useCallback((model: any): number => {
+    const files = Array.isArray(model?.files) ? model.files : [];
+    if (files.length > 0) {
+      const sizes = files.map((f: string) => parseModelSizeGb(f)).filter((s: number | null) => s !== null) as number[];
+      if (sizes.length > 0) {
+        return Math.min(...sizes);
+      }
+    }
+    // Fallback to parameter-based estimation from name or id
+    const str = `${model.name || ''} ${model.id || ''}`;
+    const bMatch = str.match(/(\d+(\.\d+)?)\s*[Bb]/);
+    if (bMatch) {
+      return parseFloat(bMatch[1]) * 0.65;
+    }
+    const mMatch = str.match(/(\d+(\.\d+)?)\s*[Mm]/);
+    if (mMatch) {
+      return (parseFloat(mMatch[1]) / 1000) * 0.65;
+    }
+    return 4.0; // Fallback default to 4GB if nothing matches
+  }, [parseModelSizeGb]);
+
+  const getKvCacheAndOverheadGb = React.useCallback((model: any): number => {
+    const str = `${model.name || ''} ${model.id || ''}`;
+    let paramsB = 8.0; // Default
+    const bMatch = str.match(/(\d+(\.\d+)?)\s*[Bb]/);
+    if (bMatch) {
+      paramsB = parseFloat(bMatch[1]);
+    } else {
+      const mMatch = str.match(/(\d+(\.\d+)?)\s*[Mm]/);
+      if (mMatch) {
+        paramsB = parseFloat(mMatch[1]) / 1000;
+      }
+    }
+    // KV Cache at 4096 is estimated as parameters-based, minimum 0.25GB
+    const kvCacheGb = Math.max(0.25, paramsB * 0.08);
+    const runtimeOverheadGb = 0.4;
+    return kvCacheGb + runtimeOverheadGb;
+  }, []);
 
   // Initialize detailedModel on first mount and fetch real GGUF files and sizes
   React.useEffect(() => {
@@ -872,7 +1008,9 @@ export function SettingsModal({
       setIsSearchingHf(true);
       setHfError(null);
       try {
-        const res = await fetch(`https://huggingface.co/api/models?limit=15&search=${encodeURIComponent(hfSearchQuery)}&filter=gguf&sort=downloads&direction=-1`);
+        const fetchSort = hfSortOption === 'vram_fit' ? 'downloads' : hfSortOption;
+        const fetchLimit = hfSortOption === 'vram_fit' ? 40 : 15;
+        const res = await fetch(`https://huggingface.co/api/models?limit=${fetchLimit}&search=${encodeURIComponent(hfSearchQuery)}&filter=gguf&sort=${fetchSort}&direction=-1`);
         if (!res.ok) throw new Error(`HF Hub returned status ${res.status}`);
         const data = await res.json();
         
@@ -945,7 +1083,7 @@ export function SettingsModal({
     }, 600);
 
     return () => clearTimeout(delayDebounce);
-  }, [hfSearchQuery]);
+  }, [hfSearchQuery, hfSortOption]);
 
   const handleDownloadHfModel = async () => {
     if (!detailedModel) return;
@@ -1643,7 +1781,7 @@ export function SettingsModal({
 
         <div className="flex-1 flex flex-col min-w-0">
           <div className={`flex-1 p-8 pt-4 custom-scrollbar ${activeSettingsTab === 'models' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-            {activeSettingsTab === 'general' && (
+              {activeSettingsTab === 'general' && (
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Appearance</h3>
@@ -3225,138 +3363,179 @@ export function SettingsModal({
                       /* EXPLORE HUGGINGFACE HUB (RETAINING FULL FUNCTIONALITY COMPACTED) */
                       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0">
                         {/* LEFT SUB COLUMN: HF LIST */}
-                        <div className="lg:col-span-12 xl:col-span-5 flex flex-col gap-3 min-h-0">
-                          {/* Rich input filter and category tabs inside HF search */}
-                          <div className="relative">
-                            <Search className="absolute left-3 top-2.5 text-gray-400 dark:text-zinc-500" size={14} />
-                            <input
-                              type="search"
-                              placeholder="Search HuggingFace for GGUF quants..."
-                              value={hfSearchQuery}
-                              onChange={(e) => setHfSearchQuery(e.target.value)}
-                              className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border transition-all duration-200 outline-none focus:ring-1 focus:ring-[var(--theme-accent)]"
-                              style={{
-                                background: 'var(--theme-surface)',
-                                borderColor: 'var(--theme-border)',
-                                color: 'var(--theme-primary)'
-                              }}
-                            />
-                            {isSearchingHf && (
-                              <div className="absolute right-3 top-2.5 flex items-center">
-                                <RefreshCw className="animate-spin text-[var(--theme-accent)]" size={14} />
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold text-zinc-400 px-1 shrink-0">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => { setHfSelectedFilter('staff'); setHfSearchQuery(''); }}
-                                className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'staff' && !hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
-                              >
-                                Curator picks
-                              </button>
-                              <span>•</span>
-                              <button
-                                onClick={() => setHfSelectedFilter('all')}
-                                className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'all' || hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
-                              >
-                                All Hub
-                              </button>
+                          <div className="lg:col-span-12 xl:col-span-5 flex flex-col gap-3 min-h-0">
+                            {/* Rich input filter and category tabs inside HF search */}
+                            <div className="relative animate-fade-in">
+                              <Search className="absolute left-3 top-2.5 text-gray-400 dark:text-zinc-500" size={14} />
+                              <input
+                                type="search"
+                                placeholder="Search HuggingFace for GGUF quants..."
+                                value={hfSearchQuery}
+                                onChange={(e) => setHfSearchQuery(e.target.value)}
+                                className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border transition-all duration-200 outline-none focus:ring-1 focus:ring-[var(--theme-accent)]"
+                                style={{
+                                  background: 'var(--theme-surface)',
+                                  borderColor: 'var(--theme-border)',
+                                  color: 'var(--theme-primary)'
+                                }}
+                              />
+                              {isSearchingHf && (
+                                <div className="absolute right-3 top-2.5 flex items-center">
+                                  <RefreshCw className="animate-spin text-[var(--theme-accent)]" size={14} />
+                                </div>
+                              )}
                             </div>
-                            <select
-                              value={hfSortOption}
-                              onChange={(e: any) => setHfSortOption(e.target.value)}
-                              className="appearance-none bg-[var(--theme-surface-alt,rgba(0,0,0,0.05))] hover:bg-[var(--theme-hover-bg,rgba(0,0,0,0.1))] dark:bg-zinc-900/40 hover:dark:bg-zinc-800/60 text-[10px] font-bold text-zinc-400 dark:text-zinc-300 px-3 py-1.5 pr-8 rounded-xl border border-[var(--theme-border)] outline-none cursor-pointer hover:text-[var(--theme-accent)] hover:border-[var(--theme-accent)] focus:border-[var(--theme-accent)] focus:ring-2 focus:ring-[var(--theme-accent)]/20 transition-all relative font-sans select-none shadow-sm"
-                              style={{
-                                backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23a1a1aa' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                                backgroundPosition: 'right 8px center',
-                                backgroundSize: '14px',
-                                backgroundRepeat: 'no-repeat'
-                              }}
-                            >
-                              <option value="downloads" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">Popularity</option>
-                              <option value="likes" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">High Rating</option>
-                              <option value="modified" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">Latest</option>
-                            </select>
-                          </div>
 
-                          {/* List of models */}
-                          <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 custom-scrollbar min-h-0">
-                            {isSearchingHf ? (
-                              <div className="py-20 text-center text-xs text-zinc-400 space-y-2">
-                                <RefreshCw size={20} className="animate-spin mx-auto text-[var(--theme-accent)]" />
-                                <p>Reorganizing model trees...</p>
+                            {/* GPU VRAM Banner */}
+                            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border bg-zinc-500/[0.03] dark:bg-zinc-900/40 text-[10px] text-zinc-400 border-[var(--theme-border)]">
+                              <Cpu className="text-zinc-400 shrink-0" size={12} />
+                              <div className="flex-1 truncate">
+                                <span className="font-semibold text-zinc-500 dark:text-zinc-400">VRAM Capacity: </span>
+                                <span className="font-mono font-bold text-[var(--theme-accent)]">{detectedVramGb.toFixed(1)} GB</span>
+                                <span className="text-[9px] text-zinc-500 dark:text-zinc-500 font-normal"> (Estimated {hasDetectedVram ? 'GPU' : 'System'} memory)</span>
                               </div>
-                            ) : hfError && hfModels.length === 0 ? (
-                              <div className="p-4 rounded-xl text-center text-xs border text-amber-500 bg-amber-500/5" style={{ borderColor: 'var(--theme-border)' }}>
-                                {hfError}
-                              </div>
-                            ) : (
-                              (() => {
-                                const listToRender = hfSearchQuery.trim() ? hfModels : curators;
-                                const filtered = listToRender.filter(m => {
-                                  if (!hfSearchQuery && hfSelectedFilter === 'staff') return m.isStaffPick;
-                                  return true;
-                                });
+                            </div>
 
-                                return filtered.map((model) => {
-                                  const isSelected = selectedModelId === model.id;
-                                  const fit = getSmallestModelFit(model);
-                                  const supportsVision = model.capabilities?.includes('Vision');
-                                  const supportsTools = model.capabilities?.includes('Tool Use');
-                                  const supportsReasoning = model.capabilities?.includes('Reasoning');
-                                  return (
-                                    <button
-                                      key={model.id}
-                                      onClick={() => {
-                                        setSelectedModelId(model.id);
-                                        fetchModelDetails(model);
-                                      }}
-                                      className="w-full p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all outline-none"
-                                      style={{
-                                        borderColor: isSelected ? 'var(--theme-accent)' : 'var(--theme-border)',
-                                        background: isSelected ? 'var(--theme-surface-alt)' : 'var(--theme-surface)'
-                                      }}
-                                    >
-                                      {renderModelLogo(model.author || '', model.id)}
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-1">
-                                          <span className="font-semibold text-xs truncate text-zinc-800 dark:text-zinc-200">
-                                            {model.name}
-                                          </span>
-                                          {model.isStaffPick && <span className="w-3 h-3 rounded-full bg-blue-500 text-white flex items-center justify-center text-[7px] font-bold shadow-sm" title="Verified">✓</span>}
-                                        </div>
-                                        <p className="text-[10px] text-zinc-400 truncate mt-0.5 leading-tight">{model.description}</p>
-                                        <div className="flex flex-wrap gap-1.5 mt-2">
-                                          {supportsVision && (
-                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-400 text-[8px] font-bold uppercase tracking-wide">
-                                              <Eye size={10} />
-                                            </span>
-                                          )}
-                                          {supportsTools && (
-                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
-                                              <Hammer size={10} />
-                                            </span>
-                                          )}
-                                          {supportsReasoning && (
-                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 text-[8px] font-bold uppercase tracking-wide">
-                                              <Brain size={10} />
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center justify-between gap-2 mt-2 font-mono text-[9px] text-zinc-500">
-                                          <span>{model.downloads?.toLocaleString() || 0} dl</span>
-                                          <span>{model.lastUpdated}</span>
-                                        </div>
+                            <div className="flex items-center justify-between text-[11px] uppercase tracking-wider font-bold text-zinc-400 px-1 shrink-0">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => { setHfSelectedFilter('staff'); setHfSearchQuery(''); }}
+                                  className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'staff' && !hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
+                                >
+                                  Curator picks
+                                </button>
+                                <span>•</span>
+                                <button
+                                  onClick={() => setHfSelectedFilter('all')}
+                                  className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'all' || hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
+                                >
+                                  All Hub
+                                </button>
+                              </div>
+                              <select
+                                value={hfSortOption}
+                                onChange={(e: any) => setHfSortOption(e.target.value)}
+                                className="appearance-none bg-[var(--theme-surface-alt,rgba(0,0,0,0.05))] hover:bg-[var(--theme-hover-bg,rgba(0,0,0,0.1))] dark:bg-zinc-900/40 hover:dark:bg-zinc-800/60 text-[10px] font-bold text-zinc-400 dark:text-zinc-300 px-3 py-1.5 pr-8 rounded-xl border border-[var(--theme-border)] outline-none cursor-pointer hover:text-[var(--theme-accent)] hover:border-[var(--theme-accent)] focus:border-[var(--theme-accent)] focus:ring-2 focus:ring-[var(--theme-accent)]/20 transition-all relative font-sans select-none shadow-sm"
+                                style={{
+                                  backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23a1a1aa' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                  backgroundPosition: 'right 8px center',
+                                  backgroundSize: '14px',
+                                  backgroundRepeat: 'no-repeat'
+                                }}
+                              >
+                                <option value="vram_fit" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">VRAM-aware Auto-Detect</option>
+                                <option value="downloads" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">Popularity</option>
+                                <option value="likes" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">High Rating</option>
+                                <option value="modified" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">Latest</option>
+                              </select>
+                            </div>
+
+                            {/* List of models */}
+                            <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 custom-scrollbar min-h-0 hidden-scrollbar">
+                              {isSearchingHf ? (
+                                <div className="py-20 text-center text-xs text-zinc-400 space-y-2">
+                                  <RefreshCw size={20} className="animate-spin mx-auto text-[var(--theme-accent)]" />
+                                  <p>Reorganizing model trees...</p>
+                                </div>
+                              ) : hfError && hfModels.length === 0 ? (
+                                <div className="p-4 rounded-xl text-center text-xs border text-amber-500 bg-amber-500/5" style={{ borderColor: 'var(--theme-border)' }}>
+                                  {hfError}
+                                </div>
+                              ) : (
+                                (() => {
+                                  const listToRender = hfSearchQuery.trim() ? hfModels : curators;
+                                  const filtered = listToRender.filter(m => {
+                                    if (!hfSearchQuery && hfSelectedFilter === 'staff') {
+                                      if (!m.isStaffPick) return false;
+                                    }
+                                    if (hfSortOption === 'vram_fit') {
+                                      const minSizeGb = getSmallestModelSizeGb(m);
+                                      const kvAndOverhead = getKvCacheAndOverheadGb(m);
+                                      const totalVramNeeded = minSizeGb + kvAndOverhead;
+                                      return totalVramNeeded <= detectedVramGb;
+                                    }
+                                    return true;
+                                  });
+
+                                  if (filtered.length === 0) {
+                                    return (
+                                      <div className="py-12 text-center text-xs text-zinc-400 space-y-1.5 border border-dashed rounded-xl border-[var(--theme-border)]">
+                                        <Cpu size={24} className="mx-auto text-zinc-300 dark:text-zinc-700" />
+                                        <p className="font-semibold">No models fit your VRAM ({detectedVramGb.toFixed(1)} GB) criteria.</p>
+                                        <p className="text-[10px] text-zinc-500">Try changing filter type to "Popularity" or "Latest".</p>
                                       </div>
-                                    </button>
-                                  );
-                                });
-                              })()
-                            )}
+                                    );
+                                  }
+
+                                  return filtered.map((model) => {
+                                    const isSelected = selectedModelId === model.id;
+                                    const minSizeGb = getSmallestModelSizeGb(model);
+                                    const kvAndOverhead = getKvCacheAndOverheadGb(model);
+                                    const totalVramNeeded = minSizeGb + kvAndOverhead;
+                                    const fits = totalVramNeeded <= detectedVramGb;
+
+                                    const supportsVision = model.capabilities?.includes('Vision');
+                                    const supportsTools = model.capabilities?.includes('Tool Use');
+                                    const supportsReasoning = model.capabilities?.includes('Reasoning');
+                                    return (
+                                      <button
+                                        key={model.id}
+                                        onClick={() => {
+                                          setSelectedModelId(model.id);
+                                          fetchModelDetails(model);
+                                        }}
+                                        className="w-full p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all outline-none leading-none shadow-sm hover:translate-y-[-1px]"
+                                        style={{
+                                          borderColor: isSelected ? 'var(--theme-accent)' : 'var(--theme-border)',
+                                          background: isSelected ? 'var(--theme-surface-alt)' : 'var(--theme-surface)'
+                                        }}
+                                      >
+                                        {renderModelLogo(model.author || '', model.id)}
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center gap-1">
+                                            <span className="font-semibold text-xs truncate text-zinc-800 dark:text-zinc-200">
+                                              {model.name}
+                                            </span>
+                                            {model.isStaffPick && <span className="w-3 h-3 rounded-full bg-blue-500 text-white flex items-center justify-center text-[7px] font-bold shadow-sm" title="Verified">✓</span>}
+                                          </div>
+                                          <p className="text-[10px] text-zinc-400 truncate mt-0.5 leading-tight">{model.description}</p>
+                                          <div className="flex flex-wrap gap-1 mt-2">
+                                            {supportsVision && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-400 text-[8px] font-bold uppercase tracking-wide">
+                                                <Eye size={10} />
+                                              </span>
+                                            )}
+                                            {supportsTools && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
+                                                <Hammer size={10} />
+                                              </span>
+                                            )}
+                                            {supportsReasoning && (
+                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 text-[8px] font-bold uppercase tracking-wide">
+                                                <Brain size={10} />
+                                              </span>
+                                            )}
+                                            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[8px] font-mono font-bold uppercase tracking-wide ${
+                                              fits 
+                                                ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400' 
+                                                : 'border-red-500/25 bg-red-500/10 text-red-400'
+                                            }`}>
+                                              <Cpu size={10} />
+                                              {totalVramNeeded.toFixed(1)} GB
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center justify-between gap-2 mt-2 font-mono text-[9px] text-zinc-500">
+                                            <span>{model.downloads?.toLocaleString() || 0} dl</span>
+                                            <span>{model.lastUpdated}</span>
+                                          </div>
+                                        </div>
+                                      </button>
+                                    );
+                                  });
+                                })()
+                              )}
+                            </div>
                           </div>
-                        </div>
 
                         {/* RIGHT SUB COLUMN: HF DETAILS */}
                         <div className="lg:col-span-12 xl:col-span-7 flex flex-col gap-4 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
@@ -3443,9 +3622,10 @@ export function SettingsModal({
                                     )}
 
                                     <select
+                                      disabled
                                       value={activeDownloadFile}
                                       onChange={(e) => setActiveDownloadFile(e.target.value)}
-                                      className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs font-semibold rounded-xl outline-none border cursor-pointer bg-[var(--theme-surface-alt,rgba(0,0,0,0.05))] hover:bg-[var(--theme-hover-bg,rgba(0,0,0,0.1))] dark:bg-zinc-900/40 hover:dark:bg-zinc-800/60 border-[var(--theme-border)] hover:border-[var(--theme-accent)] focus:border-[var(--theme-accent)] focus:ring-2 focus:ring-[var(--theme-accent)]/20 text-[var(--theme-primary)] transition-all relative font-sans shadow-inner shrink-0"
+                                      className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs font-semibold rounded-xl outline-none border cursor-default bg-[var(--theme-surface-alt,rgba(0,0,0,0.05))] border-[var(--theme-border)] text-[var(--theme-primary)] opacity-95 pointer-events-none select-none transition-all relative font-sans shadow-inner shrink-0"
                                       style={{
                                         backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23a1a1aa' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
                                         backgroundPosition: 'right 12px center',

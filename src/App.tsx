@@ -11,6 +11,7 @@ import {
   useWorkspace,
   useUIState,
   useCoderMode,
+  useResearchMode,
   useAskAi,
   useRightPanel
 } from './hooks';
@@ -118,6 +119,15 @@ export default function App() {
     isTyping: inputState.isTyping
   });
 
+  // 10. Research Mode Hook
+  const researchMode = useResearchMode({
+    currentChatId,
+    chats,
+    setChats,
+    isSidebarOpen: sidebar.isSidebarOpen,
+    setIsSidebarOpen: sidebar.setIsSidebarOpen,
+  });
+
   // 11. Right Panel Hook
   const rightPanel = useRightPanel({
     rightIframeRef: workspace.rightIframeRef,
@@ -136,16 +146,18 @@ export default function App() {
     input: inputState.input,
     messages: currentChatId ? (chats.find(c => c.id === currentChatId)?.messages || []) : [],
     callLlamaBridge: llamaBridge.callLlamaBridge,
-    createNewChat: (projId, isCoder) => {
+    createNewChat: (projId, isCoder, isResearch, agentId) => {
       const id = Date.now().toString();
       const newChat = {
         id,
-        title: 'New Chat',
+        title: agentId ? 'New Assistant Chat' : (isResearch ? 'New Deep Research' : (isCoder ? 'New Coder Workspace' : 'New Chat')),
         messages: [],
         createdAt: new Date(),
         updatedAt: new Date(),
         projectId: projId || undefined,
+        agentId: agentId || undefined,
         isCoderMode: isCoder || undefined,
+        isResearchMode: isResearch || undefined,
       };
       setChats(prev => [newChat, ...prev]);
       setCurrentChatId(id);
@@ -195,6 +207,7 @@ export default function App() {
         setToasts
       }}
       coderMode={coderMode}
+      researchMode={researchMode}
       askAi={askAi}
       rightPanel={rightPanel}
       smartPopup={smartPopup}

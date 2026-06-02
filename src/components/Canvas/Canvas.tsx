@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Layout, FileText, PenTool, Terminal, Download, ChevronDown, X } from 'lucide-react';
+import { Layout, FileText, PenTool, Terminal, Download, ChevronDown, X, Eye, Code, RotateCw } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Artifact } from '../../types';
@@ -15,6 +15,7 @@ interface CanvasProps {
   view: 'code' | 'preview';
   onSetView: (v: 'code' | 'preview') => void;
   allArtifacts?: Artifact[];
+  inline?: boolean;
 }
 
 export const Canvas = ({ 
@@ -23,9 +24,19 @@ export const Canvas = ({
   onClose, 
   view, 
   onSetView,
-  allArtifacts = []
+  allArtifacts = [],
+  inline = false
 }: CanvasProps) => {
   const [isDownloadDropdownOpen, setIsDownloadDropdownOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [iframeKey, setIframeKey] = useState(0);
+
+  const handleCopyContent = () => {
+    if (!artifact) return;
+    navigator.clipboard.writeText(artifact.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   if (!artifact) return null;
 
@@ -439,63 +450,90 @@ export const Canvas = ({
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          initial={{ x: '100%' }}
-          animate={{ x: 0 }}
-          exit={{ x: '100%' }}
-          transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-          className="fixed inset-y-0 right-0 w-full lg:w-[45vw] bg-white dark:bg-[#0a0a0a] border-l border-zinc-100 dark:border-white/5 z-[200] flex flex-col shadow-2xl"
+          initial={inline ? { opacity: 0 } : { x: '100%' }}
+          animate={inline ? { opacity: 1 } : { x: 0 }}
+          exit={inline ? { opacity: 0 } : { x: '100%' }}
+          transition={inline ? { duration: 0.15 } : { type: 'spring', damping: 30, stiffness: 300 }}
+          className={
+            inline 
+              ? "relative w-full h-full bg-white dark:bg-[#0a0a0a] flex flex-col overflow-hidden"
+              : "fixed inset-y-0 right-0 w-full lg:w-[45vw] bg-white dark:bg-[#0a0a0a] border-l border-zinc-100 dark:border-white/5 z-[200] flex flex-col shadow-2xl"
+          }
         >
-          <div className="h-16 border-b border-zinc-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0 bg-white/80 dark:bg-black/80 backdrop-blur-xl sticky top-0 z-10">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-zinc-100 dark:bg-white/5 rounded-lg text-zinc-500">
-                  {artifact.type === 'html' ? <Layout size={18} /> : 
-                   artifact.type === 'markdown' ? <FileText size={18} /> : 
-                   artifact.type === 'poem' ? <PenTool size={18} className="text-amber-500" /> : 
-                   artifact.type === 'report' ? <FileText size={18} className="text-blue-500" /> : 
-                   <Terminal size={18} />}
-                </div>
-                <div className="text-left">
-                  <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 uppercase tracking-tighter">
-                    {artifact.title}
-                  </h3>
-                  <p className="text-[10px] text-zinc-400 font-medium uppercase tracking-widest">{artifact.language}</p>
-                </div>
-              </div>
-            </div>
+          <div className="h-12 border-b border-zinc-800/60 flex items-center justify-between px-4 shrink-0 bg-[#1e1e1e] text-zinc-200 sticky top-0 z-10 select-none">
+            {/* Left section: toggles & title */}
             <div className="flex items-center gap-3">
+              {/* Custom segmented selector pill for Toggle View */}
               {(artifact.type === 'html' || artifact.type === 'markdown' || artifact.type === 'poem' || artifact.type === 'report') && (
-                <div className="flex items-center p-1 bg-zinc-100 dark:bg-white/5 rounded-xl border border-zinc-200/50 dark:border-white/5">
-                  <button
-                    type="button"
-                    onClick={() => onSetView('code')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      view === 'code' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm font-semibold' : 'text-zinc-500 font-normal'
-                    }`}
-                  >
-                    Code
-                  </button>
+                <div className="flex items-center p-0.5 bg-zinc-900/60 rounded-md border border-zinc-800/80">
                   <button
                     type="button"
                     onClick={() => onSetView('preview')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      view === 'preview' ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm font-semibold' : 'text-zinc-500 font-normal'
+                    className={`p-1.5 rounded transition-all cursor-pointer ${
+                      view === 'preview' 
+                        ? 'bg-zinc-800/90 text-white shadow-sm font-semibold' 
+                        : 'text-zinc-500 hover:text-zinc-300 font-normal'
                     }`}
+                    title="Live Preview"
                   >
-                    Preview
+                    <Eye size={13} strokeWidth={2.5} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSetView('code')}
+                    className={`p-1.5 rounded transition-all cursor-pointer ${
+                      view === 'code' 
+                        ? 'bg-zinc-800/90 text-white shadow-sm font-semibold' 
+                        : 'text-zinc-500 hover:text-zinc-300 font-normal'
+                    }`}
+                    title="View Source Code"
+                  >
+                    <Code size={13} strokeWidth={2.5} />
                   </button>
                 </div>
               )}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsDownloadDropdownOpen(!isDownloadDropdownOpen)}
-                  className="px-2.5 py-1.5 bg-zinc-150 dark:bg-white/5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded-xl text-zinc-700 dark:text-zinc-300 transition-all flex items-center gap-1 text-xs font-bold shadow-xs cursor-pointer"
-                  title="Download / Export Options"
-                >
-                  <Download size={14} strokeWidth={2.5} />
-                  <ChevronDown size={11} className={`transition-transform duration-200 ${isDownloadDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
+
+              {/* Title & Language/Type badge */}
+              <div className="flex items-center text-xs font-semibold select-all font-sans">
+                <span className="hover:text-white transition-colors" style={{ color: 'var(--theme-accent)' }}>
+                  {artifact.title}
+                </span>
+                <span className="text-zinc-600 font-normal select-none mx-1.5">·</span>
+                <span className="text-[10px] text-zinc-500 font-mono tracking-wider font-semibold uppercase">
+                  {artifact.language || artifact.type}
+                </span>
+              </div>
+            </div>
+
+            {/* Right section: actions */}
+            <div className="flex items-center gap-2">
+              {/* Styled Unified Split Copy/Export Button */}
+              <div className="relative flex items-center">
+                <div className="flex items-center bg-zinc-900/40 hover:bg-zinc-800/40 rounded-lg border border-zinc-800 text-zinc-200 transition-all text-xs font-semibold overflow-hidden h-7">
+                  <button
+                    type="button"
+                    onClick={handleCopyContent}
+                    className="px-2.5 h-full hover:bg-zinc-800/60 active:bg-zinc-805 text-zinc-200 active:text-white transition-colors cursor-pointer border-none flex items-center justify-center select-none"
+                    title="Copy full content to clipboard"
+                  >
+                    {copied ? (
+                      <span className="text-emerald-400 font-bold transition-all">Copied</span>
+                    ) : (
+                      <span>Copy</span>
+                    )}
+                  </button>
+                  <div className="w-px h-3.5 bg-zinc-800" />
+                  <button
+                    type="button"
+                    onClick={() => setIsDownloadDropdownOpen(!isDownloadDropdownOpen)}
+                    className="px-1.5 h-full hover:bg-zinc-800/60 text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer border-none flex items-center justify-center select-none"
+                    title="Export / Download Options"
+                  >
+                    <ChevronDown size={11} className={`transition-transform duration-250 ${isDownloadDropdownOpen ? 'rotate-180' : ''}`} strokeWidth={2.5} />
+                  </button>
+                </div>
+
+                {/* Dropdown Options */}
                 <AnimatePresence>
                   {isDownloadDropdownOpen && (
                     <>
@@ -504,61 +542,73 @@ export const Canvas = ({
                         onClick={() => setIsDownloadDropdownOpen(false)} 
                       />
                       <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                        initial={{ opacity: 0, scale: 0.95, y: 5 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                        className="absolute right-0 mt-2 w-52 rounded-2xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-white/10 shadow-2xl py-2 z-50 flex flex-col"
+                        exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                        className="absolute right-0 top-full mt-1.5 w-48 rounded-xl bg-zinc-950 border border-zinc-850/80 shadow-2xl py-1.5 z-50 flex flex-col"
                       >
-                        <div className="px-3.5 py-1 text-[9px] font-extrabold uppercase tracking-widest text-zinc-400 dark:text-zinc-500 select-none">
+                        <div className="px-3 py-1 text-[8px] font-extrabold uppercase tracking-widest text-zinc-500 select-none">
                           File Format Options
                         </div>
                         <button
                           type="button"
                           onClick={() => handleDownload('txt')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer border-none bg-transparent"
+                          className="px-3 py-1.5 hover:bg-zinc-900 text-left text-[11px] font-bold text-zinc-300 flex items-center gap-2 cursor-pointer border-none bg-transparent"
                         >
-                          <span className="w-5 h-5 bg-zinc-100 dark:bg-white/10 rounded-md flex items-center justify-center text-[9px] font-bold text-zinc-500 shrink-0">TXT</span>
+                          <span className="w-4 h-4 bg-zinc-900 rounded flex items-center justify-center text-[8px] font-bold text-zinc-400 shrink-0 border border-zinc-800">TXT</span>
                           <span className="truncate">Plain Text (.txt)</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDownload('md')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer border-none bg-transparent"
+                          className="px-3 py-1.5 hover:bg-zinc-900 text-left text-[11px] font-bold text-zinc-300 flex items-center gap-2 cursor-pointer border-none bg-transparent"
                         >
-                          <span className="w-5 h-5 bg-blue-50 dark:bg-blue-950/40 rounded-md flex items-center justify-center text-[9px] font-bold text-blue-500 shrink-0">MD</span>
+                          <span className="w-4 h-4 bg-blue-950/40 rounded flex items-center justify-center text-[8px] font-bold text-blue-400 shrink-0 border border-blue-900/30 font-mono">MD</span>
                           <span className="truncate">Markdown (.md)</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDownload('html')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer border-none bg-transparent"
+                          className="px-3 py-1.5 hover:bg-zinc-900 text-left text-[11px] font-bold text-zinc-300 flex items-center gap-2 cursor-pointer border-none bg-transparent"
                         >
-                          <span className="w-5 h-5 bg-emerald-50 dark:bg-emerald-950/40 rounded-md flex items-center justify-center text-[9px] font-bold text-emerald-500 shrink-0">HTML</span>
+                          <span className="w-4 h-4 bg-emerald-950/40 rounded flex items-center justify-center text-[8px] font-bold text-emerald-400 shrink-0 border border-emerald-900/30 font-mono">HTML</span>
                           <span className="truncate">Offline Page (.html)</span>
                         </button>
-                        <div className="w-full h-px bg-zinc-100 dark:bg-white/5 my-1" />
+                        <div className="w-full h-px bg-zinc-900 my-1" />
                         <button
                           type="button"
                           onClick={() => handleDownload('print')}
-                          className="px-4 py-2 hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 flex items-center gap-2 cursor-pointer border-none bg-transparent"
+                          className="px-3 py-1.5 hover:bg-zinc-900 text-left text-[11px] font-bold text-zinc-350 flex items-center gap-2 cursor-pointer border-none bg-transparent"
                         >
-                          <div className="w-5 h-5 bg-amber-50 dark:bg-amber-950/40 rounded-md flex items-center justify-center text-amber-500 shrink-0">
-                            <FileText size={10} />
+                          <div className="w-4 h-4 bg-amber-950/40 rounded flex items-center justify-center text-amber-500 shrink-0 border border-amber-900/30">
+                            <FileText size={8} />
                           </div>
-                          <span className="font-bold text-amber-600 dark:text-amber-400 truncate">Save PDF / Print</span>
+                          <span className="font-bold text-amber-500 truncate">Save PDF / Print</span>
                         </button>
                       </motion.div>
                     </>
                   )}
                 </AnimatePresence>
               </div>
-              <div className="w-px h-4 bg-zinc-200 dark:bg-white/10 mx-1" />
+
+              {/* Refresh Option */}
+              <button
+                type="button"
+                onClick={() => setIframeKey(prev => prev + 1)}
+                className="p-1 hover:bg-zinc-900/80 rounded-md text-zinc-500 hover:text-zinc-100 transition-colors cursor-pointer border-none bg-transparent"
+                title="Reload Preview iframe"
+              >
+                <RotateCw size={13} strokeWidth={2.5} />
+              </button>
+
+              {/* Close Panel Option */}
               <button
                 type="button"
                 onClick={onClose}
-                className="p-2 hover:bg-zinc-100 dark:hover:bg-white/5 rounded-xl text-zinc-500 transition-colors cursor-pointer border-none bg-transparent"
+                className="p-1 hover:bg-zinc-900/80 rounded-md text-zinc-500 hover:text-zinc-100 transition-colors cursor-pointer border-none bg-transparent"
+                title="Close Live Preview"
               >
-                <X size={20} />
+                <X size={13} strokeWidth={2.5} />
               </button>
             </div>
           </div>
@@ -758,6 +808,7 @@ export const Canvas = ({
                   ) : (
                     <div className="h-full bg-[var(--theme-surface)] overflow-hidden">
                       <iframe
+                        key={iframeKey}
                         title="Preview"
                         srcDoc={artifact.language === 'html' || artifact.type === 'html' ? getCombinedSrcDoc(artifact.content, allArtifacts) : artifact.content}
                         className="w-full h-full border-none bg-white"

@@ -15,6 +15,14 @@ import { SandboxManager } from './src/sandbox/SandboxManager';
 import { createSandboxRouter } from './src/sandbox/SandboxApi';
 import { createLogger } from './src/sandbox/SandboxHealth';
 import { VmId } from './src/sandbox/types';
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+// @ts-ignore
+const pdf = require("pdf-parse");
+// @ts-ignore
+import mammoth from "mammoth";
+
+import { RagBackendService } from "./src/services/ragBackendService";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +56,7 @@ async function startServer() {
     process.env.LUMINA_DATA_DIR || path.join(os.homedir(), '.lumina')
   );
   const sandboxLog = createLogger('Server');
+  const ragBackend = new RagBackendService();
 
   // Mount sandbox API routes
   app.use('/api', createSandboxRouter(sandbox));
@@ -865,6 +874,65 @@ async function startServer() {
   app.post("/api/scrape", async (req, res) => {
     const { url, selectors, extractLinks, extractTables, outputFormat, usePuppeteer } = req.body;
 
+    const isWrongOrGarbageLink = (linkUrl: string, srcUrl: string): boolean => {
+      try {
+        const parsed = new URL(linkUrl);
+        const host = parsed.hostname.toLowerCase();
+        const path = parsed.pathname.toLowerCase();
+        const search = parsed.search.toLowerCase();
+        const sourceHost = new URL(srcUrl).hostname.toLowerCase();
+        
+        // 1. Social media & Sharing pages
+        const socialMediaPatterns = [
+          'facebook.com', 'twitter.com', 'x.com', 'instagram.com', 'linkedin.com', 'pinterest.com', 
+          'youtube.com', 'youtu.be', 'tiktok.com', 'snapchat.com', 'whatsapp.com', 'reddit.com',
+          'tumblr.com', 'flickr.com', 'vimeo.com'
+        ];
+        if (socialMediaPatterns.some(domain => host.includes(domain))) {
+          if (!sourceHost.includes(host) && !host.includes(sourceHost)) {
+            return true;
+          }
+        }
+        
+        // 2. Generic advertising, tracking, or affiliate links
+        const adPatterns = [
+          'ads.', 'adserver', 'doubleclick', 'googleadservices', 'amazon-adsystem', 'taboola', 'outbrain', 
+          'adsystem', 'affiliate', 'adnxs', 'marketing', 'analytics', 'pixel', 'clktrkr'
+        ];
+        if (adPatterns.some(pattern => host.includes(pattern) || path.includes(pattern) || search.includes(pattern))) {
+          return true;
+        }
+
+        // 3. Clutter/Utility pages that are rarely useful content for AI scans
+        const clutterPatterns = [
+          '/privacy', '/terms', '/cookie', '/contact', '/about-us', '/about/info', '/tos', '/disclaimer',
+          '/help', '/support', '/faq', '/subscribe', '/newsletter', '/login', '/signin', '/signup', '/register',
+          '/cart', '/checkout', '/account', '/profile', '/settings', '/feedback', '/sitemap'
+        ];
+        if (clutterPatterns.some(pattern => path === pattern || path.startsWith(pattern + '/') || path.endsWith(pattern))) {
+          return true;
+        }
+
+        // 4. Search loops on the same site (e.g. /search?q=..., /?s=...)
+        if (host === sourceHost) {
+          if (path.includes('/search') || search.includes('?s=') || search.includes('&s=') || search.includes('?q=') || search.includes('&q=')) {
+            return true;
+          }
+        }
+
+        // 5. Binary or document downloads that axios scraping cannot process
+        const nonScrapableExtensions = [
+          '.zip', '.pdf', '.docx', '.xlsx', '.pptx', '.bin', '.tar', '.gz', '.dmg', '.exe', 
+          '.mp3', '.mp4', '.avi', '.mov', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'
+        ];
+        if (nonScrapableExtensions.some(ext => path.endsWith(ext))) {
+          return true;
+        }
+
+      } catch (e) {}
+      return false;
+    };
+
     if (!url) {
       return res.status(400).json({ error: 'URL is required' });
     }
@@ -898,6 +966,94 @@ async function startServer() {
       }
 
       // Check robots.txt
+      // Auto-Interception of search engine URLs to use DuckDuckGo scrape natively
+      // This bypasses 429 rate limit errors when models attempt to scrape Google search pages
+      const getSearchQueryIfSearchEngine = (urlStr: string): string | null => {
+        try {
+          const parsed = new URL(urlStr);
+          const host = parsed.hostname.toLowerCase();
+          const isSearchEngine = host.includes('google.') || 
+                                 host.includes('bing.') || 
+                                 host.includes('duckduckgo.') || 
+                                 host.includes('yahoo.');
+          if (!isSearchEngine) return null;
+
+          const q = parsed.searchParams.get('q') || 
+                    parsed.searchParams.get('query') || 
+                    parsed.searchParams.get('p') ||
+                    parsed.searchParams.get('text');
+          if (q && q.trim()) {
+            return q.trim();
+          }
+          if (parsed.hash) {
+            const hashParams = new URLSearchParams(parsed.hash.substring(1));
+            const hashQ = hashParams.get('q') || hashParams.get('query');
+            if (hashQ && hashQ.trim()) return hashQ.trim();
+          }
+        } catch (e) {}
+        return null;
+      };
+
+      const searchQuery = getSearchQueryIfSearchEngine(url);
+      if (searchQuery) {
+        console.log(`[Scrape Bypass] Intercepting search engine scrape request for query: "${searchQuery}"`);
+        try {
+          const ddgResults = await search(searchQuery, {
+            region: 'wt-wt',
+            safeSearch: -1,
+            time: 'y',
+            offset: 0
+          });
+
+          const resultsList = ddgResults.results || [];
+          const headings = resultsList.map((r: any) => ({
+            level: 'h2',
+            text: r.title
+          }));
+
+          const paragraphs = resultsList.map((r: any) => r.description || r.snippet).filter(Boolean);
+          const links = resultsList.map((r: any) => r.url).filter(Boolean);
+
+          let markdownText = `# Search Results for "${searchQuery}"\n\n`;
+          resultsList.forEach((r: any, idx: number) => {
+            markdownText += `## ${idx + 1}. [${r.title}](${r.url})\n${r.description || r.snippet || 'No description available.'}\n\n`;
+          });
+
+          if (resultsList.length === 0) {
+            markdownText += `No results were found on DuckDuckGo for: ${searchQuery}\n`;
+          }
+
+          const resultResult: any = {
+            url,
+            title: `Search: ${searchQuery}`,
+            statusCode: 200,
+            scrapedAt: new Date().toISOString(),
+            data: {
+              headings: headings.slice(0, 30),
+              paragraphs: paragraphs.slice(0, 50),
+              metaDescription: `Direct DuckDuckGo search results for query: ${searchQuery}`
+            },
+            links,
+            images: [],
+            tables: [],
+            videos: [],
+            rawText: markdownText
+          };
+
+          if (outputFormat === 'markdown') {
+            resultResult.formattedOutput = resultResult.rawText;
+          } else if (outputFormat === 'html') {
+            resultResult.formattedOutput = `<html><body>${markdownText.replace(/\n/g, '<br>')}</body></html>`;
+          } else {
+            resultResult.formattedOutput = JSON.stringify(resultResult.data, null, 2);
+          }
+
+          return res.json(resultResult);
+        } catch (searchError: any) {
+          console.error('[Scrape Bypass] DuckDuckGo search backup failed:', searchError);
+        }
+      }
+
       const robotsCheck = await checkRobotsTxt(url);
 
       // Rotate list of high-quality User-Agents
@@ -913,7 +1069,7 @@ async function startServer() {
         'User-Agent': randomAgent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
+        // Let Axios handle decompression naturally to avoid buffer decoding corruption
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
         'Sec-Fetch-Dest': 'document',
@@ -1114,14 +1270,39 @@ async function startServer() {
 
       // Extract links absolute resolved (truncated to 500 items max)
       if (extractLinks) {
+        const decodeRedirectUrl = (urlStr: string): string => {
+          try {
+            const parsed = new URL(urlStr);
+            const host = parsed.hostname.toLowerCase();
+            if (host.includes('duckduckgo.com') && parsed.searchParams.has('uddg')) {
+              const decoded = parsed.searchParams.get('uddg');
+              if (decoded) return decoded;
+            }
+            if (host.includes('google.') && parsed.pathname === '/url') {
+              const decoded = parsed.searchParams.get('url') || parsed.searchParams.get('q');
+              if (decoded) return decoded;
+            }
+            if (parsed.pathname === '/url' || parsed.pathname === '/redirect') {
+              const decoded = parsed.searchParams.get('url') || 
+                              parsed.searchParams.get('q') || 
+                              parsed.searchParams.get('to') || 
+                              parsed.searchParams.get('target');
+              if (decoded && (decoded.startsWith('http://') || decoded.startsWith('https://'))) {
+                return decoded;
+              }
+            }
+          } catch (e) {}
+          return urlStr;
+        };
         const foundLinks: Set<string> = new Set();
         $('a[href]').each((_, el) => {
           const href = $(el).attr('href');
           if (href) {
             try {
-              const absUrl = new URL(href, url).href;
+              let absUrl = new URL(href, url).href;
+              absUrl = decodeRedirectUrl(absUrl);
               // Avoid self-references or hash-only links
-              if (absUrl !== url && !absUrl.includes('#')) {
+              if (absUrl !== url && !absUrl.includes('#') && !isWrongOrGarbageLink(absUrl, url)) {
                 foundLinks.add(absUrl);
               }
             } catch (e) {
@@ -2267,6 +2448,113 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 
   // Report OS info for the AI to adapt its commands
+  // Report detected system VRAM / GPU information
+  app.get("/api/os/gpu-info", async (req, res) => {
+    try {
+      const getGPUDetails = async () => {
+        const results: { gpus: any[]; totalDedicatedVRAM_MB: number } = {
+          gpus: [],
+          totalDedicatedVRAM_MB: 0
+        };
+
+        const detectGPUType = (gpu: any) => {
+          const model = (gpu.model || "").toLowerCase();
+          const vendor = (gpu.vendor || "").toLowerCase();
+          if (gpu.vramDynamic) return "Integrated (Shared VRAM)";
+          if (model.includes("intel") || vendor.includes("intel")) return "Integrated";
+          if (model.includes("radeon") && model.includes("graphics")) return "Integrated (APU)";
+          return "Discrete";
+        };
+
+        try {
+          const graphics = await si.graphics();
+          if (graphics && graphics.controllers) {
+            for (const gpu of graphics.controllers) {
+              results.gpus.push({
+                vendor: gpu.vendor,
+                model: gpu.model,
+                vramMB: gpu.vram,
+                vramDynamic: gpu.vramDynamic,
+                bus: gpu.bus,
+                driverVersion: gpu.driverVersion,
+                type: detectGPUType(gpu)
+              });
+            }
+          }
+        } catch (e) {
+          console.error("si.graphics error:", e);
+        }
+
+        try {
+          const raw = spawnSync(
+            "nvidia-smi",
+            ["--query-gpu=name,memory.total,memory.free,memory.used", "--format=csv,noheader,nounits"],
+            { timeout: 5000, encoding: "utf8" }
+          ).stdout?.trim();
+
+          if (raw) {
+            raw.split("\n").forEach((line) => {
+              const [name, total, free, used] = line.split(",").map(s => s.trim());
+              const existing = results.gpus.find(g =>
+                g.model?.toLowerCase().includes(name?.toLowerCase().split(" ")[1])
+              );
+              const nvidiaData = {
+                vendor: "NVIDIA",
+                model: name,
+                type: "Discrete",
+                vramMB: parseInt(total, 10),
+                source: "nvidia-smi"
+              };
+              if (existing) {
+                Object.assign(existing, nvidiaData);
+              } else {
+                results.gpus.push(nvidiaData);
+              }
+            });
+          }
+        } catch {}
+
+        results.totalDedicatedVRAM_MB = results.gpus
+          .filter(g => g.type === "Discrete")
+          .reduce((sum, g) => sum + (g.vramMB || 0), 0);
+
+        return results;
+      };
+
+      const details = await getGPUDetails();
+      let vramTotalBytes = 8192 * 1024 * 1024; // Default 8GB
+
+      const discreteGPUs = details.gpus.filter(g => g.type === "Discrete" && g.vramMB);
+      if (discreteGPUs.length > 0) {
+        const bestGPU = discreteGPUs.reduce((prev, current) => {
+          const prevVal = prev.vramMB || 0;
+          const currVal = current.vramMB || 0;
+          return prevVal > currVal ? prev : current;
+        });
+        vramTotalBytes = bestGPU.vramMB * 1024 * 1024;
+      } else {
+        const anyGPU = details.gpus.find(g => g.vramMB);
+        if (anyGPU) {
+          vramTotalBytes = anyGPU.vramMB * 1024 * 1024;
+        } else if (process.platform === 'darwin') {
+          vramTotalBytes = Math.floor(os.totalmem() * 0.6);
+        } else {
+          vramTotalBytes = Math.floor(os.totalmem() * 0.4);
+        }
+      }
+
+      const vramTotalGB = vramTotalBytes / (1024 * 1024 * 1024);
+      res.json({
+        gpus: details.gpus,
+        vramTotalBytes,
+        vramTotalGB,
+        detected: discreteGPUs.length > 0 || details.gpus.length > 0
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/os/info", (req, res) => {
     const poolStatus = sandbox.isInitialized() ? sandbox.getPoolStatus() : null;
     res.json({
@@ -3060,9 +3348,186 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
     }
   });
 
+  // ─── RAG Document Database API Endpoints ─────────────────────────────────
+  app.get("/api/rag/stats", (req, res) => {
+    try {
+      res.json(ragBackend.getStats());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/rag/documents", (req, res) => {
+    try {
+      res.json(ragBackend.getDocuments());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/rag/upload", async (req, res) => {
+    const { fileName, base64, mimeType } = req.body;
+    if (!base64 || !fileName) {
+      return res.status(400).json({ error: "fileName and base64 payloads match required fields" });
+    }
+    try {
+      const buffer = Buffer.from(base64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      const doc = await ragBackend.addDocument(fileName, mimeType || 'text/plain', buffer);
+      res.json({ success: true, document: doc });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/rag/documents/:id", async (req, res) => {
+    try {
+      const success = await ragBackend.deleteDocument(req.params.id);
+      res.json({ success });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/rag/settings", (req, res) => {
+    try {
+      res.json(ragBackend.getSettings());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/rag/settings", (req, res) => {
+    try {
+      const updated = ragBackend.saveSettings(req.body);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/rag/logs", (req, res) => {
+    try {
+      res.json(ragBackend.getLogs());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/rag/rebuild", async (req, res) => {
+    try {
+      // Run as promise background task so we don't block request loop
+      ragBackend.rebuildIndex().catch(err => {
+        ragBackend.log('error', `Reindexing pipeline error: ${err.message || err}`);
+      });
+      res.json({ success: true, message: "Reindexing process launched" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/rag/clear", async (req, res) => {
+    try {
+      await ragBackend.clearAll();
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/rag/query", async (req, res) => {
+    const { query, limit, documentIds } = req.body;
+    if (!query) {
+      return res.status(400).json({ error: "query text is required" });
+    }
+    try {
+      const matches = await ragBackend.retrieve(query, limit || 5, documentIds);
+      res.json(matches);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Document Parsing Service
+  app.post("/api/parse-doc", async (req, res) => {
+    const { fileName, base64, mimeType } = req.body;
+    if (!base64) {
+      return res.status(400).json({ error: "base64 file content is required" });
+    }
+
+    try {
+      const buffer = Buffer.from(base64, 'base64');
+      let extractedText = '';
+
+      const lowerName = (fileName || '').toLowerCase();
+      if (lowerName.endsWith('.pdf') || mimeType === 'application/pdf') {
+        const data = await pdf(buffer);
+        extractedText = data.text || '';
+      } else if (lowerName.endsWith('.docx') || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        const result = await mammoth.extractRawText({ buffer });
+        extractedText = result.value || '';
+      } else {
+        // Fallback: try reading as plain utf-8 text
+        extractedText = buffer.toString('utf8');
+      }
+
+      res.json({ text: extractedText });
+    } catch (error: any) {
+      console.error("Error parsing document:", error);
+      res.status(500).json({ error: error.message || "Failed to parse document" });
+    }
+  });
+
   // AI Chat Completion Proxy
   app.post("/api/chat", async (req, res) => {
-    const { messages, systemPrompt, model, config, tools, stream = true } = req.body;
+    // RAG Context Injection
+    let finalSystemPrompt = req.body.systemPrompt || '';
+    const { ragConfig, messages } = req.body;
+    
+    if (ragConfig && ragConfig.enabled && Array.isArray(ragConfig.activeDocumentIds) && ragConfig.activeDocumentIds.length > 0) {
+      try {
+        const lastMsg = messages[messages.length - 1];
+        let userQuery = '';
+        if (lastMsg && lastMsg.role === 'user') {
+          if (typeof lastMsg.content === 'string') {
+            userQuery = lastMsg.content;
+          } else if (Array.isArray(lastMsg.content)) {
+            const textPart = lastMsg.content.find((c: any) => c.type === 'text');
+            userQuery = textPart?.text || '';
+          }
+        }
+        
+        if (userQuery) {
+          const matchedChunks = await ragBackend.retrieve(userQuery, 5, ragConfig.activeDocumentIds);
+          if (matchedChunks && matchedChunks.length > 0) {
+            const contextStr = matchedChunks.map(m => {
+              const loc = m.chunk.pageNumber ? `Page ${m.chunk.pageNumber}` : (m.chunk.section ? `Section: ${m.chunk.section}` : 'General');
+              return `--- START OF FRAGMENT ---
+Source Document: ${m.chunk.documentName}
+Location Reference: ${loc}
+
+${m.chunk.content}
+--- END OF FRAGMENT ---`;
+            }).join('\n\n');
+            
+            const ragInstruction = `Answer the user's question using the provided DOCUMENT CONTEXT whenever possible. 
+If information exists in these uploaded documents, prioritize those documents over general model knowledge.
+Always cite the source document name and reference (page/section) when using information from it. In your markdown response, cite it elegantly like "[Source: DocumentName.pdf (Page X)]".
+If the answer is not found in the documents, state that clearly rather than hallucinating.
+
+DOCUMENT CONTEXT:
+${contextStr}`;
+            
+            finalSystemPrompt = finalSystemPrompt 
+              ? `${finalSystemPrompt}\n\n${ragInstruction}`
+              : ragInstruction;
+          }
+        }
+      } catch (err: any) {
+        console.error("RAG Context Injection error:", err);
+      }
+    }
+
+    const { model, config, tools, stream = true } = req.body;
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages array is required" });
     }
@@ -3172,8 +3637,8 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
 
     // Build the API messages array with system prompt
     const apiMessages: any[] = [];
-    if (systemPrompt) {
-      apiMessages.push({ role: 'system', content: systemPrompt });
+    if (finalSystemPrompt) {
+      apiMessages.push({ role: 'system', content: finalSystemPrompt });
     }
     apiMessages.push(...messages.map((m: any) => {
       const msg: any = { role: m.role, content: m.content };
@@ -3197,7 +3662,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
           {
             model: model || 'claude-3-5-sonnet-20241022',
             max_tokens: 4096,
-            system: systemPrompt || undefined,
+            system: finalSystemPrompt || undefined,
             messages: messages.map((m: any) => ({
               role: m.role === 'assistant' ? 'assistant' : 'user',
               content: m.content
@@ -3253,8 +3718,8 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
               role: m.role === 'assistant' ? 'model' : 'user',
               parts: [{ text: m.content }]
             })),
-            systemInstruction: systemPrompt ? {
-              parts: [{ text: systemPrompt }]
+            systemInstruction: finalSystemPrompt ? {
+              parts: [{ text: finalSystemPrompt }]
             } : undefined,
             generationConfig: {
               temperature: 0.7,
@@ -3936,7 +4401,18 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         name,
         metadata: {
           file_size: modelSizeBytes,
-          context_length: metadata["llama.context_length"] || metadata["gemma.context_length"] || null,
+          context_length: (() => {
+            const key = Object.keys(metadata).find(k => k.endsWith('.context_length'));
+            if (key && metadata[key]) return Number(metadata[key]);
+            return Number(
+              metadata["llama.context_length"] ||
+              metadata["gemma.context_length"] ||
+              metadata["phi3.context_length"] ||
+              metadata["qwen2.context_length"] ||
+              metadata["mistral.context_length"] ||
+              null
+            );
+          })(),
           attention_head_count: metadata["llama.attention.head_count"] || null,
           feed_forward_length: metadata["llama.feed_forward_length"] || null,
         }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   History, 
@@ -15,7 +15,13 @@ import {
   Trash2, 
   Plus,
   FileText,
-  MousePointerClick
+  MousePointerClick,
+  ThumbsUp,
+  ThumbsDown,
+  RotateCcw,
+  Volume2,
+  VolumeX,
+  Square
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -26,6 +32,131 @@ import { NodeGraph, InlineToolCallCard } from '../NodeGraph/NodeGraph';
 import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
+
+
+interface SpeechStateListener {
+  (speakingId: string | null): void;
+}
+
+class SpeechController {
+  private activeId: string | null = null;
+  private listeners: Set<SpeechStateListener> = new Set();
+  private utterance: SpeechSynthesisUtterance | null = null;
+
+  getActiveId() {
+    return this.activeId;
+  }
+
+  speak(id: string, text: string) {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    if (this.activeId === id) {
+      this.cancel();
+      return;
+    }
+
+    this.cancel();
+
+    this.activeId = id;
+    this.notify();
+
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      this.utterance = u;
+      
+      u.onend = () => {
+        if (this.activeId === id) {
+          this.activeId = null;
+          this.utterance = null;
+          this.notify();
+        }
+      };
+
+      u.onerror = (e) => {
+        console.warn('Speech error', e);
+        if (this.activeId === id) {
+          this.activeId = null;
+          this.utterance = null;
+          this.notify();
+        }
+      };
+
+      window.speechSynthesis.speak(u);
+    } catch (err) {
+      console.error('Failed to speak', err);
+      this.activeId = null;
+      this.utterance = null;
+      this.notify();
+    }
+  }
+
+  cancel() {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    this.activeId = null;
+    this.utterance = null;
+    this.notify();
+  }
+
+  subscribe(listener: SpeechStateListener) {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notify() {
+    this.listeners.forEach(l => l(this.activeId));
+  }
+}
+
+const globalSpeechController = new SpeechController();
+
+function cleanMessageTextForSpeech(content: string): string {
+  if (!content) return "";
+  let text = content;
+
+  // 1. Strip thinking blocks completely
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+
+  // 2. Strip XML/HTML tags, especially <artifact>
+  text = text.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/gi, '');
+  text = text.replace(/<[^>]*>/g, '');
+
+  // 3. Strip code blocks completely
+  text = text.replace(/```[a-zA-Z0-9-]*[\s\S]*?```/gi, '');
+
+  // 4. Strip inline LaTeX blocks
+  text = text.replace(/\$\$[\s\S]*?\$\$/g, '');
+  text = text.replace(/\$[^\$]+\$/g, '');
+
+  // 5. Clean images and links
+  text = text.replace(/!\[[^\]]*\]\([^\)]*\)/g, ''); // strip images
+  text = text.replace(/\[([^\]]+)\]\([^\)]*\)/g, '$1'); // keep link title
+
+  // 6. Inline code backticks strip (keep the text)
+  text = text.replace(/`([^`]+)`/g, '$1');
+
+  // 7. Strip formatting characters
+  text = text.replace(/[\*_~]+/g, '');
+
+  // 8. Clean up tables
+  text = text.replace(/^\|.*\|$/gm, '');
+  text = text.replace(/\|/g, ' ');
+
+  // 9. Clean up checklist brackets
+  text = text.replace(/\[[ xX\-_]*\]/g, '');
+
+  // 10. Clean up bullet points or numbered listings at start of lines
+  text = text.replace(/^\s*[-*+]\s+/gm, '');
+  text = text.replace(/^\s*\d+\.\s+/gm, '');
+
+  // Clean trailing punctuation or extra whitespaces
+  text = text.replace(/\n\s*\n+/g, '\n');
+  text = text.trim();
+
+  return text;
+}
 
 
 interface MessageItemProps {
@@ -72,6 +203,23 @@ export const MessageItem = React.memo(({
   const [copied, setCopied] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [textAnswer, setTextAnswer] = useState("");
+  const [isPlayingSpeech, setIsPlayingSpeech] = useState(false);
+  const [feedback, setFeedback] = useState<'like' | 'dislike' | null>(null);
+
+  useEffect(() => {
+    setIsPlayingSpeech(globalSpeechController.getActiveId() === message.id);
+    return globalSpeechController.subscribe((activeId) => {
+      setIsPlayingSpeech(activeId === message.id);
+    });
+  }, [message.id]);
+
+  useEffect(() => {
+    return () => {
+      if (globalSpeechController.getActiveId() === message.id) {
+        globalSpeechController.cancel();
+      }
+    };
+  }, [message.id]);
 
   const nonInlineToolCalls = useMemo(() => {
     if (!message.toolCalls) return [];
@@ -1175,6 +1323,85 @@ export const MessageItem = React.memo(({
                   {copied ? <Check size={14} /> : React.createElement(Copy, { size: 16 })}
                   {copied && <span className="text-[10px] font-bold uppercase tracking-widest font-sans">Copied</span>}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const speechText = cleanMessageTextForSpeech(message.content);
+                    if (speechText) {
+                      globalSpeechController.speak(message.id, speechText);
+                      if (!isPlayingSpeech) {
+                        showToast?.("Reading message output aloud...");
+                      } else {
+                        showToast?.("Speech stopped.");
+                      }
+                    } else {
+                      showToast?.("No clear text to read aloud.");
+                    }
+                  }}
+                  className={`p-1.5 transition-all rounded-lg flex items-center gap-1 border-none bg-transparent cursor-pointer ${
+                    isPlayingSpeech 
+                      ? 'text-purple-500 bg-purple-500/10 ring-1 ring-purple-500/20' 
+                      : 'text-zinc-400 hover:text-purple-400 dark:hover:text-purple-350'
+                  }`}
+                  title={isPlayingSpeech ? "Stop speaking" : "Read aloud"}
+                >
+                  {isPlayingSpeech ? (
+                    <>
+                      <VolumeX size={16} className="animate-pulse" />
+                      <div className="flex items-center gap-[1px] h-3 px-0.5">
+                        <span className="w-[1.5px] h-2 bg-purple-500 animate-[bounce_0.8s_infinite] inline-block" style={{ animationDelay: '0s' }}></span>
+                        <span className="w-[1.5px] h-3 bg-purple-500 animate-[bounce_0.8s_infinite] inline-block" style={{ animationDelay: '0.15s' }}></span>
+                        <span className="w-[1.5px] h-1.5 bg-purple-500 animate-[bounce_0.8s_infinite] inline-block" style={{ animationDelay: '0.3s' }}></span>
+                        <span className="w-[1.5px] h-2.5 bg-purple-500 animate-[bounce_0.8s_infinite] inline-block" style={{ animationDelay: '0.45s' }}></span>
+                      </div>
+                    </>
+                  ) : (
+                    React.createElement(Play, { size: 16 })
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const isLiked = feedback === 'like';
+                    setFeedback(isLiked ? null : 'like');
+                    showToast?.(isLiked ? "Feedback removed" : "Thanks for your feedback!");
+                  }}
+                  className={`p-1.5 transition-colors rounded-lg border-none bg-transparent cursor-pointer ${
+                    feedback === 'like' ? 'text-emerald-500 bg-emerald-500/10' : 'text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200'
+                  }`}
+                  title="Good response"
+                >
+                  {React.createElement(ThumbsUp, { size: 16 })}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const isDisliked = feedback === 'dislike';
+                    setFeedback(isDisliked ? null : 'dislike');
+                    showToast?.(isDisliked ? "Feedback removed" : "Feedback recorded. We'll improve!");
+                  }}
+                  className={`p-1.5 transition-colors rounded-lg border-none bg-transparent cursor-pointer ${
+                    feedback === 'dislike' ? 'text-rose-500 bg-rose-500/10' : 'text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200'
+                  }`}
+                  title="Bad response"
+                >
+                  {React.createElement(ThumbsDown, { size: 16 })}
+                </button>
+                {onSendMessage && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onSendMessage && message.content) {
+                        showToast?.("Requesting message regeneration...");
+                        onSendMessage("Regenerate the previous response");
+                      }
+                    }}
+                    className="p-1.5 transition-colors rounded-lg border-none bg-transparent text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 cursor-pointer"
+                    title="Regenerate response"
+                  >
+                    {React.createElement(RotateCcw, { size: 16 })}
+                  </button>
+                )}
                 <div className="relative">
                   <button 
                     type="button"

@@ -5,7 +5,7 @@ export interface UseAskAiProps {
   input: string;
   messages: Message[];
   callLlamaBridge: (messagesPrompt: any[], tools: any[], signal?: AbortSignal) => Promise<any>;
-  createNewChat: (projId?: string | null, isCoder?: boolean) => string;
+  createNewChat: (projId?: string | null, isCoder?: boolean, isResearch?: boolean, agentId?: string | null) => string;
   currentChatId: string | null;
   isCoderMode: boolean;
   handleStartBuilding: (chatId: string, messageId: string, todos: any[]) => void;

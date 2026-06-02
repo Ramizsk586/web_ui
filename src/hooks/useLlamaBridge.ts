@@ -255,6 +255,9 @@ export function useLlamaBridge({
   };
 
   const callLlamaBridge = async (messagesPrompt: any[], tools: ToolDefinition[], signal?: AbortSignal) => {
+    const ragEnabledLocal = localStorage.getItem('lumina_rag_enabled') !== 'false';
+    const ragDocIdsLocal = JSON.parse(localStorage.getItem('lumina_rag_doc_ids') || '[]');
+    const ragConfig = { enabled: ragEnabledLocal, activeDocumentIds: ragDocIdsLocal };
     const useBridge = useBridgeTools && llamaBridgeUrl;
     const baseUrl = useBridge ? llamaBridgeUrl.replace(/\/+$/, '') : serverUrl.replace(/\/+$/, '');
     const key = useBridge ? llamaBridgeApiKey : apiKey;
@@ -279,7 +282,7 @@ export function useLlamaBridge({
         body: JSON.stringify({
           bridgeUrl: baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, ''),
           apiKey: key,
-          model: selectedLlamaModel,
+          model: selectedLlamaModel, ragConfig,
           messages: messagesPrompt,
           tools: requestTools,
           stream: false
@@ -610,6 +613,7 @@ export function useLlamaBridge({
         },
         tools: requestTools,
         stream: false,
+        ragConfig
       }),
       signal,
     });

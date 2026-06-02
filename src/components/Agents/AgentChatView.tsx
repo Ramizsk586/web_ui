@@ -162,13 +162,61 @@ export function AgentChatView({
           });
           if (dataUrl) pendingImageDataUrls.push(dataUrl);
         } else {
-          const isLikelyBinary = file.type && !file.type.startsWith('text/') && 
+          const isTextExtension = /\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh|py|go|rs|cpp|c|h|java|sql)$/i.test(file.name);
+          const isTextMime = file.type && (file.type.startsWith('text/') || file.type === 'application/json' || file.type === 'application/javascript' || file.type === 'application/x-typescript');
+          const isReadableText = isTextExtension || isTextMime;
+          const isLikelyBinary = !isReadableText;
+          const dummyUnused = 
             !/\.(txt|md|js|jsx|ts|tsx|json|css|html|xml|yaml|yml|csv|log|ini|sh)$/i.test(file.name);
           if (!isLikelyBinary && file.size < 2 * 1024 * 1024) {
-            const fileContent = await readFileAsText(file);
+            const fileContent = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string || '');
+              reader.onerror = () => resolve('');
+              reader.readAsText(file);
+            });
             fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${fileContent}\n[END FILE]`);
           } else {
-            fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+            // Send to our backend document parser for PDF, DOCX, and other files!
+            const base64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result as string;
+                const base64Str = result.split(',')[1] || '';
+                resolve(base64Str);
+              };
+              reader.onerror = () => resolve('');
+              reader.readAsDataURL(file);
+            });
+
+            if (base64) {
+              try {
+                const parseRes = await fetch('/api/parse-doc', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    fileName: file.name,
+                    mimeType: file.type,
+                    base64
+                  })
+                });
+                if (parseRes.ok) {
+                  const parseData = await parseRes.json();
+                  if (parseData.text) {
+                    fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name}]\nContent:\n${parseData.text}\n[END FILE]`);
+                  } else {
+                    fileBlocks.push(`\n\n[ATTACHED FILE: ${file.name} - Empty or unparseable content]`);
+                  }
+                } else {
+                  fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Binary or unreadable content]`);
+                }
+              } catch (parseErr: any) {
+                console.error("Failed to parse document on backend", parseErr);
+                fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Parsing error: ${parseErr.message}]`);
+              }
+            } else {
+              fileBlocks.push(`\n\n[ATTACHED FILE REFERENCE: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Unsupported or unreadable format]`);
+            }
           }
         }
       }
@@ -443,93 +491,76 @@ export function AgentChatView({
 
   return (
     <div className="flex flex-col h-full bg-[var(--theme-bg)] text-[var(--theme-primary)] overflow-hidden relative">
-      {/* Header Bar */}
-      <div className="h-14 flex items-center justify-between px-4 md:px-6 border-b border-[var(--theme-border)]/40 bg-[var(--theme-bg)]/80 backdrop-blur-md relative z-20 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={onBack}
-            className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer"
-            title="Back to generic chat"
-          >
-            <ArrowLeft size={16} />
-          </button>
-          
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className={`flex items-center justify-center w-8 h-8 rounded-xl shrink-0 p-1.5 shadow-sm ${agent.avatarColor}`}>
-              <AgentAvatar emoji={agent.avatarEmoji} className="w-5 h-5 text-white" />
-            </div>
-            <div className="flex flex-col text-left min-w-0">
-              <span className="text-xs font-bold truncate text-[var(--theme-primary)] leading-tight flex items-center gap-1.5">
-                {agent.name}
-              </span>
-              <span className="text-[10px] text-[var(--theme-secondary)] truncate leading-snug">
-                {agent.description || 'Custom AI Agent'}
-              </span>
-            </div>
-          </div>
-        </div>
+      {/* Floating Back Button */}
+      <div className="absolute top-4 left-4 z-30">
+        <button
+          onClick={onBack}
+          className="p-2 bg-[var(--theme-bg)]/80 backdrop-blur-md border border-[var(--theme-border)]/45 hover:bg-[var(--theme-hover-bg)] rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer shadow-sm flex items-center justify-center"
+          title="Back to generic chat"
+        >
+          <ArrowLeft size={16} />
+        </button>
+      </div>
 
-        {/* Settings Menu Trigger */}
-        <div className="flex items-center gap-2.5 shrink-0">
-          <div className="relative" ref={optionsRef}>
-            <button
-              onClick={() => setShowOptions(!showOptions)}
-              className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer"
+      {/* Floating Settings Menu Trigger */}
+      <div className="absolute top-4 right-4 z-30" ref={optionsRef}>
+        <button
+          onClick={() => setShowOptions(!showOptions)}
+          className="p-2 bg-[var(--theme-bg)]/80 backdrop-blur-md border border-[var(--theme-border)]/45 hover:bg-[var(--theme-hover-bg)] rounded-xl text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer shadow-sm flex items-center justify-center"
+          title="Settings"
+        >
+          <Settings size={15} />
+        </button>
+
+        <AnimatePresence>
+          {showOptions && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: -5 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: -5 }}
+              transition={{ duration: 0.12 }}
+              className="absolute right-0 mt-1.5 w-44 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-xl shadow-xl z-50 overflow-hidden py-1"
             >
-              <Settings size={15} />
-            </button>
-
-            <AnimatePresence>
-              {showOptions && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: -5 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: -5 }}
-                  transition={{ duration: 0.12 }}
-                  className="absolute right-0 mt-1.5 w-44 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-xl shadow-xl z-50 overflow-hidden py-1"
+              <button
+                onClick={() => {
+                  setShowOptions(false);
+                  onEditAgent();
+                }}
+                disabled={agent.isBuiltin}
+                className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                <Edit size={12} className="text-[var(--theme-secondary)]" />
+                Edit Agent Details
+              </button>
+              <button
+                onClick={handleOpenSystemPromptInEditor}
+                className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+              >
+                <Terminal size={12} className="text-[var(--theme-secondary)]" />
+                View System Prompt
+              </button>
+              {agent.skillFiles && agent.skillFiles.length > 0 && (
+                <button
+                  onClick={() => {
+                    setShowOptions(false);
+                    setIsInspectSkillsOpen(true);
+                  }}
+                  className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors cursor-pointer"
                 >
-                  <button
-                    onClick={() => {
-                      setShowOptions(false);
-                      onEditAgent();
-                    }}
-                    disabled={agent.isBuiltin}
-                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
-                  >
-                    <Edit size={12} className="text-[var(--theme-secondary)]" />
-                    Edit Agent Details
-                  </button>
-                  <button
-                    onClick={handleOpenSystemPromptInEditor}
-                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
-                  >
-                    <Terminal size={12} className="text-[var(--theme-secondary)]" />
-                    View System Prompt
-                  </button>
-                  {agent.skillFiles && agent.skillFiles.length > 0 && (
-                    <button
-                      onClick={() => {
-                        setShowOptions(false);
-                        setIsInspectSkillsOpen(true);
-                      }}
-                      className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors cursor-pointer"
-                    >
-                      <Brain size={12} className="text-teal-400" />
-                      Inspect Skill System
-                    </button>
-                  )}
-                  <button
-                    onClick={handleClearHistory}
-                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 transition-colors"
-                  >
-                    <Trash2 size={12} className="text-rose-400" />
-                    Clear Chat History
-                  </button>
-                </motion.div>
+                  <Brain size={12} className="text-teal-400" />
+                  Inspect Skill System
+                </button>
               )}
-            </AnimatePresence>
-          </div>
-        </div>
+              <button
+                onClick={handleClearHistory}
+                className="flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/20 transition-colors"
+              >
+                <Trash2 size={12} className="text-rose-400" />
+                Clear Chat History
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Custom *.md Skill Files Display Banner */}
@@ -605,7 +636,7 @@ export function AgentChatView({
       </AnimatePresence>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto py-6 custom-scrollbar select-text bg-[var(--theme-bg)]">
+      <div className="flex-1 overflow-y-auto pt-16 pb-6 custom-scrollbar select-text bg-[var(--theme-bg)]">
         <div className="max-w-4xl mx-auto w-full px-4 md:px-12 space-y-6">
           {/* If chat history is empty, show a neat onboarding greeting card */}
           {agent.chatHistory.length === 0 && (

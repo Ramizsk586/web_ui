@@ -542,10 +542,25 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
                     
                     // HTML
                     if (nameLower.endsWith('.html') || nameLower.endsWith('.htm')) {
+                      let htmlDoc = activeFile.editedCode || '';
+                      const hasBackground = /background(?:-color)?\s*:/i.test(htmlDoc) || 
+                                            /style\s*=\s*['"][^'"]*background/i.test(htmlDoc) ||
+                                            /class\s*=\s*['"][^'"]*\bbg-[a-z0-9-]+/i.test(htmlDoc);
+
+                      if (!hasBackground) {
+                        const defaultStyle = '\n<style>\n  html, body {\n    background-color: #ffffff !important;\n    color: #000000;\n  }\n</style>\n';
+                        if (htmlDoc.includes('<head>')) {
+                          htmlDoc = htmlDoc.replace('<head>', `<head>${defaultStyle}`);
+                        } else if (htmlDoc.includes('<html>')) {
+                          htmlDoc = htmlDoc.replace('<html>', `<html>${defaultStyle}`);
+                        } else {
+                          htmlDoc = defaultStyle + htmlDoc;
+                        }
+                      }
                       return (
                         <div className="flex-1 w-full h-full bg-white relative">
                           <iframe 
-                            srcDoc={activeFile.editedCode}
+                            srcDoc={htmlDoc}
                             title="HTML Live Preview"
                             className="w-full h-full border-none bg-white"
                             referrerPolicy="no-referrer"

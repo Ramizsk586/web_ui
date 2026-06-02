@@ -15,7 +15,13 @@ import {
   Copy,
   ExternalLink,
   ChevronRight,
-  Loader2
+  Loader2,
+  Sliders,
+  Sparkles,
+  Gauge,
+  Zap,
+  TrendingUp,
+  Info
 } from 'lucide-react';
 
 interface LocalModelConfigModalProps {
@@ -71,6 +77,25 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
   const [seed, setSeed] = useState('Random Seed');
   const [kCacheQuant, setKCacheQuant] = useState('q8_0');
   const [vCacheQuant, setVCacheQuant] = useState('q8_0');
+
+  // Advanced Universal llama.cpp GPU Offload Calculator Settings
+  const [vramSizeGb, setVramSizeGb] = useState<number>(12);
+  const [backendType, setBackendType] = useState<'CUDA' | 'Vulkan' | 'Metal' | 'ROCm'>('CUDA');
+  const [gpuCount, setGpuCount] = useState<number>(1);
+  const [tensorSplit, setTensorSplit] = useState<string>('100');
+  const [quantType, setQuantType] = useState<string>(() => {
+    const fn = model.id.toLowerCase();
+    if (fn.includes('q4_k_m')) return 'Q4_K_M';
+    if (fn.includes('q8_0')) return 'Q8_0';
+    if (fn.includes('q5_k_m')) return 'Q5_K_M';
+    if (fn.includes('q3_k_l') || fn.includes('q3_k_m')) return 'Q3_K_M';
+    if (fn.includes('fp16')) return 'FP16';
+    return 'Q4_K_M';
+  });
+  const [archOverride, setArchOverride] = useState<string>('Auto');
+  const [calcMode, setCalcMode] = useState<'Auto Calculate' | 'Maximum Safe Offload' | 'Maximum Performance Offload' | 'Balanced Mode' | 'Manual Mode'>('Balanced Mode');
+  const [showDebugBreakdown, setShowDebugBreakdown] = useState<boolean>(true);
+  const [safetyMarginMb, setSafetyMarginMb] = useState<number>(1024);
 
   // Path mapping settings state - detect actual OS user
   const [osUser, setOsUser] = useState(() => localStorage.getItem('lumina_local_os_user') || '');
@@ -271,7 +296,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
 
   // GGUF GPU layers recommended auto-tuner state
   const [metadataLoading, setMetadataLoading] = useState(false);
-  const [gpuRecommendation, setGpuRecommendation] = useState<{
+   const [gpuRecommendation, setGpuRecommendation] = useState<{
     vramTotal?: string;
     modelSize?: string;
     totalLayers?: number;
@@ -281,6 +306,12 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
     architecture?: string;
     name?: string;
     error?: string;
+    metadata?: {
+      context_length?: number | string | null;
+      file_size?: number;
+      attention_head_count?: number | null;
+      feed_forward_length?: number | null;
+    };
   } | null>(null);
 
   const fetchGpuRecommendation = async () => {
@@ -298,19 +329,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
         if (data.success) {
           setGpuRecommendation(data);
 
-          // Only auto-apply dynamic layers when the user has not already stored a custom GPU layer setting.
-          let shouldAutoApplyGpuLayers = true;
-          try {
-            const saved = localStorage.getItem(storageKey);
-            if (saved) {
-              const parsed = JSON.parse(saved);
-              if (parsed?.gpuOffload !== undefined) {
-                shouldAutoApplyGpuLayers = false;
-              }
-            }
-          } catch {}
-
-          if (shouldAutoApplyGpuLayers && typeof data.recommendedLayers === 'number') {
+          if (typeof data.recommendedLayers === 'number') {
             if (typeof data.totalLayers === 'number' && data.totalLayers > 0) {
               setCustomTotalLayers(data.totalLayers);
             }
@@ -433,10 +452,23 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
           fallbackSizeGb = sizeMb / 1024;
         }
       }
+      if (gpuRecommendation.metadata?.context_length) {
+        const parsedCtx = Number(gpuRecommendation.metadata.context_length);
+        if (!isNaN(parsedCtx) && parsedCtx > 0) {
+          maxTokens = parsedCtx;
+        }
+      }
     }
 
     return { maxTokens, fallbackSizeGb, layersCount };
   }, [model.id, gpuRecommendation, customTotalLayers]);
+
+  // Limit context length target if it exceeds model-supported bounds
+  useEffect(() => {
+    if (contextLength > modelSpecs.maxTokens) {
+      setContextLength(modelSpecs.maxTokens);
+    }
+  }, [modelSpecs.maxTokens, contextLength]);
 
   // Limit GPU Offload layers dynamically to support models of different bounds
   useEffect(() => {
@@ -445,46 +477,214 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
     }
   }, [customTotalLayers, gpuOffload]);
 
-  // Handle Dynamic Memory calculation
+  // Handle Dynamic Memory calculation & Universal Llama.cpp offload calculator math
   const memoryUsage = useMemo(() => {
-    // Model weights on GPU (fraction of total model size)
     const totalModelSizeGb = gpuRecommendation?.modelSize
       ? parseFloat(gpuRecommendation.modelSize) / 1024
       : modelSpecs.fallbackSizeGb;
-    const layerFraction = modelSpecs.layersCount > 0 ? gpuOffload / modelSpecs.layersCount : 1;
-    const gpuWeightMem = totalModelSizeGb * layerFraction;
-    const cpuWeightMem = totalModelSizeGb * (1 - layerFraction);
+      
+    const weightsGb = totalModelSizeGb;
 
-    // KV cache: 2 (K+V) * layers * hidden_dim * context_len * bytes_per_elem / 1e9
-    // We don't always know hidden_dim, so derive from bytes-per-layer if available.
-    // Empirical: bytes_per_layer ≈ bytesPerLayer from GGUF scan (in MB) → per-layer KV cost.
-    // KV per layer per token ≈ 2 * head_size_bytes  (K + V vectors).
-    // Without exact dims use a conservative empirical ratio: ~0.5 MB per layer per 1K tokens at f16,
-    // halved for q8_0, quartered for q4_0.
-    let kvBytesPerLayerPer1kTokens = 0.5; // MB, f16 baseline
-    const kvQuant = kCacheQuant === 'Auto' ? 'q8_0' : kCacheQuant;
-    if (kvQuant === 'q8_0') kvBytesPerLayerPer1kTokens = 0.25;
-    else if (kvQuant === 'q4_0') kvBytesPerLayerPer1kTokens = 0.125;
-    // Flash attention cuts KV memory roughly in half due to not materialising the full attention matrix
-    if (flashAttn) kvBytesPerLayerPer1kTokens *= 0.5;
-    const kvCacheSizeGb = (kvBytesPerLayerPer1kTokens * modelSpecs.layersCount * (contextLength / 1000)) / 1024;
+    // 1. Architecture details
+    const idLower = model.id.toLowerCase();
+    const detectedArch = archOverride !== 'Auto' ? archOverride : 
+                     idLower.includes('gemma') ? 'Gemma' : 
+                     idLower.includes('llama') ? 'Llama' : 
+                     idLower.includes('qwen') ? 'Qwen' : 
+                     idLower.includes('deepseek') ? 'DeepSeek' : 
+                     idLower.includes('phi') ? 'Phi' : 
+                     idLower.includes('yi') ? 'Yi' : 
+                     idLower.includes('mistral') ? 'Mistral' : 'Llama';
+    
+    const profiles: Record<string, any> = {
+      Llama: { hiddenDim: 4096, attentionHeads: 32, kvHeads: 8, vocabSize: 128256, expertCount: 0 },
+      Mistral: { hiddenDim: 4096, attentionHeads: 32, kvHeads: 8, vocabSize: 32000, expertCount: 0 },
+      Gemma: { hiddenDim: 3072, attentionHeads: 8, kvHeads: 8, vocabSize: 256000, expertCount: 0 },
+      Qwen: { hiddenDim: 3584, attentionHeads: 28, kvHeads: 4, vocabSize: 152064, expertCount: 0 },
+      DeepSeek: { hiddenDim: 7168, attentionHeads: 128, kvHeads: 128, vocabSize: 129280, expertCount: 0, moe: { experts: 256, active: 8 } },
+      Phi: { hiddenDim: 3072, attentionHeads: 32, kvHeads: 32, vocabSize: 32064, expertCount: 0 },
+      Yi: { hiddenDim: 4096, attentionHeads: 32, kvHeads: 32, vocabSize: 64000, expertCount: 0 },
+      'Command-R': { hiddenDim: 8192, attentionHeads: 64, kvHeads: 8, vocabSize: 255000, expertCount: 0 }
+    };
 
-    let gpuMemory = gpuWeightMem + 0.1; // 100 MB overhead
-    let cpuMemory = cpuWeightMem + 0.15;
+    const activeArch = {
+      type: detectedArch,
+      ...(profiles[detectedArch] || profiles.Llama)
+    };
 
-    if (offloadKV) {
-      gpuMemory += kvCacheSizeGb;
-    } else {
-      cpuMemory += kvCacheSizeGb;
+    // Override with scanner data if available
+    if (gpuRecommendation?.metadata) {
+      if (gpuRecommendation.architecture) {
+        activeArch.type = gpuRecommendation.architecture;
+      }
+      if (gpuRecommendation.metadata.attention_head_count) {
+        activeArch.attentionHeads = Number(gpuRecommendation.metadata.attention_head_count);
+      }
     }
 
-    return {
-      gpuMem: gpuMemory.toFixed(2),
-      cpuMem: cpuMemory.toFixed(2),
-      totalMem: (gpuMemory + cpuMemory).toFixed(2),
-      kvCacheGb: kvCacheSizeGb.toFixed(2),
+    // 2. Backend Overhead
+    let backendOverheadGb = 0;
+    if (backendType === 'CUDA') backendOverheadGb = 1.1 * gpuCount;
+    else if (backendType === 'Vulkan') backendOverheadGb = 0.7 * gpuCount;
+    else if (backendType === 'Metal') backendOverheadGb = 0.4 * gpuCount;
+    else if (backendType === 'ROCm') backendOverheadGb = 1.4 * gpuCount;
+
+    // 3. Compute Buffer Gb
+    const headDim = activeArch.hiddenDim / activeArch.attentionHeads || 128;
+    const computeBufferMb = (evalBatchSize * activeArch.hiddenDim * 2) / 1e6 + (physicalBatchSize * 512) / 1e3 + (contextLength > 8192 ? (contextLength * 3) / 1000 : 120);
+    const computeBufferGb = parseFloat(((computeBufferMb * (customTotalLayers / 32) * (weightsGb > 10 ? Math.min(2.5, weightsGb / 10) : 1)) / 1024).toFixed(3));
+
+    // 4. KV Cache Per Layer Calculation
+    let datatypeSizeKb = 2; // FP16 default
+    const kvQuant = kCacheQuant === 'Auto' ? 'q8_0' : kCacheQuant;
+    if (kvQuant === 'q8_0') datatypeSizeKb = 1.0;
+    else if (kvQuant === 'q4_0') datatypeSizeKb = 0.5;
+    const flashFactor = flashAttn ? 0.5 : 1.0;
+
+    const kvCachePerLayerBytes = 2 * contextLength * activeArch.kvHeads * headDim * datatypeSizeKb * flashFactor;
+    const kvCacheTotalGb = (kvCachePerLayerBytes * customTotalLayers) / (1024 * 1024 * 1024);
+
+    // 5. Build Layer Memory Map
+    const embedProjGb = Math.min(weightsGb * 0.18, (activeArch.hiddenDim * activeArch.vocabSize * (quantType === 'FP16' ? 2 : quantType === 'Q8_0' ? 1.0 : 0.5)) / (1024 * 1024 * 1024));
+    const baseLayerGb = (weightsGb - embedProjGb) / customTotalLayers;
+    const layerMemoryMap = [];
+    for (let i = 0; i < customTotalLayers; i++) {
+      let mult = 1.0;
+      if (i === 0) mult = 1.15;
+      else if (i === customTotalLayers - 1) mult = 1.10;
+      else {
+        mult = 1.0 + 0.05 * Math.sin((i / customTotalLayers) * Math.PI * 2);
+      }
+      if (activeArch.moe) {
+        mult *= 1.4;
+      }
+      layerMemoryMap.push({
+        index: i,
+        sizeMb: parseFloat((baseLayerGb * mult * 1024).toFixed(1)),
+      });
+    }
+
+    // 6. Sequential greedy solver to find max layers for different target profiles
+    const totalHardwareVramGb = vramSizeGb * gpuCount;
+
+    const getLayersForVramCapacity = (targetUtilization: number) => {
+      const targetCapMb = (totalHardwareVramGb * 1024 * targetUtilization) - (backendOverheadGb * 1024);
+      let availMb = targetCapMb - (computeBufferGb * 1024) - embedProjGb * 1024;
+      if (availMb < 0) return 0;
+      
+      let layersFit = 0;
+      for (let i = 0; i < layerMemoryMap.length; i++) {
+        const costMb = layerMemoryMap[i].sizeMb;
+        // if kv cache is offloaded, it costs memory per layer
+        const kvCostMb = offloadKV ? (kvCachePerLayerBytes / (1024 * 1024)) : 0;
+        const totalCostMb = costMb + kvCostMb;
+        if (availMb >= totalCostMb) {
+          layersFit++;
+          availMb -= totalCostMb;
+        } else {
+          break;
+        }
+      }
+      return layersFit;
     };
-  }, [modelSpecs, gpuOffload, contextLength, offloadKV, flashAttn, kCacheQuant, gpuRecommendation]);
+
+    const predictedMaxOffloadPerf = getLayersForVramCapacity(0.96);
+    const predictedMaxOffloadSafe = getLayersForVramCapacity(0.90);
+    const predictedMaxOffloadBalanced = getLayersForVramCapacity(0.82);
+
+    // 7. Calculate exact allocation under CURRENT SLIDER settings (gpuOffload)
+    const layerFraction = customTotalLayers > 0 ? gpuOffload / customTotalLayers : 0;
+    
+    let currentGpuWeightsGb = 0;
+    if (gpuOffload > 0) {
+      currentGpuWeightsGb = embedProjGb + (weightsGb - embedProjGb) * layerFraction;
+    }
+    const currentCpuWeightsGb = weightsGb - currentGpuWeightsGb;
+
+    const currentGpuKvGb = offloadKV ? kvCacheTotalGb * layerFraction : 0;
+    const currentCpuKvGb = kvCacheTotalGb - currentGpuKvGb;
+
+    const activeGpuBufferGb = gpuOffload > 0 ? computeBufferGb : 0;
+    const activeBackendOverheadGb = gpuOffload > 0 ? backendOverheadGb : 0;
+
+    const totalGpuMemUsedGb = currentGpuWeightsGb + currentGpuKvGb + activeGpuBufferGb + activeBackendOverheadGb;
+    const totalCpuMemUsedGb = currentCpuWeightsGb + currentCpuKvGb + (gpuOffload === 0 ? computeBufferGb : 0);
+
+    const freeHardwareVramGb = Math.max(0, totalHardwareVramGb - totalGpuMemUsedGb);
+    const vramRatio = totalHardwareVramGb > 0 ? Math.min(100, (totalGpuMemUsedGb / totalHardwareVramGb) * 100) : 0;
+
+    let vramStatusColor = 'emerald';
+    if (vramRatio > 95) vramStatusColor = 'red';
+    else if (vramRatio > 85) vramStatusColor = 'amber';
+
+    return {
+      gpuMem: totalGpuMemUsedGb.toFixed(2),
+      cpuMem: totalCpuMemUsedGb.toFixed(2),
+      totalMem: (totalGpuMemUsedGb + totalCpuMemUsedGb).toFixed(2),
+      kvCacheGb: kvCacheTotalGb.toFixed(2),
+      
+      weightsGb,
+      activeArch,
+      backendOverheadGb,
+      computeBufferGb,
+      kvCacheTotalGb,
+      totalHardwareVramGb,
+      freeVramGb: freeHardwareVramGb.toFixed(2),
+      vramRatio: parseFloat(vramRatio.toFixed(1)),
+      vramStatusColor,
+      predictedMaxOffloadPerf,
+      predictedMaxOffloadSafe,
+      predictedMaxOffloadBalanced,
+      layerMemoryMap,
+      embedProjGb,
+      kvCachePerLayerMb: parseFloat((kvCachePerLayerBytes / (1024 * 1024)).toFixed(2))
+    };
+  }, [
+    modelSpecs,
+    gpuOffload,
+    contextLength,
+    offloadKV,
+    flashAttn,
+    kCacheQuant,
+    gpuRecommendation,
+    vramSizeGb,
+    backendType,
+    gpuCount,
+    quantType,
+    archOverride,
+    calcMode,
+    customTotalLayers,
+    evalBatchSize,
+    physicalBatchSize
+  ]);
+
+  // Synchronise slider based on requested Calculator Optimization profile
+  useEffect(() => {
+    if (calcMode === 'Manual Mode') return;
+    
+    let target = 0;
+    if (calcMode === 'Maximum Performance Offload') {
+      target = memoryUsage.predictedMaxOffloadPerf;
+    } else if (calcMode === 'Maximum Safe Offload') {
+      target = memoryUsage.predictedMaxOffloadSafe;
+    } else if (calcMode === 'Balanced Mode') {
+      target = memoryUsage.predictedMaxOffloadBalanced;
+    } else if (calcMode === 'Auto Calculate') {
+      target = memoryUsage.predictedMaxOffloadSafe;
+    }
+    
+    const finalVal = Math.max(0, Math.min(customTotalLayers, target));
+    if (gpuOffload !== finalVal) {
+      setGpuOffload(finalVal);
+    }
+  }, [
+    calcMode,
+    customTotalLayers,
+    memoryUsage.predictedMaxOffloadPerf,
+    memoryUsage.predictedMaxOffloadSafe,
+    memoryUsage.predictedMaxOffloadBalanced,
+    gpuOffload
+  ]);
 
   // Generate the CLI parameters on the fly matching user specifications
   const generatedCommand = useMemo(() => {
@@ -1028,6 +1228,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
                         max={customTotalLayers}
                         value={gpuOffload}
                         onChange={(e) => {
+                          setCalcMode('Manual Mode');
                           const val = Math.max(0, Math.min(customTotalLayers, Number(e.target.value) || 0));
                           setGpuOffload(val);
                         }}
@@ -1059,124 +1260,15 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
                     max={customTotalLayers}
                     step="1"
                     value={gpuOffload}
-                    onChange={(e) => setGpuOffload(Number(e.target.value))}
+                    onChange={(e) => {
+                      setCalcMode('Manual Mode');
+                      setGpuOffload(Number(e.target.value));
+                    }}
                     className="w-full h-1 bg-[var(--theme-border)] rounded-full appearance-none cursor-pointer accent-[var(--theme-accent,#3b82f6)]"
                   />
                   <p className="text-[10px] text-[var(--theme-muted)] select-none flex items-center gap-1 mb-1">
                     <span>Distributing {gpuOffload} layers to hardware GPU and remaining CPU operations out of {customTotalLayers} total</span>
                   </p>
-
-                  {/* GPU Recommendation & GGUF Tuner Card */}
-                  <div className="p-3 bg-[var(--theme-surface)] rounded-xl border border-[var(--theme-border)]/75 space-y-2 mt-2 shadow-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-[var(--theme-primary)] flex items-center gap-1.5 uppercase tracking-wide">
-                        <Cpu size={12} className="text-[var(--theme-accent,#3b82f6)] animate-pulse" />
-                        GPU Layer Auto-Tuner
-                      </span>
-                      <button 
-                        onClick={fetchGpuRecommendation}
-                        disabled={metadataLoading}
-                        className="text-[10px] font-semibold text-[var(--theme-accent,#3b82f6)] hover:underline cursor-pointer flex items-center gap-1 disabled:opacity-50"
-                      >
-                        {metadataLoading ? (
-                          <>
-                            <RefreshCw size={9} className="animate-spin" />
-                            Scanning...
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw size={9} />
-                            Re-Scan GGUF
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    {metadataLoading && (
-                      <div className="flex items-center gap-1.5 text-[10px] text-[var(--theme-muted)] font-mono py-1">
-                        <Loader2 size={10} className="animate-spin text-[var(--theme-accent,#3b82f6)]" />
-                        Evaluating model bytes & system VRAM...
-                      </div>
-                    )}
-
-                    {!metadataLoading && gpuRecommendation && (
-                      <div className="space-y-2 select-none">
-                        {gpuRecommendation.error ? (
-                          <div className="text-[9px] text-amber-500 bg-amber-500/5 px-2.5 py-1.5 rounded-lg border border-amber-500/15 flex items-start gap-1.5 leading-normal">
-                            <AlertCircle size={10} className="shrink-0 mt-0.5" />
-                            <span>File not found on local path. Click Re-Scan once downloaded.</span>
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono leading-tight">
-                              <div className="bg-[var(--theme-surface-alt)]/50 p-1.5 rounded-lg border border-[var(--theme-border)]/40 truncate">
-                                <span className="text-[8px] uppercase font-bold text-[var(--theme-muted)] block">Format Name</span>
-                                <span className="text-[var(--theme-primary)] font-semibold truncate block" title={gpuRecommendation.name}>
-                                  {gpuRecommendation.name || "Unknown"}
-                                </span>
-                              </div>
-                              
-                              <div className="bg-[var(--theme-surface-alt)]/50 p-1.5 rounded-lg border border-[var(--theme-border)]/40 truncate">
-                                <span className="text-[8px] uppercase font-bold text-[var(--theme-muted)] block">Architecture</span>
-                                <span className="text-[var(--theme-accent,#3b82f6)] font-semibold uppercase block truncate">
-                                  {gpuRecommendation.architecture || "Unknown"}
-                                </span>
-                              </div>
-
-                              <div className="bg-[var(--theme-surface-alt)]/50 p-1.5 rounded-lg border border-[var(--theme-border)]/40">
-                                <span className="text-[8px] uppercase font-bold text-[var(--theme-muted)] block">Detected VRAM</span>
-                                <span className="text-[var(--theme-primary)] block font-semibold">
-                                  {gpuRecommendation.vramTotal || "Unknown"}
-                                </span>
-                              </div>
-
-                              <div className="bg-[var(--theme-surface-alt)]/50 p-1.5 rounded-lg border border-[var(--theme-border)]/40">
-                                <span className="text-[8px] uppercase font-bold text-[var(--theme-muted)] block">MB per Layer</span>
-                                <span className="text-[var(--theme-primary)] block font-semibold">
-                                  {gpuRecommendation.bytesPerLayer || "Unknown"}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="bg-[var(--theme-accent,#3b82f6)]/5 p-1.5 rounded-lg border border-[var(--theme-accent,#3b82f6)]/20 flex items-center justify-between gap-2.5">
-                              <div>
-                                <span className="text-[8px] uppercase font-extrabold text-[var(--theme-accent,#3b82f6)] block leading-none mb-0.5">LM Studio Tune</span>
-                                <span className="text-[var(--theme-primary)] font-semibold text-[10px] font-mono">
-                                  Set layers to <strong className="text-[var(--theme-accent,#3b82f6)]">{gpuRecommendation.recommendedLayers}</strong> / {gpuRecommendation.totalLayers}
-                                </span>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (typeof gpuRecommendation.recommendedLayers === 'number') {
-                                    if (typeof gpuRecommendation.totalLayers === 'number' && gpuRecommendation.totalLayers > 0) {
-                                      setCustomTotalLayers(gpuRecommendation.totalLayers);
-                                    }
-                                    setGpuOffload(gpuRecommendation.recommendedLayers);
-                                    showToast(`Optimized GPU Offload to ${gpuRecommendation.recommendedLayers} layers!`);
-                                  }
-                                }}
-                                className="px-2 py-1 bg-[var(--theme-accent,#3b82f6)] text-white text-[9px] font-bold rounded hover:bg-[var(--theme-accent-dark,#2563eb)] transition-colors cursor-pointer shrink-0"
-                              >
-                                Tune Layers
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {!metadataLoading && !gpuRecommendation && (
-                      <div className="text-[10px] text-[var(--theme-muted)] bg-[var(--theme-surface-alt)]/30 border border-[var(--theme-border)]/50 rounded-lg p-2 flex items-center justify-between">
-                        <span>Background tuner waiting...</span>
-                        <button 
-                          onClick={fetchGpuRecommendation}
-                          className="px-2 py-0.5 border border-[var(--theme-border)] rounded text-[var(--theme-secondary)] hover:bg-[var(--theme-surface)] text-[9px] cursor-pointer"
-                        >
-                          Scan
-                        </button>
-                      </div>
-                    )}
-                  </div>
                 </div>
 
                 {/* CPU Threads slider */}
@@ -1245,6 +1337,8 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
                   />
                 </div>
               </div>
+
+
 
               {/* Local File Path Mapping Settings */}
               <div className="space-y-4 bg-[var(--theme-surface-alt)]/35 p-5 rounded-2xl border border-[var(--theme-border)] shadow-sm">
