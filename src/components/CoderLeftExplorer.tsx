@@ -1054,6 +1054,29 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
     }
   }, [addToast, triggerWorkspaceRefresh, onWorkspaceRootPathChange]);
 
+  const handleOpenDemoFolder = useCallback(async () => {
+    try {
+      const response = await fetch('/api/fs/create-demo', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+      if (response.ok && data.success && data.folderPath) {
+        onWorkspaceRootPathChange(data.folderPath);
+        setExpandedPaths(new Set());
+        setSelectedId(null);
+        addToast(`Opened and initialized demo Git repository!`, "success");
+        triggerWorkspaceRefresh();
+      } else {
+        addToast(data.error || "Failed to initialize demo repository", "error");
+      }
+    } catch (err: any) {
+      addToast(err.message || "Failed to connect to server", "error");
+    }
+  }, [addToast, triggerWorkspaceRefresh, onWorkspaceRootPathChange]);
+
   // ==================== FUZZY SEARCH MATCH RENDERERS ====================
   
   const searchResults = useMemo(() => {
@@ -1214,12 +1237,20 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
             <div className="text-[12px] text-[#635F59]">
               No folder open
             </div>
-            <button
-              onClick={handleOpenFolder}
-              className="text-[11px] px-3 py-1.5 rounded-md bg-[#D97756]/10 text-[#D97756] border border-[#D97756]/20 hover:bg-[#D97756]/20 transition-all cursor-pointer font-medium"
-            >
-              Open Folder
-            </button>
+            <div className="flex flex-col gap-2 w-full px-2">
+              <button
+                onClick={handleOpenFolder}
+                className="text-[11px] w-full py-1.5 rounded-md bg-[#0F0D0C] text-[#AD9F91] border border-[#2D241E] hover:bg-[#1D1917] transition-all cursor-pointer font-medium"
+              >
+                Open Folder
+              </button>
+              <button
+                onClick={handleOpenDemoFolder}
+                className="text-[11px] w-full py-1.5 rounded-md bg-[#D97756]/15 text-[#D97756] border border-[#D97756]/30 hover:bg-[#D97756]/25 transition-all cursor-pointer font-semibold animate-pulse"
+              >
+                Open Demo Workspace
+              </button>
+            </div>
           </div>
         ) : treeStructure.length === 0 ? (
           <div className="text-[11px] text-[#635F59] italic px-4 py-4 text-center">

@@ -10,6 +10,46 @@ export interface UserProfile {
   age?: number | string;
 }
 
+export interface AiProviderProfile {
+  id: string;
+  name: string;
+  provider: string;
+  endpoint: string;
+  apiKey: string;
+  models: Array<{ id: string; name: string; color?: string; providerProfileId?: string; providerProfileName?: string }>;
+  selectedModelIds: string[];
+  active: boolean;
+  accentColor: string;
+  verifiedAt: number;
+  updatedAt: number;
+}
+
+const PROFILE_ACCENT_COLORS = [
+  '#3b82f6',
+  '#a855f7',
+  '#10b981',
+  '#f59e0b',
+  '#ef4444',
+  '#06b6d4',
+  '#ec4899',
+  '#84cc16',
+];
+
+const normalizeProviderProfiles = (profiles: AiProviderProfile[]): AiProviderProfile[] => {
+  const providerCounts = new Map<string, number>();
+  return profiles.map((profile) => {
+    const count = providerCounts.get(profile.provider) || 0;
+    providerCounts.set(profile.provider, count + 1);
+    return {
+      ...profile,
+      accentColor: profile.accentColor || PROFILE_ACCENT_COLORS[count % PROFILE_ACCENT_COLORS.length],
+      selectedModelIds: Array.isArray(profile.selectedModelIds) && profile.selectedModelIds.length > 0
+        ? profile.selectedModelIds
+        : profile.models.map(model => model.id),
+    };
+  });
+};
+
 export interface UseAppSettingsProps {
   setAvailableModels: React.Dispatch<React.SetStateAction<any[]>>;
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>;
@@ -207,6 +247,67 @@ export function useAppSettings({
   const [isMcpSaved, setIsMcpSaved] = useState(false);
   const [writingStyle, setWritingStyle] = useState('default');
   const [selectedProvider, setSelectedProvider] = useState(() => safeGetItem('lumina_provider', 'openprovider'));
+  const [aiProviderProfiles, setAiProviderProfiles] = useState<AiProviderProfile[]>(() => {
+    try {
+      return normalizeProviderProfiles(JSON.parse(localStorage.getItem('lumina_ai_provider_profiles') || '[]'));
+    } catch {
+      return [];
+    }
+  });
+  const [editingAiProfileId, setEditingAiProfileId] = useState<string | null>(null);
+
+  const applyActiveProviderModels = useCallback((profiles: AiProviderProfile[]) => {
+    const activeProfiles = profiles.filter(profile => profile.active);
+    const profileModels = activeProfiles.flatMap(profile =>
+      profile.models
+        .filter(model => profile.selectedModelIds.includes(model.id))
+        .map(model => ({
+          ...model,
+          id: model.id,
+          name: model.name || model.id,
+          color: model.color || 'text-blue-500',
+          providerProfileId: profile.id,
+          providerProfileName: profile.name,
+        }))
+    );
+
+    const deduped = profileModels.filter((model, index, list) =>
+      list.findIndex(item => item.id === model.id && item.providerProfileId === model.providerProfileId) === index
+    );
+
+    if (deduped.length > 0) {
+      setAvailableModels(deduped);
+      setSelectedModel(prev => {
+        const existing = deduped.find(model => model.id === prev);
+        return existing ? prev : deduped[0].id;
+      });
+    } else {
+      setAvailableModels([
+        { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free', isAutoFree: true }
+      ]);
+      setSelectedModel(prev => prev || 'openprovider/auto-free');
+    }
+  }, [setAvailableModels, setSelectedModel]);
+
+  const persistAiProviderProfiles = useCallback((nextProfiles: AiProviderProfile[]) => {
+    setAiProviderProfiles(nextProfiles);
+    localStorage.setItem('lumina_ai_provider_profiles', JSON.stringify(nextProfiles));
+    applyActiveProviderModels(nextProfiles);
+  }, [applyActiveProviderModels]);
+
+  useEffect(() => {
+    applyActiveProviderModels(aiProviderProfiles);
+  }, [aiProviderProfiles, applyActiveProviderModels]);
+
+  const getProfileDisplayName = useCallback((providerId: string, endpoint: string) => {
+    const providerLabel = CLOUD_PROVIDERS.find(p => p.id === providerId)?.label || providerId || 'Custom';
+    try {
+      const host = new URL(endpoint).hostname.replace(/^api\./, '');
+      return `${providerLabel} (${host})`;
+    } catch {
+      return providerLabel;
+    }
+  }, []);
 
   const handleProviderSelect = (providerId: string) => {
     setSelectedProvider(providerId);
@@ -243,6 +344,7 @@ export function useAppSettings({
   const handleVerifyAI = useCallback(async () => {
     setAiVerificationState('verifying');
     try {
+      let fetchedModels: Array<{ id: string; name: string; color?: string }> = [];
       const isExternal = serverUrl.startsWith('http://') || serverUrl.startsWith('https://');
       if (isExternal) {
         const response = await fetch('/api/provider/verify', {
@@ -268,19 +370,17 @@ export function useAppSettings({
             if (modelsResponse.ok) {
               const modelsData = await modelsResponse.json();
               if (modelsData.success && Array.isArray(modelsData.models)) {
-                const fetchedModels = modelsData.models.map((m: any) => ({
+                fetchedModels = modelsData.models.map((m: any) => ({
                   id: m.id,
                   name: m.name || m.id,
                   color: 'text-blue-500'
                 }));
-                if (fetchedModels.length > 0) {
-                  setAvailableModels(fetchedModels);
-                }
               }
             }
           } catch (err) {
             console.warn('Failed to fetch models but verified connection', err);
           }
+          saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
         } else {
           setAiVerificationState('error');
@@ -303,15 +403,13 @@ export function useAppSettings({
           const data = await response.json();
           const modelsArr = data.data || data.models || [];
           if (Array.isArray(modelsArr)) {
-            const fetchedModels = modelsArr.map((m: any) => ({
+            fetchedModels = modelsArr.map((m: any) => ({
               id: m.id,
               name: m.display_name || m.id,
               color: 'text-blue-500'
             }));
-            if (fetchedModels.length > 0) {
-              setAvailableModels(fetchedModels);
-            }
           }
+          saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
         } else {
           setAiVerificationState('error');
@@ -323,7 +421,209 @@ export function useAppSettings({
     } finally {
       setTimeout(() => setAiVerificationState('idle'), 3000);
     }
-  }, [serverUrl, apiKey, selectedProvider, setAvailableModels]);
+  }, [serverUrl, apiKey, selectedProvider, editingAiProfileId, aiProviderProfiles, persistAiProviderProfiles, getProfileDisplayName]);
+
+  const saveVerifiedAiProfile = (
+    models: Array<{ id: string; name: string; color?: string }>,
+    override?: { profileId?: string; provider?: string; endpoint?: string; apiKey?: string }
+  ) => {
+    const now = Date.now();
+    const targetProvider = override?.provider || selectedProvider;
+    const targetEndpoint = override?.endpoint || serverUrl;
+    const targetApiKey = override?.apiKey || apiKey;
+    const matchingProfile = aiProviderProfiles.find(profile =>
+      profile.provider === targetProvider &&
+      profile.endpoint === targetEndpoint &&
+      profile.apiKey === targetApiKey
+    );
+    const profileId = override?.profileId || editingAiProfileId || matchingProfile?.id || `profile-${now}`;
+    const existing = aiProviderProfiles.find(profile => profile.id === profileId);
+    const profileName = existing?.name || getProfileDisplayName(targetProvider, targetEndpoint);
+    const sameProviderCount = aiProviderProfiles.filter(profile => profile.provider === targetProvider).length;
+    const normalizedModels = models.length > 0 ? models : [
+      { id: `${targetProvider || 'custom'}/default`, name: `${profileName} Default`, color: 'text-blue-500' }
+    ];
+
+    const nextProfile: AiProviderProfile = {
+      id: profileId,
+      name: profileName,
+      provider: targetProvider,
+      endpoint: targetEndpoint,
+      apiKey: targetApiKey,
+      models: normalizedModels,
+      selectedModelIds: existing?.selectedModelIds?.filter(id => normalizedModels.some(model => model.id === id)) ?? normalizedModels.map(model => model.id),
+      active: existing?.active ?? true,
+      accentColor: existing?.accentColor || PROFILE_ACCENT_COLORS[sameProviderCount % PROFILE_ACCENT_COLORS.length],
+      verifiedAt: now,
+      updatedAt: now,
+    };
+
+    const nextProfiles = existing
+      ? aiProviderProfiles.map(profile => profile.id === profileId ? nextProfile : profile)
+      : [nextProfile, ...aiProviderProfiles];
+
+    persistAiProviderProfiles(nextProfiles);
+    if (!override?.profileId) {
+      setEditingAiProfileId(null);
+    }
+    localStorage.setItem('lumina_server_url', targetEndpoint);
+    localStorage.setItem('lumina_api_key', targetApiKey);
+    localStorage.setItem('lumina_provider', targetProvider);
+    showToast(existing ? 'Provider profile updated' : 'Provider profile saved');
+  };
+
+  const handleToggleAiProfile = useCallback((profileId: string) => {
+    const nextProfiles = aiProviderProfiles.map(profile =>
+      profile.id === profileId ? { ...profile, active: !profile.active, updatedAt: Date.now() } : profile
+    );
+    persistAiProviderProfiles(nextProfiles);
+  }, [aiProviderProfiles, persistAiProviderProfiles]);
+
+  const handleEditAiProfile = useCallback((profileId: string) => {
+    const profile = aiProviderProfiles.find(item => item.id === profileId);
+    if (!profile) return;
+    setEditingAiProfileId(profile.id);
+    setIsAiSaved(false);
+  }, [aiProviderProfiles]);
+
+  const handleCloseAiProfileEditor = useCallback(() => {
+    setEditingAiProfileId(null);
+  }, []);
+
+  const handleUpdateAiProfileConfig = useCallback((profileId: string, patch: Partial<Pick<AiProviderProfile, 'name' | 'provider' | 'endpoint' | 'apiKey' | 'selectedModelIds'>>) => {
+    const nextProfiles = aiProviderProfiles.map(profile =>
+      profile.id === profileId ? { ...profile, ...patch, updatedAt: Date.now() } : profile
+    );
+    persistAiProviderProfiles(nextProfiles);
+  }, [aiProviderProfiles, persistAiProviderProfiles]);
+
+  const handleToggleAiProfileModel = useCallback((profileId: string, modelId: string) => {
+    const nextProfiles = aiProviderProfiles.map(profile => {
+      if (profile.id !== profileId) return profile;
+      const selected = new Set(profile.selectedModelIds);
+      if (selected.has(modelId)) {
+        selected.delete(modelId);
+      } else {
+        selected.add(modelId);
+      }
+      return { ...profile, selectedModelIds: Array.from(selected), updatedAt: Date.now() };
+    });
+    persistAiProviderProfiles(nextProfiles);
+  }, [aiProviderProfiles, persistAiProviderProfiles]);
+
+  const handleSetAiProfileModelsVisible = useCallback((profileId: string, visible: boolean) => {
+    const nextProfiles = aiProviderProfiles.map(profile =>
+      profile.id === profileId
+        ? { ...profile, selectedModelIds: visible ? profile.models.map(model => model.id) : [], updatedAt: Date.now() }
+        : profile
+    );
+    persistAiProviderProfiles(nextProfiles);
+  }, [aiProviderProfiles, persistAiProviderProfiles]);
+
+  const handleVerifyAiProfile = useCallback(async (profileId: string) => {
+    const profile = aiProviderProfiles.find(item => item.id === profileId);
+    if (!profile) return;
+    setAiVerificationState('verifying');
+    try {
+      let fetchedModels: Array<{ id: string; name: string; color?: string }> = [];
+      const isExternal = profile.endpoint.startsWith('http://') || profile.endpoint.startsWith('https://');
+      if (isExternal) {
+        const response = await fetch('/api/provider/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            endpoint: profile.endpoint,
+            apiKey: profile.apiKey,
+            provider: profile.provider
+          })
+        });
+        if (!response.ok) {
+          setAiVerificationState('error');
+          return;
+        }
+        const modelsResponse = await fetch('/api/provider/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            endpoint: profile.endpoint,
+            apiKey: profile.apiKey
+          })
+        });
+        if (modelsResponse.ok) {
+          const modelsData = await modelsResponse.json();
+          if (modelsData.success && Array.isArray(modelsData.models)) {
+            fetchedModels = modelsData.models.map((m: any) => ({
+              id: m.id,
+              name: m.name || m.id,
+              color: 'text-blue-500'
+            }));
+          }
+        }
+      } else {
+        const headers: Record<string, string> = profile.provider === 'opencode'
+          ? { 'x-api-key': profile.apiKey }
+          : { Authorization: `Bearer ${profile.apiKey}` };
+        const response = await fetch(`${profile.endpoint.replace(/\/+$/, '')}/models`, {
+          method: 'GET',
+          headers
+        });
+        if (!response.ok) {
+          setAiVerificationState('error');
+          return;
+        }
+        const data = await response.json();
+        const modelsArr = data.data || data.models || [];
+        if (Array.isArray(modelsArr)) {
+          fetchedModels = modelsArr.map((m: any) => ({
+            id: m.id,
+            name: m.display_name || m.id,
+            color: 'text-blue-500'
+          }));
+        }
+      }
+      saveVerifiedAiProfile(fetchedModels, {
+        profileId: profile.id,
+        provider: profile.provider,
+        endpoint: profile.endpoint,
+        apiKey: profile.apiKey,
+      });
+      setAiVerificationState('success');
+    } catch (error) {
+      console.error('Profile verification failed:', error);
+      setAiVerificationState('error');
+    } finally {
+      setTimeout(() => setAiVerificationState('idle'), 3000);
+    }
+  }, [aiProviderProfiles, saveVerifiedAiProfile]);
+
+  const handleDeleteAiProfile = useCallback((profileId: string) => {
+    const nextProfiles = aiProviderProfiles.filter(profile => profile.id !== profileId);
+    persistAiProviderProfiles(nextProfiles);
+    if (editingAiProfileId === profileId) {
+      setEditingAiProfileId(null);
+    }
+  }, [aiProviderProfiles, editingAiProfileId, persistAiProviderProfiles]);
+
+  const handleRenameAiProfile = useCallback((profileId: string, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const nextProfiles = aiProviderProfiles.map(profile =>
+      profile.id === profileId ? { ...profile, name: trimmed, updatedAt: Date.now() } : profile
+    );
+    persistAiProviderProfiles(nextProfiles);
+  }, [aiProviderProfiles, persistAiProviderProfiles]);
+
+  const handleSelectAiProfileModel = useCallback((modelId: string, profileId: string) => {
+    const profile = aiProviderProfiles.find(item => item.id === profileId);
+    if (!profile) return;
+    setSelectedProvider(profile.provider);
+    setServerUrl(profile.endpoint);
+    setApiKey(profile.apiKey);
+    localStorage.setItem('lumina_server_url', profile.endpoint);
+    localStorage.setItem('lumina_api_key', profile.apiKey);
+    localStorage.setItem('lumina_provider', profile.provider);
+    setSelectedModel(modelId);
+  }, [aiProviderProfiles, setSelectedModel]);
 
   const handleSaveSearch = () => {
     localStorage.setItem('lumina_tavily_key', tavilyApiKey);
@@ -359,20 +659,6 @@ export function useAppSettings({
       setTimeout(() => setSearchVerificationState('idle'), 3000);
     }
   }, [searchProvider, tavilyApiKey, serpApiKey]);
-
-  useEffect(() => {
-    const savedApiKey = localStorage.getItem('lumina_api_key');
-    if (savedApiKey && savedApiKey.trim().length > 0) {
-      handleVerifyAI();
-    }
-    const savedProvider = localStorage.getItem('lumina_search_provider') || 'tavily';
-    const key = savedProvider === 'serpapi'
-      ? localStorage.getItem('lumina_serp_key')
-      : localStorage.getItem('lumina_tavily_key');
-    if (key && key.trim().length > 0) {
-      handleVerifySearch();
-    }
-  }, [handleVerifyAI, handleVerifySearch]);
 
   const handleSaveMcp = () => {
     localStorage.setItem('lumina_mcp_url', mcpUrl);
@@ -419,9 +705,21 @@ export function useAppSettings({
     isMcpSaved, setIsMcpSaved,
     writingStyle, setWritingStyle,
     selectedProvider, setSelectedProvider,
+    aiProviderProfiles,
+    editingAiProfileId,
     handleProviderSelect,
     handleSaveAI,
     handleVerifyAI,
+    handleToggleAiProfile,
+    handleEditAiProfile,
+    handleCloseAiProfileEditor,
+    handleUpdateAiProfileConfig,
+    handleToggleAiProfileModel,
+    handleSetAiProfileModelsVisible,
+    handleVerifyAiProfile,
+    handleDeleteAiProfile,
+    handleRenameAiProfile,
+    handleSelectAiProfileModel,
     handleSaveSearch,
     handleVerifySearch,
     handleSaveMcp,

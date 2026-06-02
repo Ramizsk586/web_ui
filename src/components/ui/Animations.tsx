@@ -1,65 +1,198 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Hammer } from 'lucide-react';
+import { Hammer, Search, Cpu, Sparkles } from 'lucide-react';
 
+/**
+ * 🎨 Web Search Animation
+ * Highly immersive, spinning orbit radar with orbiting dot waves and glowing rings
+ */
 export const WebSearchAnimation = () => (
-  <motion.div
-    animate={{ 
-      rotate: 360,
-      scale: [1, 1.1, 1],
-    }}
-    transition={{ 
-      rotate: { repeat: Infinity, duration: 8, ease: "linear" },
-      scale: { repeat: Infinity, duration: 3, ease: "easeInOut" }
-    }}
-    className="flex items-center justify-center relative"
-  >
-    <div className="absolute inset-0 bg-teal-500/20 blur-xl rounded-full" />
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-teal-500 relative z-10">
-      <circle cx="12" cy="12" r="1"/>
-      <path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9c-4.54-4.52-9.87-6.54-11.9-4.5c-2.04 2.03-.02 7.36 4.5 11.9c4.54 4.52 9.87 6.54 11.9 4.5"/>
-      <path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9c-2.03-2.04-7.36-.02-11.9 4.5c-4.52 4.54-6.54 9.87-4.5 11.9c2.03 2.04 7.36.02 11.9-4.5"/>
-    </svg>
-  </motion.div>
+  <div className="flex items-center justify-center relative w-7 h-7 select-none pointer-events-none">
+    {/* Concentric expanding wave 1 */}
+    <motion.div
+      initial={{ scale: 0.8, opacity: 0.6 }}
+      animate={{ scale: 1.8, opacity: 0 }}
+      transition={{
+        repeat: Infinity,
+        duration: 1.6,
+        ease: "easeOut"
+      }}
+      className="absolute inset-0 rounded-full border border-cyan-500/30"
+    />
+    
+    {/* Concentric expanding wave 2 */}
+    <motion.div
+      initial={{ scale: 0.8, opacity: 0.4 }}
+      animate={{ scale: 2.3, opacity: 0 }}
+      transition={{
+        repeat: Infinity,
+        duration: 1.6,
+        delay: 0.4,
+        ease: "easeOut"
+      }}
+      className="absolute inset-0 rounded-full border border-cyan-400/20"
+    />
+
+    {/* Glowing background glow */}
+    <div className="absolute inset-0 bg-cyan-500/10 blur-md rounded-full" />
+
+    {/* Rotating external orbit dash ring */}
+    <motion.div
+      animate={{ rotate: 360 }}
+      transition={{ repeat: Infinity, duration: 6, ease: "linear" }}
+      className="absolute -inset-1 rounded-full border border-dashed border-cyan-550/40 dark:border-cyan-400/30"
+    />
+
+    {/* Rotating internal ring with single satellite dot */}
+    <motion.div
+      animate={{ rotate: -360 }}
+      transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
+      className="absolute inset-0.5 rounded-full border border-cyan-500/20"
+    >
+      <div className="absolute top-0 left-1/2 -ml-0.5 w-1 h-1 bg-cyan-400 rounded-full shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
+    </motion.div>
+
+    {/* Center content */}
+    <motion.div
+      animate={{ scale: [1, 1.1, 1] }}
+      transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+      className="relative z-10 flex items-center justify-center text-cyan-550 dark:text-cyan-400 bg-cyan-950/20 border border-cyan-500/40 rounded-full w-5 h-5"
+    >
+      <Search size={10} strokeWidth={2.5} />
+    </motion.div>
+  </div>
 );
 
+/**
+ * 🛠️ Standard Tool Calling Animation
+ * A premium rotating blueprint grid with a swinging, high-tech hammer,
+ * expanding emerald particles, and active circuit-board traces.
+ */
 export const ToolCallingAnimation = () => (
-  <motion.div
-    animate={{ 
-      y: [0, -2, 0],
-      rotate: [0, 8, -8, 0],
-      scale: [1, 1.05, 1]
-    }}
-    transition={{ 
-      repeat: Infinity, 
-      duration: 2.5, 
-      ease: "easeInOut" 
-    }}
-    className="flex items-center justify-center relative"
-  >
-    <div className="absolute inset-0 bg-emerald-500/20 blur-xl rounded-full" />
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 relative z-10">
-      <path d="m14 12l-8.381 8.38a1 1 0 0 1-3.001-3L11 9"/>
-      <path d="M15 15.5a.5.5 0 0 0 .5.5A6.5 6.5 0 0 0 22 9.5a.5.5 0 0 0-.5-.5h-1.672a2 2 0 0 1-1.414-.586l-5.062-5.062a1.205 1.205 0 0 0-1.704 0L9.352 5.648a1.205 1.205 0 0 0 0 1.704l5.062 5.062A2 2 0 0 1 15 13.828z"/>
-    </svg>
-  </motion.div>
+  <div className="flex items-center justify-center relative w-7 h-7 select-none pointer-events-none">
+    {/* Radiant circular radar line */}
+    <motion.div
+      initial={{ scale: 0.8, opacity: 0.8 }}
+      animate={{ scale: 1.9, opacity: 0 }}
+      transition={{
+        repeat: Infinity,
+        duration: 2.0,
+        ease: "easeOut"
+      }}
+      className="absolute inset-0 rounded-full border border-emerald-500/30"
+    />
+
+    {/* Ambient shadow glow */}
+    <div className="absolute inset-0 bg-emerald-500/15 blur-lg rounded-full" />
+
+    {/* Spinning hexagonal gear trace */}
+    <motion.svg
+      animate={{ rotate: 360 }}
+      transition={{ repeat: Infinity, duration: 8, ease: "linear" }}
+      viewBox="0 0 24 24"
+      className="absolute -inset-1.5 w-10 h-10 text-emerald-500/30 dark:text-emerald-400/20"
+    >
+      <path
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeDasharray="4 3"
+        fill="none"
+        d="M12 2 L20.66 7 L20.66 17 L12 22 L3.34 17 L3.34 7 Z"
+      />
+    </motion.svg>
+
+    {/* Ring with a pulsing orbit dot */}
+    <motion.div
+      animate={{ rotate: 360 }}
+      transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
+      className="absolute inset-0 rounded-full border border-emerald-550/20 dark:border-emerald-500/20"
+    >
+      <div className="absolute bottom-0 left-1/2 -ml-0.5 w-1 h-1 bg-emerald-500 rounded-full shadow-[0_0_6px_#10b981]" />
+    </motion.div>
+
+    {/* Swinging instrument core */}
+    <motion.div
+      animate={{ 
+        rotate: [0, -20, 20, 0],
+        scale: [1, 1.1, 1, 1]
+      }}
+      transition={{ 
+        repeat: Infinity, 
+        duration: 2, 
+        ease: "easeInOut" 
+      }}
+      className="relative z-10 flex items-center justify-center text-emerald-550 dark:text-emerald-400 bg-emerald-950/20 border border-emerald-550/45 dark:border-emerald-500/40 rounded-full w-5.5 h-5.5"
+    >
+      <Hammer size={11} strokeWidth={2.2} />
+    </motion.div>
+  </div>
 );
 
+/**
+ * ✨ Lumina Agent Spark Core Tool Calling Animation
+ * A gorgeous amber/orange stellar-particle generator with active floating energy dots,
+ * representing intelligent reasoning and powerful cloud agent operations.
+ */
 export const LuminaToolCallingAnimation = () => (
-  <motion.div
-    animate={{ 
-      y: [0, -3, 0],
-      rotate: [0, -12, 12, 0],
-      scale: [1, 1.08, 1]
-    }}
-    transition={{ 
-      repeat: Infinity, 
-      duration: 2.2, 
-      ease: "easeInOut" 
-    }}
-    className="flex items-center justify-center relative select-none pointer-events-none"
-  >
-    <div className="absolute inset-0 bg-orange-500/20 blur-xl rounded-full animate-pulse" />
-    <Hammer size={16} className="text-orange-500 relative z-10" />
-  </motion.div>
+  <div className="flex items-center justify-center relative w-7 h-7 select-none pointer-events-none">
+    {/* Outward ripples */}
+    <motion.div
+      initial={{ scale: 0.7, opacity: 0.9 }}
+      animate={{ scale: 2.0, opacity: 0 }}
+      transition={{
+        repeat: Infinity,
+        duration: 1.5,
+        ease: "easeInOut"
+      }}
+      className="absolute inset-0 rounded-full border border-amber-500/40 dark:border-orange-500/30"
+    />
+
+    {/* Deep particle blur backing */}
+    <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/20 to-orange-500/20 blur-xl rounded-full" />
+
+    {/* Rotating double-axis gear ring */}
+    <motion.div
+      animate={{ rotate: -360 }}
+      transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
+      className="absolute -inset-1 border border-dashed border-orange-500/30 dark:border-orange-400/20 rounded-full"
+    />
+
+    {/* Active sparks floating out */}
+    {[0, 120, 240].map((angle, idx) => (
+      <motion.div
+        key={idx}
+        animate={{
+          scale: [0.5, 1.2, 0.5],
+          opacity: [0.3, 1, 0.3],
+          y: [-2, -8, -2],
+          x: [0, Math.sin(angle * Math.PI / 180) * 6, 0]
+        }}
+        transition={{
+          repeat: Infinity,
+          duration: 1.4 + idx * 0.2,
+          ease: "easeInOut"
+        }}
+        className="absolute w-1 h-1 rounded-full bg-amber-400 shadow-[0_0_8px_#f59e0b]"
+        style={{
+          lineHeight: 0
+        }}
+      />
+    ))}
+
+    {/* Center sparkling core */}
+    <motion.div
+      animate={{ 
+        scale: [1, 1.15, 0.9, 1],
+        rotate: [0, 8, -8, 0]
+      }}
+      transition={{ 
+        repeat: Infinity, 
+        duration: 1.8, 
+        ease: "easeInOut" 
+      }}
+      className="relative z-10 flex items-center justify-center text-amber-550 dark:text-amber-400 bg-amber-950/20 border border-orange-500/50 rounded-full w-5.5 h-5.5 shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+    >
+      <Sparkles size={11} strokeWidth={2.2} />
+    </motion.div>
+  </div>
 );

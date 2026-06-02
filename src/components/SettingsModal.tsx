@@ -37,6 +37,20 @@ import {
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
 
+type AiProviderProfile = {
+  id: string;
+  name: string;
+  provider: string;
+  endpoint: string;
+  apiKey: string;
+  models: Array<{ id: string; name: string; color?: string; providerProfileId?: string; providerProfileName?: string }>;
+  selectedModelIds: string[];
+  active: boolean;
+  accentColor?: string;
+  verifiedAt: number;
+  updatedAt: number;
+};
+
 interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
@@ -67,6 +81,17 @@ interface SettingsModalProps {
   handleVerifyAI: () => void;
   handleSaveAI: () => void;
   isAiSaved: boolean;
+  aiProviderProfiles?: AiProviderProfile[];
+  editingAiProfileId?: string | null;
+  handleToggleAiProfile?: (profileId: string) => void;
+  handleEditAiProfile?: (profileId: string) => void;
+  handleDeleteAiProfile?: (profileId: string) => void;
+  handleRenameAiProfile?: (profileId: string, name: string) => void;
+  handleCloseAiProfileEditor?: () => void;
+  handleUpdateAiProfileConfig?: (profileId: string, patch: Partial<Pick<AiProviderProfile, 'name' | 'provider' | 'endpoint' | 'apiKey' | 'selectedModelIds'>>) => void;
+  handleToggleAiProfileModel?: (profileId: string, modelId: string) => void;
+  handleSetAiProfileModelsVisible?: (profileId: string, visible: boolean) => void;
+  handleVerifyAiProfile?: (profileId: string) => void;
   searchProvider: string;
   setSearchProvider: (val: string) => void;
   tavilyApiKey: string;
@@ -262,6 +287,17 @@ export function SettingsModal({
   handleVerifyAI,
   handleSaveAI,
   isAiSaved,
+  aiProviderProfiles = [],
+  editingAiProfileId = null,
+  handleToggleAiProfile = () => {},
+  handleEditAiProfile = () => {},
+  handleDeleteAiProfile = () => {},
+  handleRenameAiProfile = () => {},
+  handleCloseAiProfileEditor = () => {},
+  handleUpdateAiProfileConfig = () => {},
+  handleToggleAiProfileModel = () => {},
+  handleSetAiProfileModelsVisible = () => {},
+  handleVerifyAiProfile = () => {},
   searchProvider,
   setSearchProvider,
   tavilyApiKey,
@@ -309,6 +345,11 @@ export function SettingsModal({
     }
   });
   const [customInstructions, setCustomInstructions] = React.useState(() => localStorage.getItem('lumina_profile_instructions') || '');
+  const [profileNameDrafts, setProfileNameDrafts] = React.useState<Record<string, string>>({});
+  const editingAiProfile = React.useMemo(
+    () => aiProviderProfiles.find(profile => profile.id === editingAiProfileId) || null,
+    [aiProviderProfiles, editingAiProfileId]
+  );
 
   // Rich Persona State
   const [personaTone, setPersonaTone] = React.useState(() => localStorage.getItem('lumina_persona_tone') || 'technical');
@@ -525,6 +566,52 @@ export function SettingsModal({
   const [hfDownloadStatus, setHfDownloadStatus] = React.useState<'idle' | 'downloading' | 'extracting' | 'verifying' | 'completed'>('idle');
   const [hfDownloadLogs, setHfDownloadLogs] = React.useState<string[]>([]);
   const [hfDownloadMetrics, setHfDownloadMetrics] = React.useState({ speed: '0 MB/s', downloaded: '0 MB', total: '0 MB', percent: 0 });
+
+  const parseModelSizeGb = React.useCallback((value: string): number | null => {
+    const match = String(value || '').match(/\(([\d.]+)\s*(GB|MB)\)/i) || String(value || '').match(/([\d.]+)\s*(GB|MB)/i);
+    if (!match) return null;
+    const amount = parseFloat(match[1]);
+    if (!Number.isFinite(amount)) return null;
+    return match[2].toUpperCase() === 'GB' ? amount : amount / 1024;
+  }, []);
+
+  const estimateGpuOffloadFit = React.useCallback((file: string) => {
+    const sizeGb = parseModelSizeGb(file);
+    const fallbackVramGb = 8;
+    if (!sizeGb) {
+      return {
+        label: 'Size unknown',
+        tone: 'neutral',
+        className: 'border-zinc-500/30 bg-zinc-500/10 text-zinc-400',
+      };
+    }
+    if (sizeGb <= fallbackVramGb * 0.72) {
+      return {
+        label: 'Full GPU Offload Possible',
+        tone: 'full',
+        className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
+      };
+    }
+    if (sizeGb <= fallbackVramGb * 1.15) {
+      return {
+        label: 'Partial GPU Offload Possible',
+        tone: 'partial',
+        className: 'border-blue-500/40 bg-blue-500/10 text-blue-400',
+      };
+    }
+    return {
+      label: 'Likely too large',
+      tone: 'large',
+      className: 'border-red-500/30 bg-red-500/10 text-red-400',
+    };
+  }, [parseModelSizeGb]);
+
+  const getSmallestModelFit = React.useCallback((model: any) => {
+    const files = Array.isArray(model?.files) ? model.files : [];
+    if (!files.length) return null;
+    const sorted = [...files].sort((a, b) => (parseModelSizeGb(a) || Number.MAX_VALUE) - (parseModelSizeGb(b) || Number.MAX_VALUE));
+    return estimateGpuOffloadFit(sorted[0]);
+  }, [estimateGpuOffloadFit, parseModelSizeGb]);
 
   // Initialize detailedModel on first mount and fetch real GGUF files and sizes
   React.useEffect(() => {
@@ -1869,6 +1956,267 @@ export function SettingsModal({
                       </button>
                     </div>
 
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Provider Profiles</h4>
+                          <p className="text-[11px] text-gray-500 mt-1">
+                            Verified providers are saved here. Active profiles feed the model picker.
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-semibold text-blue-500 bg-blue-500/10 px-2 py-1 rounded-lg">
+                          {aiProviderProfiles.filter(profile => profile.active).length} Active
+                        </span>
+                      </div>
+
+                      {aiProviderProfiles.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-gray-200 dark:border-white/10 bg-gray-50/50 dark:bg-white/[0.02] p-4 text-xs text-gray-500">
+                          Verify a provider connection to create your first reusable profile.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {aiProviderProfiles.map(profile => (
+                            <div
+                              key={profile.id}
+                              className="rounded-xl border p-3 transition-all bg-gray-50/50 dark:bg-white/[0.02]"
+                              style={{
+                                borderColor: profile.active ? `${profile.accentColor || '#3b82f6'}66` : 'rgba(255,255,255,0.08)',
+                                background: profile.active
+                                  ? `linear-gradient(90deg, ${profile.accentColor || '#3b82f6'}1f 0%, rgba(255,255,255,0.02) 42%)`
+                                  : undefined,
+                              }}
+                            >
+                              <div className="flex items-start gap-3">
+                                <button
+                                  onClick={() => handleToggleAiProfile(profile.id)}
+                                  className={`mt-1 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+                                    profile.active
+                                      ? 'text-white'
+                                      : 'border-gray-300 dark:border-white/15 text-transparent hover:border-blue-400'
+                                  }`}
+                                  style={profile.active ? {
+                                    backgroundColor: profile.accentColor || '#3b82f6',
+                                    borderColor: profile.accentColor || '#3b82f6',
+                                  } : undefined}
+                                  title={profile.active ? 'Deactivate profile' : 'Activate profile'}
+                                >
+                                  <Check size={13} />
+                                </button>
+                                <div className="flex-1 min-w-0">
+                                  <input
+                                    value={profileNameDrafts[profile.id] ?? profile.name}
+                                    onChange={(e) => setProfileNameDrafts(prev => ({ ...prev, [profile.id]: e.target.value }))}
+                                    onBlur={(e) => {
+                                      handleRenameAiProfile(profile.id, e.target.value);
+                                      setProfileNameDrafts(prev => {
+                                        const next = { ...prev };
+                                        delete next[profile.id];
+                                        return next;
+                                      });
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        (e.currentTarget as HTMLInputElement).blur();
+                                      }
+                                    }}
+                                    className="w-full bg-transparent outline-none text-sm font-semibold text-gray-800 dark:text-zinc-100"
+                                  />
+                                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-gray-500">
+                                    <span
+                                      className="w-2 h-2 rounded-full shrink-0"
+                                      style={{ backgroundColor: profile.accentColor || '#3b82f6' }}
+                                    />
+                                    <span>{CLOUD_PROVIDERS.find(p => p.id === profile.provider)?.label || profile.provider}</span>
+                                    <span className="w-1 h-1 rounded-full bg-gray-400" />
+                                    <span className="truncate max-w-[280px]">{profile.endpoint}</span>
+                                    <span className="w-1 h-1 rounded-full bg-gray-400" />
+                                    <span>{profile.models.length} models</span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {editingAiProfileId === profile.id && (
+                                    <span className="text-[10px] text-amber-500 font-semibold px-2">Editing</span>
+                                  )}
+                                  <button
+                                    onClick={() => handleEditAiProfile(profile.id)}
+                                    className="w-8 h-8 rounded-lg border border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-500 hover:text-blue-500 hover:border-blue-500/30 transition-all"
+                                    title="Edit profile"
+                                  >
+                                    <Wrench size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteAiProfile(profile.id)}
+                                    className="w-8 h-8 rounded-lg border border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-500 hover:text-red-500 hover:border-red-500/30 transition-all"
+                                    title="Delete profile"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                              {profile.active && profile.models.length > 0 && (
+                                <div className="mt-3 flex flex-wrap gap-1.5 pl-8">
+                                  {profile.models.slice(0, 6).map(model => (
+                                    <span key={model.id} className="text-[10px] px-2 py-1 rounded-lg bg-white/70 dark:bg-black/20 border border-gray-100 dark:border-white/5 text-gray-500 max-w-[180px] truncate">
+                                      {model.name || model.id}
+                                    </span>
+                                  ))}
+                                  {profile.models.length > 6 && (
+                                    <span className="text-[10px] px-2 py-1 rounded-lg text-gray-400">
+                                      +{profile.models.length - 6} more
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {editingAiProfile && (
+                      <div
+                        className="rounded-xl border p-4 space-y-4"
+                        style={{
+                          borderColor: `${editingAiProfile.accentColor || '#3b82f6'}66`,
+                          background: `linear-gradient(135deg, ${editingAiProfile.accentColor || '#3b82f6'}14 0%, rgba(255,255,255,0.02) 46%)`,
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0"
+                                style={{ backgroundColor: editingAiProfile.accentColor || '#3b82f6' }}
+                              />
+                              <h4 className="text-sm font-semibold text-gray-800 dark:text-zinc-100">
+                                Edit Provider Profile
+                              </h4>
+                            </div>
+                            <p className="mt-1 text-[11px] text-gray-500">
+                              Update credentials and choose which models appear in the model picker.
+                            </p>
+                          </div>
+                          <button
+                            onClick={handleCloseAiProfileEditor}
+                            className="w-8 h-8 rounded-lg border border-gray-200 dark:border-white/10 flex items-center justify-center text-gray-500 hover:text-red-500 hover:border-red-500/30 transition-all"
+                            title="Close editor"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Profile Name</label>
+                            <input
+                              value={editingAiProfile.name}
+                              onChange={(e) => handleUpdateAiProfileConfig(editingAiProfile.id, { name: e.target.value })}
+                              className="w-full h-10 px-3 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Provider</label>
+                            <select
+                              value={editingAiProfile.provider}
+                              onChange={(e) => handleUpdateAiProfileConfig(editingAiProfile.id, { provider: e.target.value })}
+                              className="w-full h-10 px-3 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                            >
+                              {CLOUD_PROVIDERS.map(provider => (
+                                <option key={provider.id} value={provider.id}>{provider.label}</option>
+                              ))}
+                              <option value="custom">Custom</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Endpoint URL</label>
+                          <input
+                            value={editingAiProfile.endpoint}
+                            onChange={(e) => handleUpdateAiProfileConfig(editingAiProfile.id, { endpoint: e.target.value })}
+                            className="w-full h-10 px-3 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">API Key</label>
+                          <input
+                            type="password"
+                            value={editingAiProfile.apiKey}
+                            onChange={(e) => handleUpdateAiProfileConfig(editingAiProfile.id, { apiKey: e.target.value })}
+                            className="w-full h-10 px-3 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => handleVerifyAiProfile(editingAiProfile.id)}
+                            disabled={aiVerificationState === 'verifying'}
+                            className="h-9 px-3 rounded-lg text-xs font-semibold border border-gray-200 dark:border-white/10 text-gray-700 dark:text-zinc-200 hover:border-blue-500/40 hover:text-blue-500 transition-all flex items-center gap-2"
+                          >
+                            {aiVerificationState === 'verifying' ? (
+                              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
+                            ) : (
+                              <RefreshCw size={13} />
+                            )}
+                            Verify & Refresh Models
+                          </button>
+                          <button
+                            onClick={() => handleSetAiProfileModelsVisible(editingAiProfile.id, true)}
+                            className="h-9 px-3 rounded-lg text-xs font-semibold border border-gray-200 dark:border-white/10 text-gray-500 hover:text-emerald-500 transition-all"
+                          >
+                            Select All
+                          </button>
+                          <button
+                            onClick={() => handleSetAiProfileModelsVisible(editingAiProfile.id, false)}
+                            className="h-9 px-3 rounded-lg text-xs font-semibold border border-gray-200 dark:border-white/10 text-gray-500 hover:text-red-500 transition-all"
+                          >
+                            Select None
+                          </button>
+                          <span className="ml-auto text-[10px] text-gray-500 font-semibold">
+                            {editingAiProfile.selectedModelIds.length}/{editingAiProfile.models.length} visible
+                          </span>
+                        </div>
+
+                        <div className="max-h-64 overflow-y-auto rounded-xl border border-gray-100 dark:border-white/5 divide-y divide-gray-100 dark:divide-white/5">
+                          {editingAiProfile.models.length === 0 ? (
+                            <div className="p-4 text-xs text-gray-500">
+                              No models cached for this profile. Verify the profile to fetch models.
+                            </div>
+                          ) : (
+                            editingAiProfile.models.map(model => {
+                              const isVisible = editingAiProfile.selectedModelIds.includes(model.id);
+                              return (
+                                <button
+                                  key={model.id}
+                                  onClick={() => handleToggleAiProfileModel(editingAiProfile.id, model.id)}
+                                  className="w-full min-h-11 px-3 py-2 flex items-center gap-3 text-left hover:bg-gray-50 dark:hover:bg-white/[0.03] transition-all"
+                                >
+                                  <span
+                                    className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
+                                      isVisible ? 'text-white' : 'border-gray-300 dark:border-white/15 text-transparent'
+                                    }`}
+                                    style={isVisible ? {
+                                      backgroundColor: editingAiProfile.accentColor || '#3b82f6',
+                                      borderColor: editingAiProfile.accentColor || '#3b82f6',
+                                    } : undefined}
+                                  >
+                                    <Check size={13} />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block text-xs font-semibold text-gray-700 dark:text-zinc-200 truncate">
+                                      {model.name || model.id}
+                                    </span>
+                                    <span className="block text-[10px] text-gray-500 truncate">{model.id}</span>
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
 
                   </div>
                 </div>
@@ -2896,11 +3244,17 @@ export function SettingsModal({
                             <select
                               value={hfSortOption}
                               onChange={(e: any) => setHfSortOption(e.target.value)}
-                              className="bg-transparent font-bold text-zinc-400 text-[10px] outline-none cursor-pointer hover:text-[var(--theme-accent)] bg-zinc-950/20 rounded"
+                              className="appearance-none bg-[var(--theme-surface-alt,rgba(0,0,0,0.05))] hover:bg-[var(--theme-hover-bg,rgba(0,0,0,0.1))] dark:bg-zinc-900/40 hover:dark:bg-zinc-800/60 text-[10px] font-bold text-zinc-400 dark:text-zinc-300 px-3 py-1.5 pr-8 rounded-xl border border-[var(--theme-border)] outline-none cursor-pointer hover:text-[var(--theme-accent)] hover:border-[var(--theme-accent)] focus:border-[var(--theme-accent)] focus:ring-2 focus:ring-[var(--theme-accent)]/20 transition-all relative font-sans select-none shadow-sm"
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23a1a1aa' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                backgroundPosition: 'right 8px center',
+                                backgroundSize: '14px',
+                                backgroundRepeat: 'no-repeat'
+                              }}
                             >
-                              <option value="downloads">Popularity</option>
-                              <option value="likes">High Rating</option>
-                              <option value="modified">Latest</option>
+                              <option value="downloads" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">Popularity</option>
+                              <option value="likes" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">High Rating</option>
+                              <option value="modified" className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold text-xs">Latest</option>
                             </select>
                           </div>
 
@@ -2925,6 +3279,8 @@ export function SettingsModal({
 
                                 return filtered.map((model) => {
                                   const isSelected = selectedModelId === model.id;
+                                  const fit = getSmallestModelFit(model);
+                                  const supportsTools = model.capabilities?.includes('Tool Use');
                                   return (
                                     <button
                                       key={model.id}
@@ -2947,6 +3303,18 @@ export function SettingsModal({
                                           {model.isStaffPick && <span className="w-3 h-3 rounded-full bg-blue-500 text-white flex items-center justify-center text-[7px] font-bold shadow-sm" title="Verified">✓</span>}
                                         </div>
                                         <p className="text-[10px] text-zinc-400 truncate mt-0.5 leading-tight">{model.description}</p>
+                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                          {supportsTools && (
+                                            <span className="px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
+                                              Tool Use
+                                            </span>
+                                          )}
+                                          {fit && (
+                                            <span className={`px-1.5 py-0.5 rounded-md border text-[8px] font-bold uppercase tracking-wide ${fit.className}`}>
+                                              {fit.label}
+                                            </span>
+                                          )}
+                                        </div>
                                         <div className="flex items-center justify-between gap-2 mt-2 font-mono text-[9px] text-zinc-500">
                                           <span>{model.downloads?.toLocaleString() || 0} dl</span>
                                           <span>{model.lastUpdated}</span>
@@ -2971,6 +3339,18 @@ export function SettingsModal({
                                   <div className="min-w-0">
                                     <h4 className="text-xs font-bold truncate max-w-[200px] text-zinc-800 dark:text-zinc-100">{detailedModel.id}</h4>
                                     <p className="text-[9px] mt-0.5 uppercase tracking-wide font-mono text-zinc-400">huggingface.co repository</p>
+                                    <div className="flex flex-wrap gap-1.5 mt-2">
+                                      {detailedModel.capabilities?.includes('Tool Use') && (
+                                        <span className="px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
+                                          Tool Use
+                                        </span>
+                                      )}
+                                      {activeDownloadFile && (
+                                        <span className={`px-1.5 py-0.5 rounded-md border text-[8px] font-bold uppercase tracking-wide ${estimateGpuOffloadFit(activeDownloadFile).className}`}>
+                                          {estimateGpuOffloadFit(activeDownloadFile).label}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                                 <a href={`https://huggingface.co/${detailedModel.id}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold hover:underline shrink-0" style={{ color: 'var(--theme-accent)' }}>Open in HF Hub ↗</a>
@@ -3015,15 +3395,71 @@ export function SettingsModal({
                                   </div>
                                 ) : (
                                   <div className="space-y-3">
+                                    {activeDownloadFile && (
+                                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-semibold ${estimateGpuOffloadFit(activeDownloadFile).className}`}>
+                                        <Cpu size={12} />
+                                        {estimateGpuOffloadFit(activeDownloadFile).label}
+                                      </div>
+                                    )}
+
                                     <select
                                       value={activeDownloadFile}
                                       onChange={(e) => setActiveDownloadFile(e.target.value)}
-                                      className="w-full px-3 py-2 text-xs rounded-lg outline-none border cursor-pointer font-semibold bg-[var(--theme-surface-alt)] border-[var(--theme-border)] text-[var(--theme-primary)]"
+                                      className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs font-semibold rounded-xl outline-none border cursor-pointer bg-[var(--theme-surface-alt,rgba(0,0,0,0.05))] hover:bg-[var(--theme-hover-bg,rgba(0,0,0,0.1))] dark:bg-zinc-900/40 hover:dark:bg-zinc-800/60 border-[var(--theme-border)] hover:border-[var(--theme-accent)] focus:border-[var(--theme-accent)] focus:ring-2 focus:ring-[var(--theme-accent)]/20 text-[var(--theme-primary)] transition-all relative font-sans shadow-inner shrink-0"
+                                      style={{
+                                        backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23a1a1aa' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
+                                        backgroundPosition: 'right 12px center',
+                                        backgroundSize: '16px',
+                                        backgroundRepeat: 'no-repeat'
+                                      }}
                                     >
                                       {detailedModel.files && detailedModel.files.map((file: string, idx: number) => (
-                                        <option key={idx} value={file}>{file}</option>
+                                        <option key={idx} value={file} className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold py-2">
+                                          {file}
+                                        </option>
                                       ))}
                                     </select>
+
+                                    {detailedModel.files && detailedModel.files.length > 0 && (
+                                      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--theme-border)' }}>
+                                        <div className="px-3 py-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider bg-zinc-500/5">
+                                          Choose a download option
+                                        </div>
+                                        <div className="divide-y divide-zinc-200 dark:divide-white/5">
+                                          {detailedModel.files.map((file: string) => {
+                                            const selected = activeDownloadFile === file;
+                                            const fit = estimateGpuOffloadFit(file);
+                                            const fileSize = parseModelSizeGb(file);
+                                            return (
+                                              <button
+                                                key={file}
+                                                onClick={() => setActiveDownloadFile(file)}
+                                                className={`w-full px-3 py-2.5 flex items-center gap-3 text-left transition-all ${
+                                                  selected ? 'bg-[var(--theme-hover-bg)]' : 'hover:bg-[var(--theme-hover-bg)]/60'
+                                                }`}
+                                              >
+                                                <span className="w-4 shrink-0 text-zinc-400">
+                                                  {selected ? <Check size={15} /> : null}
+                                                </span>
+                                                <span className="px-1.5 py-0.5 rounded-md bg-blue-500 text-white text-[9px] font-bold">GGUF</span>
+                                                <span className="flex-1 min-w-0">
+                                                  <span className="block text-xs font-semibold text-zinc-700 dark:text-zinc-200 truncate">
+                                                    {file.replace(/\s*\([^)]*\)\s*$/, '').split('/').pop()}
+                                                  </span>
+                                                  <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md border text-[9px] font-semibold ${fit.className}`}>
+                                                    <Cpu size={10} />
+                                                    {fit.label}
+                                                  </span>
+                                                </span>
+                                                <span className="text-[10px] font-mono text-zinc-500 shrink-0">
+                                                  {fileSize ? `${fileSize.toFixed(fileSize >= 1 ? 2 : 1)} GB` : 'Unknown'}
+                                                </span>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
 
                                     {hfDownloadStatus === 'idle' ? (
                                       <button

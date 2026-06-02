@@ -11,6 +11,10 @@ import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
 import { spawn, spawnSync, type ChildProcessByStdio, type ChildProcessWithoutNullStreams } from "child_process";
 import si from 'systeminformation';
+import { SandboxManager } from './src/sandbox/SandboxManager';
+import { createSandboxRouter } from './src/sandbox/SandboxApi';
+import { createLogger } from './src/sandbox/SandboxHealth';
+import { VmId } from './src/sandbox/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,9 +43,23 @@ async function startServer() {
     next();
   });
 
+  // ─── Sandbox Initialization ────────────────────────────────────────────────
+  const sandbox = new SandboxManager(
+    process.env.LUMINA_DATA_DIR || path.join(os.homedir(), '.lumina')
+  );
+  const sandboxLog = createLogger('Server');
+
+  // Mount sandbox API routes
+  app.use('/api', createSandboxRouter(sandbox));
+
   // Health check endpoint
   app.get("/api/health", async (req, res) => {
-    res.json({ status: 'ok', server: 'Lumina Web UI Server' });
+    const sandboxReady = sandbox.isInitialized();
+    res.json({
+      status: 'ok',
+      server: 'Lumina Web UI Server',
+      sandbox: sandboxReady ? 'ready' : 'uninitialized',
+    });
   });
 
   const getUpstreamErrorDetail = (e: any) => {
@@ -246,13 +264,75 @@ async function startServer() {
     }
   });
 
+  // ─── Agent API Endpoints (routed through sandbox VM) ──────────────────────────
+
+  // Execute a command inside the sandbox VM
+  // Replaces ALL direct child_process.spawn/exec usage for agent commands
+  app.post("/api/agent/exec", async (req, res) => {
+    const { vmId, command, cwd, timeoutMs, env } = req.body;
+    if (!vmId || !command) {
+      return res.status(400).json({ error: 'vmId and command are required' });
+    }
+
+    if (!sandbox.isInitialized()) {
+      try {
+        sandboxLog.info('Auto-initializing sandbox on agent exec request...');
+        await sandbox.initialize();
+      } catch (initErr: any) {
+        return res.status(503).json({ error: `Sandbox initialization failed: ${initErr.message}` });
+      }
+    }
+
+    try {
+      const result = await sandbox.agentRuntime.exec(
+        { id: vmId, tag: 'sandbox' },
+        { command, cwd, timeoutMs, env }
+      );
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Acquire a VM from the pool for an agent
+  app.post("/api/agent/acquire", async (req, res) => {
+    const { agentId, workspacePath } = req.body;
+    if (!agentId) return res.status(400).json({ error: 'agentId is required' });
+
+    try {
+      // Auto-initialize sandbox if needed
+      if (!sandbox.isInitialized()) {
+        sandboxLog.info('Auto-initializing sandbox on agent acquire request...');
+        await sandbox.initialize();
+      }
+
+      const vmId = await sandbox.acquireVm(agentId, workspacePath);
+      res.json({ success: true, vmId: vmId.id });
+    } catch (e: any) {
+      res.status(503).json({ error: e.message });
+    }
+  });
+
+  // Release a VM back to the pool
+  app.post("/api/agent/release", async (req, res) => {
+    const { vmId } = req.body;
+    if (!vmId) return res.status(400).json({ error: 'vmId is required' });
+
+    try {
+      await sandbox.releaseVm({ id: vmId, tag: 'sandbox' });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ─── Terminal Session Store ────────────────────────────────────────────────────
-  const terminalSessions = new Map<string, { cwd: string; lastAccess: number }>();
+  const terminalSessions = new Map<string, { cwd: string; lastAccess: number; vmId?: string }>();
 
   function getTerminalSession(sessionId?: string) {
     if (!sessionId || !terminalSessions.has(sessionId)) {
-      const newSession = {
-        cwd: process.cwd(),
+      const newSession: { cwd: string; lastAccess: number; vmId?: string } = {
+        cwd: '/workspace',
         lastAccess: Date.now(),
       };
       const id = sessionId || `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -274,105 +354,116 @@ async function startServer() {
     }
   }, 10 * 60 * 1000);
 
-  const isWindows = process.platform === 'win32';
-
-  function resolveTermPath(currentAbsPath: string, segment: string) {
-    if (!segment || segment === '.') return currentAbsPath;
-    if (path.isAbsolute(segment)) return segment;
-    return path.resolve(currentAbsPath, segment);
-  }
-
-  function toTermRelativePath(absPath: string) {
-    const rel = path.relative(process.cwd(), absPath);
-    return rel === '' ? '.' : rel;
-  }
-
-  function handleTermCd(args: string, session: { cwd: string }) {
-    let target: string;
-    if (!args || args.trim() === '') {
-      target = os.homedir();
-    } else {
-      target = args.trim();
-      if (target === '~' || target.startsWith('~/') || target.startsWith('~\\')) {
-        target = os.homedir() + target.slice(1);
-      }
+  const normalizeGuestWorkspacePath = (input?: string) => {
+    const target = input && input.trim() ? input.trim().replace(/\\/g, '/') : '/workspace';
+    const normalized = path.posix.normalize(path.posix.isAbsolute(target)
+      ? target
+      : path.posix.join('/workspace', target));
+    if (normalized !== '/workspace' && !normalized.startsWith('/workspace/')) {
+      throw new Error('Path escapes /workspace');
     }
-    const newAbs = resolveTermPath(session.cwd, target);
-    try {
-      if (!fs.statSync(newAbs).isDirectory()) {
-        return { stderr: `cd: not a directory: ${target}`, changed: false };
-      }
-      session.cwd = newAbs;
-      return { newPath: toTermRelativePath(newAbs), changed: true };
-    } catch {
-      return { stderr: `cd: no such file or directory: ${target}`, changed: false };
-    }
-  }
+    return normalized;
+  };
 
-  function executeTermCommand(command: string, cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    return new Promise((resolve) => {
-      let shell: string;
-      let shellArgs: string[];
+  const resolveTermPath = (currentPath: string, segment: string) =>
+    normalizeGuestWorkspacePath(path.posix.resolve(currentPath || '/workspace', segment || '/workspace'));
 
-      if (isWindows) {
-        shell = 'powershell.exe';
-        shellArgs = ['-NoProfile', '-NonInteractive', '-Command', command];
-      } else {
-        shell = '/bin/bash';
-        shellArgs = ['-c', command];
-      }
+  const toTermRelativePath = (guestPath: string) => normalizeGuestWorkspacePath(guestPath);
 
-      const child = spawn(shell, shellArgs, {
-        cwd,
-        env: { ...process.env, TERM: 'xterm-256color', FORCE_COLOR: '1' },
-        timeout: 30000,
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
-      child.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-
-      child.on('close', (code) => {
-        resolve({ stdout, stderr, exitCode: code ?? 1 });
-      });
-
-      child.on('error', (err) => {
-        resolve({ stdout: '', stderr: err.message, exitCode: 1 });
-      });
-
-      setTimeout(() => {
-        try { child.kill('SIGKILL'); } catch {}
-        resolve({ stdout, stderr: stderr + '\n[Timed out after 30s]', exitCode: 124 });
-      }, 30000);
-    });
-  }
+  const handleTermCd = (args: string, session: { cwd: string }) => {
+    const newPath = resolveTermPath(session.cwd, args || '/workspace');
+    session.cwd = newPath;
+    return { newPath, changed: true };
+  };
 
   // GET /api/terminal/session — create or resume a session
   app.get("/api/terminal/session", (req, res) => {
     const { id, session } = getTerminalSession();
-    const hostname = os.hostname();
-    let username = 'user';
-    try { username = os.userInfo().username; } catch {}
     res.json({
       sessionId: id,
       cwd: session.cwd,
-      currentPath: toTermRelativePath(session.cwd),
-      platform: process.platform,
-      shell: isWindows ? 'powershell' : 'bash',
-      hostname,
-      username,
+      currentPath: session.cwd,
+      platform: 'linux-vm',
+      shell: 'bash',
+      hostname: session.vmId || 'lumina-sandbox',
+      username: 'agent',
+      sandboxRequired: true,
     });
   });
 
-  // POST /api/terminal/execute — real OS shell command execution with session support
+  // POST /api/terminal/execute — shell command execution with sandbox routing
   app.post("/api/terminal/execute", async (req, res) => {
-    const { command, currentPath, sessionId: clientSessionId, workspaceRoot } = req.body;
+    let { command, currentPath, sessionId: clientSessionId, workspaceRoot, vmId, isCoderMode } = req.body;
     if (!command || typeof command !== 'string') {
       return res.status(400).json({ stderr: 'No command provided.' });
     }
 
+    let targetVmId = vmId;
+
+    if (!sandbox.isInitialized()) {
+      try {
+        console.log('[LUMINA_DEBUG] Initializing sandbox on-the-fly for shell execution...');
+        await sandbox.initialize();
+      } catch (initErr: any) {
+        return res.status(503).json({ sessionId: clientSessionId, stderr: `Sandbox is required for terminal execution and failed to initialize: ${initErr.message}`, stdout: '' });
+      }
+    }
+
+    if (isCoderMode || vmId || sandbox.isInitialized()) {
+      if (!targetVmId) {
+        // Look up already acquired or booting/available VMs from the pool
+        const poolStatus = sandbox.getPoolStatus();
+        const activeVms = poolStatus.activeVms || [];
+        if (activeVms.length > 0) {
+          targetVmId = activeVms[0];
+          console.log(`[LUMINA_DEBUG] Auto-routing coder shell execution to active VM: ${targetVmId}`);
+        } else {
+          try {
+            console.log('[LUMINA_DEBUG] No active VM found. Acquiring a new sandboxed VM on-the-fly...');
+            const acquired = await sandbox.acquireVm('coder-agent', workspaceRoot || currentPath || process.cwd());
+            targetVmId = acquired.id;
+            console.log(`[LUMINA_DEBUG] Successfully acquired VM: ${targetVmId}`);
+          } catch (acqErr: any) {
+            return res.status(500).json({ sessionId: clientSessionId, stderr: `Failed to acquire Sandbox VM: ${acqErr.message}`, stdout: '' });
+          }
+        }
+      }
+    }
+
+    vmId = targetVmId;
+
+    // ─── Route through sandbox VM when available ───────────────────────────
+    if (sandbox.isInitialized() && vmId) {
+      try {
+        const result = await sandbox.agentRuntime.exec(
+          { id: vmId, tag: 'sandbox' },
+          {
+            command,
+            cwd: normalizeGuestWorkspacePath(currentPath || '/workspace'),
+            timeoutMs: 120000,
+          }
+        );
+        return res.json({
+          sessionId: clientSessionId,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          exitCode: result.exitCode,
+          sandboxed: true,
+        });
+      } catch (e: any) {
+        return res.status(500).json({ sessionId: clientSessionId, stderr: `Sandbox error: ${e.message}`, stdout: '' });
+      }
+    }
+
+    // ─── Fallback: host-side execution (legacy) ────────────────────────────
+    return res.status(503).json({
+      sessionId: clientSessionId,
+      stdout: '',
+      stderr: 'Sandbox VM is required. Host-side terminal execution is disabled.\n',
+      sandboxed: false,
+    });
+
+    /*
     const { id: sessionId, session } = getTerminalSession(clientSessionId);
     const sandboxRoot = path.resolve(workspaceRoot || currentPath || process.cwd());
 
@@ -397,66 +488,54 @@ async function startServer() {
     const trimmed = command.trim();
     const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
 
-    // Prevent interactive CLI processes that would hang the background spawn process
     const LOWER_CMD = trimmed.toLowerCase();
     const BLOCKED_CLIS = ['opencode', 'claude', 'poolside', 'cline', 'aider', 'gptengineer', 'gpt-engineer', 'devin'];
     if (BLOCKED_CLIS.some(cli => LOWER_CMD.includes(cli))) {
       return res.status(400).json({
         sessionId,
-        stderr: '✖ Command blocked: Interactivity with external AI CLIs (opencode, claude, poolside, cline, etc.) is restricted to prevent terminal session freezes.\n'
+        stderr: '✖ Command blocked: Interactivity with external AI CLIs is restricted to prevent terminal session freezes.\n'
       });
     }
 
-    // Built-in: clear/cls
     if (['cls', 'clear', 'clear-host'].includes(firstWord)) {
       return res.json({ sessionId, clear: true, stdout: '', stderr: '' });
     }
 
-    // Built-in: cd
     if (firstWord === 'cd' || firstWord === 'set-location' || firstWord === 'sl') {
       const args = trimmed.slice(firstWord.length).trim();
       const targetPath = resolveTermPath(session.cwd, args || os.homedir());
       if (!isInsideSandbox(targetPath)) {
         return res.status(403).json({
-          sessionId,
-          stdout: '',
+          sessionId, stdout: '',
           stderr: `Permission denied: terminal is sandboxed to ${sandboxRoot}\n`,
           newPath: toTermRelativePath(session.cwd),
         });
       }
       const result = handleTermCd(args, session);
       return res.json({
-        sessionId,
-        stdout: '',
-        stderr: result.stderr || '',
+        sessionId, stdout: '', stderr: result.stderr || '',
         newPath: result.newPath !== undefined ? result.newPath : toTermRelativePath(session.cwd),
       });
     }
 
-    // Built-in: pwd
     if (firstWord === 'pwd' || firstWord === 'get-location' || firstWord === 'gl') {
       return res.json({ sessionId, stdout: session.cwd + '\n', stderr: '', newPath: toTermRelativePath(session.cwd) });
     }
 
-    // Execute via real shell spawn
     try {
       if (!isInsideSandbox(session.cwd)) {
         return res.status(403).json({ sessionId, stderr: `Permission denied: terminal is sandboxed to ${sandboxRoot}\n`, stdout: '' });
       }
       const result = await executeTermCommand(trimmed, session.cwd);
-
       try { fs.statSync(session.cwd); } catch { session.cwd = process.cwd(); }
-
       return res.json({
-        sessionId,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.exitCode,
-        newPath: toTermRelativePath(session.cwd),
+        sessionId, stdout: result.stdout, stderr: result.stderr,
+        exitCode: result.exitCode, newPath: toTermRelativePath(session.cwd),
       });
     } catch (err: any) {
       return res.status(500).json({ sessionId, stderr: `Server error: ${err.message}`, stdout: '' });
     }
+    */
   });
 
   // Live Compiler/Transpiler Sandbox Interceptor for React / JSX / TSX and JS
@@ -1494,6 +1573,42 @@ async function startServer() {
     return path.resolve(base, withoutDot);
   };
 
+  const ensureGitPresentAndInitialized = (targetDir: string) => {
+    try {
+      const { execSync } = require('child_process');
+      // Verify if git command is installed and present
+      try {
+        execSync('git --version', { stdio: 'ignore' });
+      } catch {
+        // Git is not present on the device, do nothing
+        return false;
+      }
+
+      // Check if targetDir is already a git workspace
+      let isGit = true;
+      try {
+        execSync('git rev-parse --is-inside-work-tree', { cwd: targetDir, stdio: 'ignore' });
+      } catch {
+        isGit = false;
+      }
+
+      if (!isGit) {
+        console.log(`[LUMINA_DEBUG] Initializing Git repository in: ${targetDir}`);
+        execSync('git init', { cwd: targetDir });
+        try {
+          execSync('git config user.name "Lumina User"', { cwd: targetDir });
+          execSync('git config user.email "user@lumina.local"', { cwd: targetDir });
+        } catch {
+          // Ignore config set failures
+        }
+        return true;
+      }
+    } catch (err: any) {
+      console.error('[LUMINA_DEBUG] Git init failed:', err.message);
+    }
+    return false;
+  };
+
   const fileExists = (filePath: string) => fs.existsSync(filePath);
 
   const readJsonFile = (filePath: string) => {
@@ -1597,6 +1712,14 @@ async function startServer() {
       return res.status(404).json({ error: "Directory not found" });
     }
     
+    // Auto-init git repository if git is installed on host and repo is not yet initialized
+    try {
+      const targetWorkspace = workspaceRoot ? path.resolve(workspaceRoot) : resolvedPath;
+      ensureGitPresentAndInitialized(targetWorkspace);
+    } catch (gitErr: any) {
+      console.warn('[LUMINA_DEBUG] Auto git init during list failed:', gitErr.message);
+    }
+
     const files = getFilesRecursively(resolvedPath);
     res.json({ files, rootPath: resolvedPath.replace(/\\/g, '/') });
   });
@@ -1743,6 +1866,10 @@ async function startServer() {
   });
 
   app.post("/api/git/changes", (req, res) => {
+    const _initTarget = req.body.workspaceRoot ? path.resolve(req.body.workspaceRoot) : process.cwd();
+    try {
+      ensureGitPresentAndInitialized(_initTarget);
+    } catch (_) {}
     const { workspaceRoot } = req.body;
     const targetDir = workspaceRoot ? path.resolve(workspaceRoot) : process.cwd();
     
@@ -1840,6 +1967,10 @@ async function startServer() {
   });
 
   app.post("/api/git/diff", (req, res) => {
+    const _initTarget = req.body.workspaceRoot ? path.resolve(req.body.workspaceRoot) : process.cwd();
+    try {
+      ensureGitPresentAndInitialized(_initTarget);
+    } catch (_) {}
     const { filePath, workspaceRoot } = req.body;
     if (!filePath) {
       return res.status(400).json({ error: "filePath is required" });
@@ -1901,9 +2032,190 @@ async function startServer() {
     }
   });
 
-  // Detect project type in the workspace folder
-  app.post("/api/fs/detect-project", (req, res) => {
-    const { folderPath, workspaceRoot } = req.body;
+  // Provision dummy/demo workspace folder in coder mode
+  app.post("/api/fs/create-demo", (req, res) => {
+    try {
+      const demoDir = path.resolve(process.cwd(), 'demo-workspace');
+      if (!fs.existsSync(demoDir)) {
+        fs.mkdirSync(demoDir, { recursive: true });
+      }
+      
+      const srcDir = path.join(demoDir, 'src');
+      if (!fs.existsSync(srcDir)) {
+        fs.mkdirSync(srcDir, { recursive: true });
+      }
+
+      // Write .gitignore
+      fs.writeFileSync(path.join(demoDir, '.gitignore'), `node_modules/\ndist/\n.DS_Store\n`, 'utf8');
+
+      // Write package.json
+      const pkg = {
+        name: "demo-workspace",
+        version: "1.0.0",
+        description: "Lumina Coder Demo Workspace",
+        scripts: {
+          dev: "vite",
+          build: "tsc && vite build"
+        },
+        dependencies: {
+          react: "^18.2.0",
+          "react-dom": "^18.2.0"
+        },
+        devDependencies: {
+          vite: "^5.0.0",
+          typescript: "^5.0.0",
+          "@types/react": "^18.2.0",
+          "@types/react-dom": "^18.2.0"
+        }
+      };
+      fs.writeFileSync(path.join(demoDir, 'package.json'), JSON.stringify(pkg, null, 2), 'utf8');
+
+      // Write index.html
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lumina Coder Demo</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>`;
+      fs.writeFileSync(path.join(demoDir, 'index.html'), html, 'utf8');
+
+      // Write App.tsx
+      const appTsx = `import React, { useState } from 'react';
+
+export default function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div style={{ padding: '32px', fontFamily: 'system-ui, sans-serif', maxWidth: '600px', margin: '0 auto' }}>
+      <h1 style={{ color: '#D97756', fontSize: '28px' }}>Welcome to Lumina Coder Demo!</h1>
+      <p style={{ color: '#aaa', lineHeight: '1.6' }}>This is a live workspace created to test real-time code changes, file status logs, and Git integration.</p>
+      
+      <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#1b1b1e', borderRadius: '12px', border: '1px solid #2d2d30' }}>
+        <p style={{ margin: '0 0 16px 0' }}>Click the button below to test interactivity:</p>
+        <button 
+          onClick={() => setCount(prev => prev + 1)}
+          style={{
+            backgroundColor: '#D97756',
+            color: '#fff',
+            border: 'none',
+            padding: '10px 20px',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: 'pointer'
+          }}
+        >
+          Clicks: {count}
+        </button>
+      </div>
+
+      <div style={{ marginTop: '32px', fontSize: '12px', color: '#666' }}>
+        Try editing <code>src/App.tsx</code> to see live-preview auto-reload in action!
+      </div>
+    </div>
+  );
+}`;
+      fs.writeFileSync(path.join(srcDir, 'App.tsx'), appTsx, 'utf8');
+
+      // Write index.css
+      const css = `body {
+  margin: 0;
+  background-color: #0d0c0c;
+  color: #f3f3f3;
+  -webkit-font-smoothing: antialiased;
+}`;
+      fs.writeFileSync(path.join(srcDir, 'index.css'), css, 'utf8');
+
+      // Write main.tsx
+      const mainTsx = `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`;
+      fs.writeFileSync(path.join(srcDir, 'main.tsx'), mainTsx, 'utf8');
+
+      // Run git init, git add, and initial commit
+      try {
+        const { execSync } = require('child_process');
+        execSync('git --version', { stdio: 'ignore' });
+        
+        let isGit = true;
+        try {
+          execSync('git rev-parse --is-inside-work-tree', { cwd: demoDir, stdio: 'ignore' });
+        } catch {
+          isGit = false;
+        }
+
+        if (!isGit) {
+          execSync('git init', { cwd: demoDir });
+          try {
+            execSync('git config user.name "Lumina User"', { cwd: demoDir });
+            execSync('git config user.email "user@lumina.local"', { cwd: demoDir });
+          } catch (_) {}
+          execSync('git add .', { cwd: demoDir });
+          execSync('git commit -m "Initial commit of Lumina Coder Demo"', { cwd: demoDir });
+        }
+      } catch (gitErr: any) {
+        console.warn('[LUMINA_DEBUG] Git init in demo creation failed:', gitErr.message);
+      }
+
+      res.json({ success: true, folderPath: demoDir.replace(/\\/g, '/') });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to create demo workspace", detail: err.message });
+    }
+  });
+
+  // Dummy wrapper to match final closing brackets safely
+  app.get("/api/dummy-placeholder", (req, res) => {
+    try {
+      console.log();
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to get git diff", detail: e.message });
+    }
+  });
+
+  // Detect project type using sandbox VM if available
+  app.post("/api/fs/detect-project", async (req, res) => {
+    const { folderPath, workspaceRoot, vmId } = req.body;
+
+    // Route through sandbox VM when available
+    if (sandbox.isInitialized() && vmId) {
+      try {
+        const targetPath = folderPath || workspaceRoot || '/workspace';
+        const result = await sandbox.agentRuntime.exec(
+          { id: vmId, tag: 'sandbox' },
+          { command: `cd "${targetPath}" && if [ -f package.json ]; then cat package.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); deps={**d.get('dependencies',{}), **d.get('devDependencies',{})}; print('vite' if 'vite' in deps else 'next' if 'next' in deps else 'react' if 'react' in deps else 'node'); print(d.get('name','unknown'))" 2>/dev/null || echo "unknown"; else echo "static"; fi`, timeoutMs: 10000 }
+        );
+
+        const lines = result.stdout.trim().split('\n');
+        const framework = lines[0] || 'unknown';
+        const typeMap: Record<string, string> = {
+          vite: 'vite', next: 'next', react: 'react',
+          node: 'node', static: 'static', unknown: 'unknown',
+        };
+
+        return res.json({
+          type: typeMap[framework] || 'unknown',
+          entryPoint: framework === 'static' ? 'index.html' : null,
+          framework: framework === 'unknown' ? null : framework,
+          sandboxed: true,
+        });
+      } catch (e: any) {
+        // Fall back to host detection
+      }
+    }
+
     const targetDir = folderPath
       ? resolveCoderPath(folderPath, workspaceRoot)
       : (workspaceRoot ? path.resolve(workspaceRoot) : process.cwd());
@@ -1956,13 +2268,21 @@ async function startServer() {
 
   // Report OS info for the AI to adapt its commands
   app.get("/api/os/info", (req, res) => {
+    const poolStatus = sandbox.isInitialized() ? sandbox.getPoolStatus() : null;
     res.json({
       platform: process.platform,
       isWindows: process.platform === 'win32',
       isMac: process.platform === 'darwin',
       isLinux: process.platform === 'linux',
-      shell: process.platform === 'win32' ? 'powershell.exe' : '/bin/bash',
+      shell: '/bin/bash',
       hostname: os.hostname(),
+      sandbox: {
+        enabled: sandbox.isInitialized(),
+        poolSize: poolStatus?.total || 0,
+        available: poolStatus?.available || 0,
+        vmCpu: sandbox.isInitialized() ? sandbox.getConfig().vmCpuCount : 0,
+        vmMemory: sandbox.isInitialized() ? sandbox.getConfig().vmMemoryMb : 0,
+      },
     });
   });
 
@@ -2213,9 +2533,47 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post('/api/preview/start', (req, res) => {
+  app.post('/api/preview/start', async (req, res) => {
     try {
       const workspaceRoot = resolveCoderPath(req.body?.folderPath);
+      let { vmId } = req.body;
+
+      if (!sandbox.isInitialized()) {
+        try {
+          await sandbox.initialize();
+        } catch (e: any) {
+          return res.status(503).json({ error: `Sandbox is required for previews and failed to initialize: ${e.message}` });
+        }
+      }
+
+      if (!vmId) {
+        try {
+          const acquired = await sandbox.acquireVm('preview-agent', workspaceRoot);
+          vmId = acquired.id;
+        } catch (e: any) {
+          return res.status(503).json({ error: `Failed to acquire Sandbox VM for preview: ${e.message}` });
+        }
+      }
+
+      try {
+        const preview = await sandbox.startPreview(
+          { id: vmId, tag: 'sandbox' },
+          '/workspace'
+        );
+        return res.json({
+          running: true,
+          url: `http://localhost:${preview.hostPort}`,
+          frameUrl: `http://localhost:${preview.hostPort}`,
+          logs: [`Preview started in VM '${vmId}' on port ${preview.hostPort}`],
+          detection: { kind: 'node', framework: 'Sandbox VM', packageManager: 'npm', devCommand: 'npm run dev', previewUrl: `http://localhost:${preview.hostPort}`, entryFile: null, notes: [] },
+          sandboxed: true,
+          vmId,
+        });
+      } catch (e: any) {
+        return res.status(500).json({ error: `Sandbox preview failed: ${e.message}` });
+      }
+
+      /*
       const samePreviewRoot = activePreviewRoot === workspaceRoot;
       activePreviewRoot = workspaceRoot;
       const detection = detectPreviewProject(workspaceRoot);
@@ -2278,6 +2636,7 @@ async function startServer() {
         logs: previewLogs,
         detection
       });
+      */
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -4155,8 +4514,14 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
   });
 
   // Graceful shutdown on Ctrl+C / SIGTERM
-  const shutdown = () => {
+  const shutdown = async () => {
     console.log('\n🛑 Shutting down server...');
+    try {
+      await sandbox.shutdown();
+      console.log('✅ Sandbox shut down.');
+    } catch (e: any) {
+      console.warn('⚠️ Sandbox shutdown error:', e.message);
+    }
     server.close(() => {
       console.log('✅ Server closed.');
       process.exit(0);
@@ -4165,6 +4530,11 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  process.on('uncaughtException', async (err) => {
+    console.error('❌ Uncaught exception:', err);
+    await sandbox.shutdown().catch(() => {});
+    process.exit(1);
+  });
 }
 
 startServer();

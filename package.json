@@ -7,8 +7,11 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server.ts",
     "dev:server": "cross-env NODE_ENV=development tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && npm run build:sandbox",
     "build:electron": "esbuild electron/main.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist-electron/main.cjs && esbuild electron/preload.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist-electron/preload.cjs",
+    "build:sandbox": "esbuild src/sandbox/index.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/sandbox.cjs",
+    "build:guest": "node scripts/bundle-guest-runtime.js",
+    "build:vm-image": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-vm-image.ps1 -OutputDir vm",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "dev:app": "npm run build:electron && concurrently --kill-others \"cross-env NODE_ENV=development tsx server.ts\" \"wait-on http://localhost:3000/api/health && electron .\"",
@@ -46,6 +49,14 @@
       {
         "from": "loading.html",
         "to": "loading.html"
+      },
+      {
+        "from": "vm",
+        "to": "vm"
+      },
+      {
+        "from": "scripts/build-vm-image.ps1",
+        "to": "scripts/build-vm-image.ps1"
       }
     ],
     "win": {
@@ -94,6 +105,7 @@
     "remark-gfm": "^4.0.1",
     "systeminformation": "^5.31.7",
     "turndown": "^7.2.4",
+    "uuid": "^14.0.0",
     "vite": "^6.2.3",
     "vite-plugin-pwa": "^1.3.0"
   },
@@ -102,6 +114,7 @@
     "@types/node": "^22.14.0",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.2.3",
+    "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "electron": "^42.3.0",

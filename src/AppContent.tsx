@@ -209,6 +209,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 import { LivePreviewPanel } from './components/LivePreviewPanel';
 import { DevToolsPanel } from './components/DevToolsPanel';
+import { VmCorePanel } from './components/VmCorePanel';
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
 import TranscriptionOptionsModal from './components/TranscriptionOptionsModal';
 import CoderWorkspaceView from './components/Coder/CoderWorkspaceView';
@@ -315,9 +316,21 @@ export default function AppContent({
     isMcpSaved, setIsMcpSaved,
     writingStyle, setWritingStyle,
     selectedProvider, setSelectedProvider,
+    aiProviderProfiles,
+    editingAiProfileId,
     handleProviderSelect,
     handleSaveAI,
     handleVerifyAI,
+    handleToggleAiProfile,
+    handleEditAiProfile,
+    handleDeleteAiProfile,
+    handleRenameAiProfile,
+    handleCloseAiProfileEditor,
+    handleUpdateAiProfileConfig,
+    handleToggleAiProfileModel,
+    handleSetAiProfileModelsVisible,
+    handleVerifyAiProfile,
+    handleSelectAiProfileModel,
     handleSaveSearch,
     handleVerifySearch,
     handleSaveMcp, useLocalModelsOnly, setUseLocalModelsOnly
@@ -529,6 +542,7 @@ export default function AppContent({
   const [retroFilter, setRetroFilter] = useState(false);
   const [verboseDebug, setVerboseDebug] = useState(false);
   const [isDevToolsOpen, setIsDevToolsOpen] = useState(false);
+  const [isVmCorePanelOpen, setIsVmCorePanelOpen] = useState(false);
   const [simLatency, setSimLatency] = useState(120);
   const [activeDevTab, setActiveDevTab] = useState<'status' | 'console' | 'perf' | 'storage' | 'flags'>('status');
   const [devLogs, setDevLogs] = useState<any[]>([]);
@@ -544,6 +558,15 @@ export default function AppContent({
   });
   const [localModelLoadingId, setLocalModelLoadingId] = useState<string | null>(null);
   const [localModelLoadingProgress, setLocalModelLoadingProgress] = useState(0);
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lumina_favorite_models') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [isFavoritesCollapsed, setIsFavoritesCollapsed] = useState(false);
+  const [collapsedModelCategories, setCollapsedModelCategories] = useState<Record<string, boolean>>({});
 
   // Downloaded local models list (synced from localStorage + server scan)
   const [downloadedModels, setDownloadedModels] = useState<any[]>(() => {
@@ -613,6 +636,11 @@ export default function AppContent({
   }, [availableModels]);
 
   const setActiveModelId = (id: string) => {
+    const profileModel = availableModels.find(model => model.id === id && model.providerProfileId);
+    if (profileModel?.providerProfileId && handleSelectAiProfileModel) {
+      handleSelectAiProfileModel(id, profileModel.providerProfileId);
+      return;
+    }
     setSelectedModel(id);
   };
 
@@ -621,6 +649,45 @@ export default function AppContent({
     if (!query) return activeModelList;
     return activeModelList.filter(model => model.name.toLowerCase().includes(query) || model.id.toLowerCase().includes(query));
   }, [activeModelList, modelSearchQuery]);
+
+  useEffect(() => {
+    localStorage.setItem('lumina_favorite_models', JSON.stringify(favoriteModelIds.slice(0, 20)));
+  }, [favoriteModelIds]);
+
+  const toggleFavoriteModel = useCallback((modelId: string) => {
+    setFavoriteModelIds(prev => {
+      if (prev.includes(modelId)) {
+        return prev.filter(id => id !== modelId);
+      }
+      if (prev.length >= 20) {
+        showToast('Favorite models are limited to 20');
+        return prev;
+      }
+      return [modelId, ...prev].slice(0, 20);
+    });
+  }, [showToast]);
+
+  const favoriteModels = useMemo(() => {
+    const byId = new Map(filteredModelList.map(model => [model.id, model]));
+    return favoriteModelIds.map(id => byId.get(id)).filter(Boolean);
+  }, [favoriteModelIds, filteredModelList]);
+
+  const providerModelCategories = useMemo(() => {
+    const groups = new Map<string, { id: string; label: string; models: any[] }>();
+    for (const model of filteredModelList) {
+      const categoryId = model.providerProfileId || model.providerProfileName || 'default-provider';
+      const label = model.providerProfileName || model.provider || 'Available Models';
+      if (!groups.has(categoryId)) {
+        groups.set(categoryId, { id: categoryId, label, models: [] });
+      }
+      groups.get(categoryId)!.models.push(model);
+    }
+    return Array.from(groups.values());
+  }, [filteredModelList]);
+
+  const toggleModelCategory = useCallback((categoryId: string) => {
+    setCollapsedModelCategories(prev => ({ ...prev, [categoryId]: !prev[categoryId] }));
+  }, []);
 
   const handleOpenLocalModelConfig = (id: string) => {
     const modelObj = activeModelList.find(m => m.id === id) || { id, name: id };
@@ -1488,6 +1555,14 @@ const startCoderPreview = useCallback(async () => {
         modelSearchQuery={modelSearchQuery}
         setModelSearchQuery={setModelSearchQuery}
         filteredModelList={filteredModelList}
+        favoriteModelIds={favoriteModelIds}
+        favoriteModels={favoriteModels}
+        toggleFavoriteModel={toggleFavoriteModel}
+        isFavoritesCollapsed={isFavoritesCollapsed}
+        setIsFavoritesCollapsed={setIsFavoritesCollapsed}
+        providerModelCategories={providerModelCategories}
+        collapsedModelCategories={collapsedModelCategories}
+        toggleModelCategory={toggleModelCategory}
         handleModelSelect={handleModelSelect}
         isTyping={isTyping}
         setIsTyping={setIsTyping}
@@ -1823,6 +1898,7 @@ const startCoderPreview = useCallback(async () => {
                           setIsHeaderMenuOpen(false);
                         } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(prev => !prev); setIsHeaderMenuOpen(false); } },
+                        { id: 'vm_core', label: 'VM Core Sandbox', icon: <Box size={16} />, onClick: () => { setIsVmCorePanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
@@ -1852,7 +1928,7 @@ const startCoderPreview = useCallback(async () => {
           </header>
         )}
 
-        {isCoderMode ? (
+        {isCoderMode && !isSettingsOpen && !isVmCorePanelOpen && !showAgentCreation ? (
           <CoderWorkspaceView
             isCoderLeftPanelOpen={isCoderLeftPanelOpen}
             setIsCoderLeftPanelOpen={setIsCoderLeftPanelOpen}
@@ -1953,6 +2029,17 @@ const startCoderPreview = useCallback(async () => {
                   handleVerifyAI={handleVerifyAI}
                   handleSaveAI={handleSaveAI}
                   isAiSaved={isAiSaved}
+                  aiProviderProfiles={aiProviderProfiles}
+                  editingAiProfileId={editingAiProfileId}
+                  handleToggleAiProfile={handleToggleAiProfile}
+                  handleEditAiProfile={handleEditAiProfile}
+                  handleDeleteAiProfile={handleDeleteAiProfile}
+                  handleRenameAiProfile={handleRenameAiProfile}
+                  handleCloseAiProfileEditor={handleCloseAiProfileEditor}
+                  handleUpdateAiProfileConfig={handleUpdateAiProfileConfig}
+                  handleToggleAiProfileModel={handleToggleAiProfileModel}
+                  handleSetAiProfileModelsVisible={handleSetAiProfileModelsVisible}
+                  handleVerifyAiProfile={handleVerifyAiProfile}
                   searchProvider={searchProvider}
                   setSearchProvider={setSearchProvider}
                   tavilyApiKey={tavilyApiKey}
@@ -1984,6 +2071,20 @@ const startCoderPreview = useCallback(async () => {
                   handleLoadLlamaModels={handleLoadLlamaModels}
                   handleLoadBridgeTools={handleLoadBridgeTools}
                   onLocalModelsChange={refreshLocalModels}
+                />
+              </motion.div>
+            ) : isVmCorePanelOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-zinc-950"
+              >
+                <VmCorePanel
+                  isOpen={isVmCorePanelOpen}
+                  onClose={() => setIsVmCorePanelOpen(false)}
+                  showToast={showToast}
                 />
               </motion.div>
             ) : showAgentCreation ? (
@@ -2213,28 +2314,93 @@ const startCoderPreview = useCallback(async () => {
                   />
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
                 {filteredModelList.length > 0 ? (
-                  filteredModelList.map(model => (
-                    <button
-                      key={model.id}
-                      onClick={() => handleModelSelect(model.id)}
-                      className={`w-full min-h-[46px] flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-colors ${
-                        activeModelId === model.id
-                          ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold'
-                          : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
-                      }`}
-                    >
-                      <div className={model.color || ''}>
-                        {model.icon}
-                      </div>
-                      <div className="flex-1 min-w-0 text-left">
-                        <div className="truncate">{model.name}</div>
-                        <div className="text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</div>
-                      </div>
-                      {activeModelId === model.id && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
-                    </button>
-                  ))
+                  <>
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--theme-muted)]">Categories</span>
+                      <span className="text-[10px] text-[var(--theme-secondary)]">{favoriteModelIds.length}/20 favorites</span>
+                    </div>
+
+                    <div className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
+                      <button
+                        onClick={() => setIsFavoritesCollapsed(!isFavoritesCollapsed)}
+                        className="w-full h-9 px-3 flex items-center gap-2 text-xs font-semibold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]"
+                      >
+                        {isFavoritesCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                        <Sparkles size={13} className="text-[var(--theme-accent)]" />
+                        <span className="flex-1 text-left">Favorites</span>
+                        <span className="text-[10px] text-[var(--theme-secondary)]">{favoriteModels.length}</span>
+                      </button>
+                      {!isFavoritesCollapsed && (
+                        <div className="p-1.5 space-y-1">
+                          {favoriteModels.length > 0 ? favoriteModels.map((model: any) => (
+                            <button
+                              key={`fav-${model.id}`}
+                              onClick={() => handleModelSelect(model.id)}
+                              className={`w-full min-h-[42px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                activeModelId === model.id ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
+                              }`}
+                            >
+                              <Sparkles size={13} className="text-[var(--theme-accent)] shrink-0" />
+                              <span className="flex-1 min-w-0 text-left">
+                                <span className="block truncate">{model.name}</span>
+                                <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</span>
+                              </span>
+                              {activeModelId === model.id && <Check size={13} className="text-[var(--theme-accent)] shrink-0" />}
+                            </button>
+                          )) : (
+                            <div className="px-3 py-4 text-center text-[11px] text-[var(--theme-secondary)]">
+                              Mark models as favorite from provider categories.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {providerModelCategories.map(category => {
+                      const collapsed = collapsedModelCategories[category.id];
+                      return (
+                        <div key={category.id} className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
+                          <button
+                            onClick={() => toggleModelCategory(category.id)}
+                            className="w-full h-9 px-3 flex items-center gap-2 text-xs font-semibold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]"
+                          >
+                            {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            <span className="flex-1 text-left truncate">{category.label}</span>
+                            <span className="text-[10px] text-[var(--theme-secondary)]">{category.models.length}</span>
+                          </button>
+                          {!collapsed && (
+                            <div className="p-1.5 space-y-1">
+                              {category.models.map(model => (
+                                <div key={`${category.id}-${model.id}`} className={`group w-full min-h-[46px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                  activeModelId === model.id ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
+                                }`}>
+                                  <button onClick={() => handleModelSelect(model.id)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                                    <div className={model.color || ''}>{model.icon}</div>
+                                    <span className="flex-1 min-w-0">
+                                      <span className="block truncate">{model.name}</span>
+                                      <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</span>
+                                    </span>
+                                  </button>
+                                  <button
+                                    onClick={() => toggleFavoriteModel(model.id)}
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                                      favoriteModelIds.includes(model.id) ? 'text-[var(--theme-accent)] bg-[var(--theme-accent)]/10' : 'text-[var(--theme-muted)] hover:text-[var(--theme-accent)] hover:bg-[var(--theme-hover-bg)]'
+                                    }`}
+                                    title={favoriteModelIds.includes(model.id) ? 'Remove favorite' : 'Add favorite'}
+                                  >
+                                    <Sparkles size={13} />
+                                  </button>
+                                  {activeModelId === model.id && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
                 ) : (
                   <div className="px-3 py-8 text-center text-xs text-[var(--theme-secondary)]">
                     No models found
@@ -2275,6 +2441,17 @@ const startCoderPreview = useCallback(async () => {
             handleVerifyAI={handleVerifyAI}
             handleSaveAI={handleSaveAI}
             isAiSaved={isAiSaved}
+            aiProviderProfiles={aiProviderProfiles}
+            editingAiProfileId={editingAiProfileId}
+            handleToggleAiProfile={handleToggleAiProfile}
+            handleEditAiProfile={handleEditAiProfile}
+            handleDeleteAiProfile={handleDeleteAiProfile}
+            handleRenameAiProfile={handleRenameAiProfile}
+            handleCloseAiProfileEditor={handleCloseAiProfileEditor}
+            handleUpdateAiProfileConfig={handleUpdateAiProfileConfig}
+            handleToggleAiProfileModel={handleToggleAiProfileModel}
+            handleSetAiProfileModelsVisible={handleSetAiProfileModelsVisible}
+            handleVerifyAiProfile={handleVerifyAiProfile}
             searchProvider={searchProvider}
             setSearchProvider={setSearchProvider}
             tavilyApiKey={tavilyApiKey}

@@ -1585,7 +1585,12 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 const runRes = await fetch('/api/terminal/execute', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ command: commandText, currentPath: coderWorkspacePath, workspaceRoot: coderWorkspacePath }),
+                  body: JSON.stringify({
+                    command: commandText,
+                    currentPath: coderWorkspacePath,
+                    workspaceRoot: coderWorkspacePath,
+                    isCoderMode: isCoderMode
+                  }),
                   signal
                 });
                 if (!runRes.ok) {

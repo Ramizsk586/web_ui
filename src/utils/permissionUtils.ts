@@ -54,5 +54,5 @@ export function shouldRequestCommandPermission(
 export function permissionModeLabel(mode: CoderPermissionMode) {
   if (mode === 'full-access') return 'Full access';
   if (mode === 'auto-review') return 'Auto-review';
-  return 'Default permissions';
+  return 'Default';
 }

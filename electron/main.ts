@@ -4,6 +4,15 @@ import fs from 'fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import http from 'http';
 
+// ─── Sandbox Integration ─────────────────────────────────────────────────────
+// The SandboxManager is bundled in server.cjs and initialized there.
+// This module provides the Electron-side IPC bridge for sandbox status
+// and coordinates sandbox lifecycle with the app startup.
+// ────────────────────────────────────────────────────────────────────────────
+
+let sandboxReady = false;
+let sandboxInitializationAttempted = false;
+
 // Suppress Electron's "Insecure CSP" dev warning.
 // 'unsafe-eval' is intentionally required at runtime by Monaco Editor,
 // react-syntax-highlighter, and other code introspection libraries.
@@ -251,6 +260,78 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
     return true;
   });
 
+  // ─── Sandbox IPC Handlers ────────────────────────────────────────────────
+  ipcMain.handle('sandbox:status', () => {
+    return { ready: sandboxReady, attempted: sandboxInitializationAttempted };
+  });
+
+  ipcMain.handle('sandbox:check', async () => {
+    try {
+      const http = require('http');
+      return new Promise((resolve) => {
+        http.get('http://localhost:3000/api/sandbox/health', (res: any) => {
+          let data = '';
+          res.on('data', (chunk: string) => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const status = JSON.parse(data);
+              sandboxReady = status.status === 'ready';
+              resolve(status);
+            } catch {
+              resolve({ status: 'error' });
+            }
+          });
+        }).on('error', () => {
+          resolve({ status: 'unavailable' });
+        });
+      });
+    } catch {
+      return { status: 'unavailable' };
+    }
+  });
+
+  ipcMain.handle('sandbox:initialize', async () => {
+    sandboxInitializationAttempted = true;
+    try {
+      const http = require('http');
+      return new Promise((resolve, reject) => {
+        const postData = JSON.stringify({});
+        const options = {
+          hostname: 'localhost',
+          port: 3000,
+          path: '/api/sandbox/initialize',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData),
+          },
+        };
+        const req = http.request(options, (res: any) => {
+          let data = '';
+          res.on('data', (chunk: string) => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const result = JSON.parse(data);
+              sandboxReady = result.success;
+              resolve(result);
+            } catch {
+              resolve({ success: false });
+            }
+          });
+        });
+        req.on('error', (err: Error) => {
+          sandboxReady = false;
+          reject(err);
+        });
+        req.write(postData);
+        req.end();
+      });
+    } catch (e: any) {
+      sandboxReady = false;
+      return { success: false, error: e.message };
+    }
+  });
+
   ipcMain.on('show-context-menu', () => {
     if (!mainWindow) return;
     const template: Electron.MenuItemConstructorOptions[] = [
@@ -308,15 +389,44 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
   // Phase 1: Show progress steps with delays, always waiting for minimum duration
   async function showLoadingSequence() {
     const steps = [
-      { text: 'Loading modules...', progress: 30, delay: 600 },
-      { text: 'Connecting to services...', progress: 55, delay: 700 },
-      { text: 'Preparing interface...', progress: 75, delay: 600 },
+      { text: 'Loading modules...', progress: 10, delay: 400 },
+      { text: 'Starting Lumina services...', progress: 25, delay: 500 },
+      { text: 'Initializing sandbox VMs...', progress: 45, delay: 800 },
+      { text: 'Preparing interface...', progress: 65, delay: 600 },
+      { text: 'Finalizing setup...', progress: 80, delay: 400 },
     ];
 
     for (const step of steps) {
       await new Promise(r => setTimeout(r, step.delay));
       if (!mainWindow || mainWindow.isDestroyed()) return;
       sendLoadingStatus(step.text, 'info', step.progress);
+    }
+
+    // Attempt sandbox initialization after server is ready
+    try {
+      sendLoadingStatus('Connecting to sandbox...', 'info', 85);
+      const http = require('http');
+      await new Promise<void>((resolve) => {
+        http.get('http://localhost:3000/api/sandbox/initialize', (res: any) => {
+          let data = '';
+          res.on('data', (chunk: string) => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const result = JSON.parse(data);
+              sandboxReady = result.success;
+              if (sandboxReady) {
+                sendLoadingStatus('Sandbox VMs ready', 'success', 90);
+              }
+            } catch {}
+            resolve();
+          });
+        }).on('error', () => {
+          sendLoadingStatus('Sandbox unavailable (will start on demand)', 'info', 90);
+          resolve();
+        });
+      });
+    } catch {
+      sendLoadingStatus('Sandbox unavailable', 'info', 90);
     }
   }
 

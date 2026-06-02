@@ -24,7 +24,7 @@ import { ScrapingProgressIndicator } from '../ScrapingProgressIndicator';
 import { WikiArticleArtifact } from '../WikiArticleArtifact';
 import { WikiToolCallIndicator } from '../WikiToolCallIndicator';
 import { InlineFileDiffPreview, RealtimeEditCounter } from './FileDiffNode';
-import { LuminaToolCallingAnimation, ToolCallingAnimation } from '../ui/Animations';
+import { LuminaToolCallingAnimation, ToolCallingAnimation, WebSearchAnimation } from '../ui/Animations';
 
 const getDomain = (url: string) => {
   try {
@@ -137,18 +137,171 @@ const getCommandFromLabel = (label?: string) => {
   return match?.[1] || '';
 };
 
-const ToolLogBlock = ({ title, lines, tone = 'default' }: { title: string; lines: string[]; tone?: 'default' | 'error' | 'success' }) => (
-  <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-[#242424] dark:bg-[#242424] text-[12px] leading-relaxed font-mono max-h-72 overflow-y-auto custom-scrollbar shadow-inner select-text">
-    <div className="px-3 py-2 border-b border-white/5 text-zinc-400 bg-black/10 sticky top-0">
-      <span className={tone === 'error' ? 'text-rose-300' : tone === 'success' ? 'text-emerald-300' : 'text-zinc-300'}>{title}</span>
+const parseAnsiToReact = (text: string) => {
+  if (!text) return null;
+  const parts: React.ReactNode[] = [];
+  const regex = /\x1b\[([0-9;]*)m/g;
+  let lastIndex = 0;
+  let currentColor = '';
+  let isBold = false;
+  let isUnderline = false;
+  let key = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      const chunk = text.slice(lastIndex, match.index);
+      parts.push(
+        <span 
+          key={key++} 
+          className={`s* ${isBold ? 'font-bold text-zinc-100' : ''} ${isUnderline ? 'underline' : ''}`}
+          style={{ color: currentColor || undefined }}
+        >
+          {chunk}
+        </span>
+      );
+    }
+    const codes = match[1].split(';').map(c => parseInt(c, 10));
+    for (const code of codes) {
+      if (code === 0) {
+        currentColor = '';
+        isBold = false;
+        isUnderline = false;
+      } else if (code === 1) {
+        isBold = true;
+      } else if (code === 4) {
+        isUnderline = true;
+      } else {
+        switch (code) {
+          case 30: currentColor = '#18181b'; break; // Black
+          case 31: currentColor = '#ef4444'; break; // Red
+          case 32: currentColor = '#10b981'; break; // Green
+          case 33: currentColor = '#f59e0b'; break; // Yellow
+          case 34: currentColor = '#3b82f6'; break; // Blue
+          case 35: currentColor = '#8b5cf6'; break; // Magenta
+          case 36: currentColor = '#06b6d4'; break; // Cyan
+          case 37: currentColor = '#f4f4f5'; break; // White
+          case 90: currentColor = '#71717a'; break; // Intense Gray
+          case 91: currentColor = '#f87171'; break; // Intense Red
+          case 92: currentColor = '#34d399'; break; // Intense Green
+          case 93: currentColor = '#fbbf24'; break; // Intense Yellow
+          case 94: currentColor = '#60a5fa'; break; // Intense Blue
+          case 95: currentColor = '#a78bfa'; break; // Intense Magenta
+          case 96: currentColor = '#22d3ee'; break; // Intense Cyan
+          case 97: currentColor = '#ffffff'; break; // Intense White
+        }
+      }
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(
+      <span 
+        key={key++} 
+        className={`s* ${isBold ? 'font-bold text-zinc-100' : ''} ${isUnderline ? 'underline' : ''}`}
+        style={{ color: currentColor || undefined }}
+      >
+        {text.slice(lastIndex)}
+      </span>
+    );
+  }
+  return parts;
+};
+
+const ToolLogBlock = ({ 
+  title, 
+  lines, 
+  tone = 'default',
+  isActive = false 
+}: { 
+  title: string; 
+  lines: string[]; 
+  tone?: 'default' | 'error' | 'success';
+  isActive?: boolean;
+}) => {
+  return (
+    <div className="rounded-xl border border-zinc-200/15 dark:border-white/10 bg-[#0c0c0e] text-[12px] leading-relaxed font-mono max-h-72 overflow-y-auto custom-scrollbar shadow-2xl select-text relative">
+      {/* OS Windows Bar imitation */}
+      <div className="px-3.5 py-2.5 border-b border-white/5 bg-[#141418] sticky top-0 flex items-center justify-between z-10 select-none">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="w-2 h-2 rounded-full bg-[#ff5f56]" />
+          <span className="w-2 h-2 rounded-full bg-[#ffbd2e]" />
+          <span className="w-2 h-2 rounded-full bg-[#27c93f]" />
+        </div>
+        
+        <span className="text-[10px] text-zinc-400 font-semibold truncate max-w-[60%] px-1 uppercase tracking-wider font-sans">
+          {title}
+        </span>
+        
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isActive ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[8px] font-bold tracking-widest font-sans">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+              RUNNING
+            </span>
+          ) : tone === 'success' ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[8px] font-bold tracking-widest font-sans">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+              SUCCESS
+            </span>
+          ) : tone === 'error' ? (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[8px] font-bold tracking-widest font-sans">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+              ERROR
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[8px] font-bold tracking-widest font-sans">
+              DONE
+            </span>
+          )}
+        </div>
+      </div>
+      
+      {/* Output Content */}
+      <div className="p-3.5 space-y-1 font-mono text-zinc-350 select-text bg-[#0c0c0e]">
+        {lines.map((line, idx) => {
+          const isCommandLine = line.trim().startsWith('$ ');
+          const formattedLine = isCommandLine ? (
+            <div className="text-zinc-100 font-semibold mb-1 flex items-start gap-1 pb-1 border-b border-white/[0.03]">
+              <span className="text-cyan-400 opacity-80 shrink-0 select-none">$</span>
+              <span>{line.replace(/^\$\s*/, '')}</span>
+            </div>
+          ) : (
+            <div className="whitespace-pre-wrap break-all min-h-[1.2em]">
+              {parseAnsiToReact(line)}
+            </div>
+          );
+          
+          return (
+            <motion.div 
+              key={idx}
+              initial={{ opacity: 0, x: -3 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.15, delay: Math.min(idx * 0.015, 0.3) }}
+            >
+              {formattedLine}
+            </motion.div>
+          );
+        })}
+        {isActive && (
+          <div className="flex items-center gap-1.5 text-zinc-500 italic text-[11px] mt-2 pt-1.5 border-t border-white/[0.02]">
+            <motion.span
+              animate={{ opacity: [1, 0, 1] }}
+              transition={{ repeat: Infinity, duration: 1.0 }}
+              className="inline-block w-1.5 h-3 bg-cyan-400 rounded-sm"
+            />
+            <span>Executing background tasks...</span>
+          </div>
+        )}
+      </div>
     </div>
-    <pre className="p-3 whitespace-pre-wrap break-words text-zinc-300">{lines.join('\n')}</pre>
-  </div>
-);
+  );
+};
 
 const renderPlainToolResult = (node: ToolCallNode) => {
   const parsed = parseNodeResult(node.result);
   const toolName = node.toolName || '';
+  const isActive = node.status === 'active';
 
   if (toolName === 'run_command') {
     const command = getCommandFromLabel(node.label);
@@ -161,7 +314,7 @@ const renderPlainToolResult = (node: ToolCallNode) => {
       stderr ? `${stdout ? '\n' : ''}${stderr}` : '',
       exitCode !== undefined ? `\nexit code: ${exitCode}` : ''
     ].filter(Boolean);
-    return <ToolLogBlock title="Shell" lines={lines} tone={exitCode === 0 ? 'success' : exitCode ? 'error' : 'default'} />;
+    return <ToolLogBlock title="Shell" lines={lines} tone={exitCode === 0 ? 'success' : exitCode ? 'error' : 'default'} isActive={isActive} />;
   }
 
   if (toolName === 'read_file') {
@@ -170,7 +323,7 @@ const renderPlainToolResult = (node: ToolCallNode) => {
     const range = typeof parsed === 'object' && parsed && (parsed as any).offset
       ? ` -Offset ${(parsed as any).offset}${(parsed as any).limit ? ` -TotalCount ${(parsed as any).limit}` : ''}`
       : '';
-    return <ToolLogBlock title="Read file" lines={[`$ Get-Content -Path ${filePath}${range}`, '', content]} />;
+    return <ToolLogBlock title="Read file" lines={[`$ Get-Content -Path ${filePath}${range}`, '', content]} isActive={isActive} />;
   }
 
   if (toolName === 'search_code') {
@@ -185,12 +338,12 @@ const renderPlainToolResult = (node: ToolCallNode) => {
         : files.map((f: any) => formatPath(f.filePath || f.path))),
       matches.length === 0 && files.length === 0 ? 'No matches' : ''
     ].filter(Boolean);
-    return <ToolLogBlock title="Shell" lines={lines} />;
+    return <ToolLogBlock title="Shell" lines={lines} isActive={isActive} />;
   }
 
   if (['write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file'].includes(toolName)) {
     const filePath = typeof parsed === 'object' && parsed ? formatPath((parsed as any).filePath || node.filePath) : node.filePath;
-    const replacements = typeof parsed === 'object' && parsed && (parsed as any).replacements ? ` (${(parsed as any).replacements} replacement${(parsed as any).replacements === 1 ? '' : 's'})` : '';
+    const replacements = typeof parsed === 'object' && parsed && (parsed as any).replacements ? ` (s* ${(parsed as any).replacements} replacement${(parsed as any).replacements === 1 ? '' : 's'})` : '';
     const action = toolName === 'edit_file' ? 'Edited file' :
       toolName === 'write_file' ? 'Wrote file' :
       toolName === 'create_file' ? 'Created file' :
@@ -199,11 +352,11 @@ const renderPlainToolResult = (node: ToolCallNode) => {
     return (
       <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-[#242424] dark:bg-[#242424] text-[12px] font-mono shadow-inner select-text overflow-hidden">
         <div className="px-3 py-2 border-b border-white/5 text-zinc-300 bg-black/10">{action}{replacements}</div>
-        <div className="p-3 space-y-2">
+        <div className="p-3 space-y-2 bg-[#121214]">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="px-2 py-1 rounded bg-zinc-900/70 border border-white/10 text-zinc-300">{filePath || node.filePath || 'workspace file'}</span>
-            {node.addedCount !== undefined && <span className="text-emerald-400">+{node.addedCount}</span>}
-            {node.removedCount !== undefined && <span className="text-rose-400">-{node.removedCount}</span>}
+            <span className="px-2 py-1 rounded bg-zinc-900 border border-white/10 text-zinc-300">{filePath || node.filePath || 'workspace file'}</span>
+            {node.addedCount !== undefined && <span className="text-emerald-400 font-semibold">+{node.addedCount}</span>}
+            {node.removedCount !== undefined && <span className="text-rose-400 font-semibold">-${node.removedCount}</span>}
           </div>
           {['write_file', 'edit_file', 'create_file'].includes(toolName) && (
             <InlineFileDiffPreview node={node} />
@@ -214,16 +367,18 @@ const renderPlainToolResult = (node: ToolCallNode) => {
   }
 
   if (typeof parsed === 'string') {
-    return <ToolLogBlock title={humanizeToolName(node.toolName, node.label)} lines={[parsed]} />;
+    return <ToolLogBlock title={humanizeToolName(node.toolName, node.label)} lines={[parsed]} isActive={isActive} />;
   }
 
   return (
     <ToolLogBlock
       title={humanizeToolName(node.toolName, node.label)}
       lines={[JSON.stringify(parsed, null, 2)]}
+      isActive={isActive}
     />
   );
 };
+
 
 interface NodeGraphProps {
   nodes: ToolCallNode[]; 
@@ -309,14 +464,19 @@ export const NodeGraph = React.memo(({
     return nodes;
   }, [nodes, hasThoughts]);
 
-  // Auto-expand any active/running nodes so the user can inspect progress in real time
+  // Auto-expand any active/running nodes so the user can inspect progress in real time (and auto-collapse completed ones)
   useEffect(() => {
     nodes.forEach(node => {
       if (node.status === 'active') {
-        setCollapsedToolNodes(prev => ({
-          ...prev,
-          [node.id]: false
-        }));
+        setCollapsedToolNodes(prev => {
+          if (prev[node.id] === false) return prev;
+          return { ...prev, [node.id]: false };
+        });
+      } else if (node.status === 'complete' || node.status === 'failed') {
+        setCollapsedToolNodes(prev => {
+          if (prev[node.id] === true) return prev;
+          return { ...prev, [node.id]: true };
+        });
       }
     });
   }, [nodes]);
@@ -492,9 +652,13 @@ export const NodeGraph = React.memo(({
               <div className="flex items-center gap-2.5 min-w-0 pr-4">
                 <div className="shrink-0 flex items-center justify-center">
                   {node.status === 'active' ? (
-                    node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_')
-                      ? <LuminaToolCallingAnimation />
-                      : <ToolCallingAnimation />
+                    node.toolName === 'web_search' || node.toolName === 'web_scrape' || node.toolName === 'fetch_url' ? (
+                      <WebSearchAnimation />
+                    ) : node.toolName?.startsWith('wiki_') ? (
+                      <LuminaToolCallingAnimation />
+                    ) : (
+                      <ToolCallingAnimation />
+                    )
                   ) : (
                     renderNodeIcon(node.icon)
                   )}
@@ -601,9 +765,10 @@ export const NodeGraph = React.memo(({
                     )}
 
                     {isScriptNode && (
-                      <div className="flex items-center gap-1.5 mt-2.5">
-                        <span className="text-[9px] font-bold tracking-widest uppercase px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800/60 text-zinc-550 dark:text-zinc-400 rounded border border-zinc-200/50 dark:border-zinc-700/50 font-mono">
-                          Script Execution
+                      <div className="flex items-center gap-2 mt-2.5">
+                        <span className="text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 bg-zinc-950 dark:bg-zinc-900 border border-emerald-550/25 dark:border-emerald-500/25 text-emerald-550 dark:text-emerald-400 rounded-md font-mono flex items-center gap-1.5 shadow-xs">
+                          <span className={`${node.status === 'active' ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500'} w-1.5 h-1.5 rounded-full inline-block`} />
+                          SHELL EXECUTION
                         </span>
                       </div>
                     )}
@@ -636,6 +801,8 @@ export const InlineToolCallCard = React.memo(({
   useEffect(() => {
     if (node.status === 'active') {
       setIsCollapsed(false);
+    } else if (node.status === 'complete' || node.status === 'failed') {
+      setIsCollapsed(true);
     }
   }, [node.status]);
 
@@ -656,9 +823,13 @@ export const InlineToolCallCard = React.memo(({
         <div className="flex items-center gap-2.5 min-w-0 pr-4">
           <div className="shrink-0 flex items-center justify-center">
             {node.status === 'active' ? (
-              node.toolName === 'web_scrape' || node.toolName?.startsWith('wiki_')
-                ? <LuminaToolCallingAnimation />
-                : <ToolCallingAnimation />
+              node.toolName === 'web_search' || node.toolName === 'web_scrape' || node.toolName === 'fetch_url' ? (
+                <WebSearchAnimation />
+              ) : node.toolName?.startsWith('wiki_') ? (
+                <LuminaToolCallingAnimation />
+              ) : (
+                <ToolCallingAnimation />
+              )
             ) : (
               renderNodeIcon(node.icon)
             )}
@@ -765,9 +936,10 @@ export const InlineToolCallCard = React.memo(({
               )}
 
               {isScriptNode && (
-                <div className="flex items-center gap-1.5 mt-2.5">
-                  <span className="text-[9px] font-bold tracking-widest uppercase px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800/60 text-zinc-550 dark:text-zinc-400 rounded border border-zinc-200/50 dark:border-zinc-700/50 font-mono">
-                    Script Execution
+                <div className="flex items-center gap-2 mt-2.5">
+                  <span className="text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 bg-zinc-950 dark:bg-zinc-900 border border-emerald-550/25 dark:border-emerald-500/25 text-emerald-550 dark:text-emerald-400 rounded-md font-mono flex items-center gap-1.5 shadow-xs">
+                    <span className={`${node.status === 'active' ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500'} w-1.5 h-1.5 rounded-full inline-block`} />
+                    SHELL EXECUTION
                   </span>
                 </div>
               )}
