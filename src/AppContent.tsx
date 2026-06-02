@@ -2495,7 +2495,7 @@ const startCoderPreview = useCallback(async () => {
               initial={{ opacity: 0, x: 24, scale: 0.95 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 12, scale: 0.95 }}
-              className="px-3 py-1.5 bg-zinc-950/95 border border-white/10 rounded-lg text-[10.5px] font-medium text-white shadow-lg backdrop-blur-md flex items-center gap-2 max-w-sm pointer-events-auto"
+              className="px-3 py-1.5 bg-zinc-950/95 border border-white/10 rounded-lg text-[10.5px] font-medium text-white shadow-lg backdrop-blur-md flex items-center gap-2 w-fit max-w-lg pointer-events-auto"
             >
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
               <span>{toast.message}</span>

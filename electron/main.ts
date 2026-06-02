@@ -338,6 +338,9 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
       { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => mainWindow!.webContents.setZoomFactor(Math.min(3.0, mainWindow!.webContents.getZoomFactor() + 0.1)) },
       { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => mainWindow!.webContents.setZoomFactor(Math.max(0.3, mainWindow!.webContents.getZoomFactor() - 0.1)) },
       { type: 'separator' }, { role: 'copy' }, { role: 'paste' }, { type: 'separator' },
+      { role: 'reload' },
+      { role: 'forceReload' },
+      { type: 'separator' },
       { label: 'Inspect', accelerator: 'F12', click: () => mainWindow?.webContents.toggleDevTools() },
     ];
     Menu.buildFromTemplate(template).popup({ window: mainWindow });

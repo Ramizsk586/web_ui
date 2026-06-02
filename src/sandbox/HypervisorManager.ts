@@ -35,12 +35,20 @@ export class HypervisorManager {
     } catch {}
 
     try {
-      const cpuInfo = execSync('systeminfo | findstr /C:"Virtualization Enabled In Firmware"', {
-        encoding: 'utf8',
-        timeout: 5000,
-      });
-      detection.cpuVirtualization = cpuInfo.toLowerCase().includes('yes');
-    } catch {}
+      const cpuVirtStr = execSync(
+        'powershell -NoProfile -Command "(Get-CimInstance -ClassName Win32_Processor).VirtualizationFirmwareEnabled"',
+        { encoding: 'utf8', timeout: 5000 }
+      );
+      detection.cpuVirtualization = cpuVirtStr.trim() === 'True';
+    } catch {
+      try {
+        const cpuInfo = execSync('systeminfo | findstr /R /C:"Virtualization"', {
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        detection.cpuVirtualization = cpuInfo.toLowerCase().includes('yes');
+      } catch {}
+    }
 
     try {
       const hvInfo = execSync(
@@ -111,21 +119,23 @@ export class HypervisorManager {
     } catch {}
 
     log.info(`Creating NAT switch '${VM_SWITCH_NAME}'...`);
+    // Hyper-V New-VMSwitch does not support -SwitchType NAT.
+    // Create an Internal switch, assign an IP, then set up NAT via New-NetNat.
     execSync(
-      `powershell -NoProfile -Command "New-VMSwitch -SwitchName '${VM_SWITCH_NAME}' -SwitchType NAT -NetAdapterName 'vEthernet (${VM_SWITCH_NAME})'"`,
+      `powershell -NoProfile -Command "New-VMSwitch -SwitchName '${VM_SWITCH_NAME}' -SwitchType Internal"`,
       { encoding: 'utf8', timeout: 30000 }
     );
 
     try {
       execSync(
-        `powershell -NoProfile -Command "New-NetIPAddress -IPAddress 192.168.137.1 -PrefixLength 24 -InterfaceAlias 'vEthernet (${VM_SWITCH_NAME})'"`,
+        `powershell -NoProfile -Command "New-NetIPAddress -IPAddress 192.168.137.1 -PrefixLength 24 -InterfaceAlias 'vEthernet (${VM_SWITCH_NAME})' -ErrorAction SilentlyContinue"`,
         { encoding: 'utf8', timeout: 10000 }
       );
     } catch {}
 
     try {
       execSync(
-        `powershell -NoProfile -Command "New-NetNat -Name '${VM_SWITCH_NAME}' -InternalIPInterfaceAddressPrefix 192.168.137.0/24"`,
+        `powershell -NoProfile -Command "New-NetNat -Name '${VM_SWITCH_NAME}' -InternalIPInterfaceAddressPrefix 192.168.137.0/24 -ErrorAction SilentlyContinue"`,
         { encoding: 'utf8', timeout: 10000 }
       );
     } catch {}

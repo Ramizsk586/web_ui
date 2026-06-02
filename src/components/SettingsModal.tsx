@@ -25,6 +25,7 @@ import {
   Layers,
   BookOpen,
   Download,
+  Eye,
   RefreshCw,
   Cpu,
   Activity,
@@ -381,7 +382,8 @@ export function SettingsModal({
         size: "1.15 GB",
         modified: "6 hours ago",
         publisher: "openbmb",
-        file: "minicpm5-1b-instruct-q8_0.gguf"
+        file: "minicpm5-1b-instruct-q8_0.gguf",
+        capabilities: ["Vision", "Reasoning"]
       },
       {
         id: "google/gemma-2-2b-it-GGUF",
@@ -390,7 +392,8 @@ export function SettingsModal({
         size: "1.67 GB",
         modified: "12 hours ago",
         publisher: "google",
-        file: "gemma-2-2b-it-q4_k_m.gguf"
+        file: "gemma-2-2b-it-q4_k_m.gguf",
+        capabilities: ["Reasoning"]
       },
       {
         id: "lmstudio-community/Llama-3.2-1B-Instruct-GGUF",
@@ -399,7 +402,8 @@ export function SettingsModal({
         size: "1.23 GB",
         modified: "1 day ago",
         publisher: "meta",
-        file: "Llama-3.2-1B-Instruct-Q8_0.gguf"
+        file: "Llama-3.2-1B-Instruct-Q8_0.gguf",
+        capabilities: ["Reasoning"]
       },
       {
         id: "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
@@ -408,7 +412,8 @@ export function SettingsModal({
         size: "1.02 GB",
         modified: "3 days ago",
         publisher: "Qwen",
-        file: "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+        file: "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+        capabilities: ["Tool Use", "Reasoning"]
       }
     ];
   });
@@ -1127,6 +1132,7 @@ export function SettingsModal({
         publisher,
         file: modelFile,
         path: actualPath,
+        capabilities: detailedModel.capabilities || ['Reasoning'],
       };
 
       setDownloadedModelsList(prev => {
@@ -3040,9 +3046,26 @@ export function SettingsModal({
                                             }}>
                                               {model.name}
                                             </span>
-                                            <span className="text-[10px] font-mono text-zinc-400 block mt-0.5 opacity-80">
-                                              {model.file}
-                                            </span>
+                                            <div className="flex items-center gap-1 mt-0.5">
+                                              {model.capabilities?.includes('Vision') && (
+                                                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded border border-emerald-500/25 bg-emerald-500/10 text-emerald-400" title="Vision">
+                                                  <Eye size={8} />
+                                                </span>
+                                              )}
+                                              {model.capabilities?.includes('Tool Use') && (
+                                                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded border border-violet-500/25 bg-violet-500/10 text-violet-400" title="Tool Use">
+                                                  <Hammer size={8} />
+                                                </span>
+                                              )}
+                                              {model.capabilities?.includes('Reasoning') && (
+                                                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded border border-amber-500/25 bg-amber-500/10 text-amber-400" title="Reasoning">
+                                                  <Brain size={8} />
+                                                </span>
+                                              )}
+                                              <span className="text-[10px] font-mono text-zinc-400 opacity-80">
+                                                {model.file}
+                                              </span>
+                                            </div>
                                           </div>
                                           {isLoaded && (
                                             <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 text-[9px] font-bold border border-emerald-500/20">
@@ -3280,7 +3303,9 @@ export function SettingsModal({
                                 return filtered.map((model) => {
                                   const isSelected = selectedModelId === model.id;
                                   const fit = getSmallestModelFit(model);
+                                  const supportsVision = model.capabilities?.includes('Vision');
                                   const supportsTools = model.capabilities?.includes('Tool Use');
+                                  const supportsReasoning = model.capabilities?.includes('Reasoning');
                                   return (
                                     <button
                                       key={model.id}
@@ -3304,14 +3329,19 @@ export function SettingsModal({
                                         </div>
                                         <p className="text-[10px] text-zinc-400 truncate mt-0.5 leading-tight">{model.description}</p>
                                         <div className="flex flex-wrap gap-1.5 mt-2">
-                                          {supportsTools && (
-                                            <span className="px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
-                                              Tool Use
+                                          {supportsVision && (
+                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-400 text-[8px] font-bold uppercase tracking-wide">
+                                              <Eye size={10} />
                                             </span>
                                           )}
-                                          {fit && (
-                                            <span className={`px-1.5 py-0.5 rounded-md border text-[8px] font-bold uppercase tracking-wide ${fit.className}`}>
-                                              {fit.label}
+                                          {supportsTools && (
+                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
+                                              <Hammer size={10} />
+                                            </span>
+                                          )}
+                                          {supportsReasoning && (
+                                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 text-[8px] font-bold uppercase tracking-wide">
+                                              <Brain size={10} />
                                             </span>
                                           )}
                                         </div>
@@ -3340,9 +3370,19 @@ export function SettingsModal({
                                     <h4 className="text-xs font-bold truncate max-w-[200px] text-zinc-800 dark:text-zinc-100">{detailedModel.id}</h4>
                                     <p className="text-[9px] mt-0.5 uppercase tracking-wide font-mono text-zinc-400">huggingface.co repository</p>
                                     <div className="flex flex-wrap gap-1.5 mt-2">
+                                      {detailedModel.capabilities?.includes('Vision') && (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-400" title="Vision">
+                                          <Eye size={12} />
+                                        </span>
+                                      )}
                                       {detailedModel.capabilities?.includes('Tool Use') && (
-                                        <span className="px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
-                                          Tool Use
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400" title="Tool Use">
+                                          <Hammer size={12} />
+                                        </span>
+                                      )}
+                                      {detailedModel.capabilities?.includes('Reasoning') && (
+                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400" title="Reasoning">
+                                          <Brain size={12} />
                                         </span>
                                       )}
                                       {activeDownloadFile && (

@@ -473,11 +473,11 @@ export function VmCorePanel({ isOpen, onClose, showToast }: VmCorePanelProps) {
                           <span>Hypervisor Host Status</span>
                         </h4>
                         <div className="text-[10px] text-zinc-400 space-y-1.5 font-mono relative z-10">
-                          <div>WSL Available: <span className={diagnostics?.host?.wslInstalled ? 'text-teal-400' : 'text-zinc-500'}>{diagnostics?.host?.wslInstalled ? 'DETECTED' : 'NOT DETECTED'}</span></div>
-                          <div>Hyper-V Available: <span className={diagnostics?.host?.hyperVSupported ? 'text-teal-400' : 'text-zinc-500'}>{diagnostics?.host?.hyperVSupported ? 'DETECTED' : 'NOT DETECTED'}</span></div>
-                          <div>CPU Virtualization: <span className={diagnostics?.host?.cpuVirtualization ? 'text-teal-400' : 'text-orange-400'}>{diagnostics?.host?.cpuVirtualization ? 'ENABLED' : 'DISABLED'}</span></div>
-                          <div>System Memory: <span className="text-zinc-300 font-bold">{diagnostics?.host?.totalRamGb ? `${diagnostics.host.totalRamGb} GB` : '8.00 GB (Shared)'}</span></div>
-                          <div>Free Disk Volume: <span className="text-zinc-300 font-bold">{diagnostics?.host?.freeDiskGb ? `${diagnostics.host.freeDiskGb} GB` : '20.00 GB'}</span></div>
+                          <div>WSL Available: <span className={diagnostics?.host ? (diagnostics?.host?.wslInstalled ? 'text-teal-400' : 'text-zinc-500') : 'text-zinc-600'}>{diagnostics ? (diagnostics.host?.wslInstalled ? 'DETECTED' : 'NOT DETECTED') : 'CHECKING...'}</span></div>
+                          <div>Hyper-V Available: <span className={diagnostics?.host ? (diagnostics?.host?.hyperVSupported ? 'text-teal-400' : 'text-zinc-500') : 'text-zinc-600'}>{diagnostics ? (diagnostics.host?.hyperVSupported ? 'DETECTED' : 'NOT DETECTED') : 'CHECKING...'}</span></div>
+                          <div>CPU Virtualization: <span className={diagnostics?.host ? (diagnostics?.host?.cpuVirtualization ? 'text-teal-400' : 'text-orange-400') : 'text-zinc-600'}>{diagnostics ? (diagnostics.host?.cpuVirtualization ? 'ENABLED' : 'DISABLED') : 'CHECKING...'}</span></div>
+                          <div>System Memory: <span className="text-zinc-300 font-bold">{diagnostics?.host?.totalRamGb ? `${diagnostics.host.totalRamGb} GB` : (diagnostics ? '8.00 GB (Shared)' : 'CHECKING...')}</span></div>
+                          <div>Free Disk Volume: <span className="text-zinc-300 font-bold">{diagnostics?.host?.freeDiskGb ? `${diagnostics.host.freeDiskGb} GB` : (diagnostics ? '20.00 GB' : 'CHECKING...')}</span></div>
                         </div>
                       </div>
 
