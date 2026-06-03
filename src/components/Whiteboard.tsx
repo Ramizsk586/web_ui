@@ -808,171 +808,244 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
     </button>
   );
 
+  const groupTitleClass = "mt-2 text-[10px] tracking-[0.18em] uppercase text-[var(--theme-muted)]/85 text-center";
+  const toolbarSectionClass = "flex h-[124px] shrink-0 flex-col justify-between rounded-2xl border border-white/6 bg-[rgba(255,255,255,0.03)] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
+  const panelButtonClass = "flex h-9 w-9 items-center justify-center rounded-xl border transition-all cursor-pointer";
+
   return (
     <div className="flex flex-col h-full bg-[var(--theme-input-bg)] select-none font-sans text-xs">
       {/* Dynamic Toolbar */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--theme-bg)]/80 border-b border-[var(--theme-border)]/35 overflow-x-auto custom-scrollbar shrink-0 backdrop-blur-sm">
-        {toolBtn('select', <MousePointer />, 'Select & move shapes')}
-        {toolBtn('fill', <PaintBucket />, 'Fill color / Paint shapes')}
-        {toolBtn('pen', <Pencil />, 'Pen')}
-        {toolBtn('eraser', <Eraser />, 'Eraser')}
-        {toolBtn('line', <Minus />, 'Line')}
-        {toolBtn('rect', <Square />, 'Rect')}
-        {toolBtn('circle', <Circle />, 'Circle')}
-        {toolBtn('triangle', <Triangle />, 'Triangle')}
-        {toolBtn('diamond', <Diamond />, 'Diamond')}
-        {toolBtn('arrow', <ArrowRight />, 'Arrow')}
-        {toolBtn('star', <Star />, 'Star')}
-        {toolBtn('text', <Type />, 'Text')}
+      <div className="shrink-0 border-b border-[var(--theme-border)]/35 bg-[linear-gradient(180deg,rgba(29,26,24,0.97),rgba(20,17,16,0.94))] px-3 py-2 backdrop-blur-md">
+        <div className="flex items-stretch gap-2 overflow-hidden">
+          <div className={`${toolbarSectionClass} w-[188px]`}>
+            <div className="grid grid-cols-3 gap-2">
+              {toolBtn('pen', <Pencil />, 'Pen')}
+              {toolBtn('eraser', <Eraser />, 'Eraser')}
+              {toolBtn('text', <Type />, 'Text')}
+              {toolBtn('fill', <PaintBucket />, 'Fill color / Paint shapes')}
+              <button
+                onClick={addStickyNote}
+                className={`${panelButtonClass} bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80`}
+                title="Add Sticky Note"
+                aria-label="Add Sticky Note"
+              >
+                <StickyNote size={16} className="text-yellow-500" />
+              </button>
+              {toolBtn('select', <MousePointer />, 'Select & move shapes')}
+            </div>
+            <div className={groupTitleClass}>Tools</div>
+          </div>
 
-        <div className="w-px h-5 bg-[var(--theme-border)]/35 mx-1 self-center" />
+          <div className={`${toolbarSectionClass} w-[128px]`}>
+            <div className="flex flex-col gap-2">
+              <div className="rounded-2xl border border-[#d4af6d]/65 bg-[#201a14] px-3 py-2 shadow-[0_0_0_1px_rgba(212,175,109,0.15)]">
+                <div className="flex items-center justify-between">
+                  <PaintBucket size={16} className="text-[#f2ddaa]" />
+                  <span className="text-[10px] font-mono font-bold text-[#f2ddaa]">{brushSize}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={brushSize}
+                  onChange={e => {
+                    const sz = Number(e.target.value);
+                    setBrushSize(sz);
+                    if (selectedActionIndex !== null) {
+                      setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, size: sz } : act));
+                    }
+                  }}
+                  className="mt-2 w-full cursor-pointer appearance-none rounded-lg accent-[#D97756]"
+                  title="Brush Size"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={undo}
+                  className={`${panelButtonClass} bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80`}
+                  title="Undo Canvas (Ctrl+Z)"
+                >
+                  <RotateCcw size={15} />
+                </button>
+                <button
+                  onClick={redo}
+                  className={`${panelButtonClass} bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80`}
+                  title="Redo Canvas (Ctrl+Y)"
+                >
+                  <RotateCw size={15} />
+                </button>
+              </div>
+            </div>
+            <div className={groupTitleClass}>Brushes</div>
+          </div>
 
-        <button 
-          onClick={addStickyNote} 
-          className="p-1.5 rounded-lg border bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80 flex items-center justify-center cursor-pointer transition-all"
-          title="Add Yellow Sticky Note"
-          aria-label="Add Sticky Note"
-        >
-          <StickyNote size={14} className="text-yellow-500" />
-        </button>
-
-        <div className="w-px h-5 bg-[var(--theme-border)]/35 mx-1 self-center" />
-
-        {/* Brush Color Palettes */}
-        <div className="flex gap-1.5 items-center mr-1">
-          {COLORS.map(c => (
-            <button 
-              key={c} 
-              onClick={() => {
-                setColor(c);
-                if (selectedActionIndex !== null) {
-                  setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: c } : act));
-                }
-              }} 
-              className="w-4 h-4 rounded-full border transition-all cursor-pointer relative"
-              style={{ 
-                background: c, 
-                borderColor: color === c ? '#D97756' : 'rgba(255,255,255,0.15)',
-                transform: color === c ? 'scale(1.25)' : 'scale(1)'
-              }}
-              title={`Use Color: ${c}`}
-            >
-              {color === c && (
-                <span className="absolute inset-0 m-auto w-1 h-1 rounded-full bg-black/40" />
+          <div className={`${toolbarSectionClass} min-w-0 flex-1`}>
+            <div className="grid grid-cols-6 gap-2">
+              {toolBtn('line', <Minus />, 'Line')}
+              {toolBtn('rect', <Square />, 'Rect')}
+              {toolBtn('circle', <Circle />, 'Circle')}
+              {toolBtn('triangle', <Triangle />, 'Triangle')}
+              {toolBtn('diamond', <Diamond />, 'Diamond')}
+              {toolBtn('arrow', <ArrowRight />, 'Arrow')}
+              {toolBtn('star', <Star />, 'Star')}
+              <button
+                onClick={clearCanvas}
+                className={`${panelButtonClass} bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-red-400 hover:text-red-300 hover:bg-red-500/10`}
+                title="Wipe canvas completely"
+              >
+                <Trash2 size={15} />
+              </button>
+              <button
+                onClick={exportCanvas}
+                className={`${panelButtonClass} bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80`}
+                title="Export Board to PNG image"
+              >
+                <Download size={15} />
+              </button>
+              {selectedActionIndex !== null ? (
+                <button
+                  onClick={() => {
+                    setActions(prev => prev.filter((_, idx) => idx !== selectedActionIndex));
+                    setSelectedActionIndex(null);
+                  }}
+                  className={`${panelButtonClass} bg-red-500/10 border-red-500/20 text-red-400 hover:text-red-300`}
+                  title="Delete selected item (Delete or Backspace)"
+                >
+                  <Trash2 size={15} />
+                </button>
+              ) : (
+                <div className="h-9 w-9 rounded-xl border border-dashed border-white/10 bg-transparent" />
               )}
-            </button>
-          ))}
-        </div>
+              <div className="col-span-2 flex items-center rounded-xl border border-[var(--theme-border)]/35 bg-[var(--theme-bg)]/45 px-2">
+                <span className="mr-2 text-[9px] font-mono font-bold uppercase tracking-[0.14em] text-[var(--theme-muted)]">Scale</span>
+                <select
+                  value={zoom}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setZoom(val === 'fit' ? 'fit' : parseFloat(val) as any);
+                    canvasRectRef.current = null;
+                  }}
+                  className="w-full cursor-pointer bg-transparent text-[11px] font-semibold text-[var(--theme-primary)] outline-none"
+                >
+                  <option value="fit">Fit</option>
+                  <option value="0.5">50%</option>
+                  <option value="1">100%</option>
+                  <option value="1.5">150%</option>
+                  <option value="2">200%</option>
+                </select>
+              </div>
+            </div>
+            <div className={groupTitleClass}>Shapes</div>
+          </div>
 
-        <div className="w-px h-5 bg-[var(--theme-border)]/35 mx-1 self-center" />
+          <div className={`${toolbarSectionClass} w-[370px]`}>
+            <div className="flex items-start gap-3">
+              <div className="grid grid-cols-2 gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColor('#000000');
+                    if (selectedActionIndex !== null) {
+                      setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: '#000000' } : act));
+                    }
+                  }}
+                  className="h-10 w-10 rounded-full border-2 border-[#d4af6d] shadow-[0_0_0_3px_rgba(212,175,109,0.2)]"
+                  style={{ background: '#000000' }}
+                  title="Black"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColor('#ffffff');
+                    if (selectedActionIndex !== null) {
+                      setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: '#ffffff' } : act));
+                    }
+                  }}
+                  className="h-10 w-10 rounded-full border border-white/25"
+                  style={{ background: '#ffffff' }}
+                  title="White"
+                />
+              </div>
+              <div className="grid flex-1 grid-cols-10 gap-x-2 gap-y-2">
+                {COLORS.map(c => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setColor(c);
+                      if (selectedActionIndex !== null) {
+                        setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: c } : act));
+                      }
+                    }}
+                    className="relative h-7 w-7 rounded-full border transition-all cursor-pointer"
+                    style={{
+                      background: c,
+                      borderColor: color === c ? '#f2ddaa' : 'rgba(255,255,255,0.22)',
+                      boxShadow: color === c ? '0 0 0 2px rgba(242,221,170,0.22)' : 'none',
+                      transform: color === c ? 'scale(1.08)' : 'scale(1)'
+                    }}
+                    title={`Use Color: ${c}`}
+                  >
+                    {color === c && (
+                      <span className="absolute inset-0 m-auto h-2 w-2 rounded-full bg-black/40" />
+                    )}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const picker = document.getElementById('whiteboard-color-picker') as HTMLInputElement | null;
+                    picker?.click();
+                  }}
+                  className="col-span-2 ml-1 flex h-7 items-center justify-center rounded-full border border-white/15 bg-[conic-gradient(from_180deg_at_50%_50%,#ff004c,#ff8a00,#ffe600,#27d64d,#00c2ff,#5e5eff,#c03bff,#ff004c)]"
+                  title="Custom color"
+                >
+                  <span className="h-4 w-4 rounded-full border border-white/60 bg-black/25 backdrop-blur-sm" />
+                </button>
+                <input
+                  id="whiteboard-color-picker"
+                  type="color"
+                  value={color}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setColor(next);
+                    if (selectedActionIndex !== null) {
+                      setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: next } : act));
+                    }
+                  }}
+                  className="hidden"
+                />
+              </div>
+            </div>
+            <div className={groupTitleClass}>Colours</div>
+          </div>
 
-        {/* Brush Size Slider */}
-        <div className="flex items-center gap-2 px-1.5 py-1 rounded-lg bg-[var(--theme-bg)]/45 border border-[var(--theme-border)]/35">
-          <span className="text-[9px] font-mono font-bold text-[var(--theme-muted)] w-6 text-right">{brushSize}</span>
-          <input 
-            type="range" 
-            min={1} 
-            max={100} 
-            value={brushSize} 
-            onChange={e => {
-              const sz = Number(e.target.value);
-              setBrushSize(sz);
-              if (selectedActionIndex !== null) {
-                setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, size: sz } : act));
-              }
-            }} 
-            className="w-14 h-1 bg-[var(--theme-border)]/25 rounded-lg appearance-none cursor-pointer accent-[#D97756]" 
-            title="Brush Size"
-          />
-        </div>
-
-        <div className="w-px h-5 bg-[var(--theme-border)]/35 mx-1 self-center" />
-
-        {/* Dynamic Zoom Scale Dropdown */}
-        <div className="flex items-center gap-1.5 px-1.5 py-1 rounded-lg bg-[var(--theme-bg)]/45 border border-[var(--theme-border)]/35">
-          <span className="text-[9px] font-mono font-bold text-[var(--theme-muted)]">Scale:</span>
-          <select
-            value={zoom}
-            onChange={(e) => {
-              const val = e.target.value;
-              setZoom(val === 'fit' ? 'fit' : parseFloat(val) as any);
-              canvasRectRef.current = null;
-            }}
-            className="bg-transparent text-[10px] text-[var(--theme-primary)] font-semibold border-none focus:outline-none cursor-pointer"
-          >
-            <option value="fit">Fit Screen</option>
-            <option value="0.5">50% (Small)</option>
-            <option value="1">100% (Original)</option>
-            <option value="1.5">150% (Large)</option>
-            <option value="2">200% (Zoomed)</option>
-          </select>
-        </div>
-
-        <div className="flex-1" />
-
-        {/* Action Controls */}
-        <div className="flex gap-1 items-center">
-          {selectedActionIndex !== null && (
-            <button 
-              onClick={() => {
-                setActions(prev => prev.filter((_, idx) => idx !== selectedActionIndex));
-                setSelectedActionIndex(null);
-              }} 
-              className="p-1.5 rounded-lg text-red-500 hover:text-red-400 hover:bg-red-500/15 transition-all cursor-pointer flex items-center justify-center"
-              title="Delete selected item (Delete or Backspace)"
-            >
-              <Trash2 size={13} />
-            </button>
-          )}
-          <button 
-            onClick={undo} 
-            className="p-1.5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80 transition-all cursor-pointer"
-            title="Undo Canvas (Ctrl+Z)"
-          >
-            <RotateCcw size={13} />
-          </button>
-          <button 
-            onClick={redo} 
-            className="p-1.5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80 transition-all cursor-pointer"
-            title="Redo Canvas (Ctrl+Y)"
-          >
-            <RotateCw size={13} />
-          </button>
-          <button 
-            onClick={clearCanvas} 
-            className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all cursor-pointer"
-            title="Wipe canvas completely"
-          >
-            <Trash2 size={13} />
-          </button>
-          <button 
-            onClick={exportCanvas} 
-            className="p-1.5 rounded-lg text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80 transition-all cursor-pointer"
-            title="Export Board to PNG image"
-          >
-            <Download size={13} />
-          </button>
           {onAttachToChat && (
-            <button
-              onClick={async () => {
-                const canvas = canvasRef.current;
-                if (!canvas) return;
-                try {
-                  const dataUrl = canvas.toDataURL('image/png');
-                  const res = await fetch(dataUrl);
-                  const blob = await res.blob();
-                  const file = new File([blob], `whiteboard-${Date.now()}.png`, { type: 'image/png' });
-                  onAttachToChat(file);
-                } catch (err) {
-                  console.error("Error attaching sketch:", err);
-                }
-              }}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#D97756] hover:bg-[#c36342] text-white flex items-center gap-1.5 transition-all cursor-pointer ml-1 animate-fade-in"
-              title="Attach this drawing directly to your chat input box as an image attachment"
-            >
-              <Send size={11} />
-              <span>Attach Sketch to Chat</span>
-            </button>
+            <div className={`${toolbarSectionClass} w-[154px]`}>
+              <button
+                onClick={async () => {
+                  const canvas = canvasRef.current;
+                  if (!canvas) return;
+                  try {
+                    const blob = await new Promise<Blob | null>((resolve) => {
+                      canvas.toBlob((nextBlob) => resolve(nextBlob), 'image/png');
+                    });
+                    if (!blob) {
+                      throw new Error('Failed to export whiteboard image');
+                    }
+                    const file = new File([blob], `whiteboard-${Date.now()}.png`, { type: 'image/png' });
+                    onAttachToChat(file);
+                  } catch (err) {
+                    console.error("Error attaching sketch:", err);
+                  }
+                }}
+                className="flex h-full min-h-[74px] w-full flex-col items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(180deg,#e07c57,#c85e3d)] px-3 text-center text-white shadow-[0_12px_24px_rgba(200,94,61,0.22)] transition-all hover:brightness-105"
+                title="Attach this drawing directly to your chat input box as an image attachment"
+              >
+                <Send size={18} />
+                <span className="text-[12px] font-bold leading-tight">Attach Sketch</span>
+              </button>
+              <div className={groupTitleClass}>Export</div>
+            </div>
           )}
         </div>
       </div>

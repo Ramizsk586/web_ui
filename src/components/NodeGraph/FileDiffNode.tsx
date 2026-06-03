@@ -7,6 +7,13 @@ export const getFileNameOnly = (path: string) => {
   return parts[parts.length - 1];
 };
 
+export const normalizeDisplayPath = (pathValue: string) => {
+  return String(pathValue || '')
+    .replace(/\\/g, '/')
+    .replace(/^[A-Za-z]:\/Project\/?/i, '')
+    .replace(/^\/+/, '');
+};
+
 export const computeLineDiff = (oldContent: string, newContent: string) => {
   const oldLines = oldContent ? oldContent.split('\n') : [];
   const newLines = newContent ? newContent.split('\n') : [];
@@ -112,12 +119,13 @@ interface InlineFileDiffPreviewProps {
 
 export const InlineFileDiffPreview = ({ node }: InlineFileDiffPreviewProps) => {
   const lines = buildVisualDiff(node.oldContent || '', node.newContent || '');
-  const fileName = getFileNameOnly(node.filePath || 'file');
+  const displayPath = normalizeDisplayPath(node.filePath || 'file');
+  const fileName = getFileNameOnly(displayPath);
   const added = node.addedCount ?? 0;
   const removed = node.removedCount ?? 0;
 
   if (!node.oldContent && !node.newContent) {
-    return <RealtimeEditCounter node={node} />;
+    return null;
   }
 
   return (
@@ -176,8 +184,8 @@ export const RealtimeEditCounter = ({ node }: RealtimeEditCounterProps) => {
   const isEditing = node.status === 'active';
   const isComplete = node.status === 'complete';
   
-  const targetAdded = node.addedCount ?? 45;
-  const targetRemoved = node.removedCount ?? 8;
+  const targetAdded = node.addedCount ?? 0;
+  const targetRemoved = node.removedCount ?? 0;
 
   useEffect(() => {
     if (isEditing) {
@@ -203,13 +211,13 @@ export const RealtimeEditCounter = ({ node }: RealtimeEditCounterProps) => {
     }
   }, [isEditing, isComplete, targetAdded, targetRemoved, node.addedCount, node.removedCount]);
 
-  const displayAdded = isEditing ? Math.max(1, added) : (node.addedCount ?? 0);
-  const displayRemoved = isEditing ? Math.max(1, removed) : (node.removedCount ?? 0);
+  const displayAdded = isEditing ? added : (node.addedCount ?? 0);
+  const displayRemoved = isEditing ? removed : (node.removedCount ?? 0);
 
   return (
     <div className="flex items-center gap-2 mt-1 px-1 py-0.5 select-none font-sans flex-wrap ml-7">
       <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-700/50 font-mono text-[11px] text-zinc-650 dark:text-zinc-350">
-        <span className="opacity-70">{getFileNameOnly(node.filePath || 'file.ts')}</span>
+        <span className="opacity-70">{getFileNameOnly(normalizeDisplayPath(node.filePath || 'file.ts'))}</span>
       </div>
       {displayAdded > 0 && (
         <span className="text-[11.5px] font-bold text-[#10b981] dark:text-[#34d399] font-mono">

@@ -38,6 +38,7 @@ import {
   Users,
   X
 } from 'lucide-react';
+import { MonacoCodeEditor } from './ui/MonacoCodeEditor';
 
 import type { SubAgent, OrchestrationConflict, AgentOrchestrationState } from '../hooks/useCoderMode';
 
@@ -80,6 +81,7 @@ const CoderWorkspacePanelComponent: React.FC<CoderWorkspacePanelProps> = ({
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState<boolean>(false);
   const [isLoadingContent, setIsLoadingContent] = useState<boolean>(false);
+  const [editorCursor, setEditorCursor] = useState({ line: 1, column: 1 });
   const [iframeKey, setIframeKey] = useState<number>(0);
   const [newFileName, setNewFileName] = useState<string>('');
   const [isCreatingNewFile, setIsCreatingNewFile] = useState<boolean>(false);
@@ -529,6 +531,18 @@ I would like to change this element to:
     if (file && file.relativePath) return file.relativePath;
     const parts = absolute.split('coder/');
     return parts.length > 1 ? parts[1] : absolute;
+  };
+
+  const getEditorLanguage = (filePath: string | null) => {
+    if (!filePath) return 'plaintext';
+    const lower = filePath.toLowerCase();
+    if (lower.endsWith('.tsx') || lower.endsWith('.ts')) return 'typescript';
+    if (lower.endsWith('.jsx') || lower.endsWith('.js')) return 'javascript';
+    if (lower.endsWith('.json')) return 'json';
+    if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return 'css';
+    if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'html';
+    if (lower.endsWith('.md')) return 'markdown';
+    return 'plaintext';
   };
 
   return (
@@ -1237,18 +1251,48 @@ I would like to change this element to:
                     <span className="text-[11px] mt-1 text-[#AD9F91]/65 max-w-[200px]">to read its contents and make manual edits here.</span>
                   </div>
                 ) : isEditing ? (
-                  <textarea
-                    value={editedContent}
-                    onChange={(e) => setEditedContent(e.target.value)}
-                    className="w-full h-full text-xs font-mono bg-[#110E0D] text-[#EDE6DD] border border-[#241C18] rounded-xl p-3.5 focus:outline-none focus:border-[#D97756] select-text resize-none line-clamp-15"
-                    style={{ minHeight: '160px', tabSize: 4 }}
-                  />
+                  <div className="h-full min-h-[320px] overflow-hidden rounded-xl border border-[#241C18] bg-[#110E0D]">
+                    <MonacoCodeEditor
+                      value={editedContent}
+                      language={getEditorLanguage(selectedFilePath)}
+                      path={selectedFilePath || undefined}
+                      onChange={setEditedContent}
+                      onSave={handleSaveFileContent}
+                      onMount={(editor) => {
+                        editor.onDidChangeCursorPosition((event) => {
+                          setEditorCursor({
+                            line: event.position.lineNumber,
+                            column: event.position.column,
+                          });
+                        });
+                      }}
+                    />
+                  </div>
                 ) : (
-                  <pre className="font-mono text-xs text-[#DDD2C4] p-3.5 rounded-xl bg-[#110E0D] overflow-auto whitespace-pre-wrap select-text selection:bg-[#D97756]/20 border border-[#241C18] text-left leading-relaxed">
-                    <code>{fileContent || '/* Empty File content */'}</code>
-                  </pre>
+                  <div className="h-full min-h-[320px] overflow-hidden rounded-xl border border-[#241C18] bg-[#110E0D]">
+                    <MonacoCodeEditor
+                      value={fileContent || '/* Empty File content */'}
+                      language={getEditorLanguage(selectedFilePath)}
+                      path={selectedFilePath || undefined}
+                      readOnly
+                      onMount={(editor) => {
+                        editor.onDidChangeCursorPosition((event) => {
+                          setEditorCursor({
+                            line: event.position.lineNumber,
+                            column: event.position.column,
+                          });
+                        });
+                      }}
+                    />
+                  </div>
                 )}
               </div>
+              {selectedFilePath && (
+                <div className="px-3.5 py-1.5 border-t border-[#241C18] bg-[#100D0C] text-[10px] text-[#AD9F91] font-mono flex items-center justify-between shrink-0">
+                  <span>{getEditorLanguage(selectedFilePath).toUpperCase()}</span>
+                  <span>Ln {editorCursor.line}, Col {editorCursor.column}</span>
+                </div>
+              )}
             </div>
           </div>
         )}

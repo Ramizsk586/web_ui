@@ -159,23 +159,51 @@ export function useLlamaBridge({
   const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
 
   const normalizeTools = (tools: ToolDefinition[] = []) => tools.map((tool) => {
+    const functionName = tool.function?.name;
     const parameters = tool.function?.parameters && typeof tool.function.parameters === 'object'
       ? tool.function.parameters
-      : { type: 'object', properties: {}, required: [] };
+      : null;
+
+    if (!functionName) {
+      return null;
+    }
+
+    if (!parameters) {
+      return {
+        type: 'function' as const,
+        function: {
+          name: functionName
+        }
+      };
+    }
+
     const compactParameters = compactToolSchema({
       type: parameters.type || 'object',
       properties: parameters.properties || {},
       required: Array.isArray(parameters.required) ? parameters.required : []
     });
 
+    const hasParameterShape =
+      Object.keys(compactParameters.properties || {}).length > 0 ||
+      (compactParameters.required?.length || 0) > 0;
+
+    if (!hasParameterShape) {
+      return {
+        type: 'function' as const,
+        function: {
+          name: functionName
+        }
+      };
+    }
+
     return {
       type: 'function' as const,
       function: {
-        name: tool.function.name,
+        name: functionName,
         parameters: compactParameters
       }
     };
-  });
+  }).filter(Boolean);
 
   const handleTestLlamaConnection = async () => {
     setAiVerificationState('verifying');

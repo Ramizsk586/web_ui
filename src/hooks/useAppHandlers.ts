@@ -83,6 +83,24 @@ const compressToolResultForApi = (name: string, result: any): string => {
   return `${str.substring(0, 2500)}\n\n... [Truncated to save token rate limits]`;
 };
 
+const normalizeToolFilePath = (filePath: string, workspaceRoot?: string) => {
+  const raw = String(filePath || '').replace(/\\/g, '/').trim();
+  if (!raw) return '';
+
+  const withoutLeading = raw.replace(/^\/+/, '');
+  const normalizedRoot = String(workspaceRoot || '').replace(/\\/g, '/').replace(/\/+$/, '');
+
+  if (normalizedRoot) {
+    const escapedRoot = normalizedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rootPattern = new RegExp(`^${escapedRoot}/?`, 'i');
+    if (rootPattern.test(raw)) {
+      return raw.replace(rootPattern, '');
+    }
+  }
+
+  return withoutLeading.replace(/^[A-Za-z]:\/Project\/?/i, '');
+};
+
 export interface UseAppHandlersParams {
   input: string;
   setInput: (v: string) => void;
@@ -875,7 +893,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     try {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       
-      let activeTools = (!isCoderMode || shouldRunCoderAgent) ? buildActiveTools() : [];
+      let activeTools = buildActiveTools();
       if (isDeepSearchEnabled && !isCoderMode) {
         const existingNames = new Set(activeTools.map((tool: any) => tool?.function?.name).filter(Boolean));
         for (const tool of deepResearchTools) {
@@ -884,7 +902,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
           }
         }
       }
-      if (shouldRunCoderAgent) {
+      if (isCoderMode) {
         activeTools.push(
           {
             type: 'function',
@@ -1374,10 +1392,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             
             const isScrape = name === 'web_scrape' || name === 'fetch_url';
             const readRange = name === 'read_file' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
+            const normalizedArgPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
             const node: ToolCallNode = {
               id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
               type: 'tool',
-              label: isScrape ? `Web Scraper (${args.url})` : name === 'run_command' ? `Terminal command (${args.command})` : `${name} ${args.filePath ? `(${args.filePath})` : ''}${readRange}`,
+              label: isScrape ? `Web Scraper (${args.url})` : name === 'run_command' ? `Terminal command (${args.command})` : `${name} ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}`,
               status: 'active',
               toolName: name,
               argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
@@ -1399,9 +1418,9 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                     name.includes('read') || name.includes('file') ? 'file' :
                     name.includes('edit') || name.includes('create') ? 'edit' :
                     'sparkles',
-              filePath: args.filePath || '',
-              addedCount: name === 'write_file' ? (args.content ? args.content.split('\n').length : 15) : (name === 'edit_file' ? 45 : undefined),
-              removedCount: name === 'write_file' ? 0 : (name === 'edit_file' ? 8 : undefined)
+              filePath: normalizedArgPath || '',
+              addedCount: undefined,
+              removedCount: undefined
             };
             currentCallNodes.push(node);
             toolCallNodes.push(node);
@@ -1437,7 +1456,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
               }
               const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
               if (name === 'create_file') {
-                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 if (cleanedPath.includes('/') && !args.isDirectory) {
                   const folderPart = cleanedPath.substring(0, cleanedPath.lastIndexOf('/'));
@@ -1451,30 +1470,30 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ filePath: fullPath, isDirectory: !!args.isDirectory, content: args.content, ...workspaceArg }), signal
                 });
-                resultValue = await createRes.json();
+                resultValue = { ...(await createRes.json()), filePath: cleanedPath, action: args.isDirectory ? 'created_directory' : 'created_file' };
                 showToast(`Created ${cleanedPath}`);
               } else if (name === 'delete_file') {
-                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 const delRes = await fetch('/api/fs/delete', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ filePath: fullPath, ...workspaceArg }), signal
                 });
-                resultValue = await delRes.json();
+                resultValue = { ...(await delRes.json()), filePath: cleanedPath, action: 'deleted_file' };
                 showToast(`Deleted ${cleanedPath}`);
               } else if (name === 'rename_file') {
-                const oldPath = args.filePath.replace(/^\/+/, '');
-                const newPath = args.newPath.replace(/^\/+/, '');
+                const oldPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
+                const newPath = normalizeToolFilePath(args.newPath, coderWorkspacePath);
                 const fullOldPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${oldPath}` : `./${oldPath}`;
                 const fullNewPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${newPath}` : `./${newPath}`;
                 const moveRes = await fetch('/api/fs/move', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ oldPath: fullOldPath, newPath: fullNewPath, ...workspaceArg }), signal
                 });
-                resultValue = await moveRes.json();
+                resultValue = { ...(await moveRes.json()), filePath: newPath, oldPath, newPath, action: 'renamed_file' };
                 showToast(`Renamed ${oldPath} → ${newPath}`);
               } else if (name === 'write_file') {
-                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 
                 let oldContent = '';
@@ -1518,10 +1537,18 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   matchingNode.removedCount = diffValues.removed;
                   matchingNode.oldContent = oldContent;
                   matchingNode.newContent = newContent;
+                  matchingNode.filePath = cleanedPath;
                 }
+                resultValue = {
+                  ...resultValue,
+                  filePath: cleanedPath,
+                  action: oldContent ? 'updated_file' : 'created_file',
+                  addedCount: diffValues.added,
+                  removedCount: diffValues.removed
+                };
                 showToast(`Wrote ${cleanedPath}`);
               } else if (name === 'read_file') {
-                const cleanedPath = args.filePath.replace(/^\/+/, '');
+                const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 const readBody: any = { filePath: fullPath, ...workspaceArg };
                 if (args.offset) readBody.offset = Number(args.offset);
@@ -1532,7 +1559,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   body: JSON.stringify(readBody),
                   signal
                 });
-                resultValue = await readRes.json();
+                resultValue = { ...(await readRes.json()), filePath: cleanedPath };
                 const range = args.offset ? ` [offset=${args.offset}${args.limit ? `, limit=${args.limit}` : ''}]` : '';
                 showToast(`Read ${cleanedPath}${range}`);
               } else if (name === 'search_code') {
@@ -1590,7 +1617,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   showToast(`Found ${matches.length} match${matches.length === 1 ? '' : 'es'}`);
                 }
               } else if (name === 'analyze_file') {
-                const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
+                const cleanedPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
                 if (!cleanedPath) throw new Error("LSP_Experimental requires filePath");
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 const lspRes = await fetch('/api/lsp/analyze', {
@@ -1599,10 +1626,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
                   signal
                 });
-                resultValue = await lspRes.json();
+                resultValue = { ...(await lspRes.json()), filePath: cleanedPath };
                 showToast(`LSP analyzed ${cleanedPath}`);
               } else if (name === 'edit_file') {
-                const cleanedPath = String(args.filePath || '').replace(/^\/+/, '');
+                const cleanedPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
                 const searchText = String(args.search || '');
                 const replaceText = String(args.replace ?? '');
                 if (!cleanedPath || !searchText) throw new Error("edit_file requires filePath and search");
@@ -1633,8 +1660,16 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   matchingNode.removedCount = diffValues.removed;
                   matchingNode.oldContent = oldContent;
                   matchingNode.newContent = newContentVal;
+                  matchingNode.filePath = cleanedPath;
                 }
-                resultValue = { ...resultValue, replacements: args.all ? occurrences : 1 };
+                resultValue = {
+                  ...resultValue,
+                  filePath: cleanedPath,
+                  replacements: args.all ? occurrences : 1,
+                  addedCount: diffValues.added,
+                  removedCount: diffValues.removed,
+                  action: 'edited_file'
+                };
                 showToast(`Patched ${cleanedPath}`);
               } else if (name === 'run_skill') {
                 const skillId = String(args.skillId || '');

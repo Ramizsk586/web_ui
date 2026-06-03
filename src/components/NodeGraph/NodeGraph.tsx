@@ -24,7 +24,7 @@ import { ScrapingResultArtifact } from '../ScrapingResultArtifact';
 import { ScrapingProgressIndicator } from '../ScrapingProgressIndicator';
 import { WikiArticleArtifact } from '../WikiArticleArtifact';
 import { WikiToolCallIndicator } from '../WikiToolCallIndicator';
-import { InlineFileDiffPreview, RealtimeEditCounter } from './FileDiffNode';
+import { InlineFileDiffPreview, RealtimeEditCounter, normalizeDisplayPath } from './FileDiffNode';
 import { LuminaToolCallingAnimation, ToolCallingAnimation, WebSearchAnimation } from '../ui/Animations';
 
 const getDomain = (url: string) => {
@@ -343,8 +343,10 @@ const renderPlainToolResult = (node: ToolCallNode) => {
   }
 
   if (['write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file'].includes(toolName)) {
-    const filePath = typeof parsed === 'object' && parsed ? formatPath((parsed as any).filePath || node.filePath) : node.filePath;
-    const replacements = typeof parsed === 'object' && parsed && (parsed as any).replacements ? ` (s* ${(parsed as any).replacements} replacement${(parsed as any).replacements === 1 ? '' : 's'})` : '';
+    const filePathValue = typeof parsed === 'object' && parsed ? String((parsed as any).filePath || node.filePath || '') : String(node.filePath || '');
+    const filePath = formatPath(normalizeDisplayPath(filePathValue));
+    const replacementsCount = typeof parsed === 'object' && parsed ? Number((parsed as any).replacements || 0) : 0;
+    const replacements = replacementsCount > 0 ? ` (${replacementsCount} replacement${replacementsCount === 1 ? '' : 's'})` : '';
     const action = toolName === 'edit_file' ? 'Edited file' :
       toolName === 'write_file' ? 'Wrote file' :
       toolName === 'create_file' ? 'Created file' :

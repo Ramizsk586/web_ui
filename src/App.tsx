@@ -133,8 +133,7 @@ export default function App() {
     rightIframeRef: workspace.rightIframeRef,
     iframeKey: workspace.iframeKey,
     rightPreviewSubpath: workspace.rightPreviewSubpath,
-    showToast,
-    setFloatingEditFile: workspace.setFloatingEditFile
+    showToast
   });
 
   const smartPopup = null;

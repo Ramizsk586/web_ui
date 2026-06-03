@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   X, 
   Save, 
@@ -22,6 +22,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { MonacoCodeEditor } from './ui/MonacoCodeEditor';
 
 interface FloatingCodeEditorProps {
   filePath: string;
@@ -39,54 +40,6 @@ interface TabFile {
   cursorLine: number;
   cursorCol: number;
 }
-
-// Warm refined Claude palette for syntax highlights
-const HIGHLIGHT_PATTERNS: Record<string, { pattern: RegExp; color: string }[]> = {
-  js: [
-    { pattern: /\/\/[^\n]*$/gm, color: '#8F8273' }, // Warm gray comment
-    { pattern: /\/\*[\s\S]*?\*\//g, color: '#8F8273' },
-    { pattern: /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, color: '#E09F67' }, // Rich warm string
-    { pattern: /`(?:[^`\\]|\\.)*`/g, color: '#E09F67' },
-    { pattern: /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|new|this|try|catch|throw|typeof|instanceof|default)\b/g, color: '#D97756' }, // Coral keyword
-    { pattern: /\b(true|false|null|undefined)\b/g, color: '#D97756' },
-    { pattern: /\b\d+(?:\.\d+)?\b/g, color: '#B5CEA8' },
-  ],
-  ts: [
-    { pattern: /\/\/[^\n]*$/gm, color: '#8F8273' },
-    { pattern: /\/\*[\s\S]*?\*\//g, color: '#8F8273' },
-    { pattern: /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, color: '#E09F67' },
-    { pattern: /`(?:[^`\\]|\\.)*`/g, color: '#E09F67' },
-    { pattern: /\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|new|this|try|catch|interface|type|extends|implements|readonly|enum|as|any|void|string|number|boolean|unknown|never)\b/g, color: '#D97756' },
-    { pattern: /\b(true|false|null|undefined)\b/g, color: '#D97756' },
-    { pattern: /\b\d+(?:\.\d+)?\b/g, color: '#B5CEA8' },
-  ],
-  json: [
-    { pattern: /"(?:[^"\\]|\\.)*"(?=\s*:)/g, color: '#EDE6DD' },
-    { pattern: /"(?:[^"\\]|\\.)*"/g, color: '#E09F67' },
-    { pattern: /\b(true|false|null)\b/g, color: '#D97756' },
-    { pattern: /\b\d+(?:\.\d+)?\b/g, color: '#B5CEA8' },
-  ],
-  css: [
-    { pattern: /\/\*[\s\S]*?\*\//g, color: '#8F8273' },
-    { pattern: /:[^;]+;/g, color: '#E09F67' },
-    { pattern: /\.[a-zA-Z0-9_\-]+/g, color: '#F1ECE4' },
-    { pattern: /#[a-zA-Z0-9_\-]+/g, color: '#F1ECE4' },
-    { pattern: /@\w+\b/g, color: '#D97756' },
-  ],
-  html: [
-    { pattern: /<!--[\s\S]*?-->/g, color: '#8F8273' },
-    { pattern: /<\/?[a-zA-Z0-9:]+\b/g, color: '#D97756' },
-    { pattern: /"[^"]*"/g, color: '#E09F67' },
-    { pattern: /=[a-zA-Z0-9"]+/g, color: '#AD9F91' },
-  ],
-  md: [
-    { pattern: /^#{1,6}\s+.*/gm, color: '#D97756' },
-    { pattern: /\*\*(?:[^*]+)\*\*/g, color: '#E09F67' },
-    { pattern: /`[^`]+`/g, color: '#EDE6DD' },
-    { pattern: /^\s*[-*+]\s+/gm, color: '#AD9F91' },
-    { pattern: /^\s*\d+\.\s+/gm, color: '#AD9F91' },
-  ],
-};
 
 const getFileExt = (name: string): string => {
   const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
@@ -119,18 +72,12 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
   const [showFind, setShowFind] = useState(false);
   const [findQuery, setFindQuery] = useState('');
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   const activeFile = useMemo(() => {
     return openFiles.find(f => f.path === activePath) || null;
   }, [openFiles, activePath]);
 
   const fileExt = useMemo(() => {
     return activeFile ? getFileExt(activeFile.name) : '';
-  }, [activeFile]);
-
-  const lines = useMemo(() => {
-    return activeFile ? activeFile.editedCode.split('\n') : [];
   }, [activeFile]);
 
   const isPreviewable = useMemo(() => {
@@ -279,28 +226,12 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeFile, handleSaveActive]);
 
-  const handleCodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const code = e.target.value;
+  const handleCodeChange = (code: string) => {
     if (!activeFile) return;
     setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? {
       ...f,
       editedCode: code,
       isModified: code !== f.content
-    } : f));
-  };
-
-  const handleCursorChange = () => {
-    const ta = textareaRef.current;
-    if (!ta || !activeFile) return;
-    const value = ta.value;
-    const selection = ta.selectionStart;
-    const line = value.slice(0, selection).split('\n').length;
-    const col = selection - value.lastIndexOf('\n', selection - 1);
-    
-    setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? {
-      ...f,
-      cursorLine: line,
-      cursorCol: col
     } : f));
   };
 
@@ -319,42 +250,6 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
       }
       return filtered;
     });
-  };
-
-  // Regexp highlights
-  const renderHighlighted = (line: string, ext: string) => {
-    if (!ext || !HIGHLIGHT_PATTERNS[ext]) return line;
-    const patterns = HIGHLIGHT_PATTERNS[ext];
-    let result: React.ReactNode[] = [line];
-    
-    patterns.forEach(({ pattern, color }) => {
-      const newResult: React.ReactNode[] = [];
-      result.forEach((node, i) => {
-        if (typeof node !== 'string') {
-          newResult.push(node);
-          return;
-        }
-        let lastIndex = 0;
-        const matches = [...node.matchAll(new RegExp(pattern, 'g'))];
-        matches.forEach((match) => {
-          const idx = match.index ?? 0;
-          if (idx > lastIndex) {
-            newResult.push(node.slice(lastIndex, idx));
-          }
-          newResult.push(
-            <span key={`${i}-${idx}`} style={{ color }} className="transition-all">
-              {match[0]}
-            </span>
-          );
-          lastIndex = idx + match[0].length;
-        });
-        if (lastIndex < node.length) {
-          newResult.push(node.slice(lastIndex));
-        }
-      });
-      result = newResult;
-    });
-    return result;
   };
 
   const findMatchesCount = useMemo(() => {
@@ -775,74 +670,27 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
                   })()}
                 </div>
               ) : (
-                <>
-                  {/* Left Gutter */}
-                  {showLineNumbers && (
-                    <div
-                      className="shrink-0 overflow-hidden py-4 text-right select-none pr-3.5 bg-[#131110]/55"
-                      style={{
-                        width: 44,
-                        borderRight: '1px solid #2C241E',
-                        fontSize,
-                        lineHeight: `${fontSize + 6}px`,
-                        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                      }}
-                    >
-                      {lines.map((_, i) => (
-                        <div
-                          key={i}
-                          className="font-mono text-[9px] select-none"
-                          style={{
-                            color: i + 1 === activeFile.cursorLine ? '#EDE6DD' : '#51473E',
-                            fontWeight: i + 1 === activeFile.cursorLine ? 600 : 400,
-                          }}
-                        >
-                          {i + 1}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Master Textarea Editor Pane */}
-                  <div className="flex-1 relative overflow-auto custom-scrollbar h-full bg-[#1A1715] select-text">
-                    <textarea
-                      ref={textareaRef}
-                      value={activeFile.editedCode}
-                      onChange={handleCodeChange}
-                      onKeyUp={handleCursorChange}
-                      onClick={handleCursorChange}
-                      spellCheck={false}
-                      className="absolute inset-0 w-full h-full resize-none border-none outline-none focus:ring-0 text-transparent caret-[#D97756] p-4 font-mono z-10 select-text selection:bg-[#D97756]/20 bg-transparent h-full overflow-hidden"
-                      style={{
-                        fontSize,
-                        lineHeight: `${fontSize + 6}px`,
-                        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                        whiteSpace: wordWrap ? 'pre-wrap' : 'pre',
-                        tabSize: 4,
-                      }}
-                    />
-                    
-                    {/* Syntax Highlight Overlay */}
-                    <div
-                      className="absolute inset-0 pointer-events-none p-4 font-mono whitespace-pre-wrap select-none"
-                      style={{
-                        fontSize,
-                        lineHeight: `${fontSize + 6}px`,
-                        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                        whiteSpace: wordWrap ? 'pre-wrap' : 'pre',
-                        tabSize: 4,
-                        color: '#DDD2C4',
-                      }}
-                    >
-                      {fileExt && HIGHLIGHT_PATTERNS[fileExt]
-                        ? lines.map((line, i) => (
-                          <div key={i} className="min-h-[1.5em]">{renderHighlighted(line, fileExt)}</div>
-                        ))
-                        : activeFile.editedCode
-                      }
-                    </div>
-                  </div>
-                </>
+                <div className="flex-1 overflow-hidden bg-[#1A1715]">
+                  <MonacoCodeEditor
+                    value={activeFile.editedCode}
+                    language={fileExt || 'plaintext'}
+                    path={activeFile.path}
+                    fontSize={fontSize}
+                    wordWrap={wordWrap}
+                    lineNumbers={showLineNumbers ? 'on' : 'off'}
+                    onChange={handleCodeChange}
+                    onSave={handleSaveActive}
+                    onMount={(editor) => {
+                      editor.onDidChangeCursorPosition((event) => {
+                        setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? {
+                          ...f,
+                          cursorLine: event.position.lineNumber,
+                          cursorCol: event.position.column
+                        } : f));
+                      });
+                    }}
+                  />
+                </div>
               )}
             </div>
           ) : (

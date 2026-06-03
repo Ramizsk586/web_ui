@@ -2923,8 +2923,15 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       href,
       outerHTML,
       attributes = {},
+      dataAttributes = {},
       domPath = [],
-      sourceHint
+      sourceHint,
+      role,
+      ariaLabel,
+      title,
+      parentText,
+      siblingIndex,
+      sameTagSiblingIndex
     } = req.body;
 
     const normalizeText = (value = '') => String(value).replace(/\s+/g, ' ').trim();
@@ -2971,7 +2978,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       if (placeholder) checks.push(String(placeholder));
       if (href) checks.push(String(href));
       if (src) checks.push(String(src));
+      if (role) checks.push(`role="${role}"`, `role='${role}'`, role);
+      if (ariaLabel) checks.push(`aria-label="${ariaLabel}"`, `aria-label='${ariaLabel}'`, ariaLabel);
+      if (title) checks.push(`title="${title}"`, `title='${title}'`, title);
       if (text && normalizeText(text).length > 1) checks.push(normalizeText(text), String(text).trim());
+      if (parentText && normalizeText(parentText).length > 1) checks.push(normalizeText(parentText));
       for (const value of Object.values(attributes as Record<string, string>)) {
         if (typeof value === 'string' && value.trim().length > 2 && value.length < 200) checks.push(value.trim());
       }
@@ -2987,7 +2998,88 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       return -1;
     };
 
+    const scoreSnippet = (snippet: string) => {
+      let score = 0;
+      const normalizedSnippet = normalizeText(snippet);
+      if (selectedText.length > 1 && normalizedSnippet.includes(selectedText)) {
+        score += 240 + Math.min(120, selectedText.length * 2);
+      }
+      if (id && snippet.includes(id)) {
+        score += 220;
+      }
+      if (ariaLabel && snippet.includes(ariaLabel)) {
+        score += 180;
+      }
+      if (title && snippet.includes(title)) {
+        score += 90;
+      }
+      if (role && snippet.includes(role)) {
+        score += 70;
+      }
+      if (tag && new RegExp(`<${tag}(\\s|>|/)`, 'i').test(snippet)) {
+        score += 80;
+      }
+      for (const cls of selectedClasses) {
+        if (snippet.includes(cls)) score += 45;
+      }
+      for (const [attrName, attrValue] of Object.entries(attributes as Record<string, string>)) {
+        if (!attrValue || attrValue.length > 200) continue;
+        if (snippet.includes(`${attrName}="${attrValue}"`) || snippet.includes(`${attrName}='${attrValue}'`)) {
+          score += 110;
+        } else if (snippet.includes(attrValue)) {
+          score += 35;
+        }
+      }
+      for (const [attrName, attrValue] of Object.entries(dataAttributes as Record<string, string>)) {
+        if (!attrValue || attrValue.length > 200) continue;
+        if (snippet.includes(`${attrName}="${attrValue}"`) || snippet.includes(`${attrName}='${attrValue}'`)) {
+          score += 150;
+        } else if (snippet.includes(attrValue)) {
+          score += 50;
+        }
+      }
+      if (typeof siblingIndex === 'number' && siblingIndex >= 0) {
+        if (snippet.includes(`[${siblingIndex}]`)) score += 20;
+        if (snippet.includes(`index === ${siblingIndex}`) || snippet.includes(`index===${siblingIndex}`)) score += 70;
+        if (snippet.includes(`${siblingIndex}`)) score += 8;
+      }
+      if (typeof sameTagSiblingIndex === 'number' && sameTagSiblingIndex >= 0) {
+        if (snippet.includes(`index === ${sameTagSiblingIndex}`) || snippet.includes(`index===${sameTagSiblingIndex}`)) score += 90;
+        if (snippet.includes(`key={${sameTagSiblingIndex}}`) || snippet.includes(`key="${sameTagSiblingIndex}"`)) score += 40;
+      }
+      return score;
+    };
+
+    const extractFocusedJsxSnippet = (content: string, index: number) => {
+      if (index < 0) return null;
+      const lines = content.split(/\r?\n/);
+      let charCount = 0;
+      let lineIndex = 0;
+      for (; lineIndex < lines.length; lineIndex++) {
+        if (charCount + lines[lineIndex].length + 1 > index) break;
+        charCount += lines[lineIndex].length + 1;
+      }
+
+      let bestSnippet: string | null = null;
+      let bestScore = -1;
+      for (let start = lineIndex; start >= Math.max(0, lineIndex - 18); start--) {
+        for (let end = lineIndex; end <= Math.min(lines.length - 1, lineIndex + 18); end++) {
+          const snippet = lines.slice(start, end + 1).join('\n').trim();
+          if (!snippet) continue;
+          if (snippet.length > 2200) break;
+          const snippetScore = scoreSnippet(snippet);
+          if (snippetScore > bestScore) {
+            bestScore = snippetScore;
+            bestSnippet = snippet;
+          }
+        }
+      }
+      return bestSnippet;
+    };
+
     const extractBalancedSnippet = (content: string, index: number) => {
+      const focusedSnippet = extractFocusedJsxSnippet(content, index);
+      if (focusedSnippet) return focusedSnippet.length > 2400 ? focusedSnippet.slice(0, 2400) : focusedSnippet;
       if (index < 0) return content.substring(0, 1600);
       const lines = content.split(/\r?\n/);
       let charCount = 0;
@@ -3028,7 +3120,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       }
 
       const snippet = lines.slice(startLine, endLine + 1).join('\n').trim();
-      return snippet.length > 5000 ? snippet.slice(0, 5000) : snippet;
+      return snippet.length > 2800 ? snippet.slice(0, 2800) : snippet;
     };
 
     const allFiles = getFilesRecursively(previewRoot);
@@ -3091,6 +3183,28 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           }
         }
 
+        if (ariaLabel) {
+          if (content.includes(`aria-label="${ariaLabel}"`) || content.includes(`aria-label='${ariaLabel}'`)) {
+            score += 260;
+            if (matchIndex === -1) matchIndex = content.indexOf(ariaLabel);
+          } else if (content.includes(ariaLabel)) {
+            score += 90;
+            if (matchIndex === -1) matchIndex = content.indexOf(ariaLabel);
+          }
+        }
+
+        if (title) {
+          if (content.includes(`title="${title}"`) || content.includes(`title='${title}'`)) {
+            score += 130;
+            if (matchIndex === -1) matchIndex = content.indexOf(title);
+          }
+        }
+
+        if (role && content.includes(role)) {
+          score += 35;
+          if (matchIndex === -1) matchIndex = content.indexOf(role);
+        }
+
         for (const [attrName, attrValue] of Object.entries(attributes as Record<string, string>)) {
           if (!attrValue || attrValue.length > 300) continue;
           const exactAttrDouble = `${attrName}="${attrValue}"`;
@@ -3100,6 +3214,19 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             if (matchIndex === -1) matchIndex = content.indexOf(attrValue);
           } else if (attrValue.length > 2 && content.includes(attrValue)) {
             score += 35;
+            if (matchIndex === -1) matchIndex = content.indexOf(attrValue);
+          }
+        }
+
+        for (const [attrName, attrValue] of Object.entries(dataAttributes as Record<string, string>)) {
+          if (!attrValue || attrValue.length > 300) continue;
+          const exactAttrDouble = `${attrName}="${attrValue}"`;
+          const exactAttrSingle = `${attrName}='${attrValue}'`;
+          if (content.includes(exactAttrDouble) || content.includes(exactAttrSingle)) {
+            score += 190;
+            if (matchIndex === -1) matchIndex = content.indexOf(attrValue);
+          } else if (attrValue.length > 1 && content.includes(attrValue)) {
+            score += 50;
             if (matchIndex === -1) matchIndex = content.indexOf(attrValue);
           }
         }
@@ -3144,6 +3271,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
         if (matchIndex === -1) {
           matchIndex = findNeedleIndex(content);
+        }
+
+        if (matchIndex !== -1) {
+          const focusedSnippet = extractFocusedJsxSnippet(content, matchIndex);
+          if (focusedSnippet) {
+            score += scoreSnippet(focusedSnippet);
+            score -= Math.floor(focusedSnippet.length / 220);
+          }
         }
 
         candidates.push({ ...file, content, score, matchIndex });

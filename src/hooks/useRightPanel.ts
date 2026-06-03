@@ -5,15 +5,13 @@ export interface UseRightPanelProps {
   iframeKey: number;
   rightPreviewSubpath: string;
   showToast: (msg: string) => void;
-  setFloatingEditFile: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 export function useRightPanel({
   rightIframeRef,
   iframeKey,
   rightPreviewSubpath,
-  showToast,
-  setFloatingEditFile
+  showToast
 }: UseRightPanelProps) {
   const [rightViewportMode, setRightViewportMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [rightIsInspectMode, setRightIsInspectMode] = useState<boolean>(false);
@@ -31,14 +29,21 @@ export function useRightPanel({
     outerHTML?: string;
     attributes?: Record<string, string>;
     domPath?: string[];
-    sourceHint?: {
-      fileName?: string;
-      lineNumber?: number;
-      columnNumber?: number;
-      componentName?: string;
-      ownerName?: string;
-    };
-  }) => {
+      sourceHint?: {
+        fileName?: string;
+        lineNumber?: number;
+        columnNumber?: number;
+        componentName?: string;
+        ownerName?: string;
+      };
+      role?: string;
+      ariaLabel?: string;
+      title?: string;
+      parentText?: string;
+      siblingIndex?: number;
+      sameTagSiblingIndex?: number;
+      dataAttributes?: Record<string, string>;
+    }) => {
     setIsAnalyzingElement(true);
     showToast("Analyzing selected element...");
     try {
@@ -60,11 +65,6 @@ export function useRightPanel({
           };
           setLocalElementAttachments(prev => [...prev, newAtt]);
           showToast(`Attached selected element as a visual document badge`);
-          
-          // Also set as floatingEditFile so developer can edit it in floating editor if they want
-          if (data.analysis.filePath) {
-            setFloatingEditFile(data.analysis.filePath);
-          }
         } else {
           showToast("Automated element source trace returned an error.");
         }
@@ -77,7 +77,7 @@ export function useRightPanel({
     } finally {
       setIsAnalyzingElement(false);
     }
-  }, [showToast, setFloatingEditFile]);
+  }, [showToast]);
 
   useEffect(() => {
     const iframe = rightIframeRef.current;
@@ -138,11 +138,23 @@ export function useRightPanel({
             const placeholder = clickedEl.getAttribute('placeholder') || '';
             const href = clickedEl.getAttribute('href') || '';
             const src = clickedEl.getAttribute('src') || '';
+            const role = clickedEl.getAttribute('role') || '';
+            const ariaLabel = clickedEl.getAttribute('aria-label') || '';
+            const title = clickedEl.getAttribute('title') || '';
             const text = clickedEl.innerText?.substring(0, 300).trim() || clickedEl.textContent?.substring(0, 300).trim() || '';
+            const parentText = clickedEl.parentElement?.innerText?.substring(0, 300).trim() || '';
             const attributes = Array.from(clickedEl.attributes || []).reduce<Record<string, string>>((acc, attr) => {
               acc[attr.name] = attr.value;
               return acc;
             }, {});
+            const dataAttributes = Object.fromEntries(
+              Object.entries(attributes).filter(([name]) => name.startsWith('data-')).slice(0, 10)
+            );
+            const parentChildren = clickedEl.parentElement ? Array.from(clickedEl.parentElement.children) : [];
+            const siblingIndex = parentChildren.indexOf(clickedEl);
+            const sameTagSiblingIndex = parentChildren.filter(
+              (child) => (child as HTMLElement).tagName === clickedEl.tagName
+            ).indexOf(clickedEl);
             const domPath: string[] = [];
             let pathEl: HTMLElement | null = clickedEl;
             while (pathEl && pathEl !== doc.body && domPath.length < 8) {
@@ -186,7 +198,14 @@ export function useRightPanel({
               placeholder,
               src,
               href,
+              role,
+              ariaLabel,
+              title,
+              parentText,
+              siblingIndex,
+              sameTagSiblingIndex,
               attributes,
+              dataAttributes,
               domPath,
               outerHTML: clickedEl.outerHTML?.slice(0, 4000),
               sourceHint: getReactSourceHint(clickedEl)
