@@ -154,6 +154,32 @@ export default function CoderWorkspaceView({
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
   const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [explorerWidth, setExplorerWidth] = useState(420);
+  const [isExplorerResizing, setIsExplorerResizing] = useState(false);
+
+  const handleExplorerResizeStart = (e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsExplorerResizing(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handleMove = (e: PointerEvent) => {
+      const newWidth = e.clientX;
+      if (newWidth >= 200 && newWidth <= 600) {
+        setExplorerWidth(newWidth);
+      }
+    };
+    const handleUp = () => {
+      setIsExplorerResizing(false);
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = 'auto';
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+  };
+
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
       {/* LEFT PANEL: File Explorer (VS Code Styled collapsible sidebar) */}
@@ -161,10 +187,10 @@ export default function CoderWorkspaceView({
         {isCoderLeftPanelOpen && (
           <motion.div
             initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 420, opacity: 1 }}
+            animate={{ width: explorerWidth, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="h-full border-r border-[#221B17] bg-[#110E0D] flex flex-col overflow-hidden shrink-0 z-10 shadow-xl"
+            transition={{ duration: isExplorerResizing ? 0 : 0.22, ease: 'easeOut' }}
+            className="h-full border-r border-[#221B17] bg-[#110E0D] flex flex-col overflow-hidden shrink-0 z-10 shadow-xl relative"
           >
             <CoderLeftExplorer 
               workspaceRefreshKey={workspaceRefreshKey}
@@ -188,6 +214,12 @@ export default function CoderWorkspaceView({
               ) : undefined}
               onClose={() => setIsCoderLeftPanelOpen(false)}
             />
+            <div
+              onPointerDown={handleExplorerResizeStart}
+              className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors z-20 group/resizer"
+            >
+              <div className={`absolute top-0 right-0 w-[2px] h-full transition-colors ${isExplorerResizing ? 'bg-blue-500' : 'bg-transparent group-hover/resizer:bg-blue-500/50'}`} />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

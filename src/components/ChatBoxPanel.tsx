@@ -829,12 +829,9 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                       type="button"
                       onClick={() => {
                         setShowTodoPanel(false);
-                        setCoderTodos([]);
-                        setActiveCommandQuery(null);
-                        setActiveCommandType(null);
                       }}
                       className="p-1 hover:bg-red-500/10 hover:text-red-400 rounded-lg text-[var(--theme-muted)] transition-all cursor-pointer flex items-center justify-center w-6 h-6 border border-transparent"
-                      title="Dismiss checklist"
+                      title="Hide checklist"
                     >
                       <X size={14} />
                     </button>
@@ -1641,6 +1638,16 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
             rows={1}
             className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[16px] p-0 resize-none min-h-[40px] text-[var(--theme-primary)] placeholder-zinc-500/70 scroll-none cursor-text pointer-events-auto"
           />
+          {coderTodos.length > 0 && !showTodoPanel && (
+            <button
+              type="button"
+              onClick={() => setShowTodoPanel(true)}
+              className="mt-2 mx-1 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--theme-accent)]/10 hover:bg-[var(--theme-accent)]/20 border border-[var(--theme-accent)]/25 text-[var(--theme-accent)] text-[11px] font-bold transition-all cursor-pointer self-start"
+            >
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Show Todo ({coderTodos.filter(t => t.status === 'complete').length}/{coderTodos.length})
+            </button>
+          )}
         </div>
 
         <AnimatePresence>

@@ -39,7 +39,7 @@ export const CLOUD_PROVIDERS = [
   { id: 'openrouter', label: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', key: '', icon: React.createElement(Box, { size: 13 }) },
   { id: 'together', label: 'Together AI', endpoint: 'https://api.together.xyz/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'mistral', label: 'Mistral', endpoint: 'https://api.mistral.ai/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
-  { id: 'ollama_cloud', label: 'Ollama Cloud', endpoint: 'https://ollama.com', key: '', icon: React.createElement(CloudSun, { size: 13 }) },
+  { id: 'ollama_cloud', label: 'Ollama Cloud', endpoint: 'https://ollama.com/v1', key: '', icon: React.createElement(CloudSun, { size: 13 }) },
   { id: 'ollama_local', label: 'Ollama Local', endpoint: 'http://127.0.0.1:11434/v1', key: '', icon: React.createElement(Terminal, { size: 13 }) },
   { id: 'lm_studio', label: 'LM Studio', endpoint: 'http://127.0.0.1:1234/v1', key: '', icon: React.createElement(HardDrive, { size: 13 }) },
   { id: 'nvidia_nim', label: 'NVIDIA NIM', endpoint: 'https://integrate.api.nvidia.com/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },

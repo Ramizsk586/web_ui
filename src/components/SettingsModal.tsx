@@ -1777,6 +1777,13 @@ export function SettingsModal({
               </button>
             ))}
           </nav>
+          <button
+            onClick={onClose}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 transition-all mt-auto"
+          >
+            <X size={16} />
+            Close
+          </button>
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
