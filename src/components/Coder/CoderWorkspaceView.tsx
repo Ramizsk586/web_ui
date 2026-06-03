@@ -684,6 +684,8 @@ export default function CoderWorkspaceView({
           openFileTabs={openFileTabs}
           setOpenFileTabs={setOpenFileTabs}
           workspaceRootPath={coderWorkspacePath}
+          orchestrationState={orchestrationState}
+          onOpenFile={setFloatingEditFile}
         />
       </AnimatePresence>
 

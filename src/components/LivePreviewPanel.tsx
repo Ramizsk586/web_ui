@@ -17,8 +17,12 @@ import {
   Lock,
   Signal,
   Wifi,
-  Battery
+  Battery,
+  Bot,
+  GitBranch,
+  Terminal
 } from 'lucide-react';
+import { getTerminalSessionId } from '../utils/terminalService';
 
 interface LivePreviewPanelProps {
   isCoderRightPanelOpen: boolean;
@@ -40,11 +44,13 @@ interface LivePreviewPanelProps {
   rightIsInspectMode: boolean;
   setRightIsInspectMode: (enabled: boolean) => void;
   startCoderPreview: () => Promise<void>;
-  activeTab: 'overview' | 'review' | string;
-  setActiveTab: (tab: 'overview' | 'review' | string) => void;
+  activeTab: 'overview' | 'review' | 'workflow' | string;
+  setActiveTab: (tab: 'overview' | 'review' | 'workflow' | string) => void;
   openFileTabs: string[];
   setOpenFileTabs: React.Dispatch<React.SetStateAction<string[]>>;
   workspaceRootPath?: string;
+  orchestrationState?: any;
+  onOpenFile?: (filePath: string) => void;
 }
 
 interface DiffLine {
@@ -164,7 +170,9 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   setActiveTab,
   openFileTabs,
   setOpenFileTabs,
-  workspaceRootPath
+  workspaceRootPath,
+  orchestrationState,
+  onOpenFile
 }) => {
   const [gitChanges, setGitChanges] = useState<any[]>([]);
   const [fileDiffs, setFileDiffs] = useState<Record<string, string>>({});
@@ -173,6 +181,8 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   const [isLandscape, setIsLandscape] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [androidTime, setAndroidTime] = useState<AndroidTimeState>(getCurrentTime);
+  const [artifacts, setArtifacts] = useState<any[]>([]);
+  const [loadingArtifacts, setLoadingArtifacts] = useState(false);
 
   const [panelWidth, setPanelWidth] = useState(() => activeTab === 'overview'
     ? (rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440)
@@ -240,6 +250,28 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
     }
   };
 
+  const fetchArtifacts = async () => {
+    setLoadingArtifacts(true);
+    try {
+      const res = await fetch('/api/fs/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: '.', workspaceRoot: workspaceRootPath || '.' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.files) {
+          const mdFiles = data.files.filter((f: any) => !f.isDirectory && f.name.toLowerCase().endsWith('.md'));
+          setArtifacts(mdFiles);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch artifacts:", err);
+    } finally {
+      setLoadingArtifacts(false);
+    }
+  };
+
   const fetchFileDiff = async (filePath: string) => {
     setLoadingDiff(prev => ({ ...prev, [filePath]: true }));
     try {
@@ -263,9 +295,14 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
 
   useEffect(() => {
     if (isCoderRightPanelOpen) {
-      fetchGitChanges();
+      if (activeTab === 'workflow') {
+        fetchGitChanges();
+        fetchArtifacts();
+      } else if (activeTab === 'review') {
+        fetchGitChanges();
+      }
     }
-  }, [isCoderRightPanelOpen, iframeKey, workspaceRootPath]);
+  }, [isCoderRightPanelOpen, activeTab, iframeKey, workspaceRootPath]);
 
   const isDesktop = rightViewportMode === 'desktop';
   const isMobile = rightViewportMode === 'mobile';
@@ -581,6 +618,21 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
             Review
           </button>
 
+          <button
+            onClick={() => {
+              setActiveTab('workflow');
+              fetchGitChanges();
+              fetchArtifacts();
+            }}
+            className={`px-3 py-3.5 text-xs font-semibold flex items-center gap-1.5 transition-all border-b-2 cursor-pointer ${
+              activeTab === 'workflow'
+                ? 'border-[#D97756] text-[#D97756]'
+                : 'border-transparent text-zinc-400 hover:text-white'
+            }`}
+          >
+            Workflow
+          </button>
+
           {openFileTabs.map(filePath => {
             const fileName = filePath.split('/').pop() || filePath;
             const isActive = activeTab === filePath;
@@ -637,6 +689,18 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
               onClick={fetchGitChanges}
               className={`p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer ${loadingChanges ? 'animate-spin' : ''}`}
               title="Refresh changes list"
+            >
+              <RefreshCw size={12} />
+            </button>
+          )}
+          {activeTab === 'workflow' && (
+            <button 
+              onClick={() => {
+                fetchGitChanges();
+                fetchArtifacts();
+              }}
+              className={`p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer ${loadingChanges || loadingArtifacts ? 'animate-spin' : ''}`}
+              title="Refresh workflow data"
             >
               <RefreshCw size={12} />
             </button>
@@ -874,7 +938,252 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
         </div>
       )}
 
-      {activeTab !== 'overview' && activeTab !== 'review' && (
+      {activeTab === 'workflow' && (
+        <div className="flex-1 flex flex-col overflow-y-auto bg-[#0C0B0A] p-4 text-left font-sans space-y-6">
+          <div className="flex items-center justify-between border-b border-zinc-800/60 pb-3 select-none">
+            <div>
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">Workflow</h2>
+              <p className="text-[10px] text-zinc-500 font-mono mt-0.5 uppercase">Workspace Orchestration Dock</p>
+            </div>
+          </div>
+
+          {/* 1. Subagents Section */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-wider select-none">
+              <Bot size={14} className="text-[#D97756]" />
+              <span>Subagents</span>
+              {orchestrationState?.agents?.length > 0 && (
+                <span className="text-[9px] bg-zinc-800 text-zinc-400 px-1.5 py-0.2 rounded font-mono ml-auto">
+                  {orchestrationState.agents.length}
+                </span>
+              )}
+            </div>
+            
+            {!orchestrationState?.agents || orchestrationState.agents.length === 0 ? (
+              <div className="p-4 rounded-xl border border-dashed border-zinc-850 bg-zinc-950/20 text-center select-none text-zinc-500 text-[11px]">
+                No active subagents. They will appear here when spawned.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {orchestrationState.agents.map((agent: any, idx: number) => {
+                  let statusColor = 'bg-zinc-600';
+                  let statusBg = 'bg-zinc-950/30';
+                  let pulseClass = '';
+
+                  if (agent.status === 'running') {
+                    statusColor = 'bg-emerald-500';
+                    statusBg = 'bg-emerald-500/10 border-emerald-500/20';
+                    pulseClass = 'animate-pulse';
+                  } else if (agent.status === 'done') {
+                    statusColor = 'bg-teal-500';
+                    statusBg = 'bg-teal-500/10 border-teal-500/20';
+                  } else if (agent.status === 'failed') {
+                    statusColor = 'bg-rose-500';
+                    statusBg = 'bg-rose-500/10 border-rose-500/20';
+                  } else if (agent.status === 'waiting') {
+                    statusColor = 'bg-amber-500';
+                    statusBg = 'bg-amber-500/10 border-amber-500/20';
+                  } else if (agent.status === 'needs_review') {
+                    statusColor = 'bg-orange-500';
+                    statusBg = 'bg-orange-500/10 border-orange-500/20';
+                  }
+
+                  return (
+                    <div 
+                      key={agent.id || idx}
+                      className={`flex flex-col p-3 rounded-xl border border-zinc-850 bg-[#141211] transition-all`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${statusColor} ${pulseClass}`} />
+                          <span className="text-xs font-semibold text-zinc-200">{agent.name || 'Subagent'}</span>
+                        </div>
+                        <span className="text-[9px] font-mono uppercase tracking-wider text-zinc-550 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-850">
+                          {agent.status}
+                        </span>
+                      </div>
+                      
+                      {agent.filesCreated && agent.filesCreated.length > 0 && (
+                        <div className="mt-2 pl-4 border-l border-zinc-800 space-y-1">
+                          <div className="text-[9px] text-zinc-500 uppercase tracking-wider font-mono">Files:</div>
+                          {agent.filesCreated.map((f: string, fIdx: number) => (
+                            <div 
+                              key={fIdx}
+                              onClick={() => {
+                                if (onOpenFile) {
+                                  onOpenFile(f);
+                                }
+                              }}
+                              className="text-[10px] text-[#D97756] hover:underline cursor-pointer font-mono truncate"
+                              title="Click to open file in editor"
+                            >
+                              {f.split('/').pop() || f}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 2. Files Changed Section */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-wider select-none">
+              <GitBranch size={14} className="text-[#D97756]" />
+              <span>Files Changed</span>
+              {gitChanges.length > 0 && (
+                <span className="text-[9px] bg-[#D97756]/15 text-[#D97756] border border-[#D97756]/20 px-1.5 py-0.2 rounded-full font-mono ml-auto">
+                  {gitChanges.length}
+                </span>
+              )}
+            </div>
+
+            {loadingChanges ? (
+              <div className="flex items-center justify-center text-zinc-500 select-none py-4 gap-2">
+                <Loader2 size={12} className="animate-spin text-[#D97756]" />
+                <span className="text-[11px] font-mono">Scanning modifications...</span>
+              </div>
+            ) : gitChanges.length === 0 ? (
+              <div className="p-4 rounded-xl border border-dashed border-zinc-850 bg-zinc-950/20 text-center select-none text-zinc-500 text-[11px]">
+                No files modified. Workspace matches clean HEAD.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {gitChanges.map((file, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      if (!openFileTabs.includes(file.filePath)) {
+                        setOpenFileTabs(prev => [...prev, file.filePath]);
+                      }
+                      setActiveTab(file.filePath);
+                      fetchFileDiff(file.filePath);
+                    }}
+                    className="group flex items-center justify-between p-2.5 rounded-xl border border-zinc-800/50 bg-[#141211] hover:border-zinc-700/80 hover:bg-[#1a1715] transition-all cursor-pointer shadow-xs select-none"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 pr-4">
+                      {renderFileIcon(file.fileName)}
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-semibold text-zinc-200 truncate group-hover:text-white">{file.fileName}</span>
+                        <span className="text-[8px] text-zinc-550 font-mono truncate">{file.folder}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1 text-[10px] font-mono font-bold">
+                        {file.added > 0 && <span className="text-emerald-500">+{file.added}</span>}
+                        {file.removed > 0 && <span className="text-rose-500">-{file.removed}</span>}
+                      </div>
+                      <ChevronRight size={12} className="text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 3. Artifacts Section */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-wider select-none">
+              <FileText size={14} className="text-[#D97756]" />
+              <span>Artifacts</span>
+              {artifacts.length > 0 && (
+                <span className="text-[9px] bg-zinc-800 text-zinc-400 px-1.5 py-0.2 rounded font-mono ml-auto">
+                  {artifacts.length}
+                </span>
+              )}
+            </div>
+
+            {loadingArtifacts ? (
+              <div className="flex items-center justify-center text-zinc-500 select-none py-4 gap-2">
+                <Loader2 size={12} className="animate-spin text-[#D97756]" />
+                <span className="text-[11px] font-mono">Scanning artifacts...</span>
+              </div>
+            ) : artifacts.length === 0 ? (
+              <div className="p-4 rounded-xl border border-dashed border-zinc-850 bg-zinc-950/20 text-center select-none text-zinc-500 text-[11px]">
+                No markdown artifacts found in the workspace root.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-1.5">
+                {artifacts.map((file, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      if (onOpenFile) {
+                        onOpenFile(file.path);
+                      }
+                    }}
+                    className="group flex items-center justify-between p-2.5 rounded-xl border border-zinc-850 bg-[#141211] hover:border-[#D97756]/40 hover:bg-[#1a1715] transition-all cursor-pointer shadow-xs select-none"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 pr-4">
+                      <FileText size={14} className="text-[#D97756] shrink-0" />
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-semibold text-zinc-200 truncate group-hover:text-white">{file.name}</span>
+                        <span className="text-[8px] text-zinc-550 font-mono truncate">{file.relativePath}</span>
+                      </div>
+                    </div>
+                    <ChevronRight size={12} className="text-zinc-650 group-hover:text-zinc-400 transition-colors" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 4. Background Tasks Section */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-wider select-none">
+              <Terminal size={14} className="text-[#D97756]" />
+              <span>Background Tasks</span>
+            </div>
+
+            <div className="space-y-2">
+              {/* Dev Server Task */}
+              <div className="flex flex-col p-3 rounded-xl border border-zinc-850 bg-[#141211] space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${devServerUrl ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-650'}`} />
+                    <span className="text-xs font-semibold text-zinc-200">Web Preview Dev Server</span>
+                  </div>
+                  <span className="text-[9px] font-mono uppercase tracking-wider text-zinc-550 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                    {devServerUrl ? 'running' : 'stopped'}
+                  </span>
+                </div>
+                
+                {devServerUrl && (
+                  <div className="text-[10px] text-zinc-450 font-mono break-all bg-zinc-950/40 p-1.5 rounded border border-zinc-900">
+                    <a href={devServerUrl} target="_blank" rel="noopener noreferrer" className="hover:underline text-[#D97756]">
+                      {devServerUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Terminal Session Task */}
+              <div className="flex flex-col p-3 rounded-xl border border-zinc-850 bg-[#141211] space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-teal-500" />
+                    <span className="text-xs font-semibold text-zinc-200">Lumina Terminal Shell</span>
+                  </div>
+                  <span className="text-[9px] font-mono uppercase tracking-wider text-zinc-550 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                    active
+                  </span>
+                </div>
+                <div className="text-[9px] text-zinc-550 font-mono space-y-0.5 pl-4 border-l border-zinc-800">
+                  {getTerminalSessionId() && (
+                    <div>Session ID: <span className="text-zinc-450">{getTerminalSessionId()?.slice(0, 8)}...</span></div>
+                  )}
+                  <div>CWD: <span className="text-zinc-450">{workspaceRootPath || '.'}</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab !== 'overview' && activeTab !== 'review' && activeTab !== 'workflow' && (
         <div className="flex-1 flex flex-col overflow-hidden bg-[#0d0c0c] text-left">
           <div className="h-9 border-b border-zinc-900 bg-zinc-950/80 px-4 flex items-center justify-between shrink-0 select-none">
             <span className="text-[10px] text-zinc-550 font-mono uppercase tracking-wider truncate mr-4">{activeTab}</span>

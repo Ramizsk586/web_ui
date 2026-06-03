@@ -405,6 +405,429 @@ async function startServer() {
     }
   });
 
+  app.post("/api/agents/spawn", async (req, res) => {
+    const { agentName, task, workspaceRoot, modelConfig } = req.body;
+    if (!agentName || !task) {
+      return res.status(400).json({ error: "agentName and task are required" });
+    }
+
+    try {
+      const resolvedWorkspace = resolveCoderPath(workspaceRoot);
+      const promptPath = path.join(resolvedWorkspace, '.lumina', 'subagents', `${agentName}.prompt`);
+      let promptContent = '';
+      if (fs.existsSync(promptPath)) {
+        promptContent = fs.readFileSync(promptPath, 'utf8');
+      } else {
+        const fallbackPath = path.join(process.cwd(), '.lumina', 'subagents', `${agentName}.prompt`);
+        if (fs.existsSync(fallbackPath)) {
+          promptContent = fs.readFileSync(fallbackPath, 'utf8');
+        } else {
+          promptContent = `---\ntools: [read_file, write_file, edit_file, create_file, delete_file, rename_file, run_command, search_code]\n---\nYou are ${agentName}, a specialized software engineering subagent. Your task is: ${task}`;
+        }
+      }
+
+      let systemPrompt = promptContent;
+      let configuredTools = ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'search_code'];
+      const fmMatch = promptContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+      if (fmMatch) {
+        const fmContent = fmMatch[1];
+        systemPrompt = fmMatch[2];
+        const toolsMatch = fmContent.match(/tools:\s*\[(.*?)\]/i);
+        if (toolsMatch) {
+          const rawTools = toolsMatch[1].split(',').map(s => s.trim().toLowerCase());
+          const mappedTools = [];
+          for (const rt of rawTools) {
+            if (rt === 'write') {
+              mappedTools.push('write_file', 'edit_file');
+            } else if (rt === 'filecreate') {
+              mappedTools.push('create_file');
+            } else if (rt === 'read') {
+              mappedTools.push('read_file');
+            } else if (rt === 'command' || rt === 'run_command') {
+              mappedTools.push('run_command');
+            } else if (rt === 'search' || rt === 'search_code') {
+              mappedTools.push('search_code');
+            } else {
+              mappedTools.push(rt);
+            }
+          }
+          if (mappedTools.length > 0) {
+            configuredTools = [...new Set(mappedTools)];
+          }
+        }
+      }
+
+      const subagentToolsSchemas = [];
+      const toolMap = new Map();
+
+      toolMap.set('read_file', {
+        type: 'function',
+        function: {
+          name: 'read_file',
+          description: 'Read contents of a file in the workspace.',
+          parameters: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string', description: 'Path to file.' },
+              offset: { type: 'number', description: 'Line offset (1-based).' },
+              limit: { type: 'number', description: 'Line count limit.' }
+            },
+            required: ['filePath']
+          }
+        }
+      });
+
+      toolMap.set('write_file', {
+        type: 'function',
+        function: {
+          name: 'write_file',
+          description: 'Write complete contents to a file.',
+          parameters: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string', description: 'Path to file.' },
+              content: { type: 'string', description: 'File content.' }
+            },
+            required: ['filePath', 'content']
+          }
+        }
+      });
+
+      toolMap.set('edit_file', {
+        type: 'function',
+        function: {
+          name: 'edit_file',
+          description: 'Edit a file using search and replace blocks.',
+          parameters: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string', description: 'Path to file.' },
+              search: { type: 'string', description: 'Search content.' },
+              replace: { type: 'string', description: 'Replacement content.' },
+              all: { type: 'boolean', description: 'Replace all occurrences.' }
+            },
+            required: ['filePath', 'search', 'replace']
+          }
+        }
+      });
+
+      toolMap.set('create_file', {
+        type: 'function',
+        function: {
+          name: 'create_file',
+          description: 'Create a file or directory.',
+          parameters: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string', description: 'Path to create.' },
+              isDirectory: { type: 'boolean', description: 'Create directory.' },
+              content: { type: 'string', description: 'Optional initial content.' }
+            },
+            required: ['filePath']
+          }
+        }
+      });
+
+      toolMap.set('delete_file', {
+        type: 'function',
+        function: {
+          name: 'delete_file',
+          description: 'Delete a file or directory.',
+          parameters: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string', description: 'Path to delete.' }
+            },
+            required: ['filePath']
+          }
+        }
+      });
+
+      toolMap.set('rename_file', {
+        type: 'function',
+        function: {
+          name: 'rename_file',
+          description: 'Rename or move a file or directory.',
+          parameters: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string', description: 'Current path.' },
+              newPath: { type: 'string', description: 'New path.' }
+            },
+            required: ['filePath', 'newPath']
+          }
+        }
+      });
+
+      toolMap.set('run_command', {
+        type: 'function',
+        function: {
+          name: 'run_command',
+          description: 'Run a shell/terminal command in the workspace.',
+          parameters: {
+            type: 'object',
+            properties: {
+              command: { type: 'string', description: 'The command string to execute.' }
+            },
+            required: ['command']
+          }
+        }
+      });
+
+      toolMap.set('search_code', {
+        type: 'function',
+        function: {
+          name: 'search_code',
+          description: 'Search for text in workspace files.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search term.' },
+              fileGlob: { type: 'string', description: 'Filter files e.g. *.ts' },
+              maxResults: { type: 'number', description: 'Max matches.' }
+            },
+            required: ['query']
+          }
+        }
+      });
+
+      for (const tName of configuredTools) {
+        const schema = toolMap.get(tName);
+        if (schema) {
+          subagentToolsSchemas.push(schema);
+        }
+      }
+
+      if (subagentToolsSchemas.length === 0) {
+        subagentToolsSchemas.push(
+          toolMap.get('read_file'),
+          toolMap.get('write_file'),
+          toolMap.get('edit_file'),
+          toolMap.get('create_file'),
+          toolMap.get('search_code')
+        );
+      }
+
+      const bridgeBacked = process.env.LLAMA_BRIDGE_URL || 'http://localhost:8089';
+      const bridgeKey = process.env.LLAMA_BRIDGE_API_KEY || '';
+      const model = process.env.LLAMA_BRIDGE_MODEL || 'openprovider/auto-free';
+
+      const messages: any[] = [
+        { role: 'system', content: `${systemPrompt}\n\nExecution context: Working on workspace ${resolvedWorkspace}. Only write code inside this workspace. When you are finished, output ✅ ${agentName.toUpperCase()} COMPLETE and a summary.` },
+        { role: 'user', content: task }
+      ];
+
+      const agentEvents = [];
+      let finalSummary = '';
+      let loopCount = 0;
+      const maxLoops = 15;
+
+      while (loopCount < maxLoops) {
+        loopCount++;
+        
+        let choice = null;
+        try {
+          const chatRes = await axios.post(`http://127.0.0.1:${PORT}/api/chat`, {
+            messages,
+            model: modelConfig?.model || model || 'gpt-4o-mini',
+            config: modelConfig?.config || {
+              provider: 'openai-compatible',
+              baseUrl: bridgeBacked,
+              apiKey: bridgeKey
+            },
+            tools: subagentToolsSchemas,
+            stream: false
+          }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 120000
+          });
+
+          const chatData = chatRes.data;
+          choice = chatData?.choices?.[0]?.message;
+        } catch (chatErr: any) {
+          const errDetail = chatErr.response?.data?.error?.message || chatErr.response?.data?.error || chatErr.message;
+          console.error("Subagent API chat completion failed:", errDetail);
+          throw new Error(`Subagent upstream LLM error: ${errDetail}`);
+        }
+
+        if (!choice) break;
+
+        if (choice.content) {
+          finalSummary += choice.content;
+        }
+
+        messages.push(choice);
+
+        if (!choice.tool_calls || choice.tool_calls.length === 0) {
+          break;
+        }
+
+        for (const toolCall of choice.tool_calls) {
+          const toolName = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments || '{}');
+          
+          let toolOutput = null;
+          const eventId = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          
+          agentEvents.push({
+            id: eventId,
+            type: 'tool',
+            name: toolName,
+            status: 'active',
+            input: args
+          });
+
+          try {
+            if (toolName === 'read_file') {
+              const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
+              if (fs.existsSync(fileRes) && fs.statSync(fileRes).isFile()) {
+                const offset = args.offset !== undefined ? Math.max(0, Number(args.offset) - 1) : 0;
+                const limit = args.limit !== undefined ? Math.max(1, Number(args.limit)) : undefined;
+                const fullContent = fs.readFileSync(fileRes, 'utf8');
+                const lines = fullContent.split('\n');
+                const sliced = limit !== undefined ? lines.slice(offset, offset + limit) : lines.slice(offset);
+                toolOutput = { success: true, content: sliced.join('\n'), totalLines: lines.length };
+              } else {
+                toolOutput = { error: 'File not found' };
+              }
+            } else if (toolName === 'write_file') {
+              const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
+              fs.mkdirSync(path.dirname(fileRes), { recursive: true });
+              fs.writeFileSync(fileRes, args.content || '', 'utf8');
+              toolOutput = { success: true };
+            } else if (toolName === 'edit_file') {
+              const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
+              if (fs.existsSync(fileRes)) {
+                let content = fs.readFileSync(fileRes, 'utf8');
+                if (content.includes(args.search)) {
+                  content = args.all ? content.split(args.search).join(args.replace) : content.replace(args.search, args.replace);
+                  fs.writeFileSync(fileRes, content, 'utf8');
+                  toolOutput = { success: true };
+                } else {
+                  toolOutput = { error: 'Search text not found' };
+                }
+              } else {
+                toolOutput = { error: 'File not found' };
+              }
+            } else if (toolName === 'create_file') {
+              const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
+              if (args.isDirectory) {
+                fs.mkdirSync(fileRes, { recursive: true });
+                toolOutput = { success: true, action: 'created_directory' };
+              } else {
+                fs.mkdirSync(path.dirname(fileRes), { recursive: true });
+                fs.writeFileSync(fileRes, args.content || '', 'utf8');
+                toolOutput = { success: true, action: 'created_file' };
+              }
+            } else if (toolName === 'delete_file') {
+              const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
+              if (fs.existsSync(fileRes)) {
+                if (fs.statSync(fileRes).isDirectory()) {
+                  fs.rmdirSync(fileRes, { recursive: true });
+                } else {
+                  fs.unlinkSync(fileRes);
+                }
+                toolOutput = { success: true };
+              } else {
+                toolOutput = { error: 'File not found' };
+              }
+            } else if (toolName === 'rename_file') {
+              const oldRes = resolveCoderPath(args.filePath, resolvedWorkspace);
+              const newRes = resolveCoderPath(args.newPath, resolvedWorkspace);
+              if (fs.existsSync(oldRes)) {
+                fs.mkdirSync(path.dirname(newRes), { recursive: true });
+                fs.renameSync(oldRes, newRes);
+                toolOutput = { success: true };
+              } else {
+                toolOutput = { error: 'Source file not found' };
+              }
+            } else if (toolName === 'run_command') {
+              const isWin = process.platform === 'win32';
+              const cmdStr = args.command || '';
+              const translated = isWin ? translateCommand(cmdStr) : cmdStr;
+              
+              const parts = cmdStr.trim().split(/\s+/);
+              if (parts[0].toLowerCase() === 'cd') {
+                toolOutput = { exitCode: 0, stdout: '', stderr: 'Notice: cd is handled statefully in main terminal sessions. For subagents, commands run in the workspace root.' };
+              } else {
+                const runRes = await new Promise((resolve) => {
+                  const proc = isWin 
+                    ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', translated], { cwd: resolvedWorkspace, env: process.env })
+                    : spawn(translated, [], { cwd: resolvedWorkspace, env: process.env, shell: true });
+                  let stdout = '', stderr = '';
+                  proc.stdout.on('data', (c) => stdout += c.toString());
+                  proc.stderr.on('data', (c) => stderr += c.toString());
+                  proc.on('close', (exitCode) => resolve({ exitCode: exitCode || 0, stdout, stderr }));
+                  proc.on('error', (err) => resolve({ exitCode: 1, stdout: '', stderr: err.message }));
+                });
+                toolOutput = runRes;
+              }
+            } else if (toolName === 'search_code') {
+              const query = (args.query || '').trim();
+              const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
+              let files = getFilesRecursively(resolvedWorkspace);
+              if (fileGlob) {
+                files = files.filter(f => !f.isDirectory && f.relativePath.toLowerCase().includes(fileGlob));
+              } else {
+                files = files.filter(f => !f.isDirectory);
+              }
+              const matches = [];
+              const maxResults = Math.min(Number(args.maxResults) || 30, 80);
+              let count = 0;
+              for (const file of files) {
+                if (count >= maxResults) break;
+                const fullF = path.join(resolvedWorkspace, file.relativePath);
+                if (fs.existsSync(fullF)) {
+                  const content = fs.readFileSync(fullF, 'utf8');
+                  if (content.toLowerCase().includes(query.toLowerCase())) {
+                    const lines = content.split('\n');
+                    lines.forEach((line, idx) => {
+                      if (count < maxResults && line.toLowerCase().includes(query.toLowerCase())) {
+                        matches.push({ filePath: file.relativePath, line: idx + 1, text: line.trim() });
+                        count++;
+                      }
+                    });
+                  }
+                }
+              }
+              toolOutput = { query, count: matches.length, matches };
+            } else {
+              toolOutput = { error: `Tool ${toolName} not implemented` };
+            }
+
+            const ev = agentEvents.find(e => e.id === eventId);
+            if (ev) {
+              ev.status = 'complete';
+              ev.output = JSON.stringify(toolOutput).slice(0, 500);
+            }
+          } catch (toolErr: any) {
+            toolOutput = { error: toolErr.message };
+            const ev = agentEvents.find(e => e.id === eventId);
+            if (ev) {
+              ev.status = 'failed';
+              ev.output = toolErr.message;
+            }
+          }
+
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(toolOutput)
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        summary: finalSummary,
+        events: agentEvents
+      });
+    } catch (err: any) {
+      console.error("Subagent spawning failed:", err);
+      res.status(500).json({ error: err.message || "Subagent spawn failure" });
+    }
+  });
+
   const getUpstreamErrorDetail = (e: any) => {
     const raw = e?.response?.data ?? e?.message ?? String(e);
     return typeof raw === 'string' ? raw : JSON.stringify(raw);

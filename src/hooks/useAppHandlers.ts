@@ -187,6 +187,13 @@ export interface UseAppHandlersParams {
   selectedModel: string;
   activeModelId: string;
   activeModelList: any[];
+  serverUrl?: string;
+  apiKey?: string;
+  selectedProvider?: string;
+  llamaBridgeUrl?: string;
+  llamaBridgeApiKey?: string;
+  selectedLlamaModel?: string;
+  useBridgeTools?: boolean;
 
   chats: Chat[];
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
@@ -309,6 +316,9 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     persona, writingStyle, useTurboQuant,
     tavilyApiKey, serpApiKey, searchProvider,
     selectedModel, activeModelId, activeModelList,
+    serverUrl, apiKey, selectedProvider,
+    llamaBridgeUrl, llamaBridgeApiKey, selectedLlamaModel,
+    useBridgeTools,
     chats, setChats,
     currentChatId, setCurrentChatId,
     isWebSearchEnabled,
@@ -970,6 +980,27 @@ export function useAppHandlers(params: UseAppHandlersParams) {
           {
             type: 'function',
             function: {
+              name: 'spawn_subagent',
+              description: 'Spawn a focused engineering subagent to perform a specific engineering task (e.g. scaffolding, backend coding, frontend coding, writing tests, writing documentation) in the workspace.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  agentName: {
+                    type: 'string',
+                    description: 'The name of the subagent to spawn. Available subagents: scaffold-agent, config-agent, backend-agent, frontend-agent, database-agent, auth-agent, integration-agent, test-agent, docs-agent, deploy-agent.'
+                  },
+                  task: {
+                    type: 'string',
+                    description: 'The specific task instruction for the subagent. Be very precise, detailed, and clear about the context.'
+                  }
+                },
+                required: ['agentName', 'task']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
               name: 'write_file',
               description: 'Create or overwrite a file. Creates parent dirs automatically.',
               parameters: {
@@ -1060,32 +1091,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
               }
             }
           },
-          {
-            type: 'function',
-            function: {
-              name: 'manage_todos',
-              description: 'Manage task todo list.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  action: { type: 'string', enum: ['create', 'update', 'complete', 'list'] },
-                  items: {
-                    type: 'array',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        content: { type: 'string' },
-                        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
-                        priority: { type: 'string', enum: ['high', 'medium', 'low'] }
-                      },
-                      required: ['content', 'status']
-                    }
-                  }
-                },
-                required: ['action', 'items']
-              }
-            }
-          },
+
           {
             type: 'function',
             function: {
@@ -1304,6 +1310,20 @@ You are a software engineering agent. When asked to build/modify code:
 2. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
 3. Use 'search_code' to find symbols/errors. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
 4. Work in tool-call cycles until the task is complete. Give a summary when done.
+
+[SUBAGENTS DELEGATION SYSTEM]
+When asked to build a full project, scaffold a new application, or implement a large feature, you should spawn specialized subagents to perform targeted tasks using the 'spawn_subagent' tool:
+- 'scaffold-agent': To set up folders, project structure, and empty stub files.
+- 'config-agent': To configure dependencies, install packages, and manage package.json/webpack/vite configs.
+- 'database-agent': To configure databases, schemas, migrations, or database connection scripts.
+- 'backend-agent': To implement server-side APIs, routes, controllers, and services.
+- 'frontend-agent': To build UI components, hooks, pages, styles, and web views.
+- 'auth-agent': To set up login, authentication routes, session management, or tokens.
+- 'test-agent': To write and execute unit tests, integration tests, or end-to-end tests.
+- 'docs-agent': To write README, API documentations, or comment structures.
+- 'deploy-agent': To configure CI/CD pipelines, Dockerfiles, or cloud deployment configs.
+
+Sequential Work: Spawn them one by one (e.g. scaffold first, then config, then database, then backend, frontend) to avoid conflicts. Provide specific and detailed task strings so they know exactly what to build. Re-check the files they created and write the final integration yourself.
 
 [ASK USER TOOL INSTRUCTIONS]
 - Do NOT call 'ask_user' to ask trivial or basic questions (e.g. asking for file paths, project names, or generic things you can check yourself using tools like 'search_code', 'read_file', or by running commands).
@@ -1954,22 +1974,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   resultValue = { error: `Unknown skill: ${skillId}. Available: ${SKILLS.map((s: any) => s.id).join(', ')}` };
                 }
                 showToast(`Applied skill: ${skillId}`);
-              } else if (name === 'manage_todos') {
-                const action = String(args.action || '');
-                const items = (args.items || []).map((item: any, i: number) => ({
-                  ...item,
-                  id: item.id || createStableTurnId('todo', i, item.text || item.content || 'task')
-                }));
-                if (action === 'create' || action === 'update') {
-                  setCoderTodos(items);
-                  resultValue = { success: true, action, count: items.length, items };
-                } else if (action === 'complete') {
-                  setCoderTodos(prev => prev.map((item: any) => ({ ...item, status: 'completed' })));
-                  resultValue = { success: true, action: 'complete' };
-                } else {
-                  resultValue = { success: true, action: 'list', items: coderTodos };
-                }
-                showToast(`Todos: ${action} ${items.length} items`);
+              
               } else if (name === 'fetch_url') {
                 const targetUrl = args.url;
                 if (!targetUrl) throw new Error("Missing required 'url' parameter for Webfetch.");
@@ -2075,6 +2080,96 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                     { title: `${searchQueryVal} Synthesis Report`, url: `https://intel.local/report`, snippet: `Synthesized findings on ${searchQueryVal}. Agents Alpha, Beta, and Gamma processed parameters recursively.` }
                   ]
                 };
+              } else if (name === 'spawn_subagent') {
+                const agentName = String(args.agentName || '');
+                const taskText = String(args.task || '');
+                if (!agentName || !taskText) throw new Error("spawn_subagent requires agentName and task");
+                showToast(`Spawning subagent: ${agentName}...`);
+
+                setOrchestrationState((prev: any) => {
+                  const cleanName = agentName.replace('-agent', '').toUpperCase();
+                  const existingIdx = prev.agents.findIndex((a: any) => a.id === agentName);
+                  let nextAgents = [...prev.agents];
+                  if (existingIdx !== -1) {
+                    nextAgents[existingIdx] = {
+                      ...nextAgents[existingIdx],
+                      status: 'running',
+                      startedAt: Date.now()
+                    };
+                  } else {
+                    nextAgents.push({
+                      id: agentName,
+                      name: `${cleanName} Agent`,
+                      phase: prev.currentPhase || 1,
+                      status: 'running',
+                      filesCreated: [],
+                      startedAt: Date.now()
+                    });
+                  }
+                  return {
+                    ...prev,
+                    isActive: true,
+                    agents: nextAgents
+                  };
+                });
+
+                 try {
+                  const useBridge = useBridgeTools && llamaBridgeUrl;
+                  const activeBaseUrl = useBridge ? llamaBridgeUrl.replace(/\/+$/, '') : serverUrl?.replace(/\/+$/, '') || '';
+                  const activeKey = useBridge ? llamaBridgeApiKey : apiKey || '';
+                  const activeProvider = useBridge ? 'llama-bridge' : selectedProvider || 'openai-compatible';
+                  const activeModel = useBridge ? selectedLlamaModel : activeModelId;
+
+                  const spawnRes = await fetch('/api/agents/spawn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      agentName,
+                      task: taskText,
+                      workspaceRoot: coderWorkspacePath,
+                      modelConfig: {
+                        model: activeModel,
+                        config: {
+                          provider: activeProvider,
+                          baseUrl: activeBaseUrl,
+                          apiKey: activeKey
+                        }
+                      }
+                    }),
+                    signal
+                  });
+                  const spawnData = await spawnRes.json();
+                  if (!spawnRes.ok || spawnData.error) {
+                    throw new Error(spawnData.error || 'Subagent execution failed');
+                  }
+
+                  setOrchestrationState((prev: any) => ({
+                    ...prev,
+                    agents: prev.agents.map((a: any) => a.id === agentName ? { ...a, status: 'done', completedAt: Date.now() } : a)
+                  }));
+
+                  resultValue = {
+                    success: true,
+                    agentName,
+                    task: taskText,
+                    summary: spawnData.summary,
+                    events: spawnData.events
+                  };
+                  showToast(`Subagent ${agentName} complete!`);
+                  triggerWorkspaceRefresh();
+                } catch (subErr: any) {
+                  const errMsg = subErr.message || 'Subagent failed';
+                  setOrchestrationState((prev: any) => ({
+                    ...prev,
+                    agents: prev.agents.map((a: any) => a.id === agentName ? { ...a, status: 'failed', error: errMsg } : a)
+                  }));
+                  resultValue = {
+                    success: false,
+                    agentName,
+                    error: errMsg
+                  };
+                  showToast(`Subagent ${agentName} failed!`);
+                }
               } else if (name === 'run_command') {
                 const commandText = args.command;
                 if (!commandText) throw new Error("run_command requires command parameter");
@@ -2150,8 +2245,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 }));
               }
 
-              if (resultValue && !resultValue.error) {
-                turnToolResultCache.set(cacheKey, resultValue);
+              if (resultValue !== undefined) {
+                if (resultValue && !resultValue.error) {
+                  turnToolResultCache.set(cacheKey, resultValue);
+                }
               } else if (name === 'search' || name === 'google_scholar') {
                 const rawQueries = Array.isArray(args.query) ? args.query : [args.query].filter(Boolean);
                 const queries = rawQueries.map((q: any) => String(q).trim()).filter(Boolean);
