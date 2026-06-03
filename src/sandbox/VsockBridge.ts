@@ -26,25 +26,63 @@ export class VsockBridge {
   }
 
   async start(): Promise<void> {
+    if (this.server) {
+      // Idempotency: if we already started a server, reuse it.
+      try {
+        const addr = this.server.address?.();
+        if (addr) return;
+      } catch {
+        // continue to (re)start
+      }
+    }
+
     const pipePath = path.join(this.pipeDir, 'lumina-sandbox.ipc');
 
     return new Promise((resolve, reject) => {
       if (process.platform === 'win32') {
         const namedPipe = `\\\\.\\pipe\\lumina-sandbox`;
+
+        // If another instance already bound the pipe, reuse it gracefully.
+        // Best-effort: attempt to create server; if EADDRINUSE then resolve.
         this.server = net.createServer((socket) => {
           this.handleConnection(socket);
         });
 
-        this.server.listen(namedPipe, () => {
+        this.server.once('listening', () => {
           log.info(`IPC server listening on named pipe: ${namedPipe}`);
           this.startHeartbeat();
           resolve();
         });
 
-        this.server.on('error', (err) => {
-          log.error(`IPC server error: ${err.message}`);
+        this.server.on('error', (err: any) => {
+          const msg = err?.message || String(err);
+          log.error(`IPC server error: ${msg}`);
+
+          // EADDRINUSE: address already in use. Another process/server likely already started.
+          if (msg.includes('EADDRINUSE')) {
+            try {
+              // Stop our server object; keep the other process running.
+              this.server?.close?.();
+            } catch {}
+            this.server = null;
+            resolve();
+            return;
+          }
+
           reject(err);
         });
+
+        try {
+          this.server.listen(namedPipe);
+        } catch (e: any) {
+          const msg = e?.message || String(e);
+          if (msg.includes('EADDRINUSE')) {
+            this.server = null;
+            resolve();
+            return;
+          }
+          reject(e);
+        }
       } else {
         const socketPath = `/tmp/lumina-sandbox.sock`;
         try { fs.unlinkSync(socketPath); } catch {}
@@ -53,7 +91,7 @@ export class VsockBridge {
           this.handleConnection(socket);
         });
 
-        this.server.listen(socketPath, () => {
+        this.server.once('listening', () => {
           log.info(`IPC server listening on socket: ${socketPath}`);
           fs.chmodSync(socketPath, 0o600);
           this.startHeartbeat();
@@ -64,6 +102,8 @@ export class VsockBridge {
           log.error(`IPC server error: ${err.message}`);
           reject(err);
         });
+
+        this.server.listen(socketPath);
       }
     });
   }

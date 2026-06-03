@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Mic, 
@@ -23,6 +23,8 @@ interface VoiceAssistantPanelProps {
   messages: any[];
   isTyping: boolean;
   speakText: (text: string) => void;
+  handleSend?: (contentOverride?: string) => Promise<void>;
+  setVoiceDirectSendCallback?: (cb: ((transcript: string) => void) | null) => void;
 }
 
 export function VoiceAssistantPanel({
@@ -38,7 +40,9 @@ export function VoiceAssistantPanel({
   isAiSpeaking,
   stopSpeaking,
   messages,
-  isTyping
+  isTyping,
+  handleSend,
+  setVoiceDirectSendCallback
 }: VoiceAssistantPanelProps) {
   const [handsFree, setHandsFree] = useState(true);
   const wasSpeakingRef = useRef(false);
@@ -47,11 +51,33 @@ export function VoiceAssistantPanel({
   const assistantMessages = messages.filter(m => m.role === 'assistant');
   const lastAssistantMsg = assistantMessages[assistantMessages.length - 1];
 
+  // Set up callback to send transcript directly to AI
+  const startDirectVoiceDictation = useCallback(() => {
+    if (setVoiceDirectSendCallback && handleSend) {
+      setVoiceDirectSendCallback((transcript) => {
+        handleSend(transcript);
+      });
+    }
+    startVoiceDictation();
+  }, [setVoiceDirectSendCallback, handleSend, startVoiceDictation]);
+
+  // Toggle that uses direct send mode for the voice panel
+  const toggleDirectVoiceDictation = useCallback(() => {
+    if (isVoiceListening) {
+      if (setVoiceDirectSendCallback) {
+        setVoiceDirectSendCallback(null);
+      }
+      stopVoiceDictation();
+    } else {
+      startDirectVoiceDictation();
+    }
+  }, [isVoiceListening, stopVoiceDictation, startDirectVoiceDictation, setVoiceDirectSendCallback]);
+
   // Auto-start listening on mount when handsfree is enabled
   useEffect(() => {
     if (isOpen && !isVoiceListening && !isAiSpeaking && !isTyping) {
       const timer = setTimeout(() => {
-        startVoiceDictation();
+        startDirectVoiceDictation();
       }, 800);
       return () => clearTimeout(timer);
     }
@@ -67,7 +93,7 @@ export function VoiceAssistantPanel({
       if (handsFree && isOpen && !isVoiceListening && !isTyping) {
         // Auto trigger listening!
         const timer = setTimeout(() => {
-          startVoiceDictation();
+          startDirectVoiceDictation();
         }, 600);
         return () => clearTimeout(timer);
       }
@@ -90,8 +116,10 @@ export function VoiceAssistantPanel({
   const handleClosePanel = () => {
     stopSpeaking();
     if (isVoiceListening) {
+      setVoiceDirectSendCallback?.(null);
       stopVoiceDictation(false);
     }
+    setVoiceDirectSendCallback?.(null);
     onClose();
   };
 
@@ -116,7 +144,7 @@ export function VoiceAssistantPanel({
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: '100%', opacity: 0.95 }}
             transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-            className="fixed top-0 right-0 z-[510] h-full w-[100%] sm:w-[420px] flex flex-col justify-between bg-[var(--theme-surface)] border-l border-[var(--theme-border)] text-[var(--theme-primary)] p-6 md:p-7 select-none font-sans shadow-2xl overflow-y-auto"
+            className="fixed top-0 right-0 z-[510] h-full w-[100%] sm:w-[420px] flex flex-col justify-between bg-[var(--theme-surface)] border-l border-[var(--theme-border)] text-[var(--theme-primary)] p-6 md:p-7 select-none font-sans shadow-2xl overflow-y-auto overflow-x-hidden"
             id="voice-assistant-side-panel"
           >
             {/* TOP STATUS BAR */}
@@ -254,7 +282,7 @@ export function VoiceAssistantPanel({
                   style={{
                     boxShadow: visualState === 'listening' ? '0 10px 25px -5px rgba(59, 130, 246, 0.15)' : 'none'
                   }}
-                  onClick={toggleVoiceDictation}
+                  onClick={toggleDirectVoiceDictation}
                 >
                   {/* Radial backdrop overlay for nice glass shading */}
                   <div className="absolute inset-0 bg-gradient-to-b from-white/[0.04] to-black/[0.04] z-[1]" />
@@ -329,31 +357,24 @@ export function VoiceAssistantPanel({
 
               </div>
 
-              {/* TRANSCRIPTIONS DISPLAY (REAL-TIME SUBTITLES PANEL) */}
+              {/* Voice status and response display */}
               <div className="w-full text-center px-1 mt-4 flex flex-col gap-3 relative z-25 min-h-[120px] justify-center">
                 
-                {/* User Speech / Interim Results */}
                 <AnimatePresence mode="wait">
-                  {(isVoiceListening || voiceInterimText) && (
+                  {isVoiceListening && (
                     <motion.div
-                      key="usr-sp"
+                      key="voice-listening"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="bg-[var(--theme-surface-alt,var(--theme-bg))] border border-[var(--theme-border)] rounded-2xl p-4 max-w-sm mx-auto shadow-sm"
+                      className="text-[var(--theme-secondary)] text-xs italic font-sans"
                     >
-                      <p className="text-[10px] font-mono text-[var(--theme-accent)] uppercase tracking-widest mb-1.5 flex items-center justify-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] animate-ping" />
-                        You said:
-                      </p>
-                      <p className="text-xs font-medium text-[var(--theme-primary)] italic font-sans leading-relaxed">
-                        "{voiceInterimText || 'Listening for speech...'}"
-                      </p>
+                      Listening...
                     </motion.div>
                   )}
 
                   {/* AI response display summary */}
-                  {!isVoiceListening && !voiceInterimText && (lastAssistantMsg || isTyping) && (
+                  {!isVoiceListening && (lastAssistantMsg || isTyping) && (
                     <motion.div
                       key="ai-resp"
                       initial={{ opacity: 0 }}
@@ -380,7 +401,7 @@ export function VoiceAssistantPanel({
                   )}
 
                   {/* Default Welcome */}
-                  {!isVoiceListening && !voiceInterimText && !lastAssistantMsg && !isTyping && (
+                  {!isVoiceListening && !lastAssistantMsg && !isTyping && (
                     <motion.div
                       key="welcome"
                       initial={{ opacity: 0 }}
@@ -414,7 +435,7 @@ export function VoiceAssistantPanel({
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={toggleVoiceDictation}
+                  onClick={toggleDirectVoiceDictation}
                   className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
                     isVoiceListening 
                       ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' 
@@ -546,6 +567,41 @@ export function VoiceWaveCanvas({ isListening, volume, isSpeaking, isThinking }:
         if (computed) accentColor = computed;
       } catch (e) {
         // fallback
+      }
+
+      if (isListening) {
+        const barCount = 15;
+        const gap = width * 0.025;
+        const barWidth = (width * 0.68 - gap * (barCount - 1)) / barCount;
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const baseX = centerX - ((barWidth * barCount + gap * (barCount - 1)) / 2);
+        const intensity = Math.max(0.18, volume / 100);
+
+        ctx.fillStyle = hexToRgba(accentColor, 0.14);
+        ctx.beginPath();
+        ctx.roundRect(width * 0.16, centerY - height * 0.18, width * 0.68, height * 0.36, height * 0.18);
+        ctx.fill();
+
+        for (let i = 0; i < barCount; i++) {
+          const distanceFromCenter = Math.abs(i - (barCount - 1) / 2) / ((barCount - 1) / 2);
+          const motion = Math.sin(phase * 1.6 + i * 0.58) * 0.5 + 0.5;
+          const heightRatio = 0.18 + intensity * (0.2 + (1 - distanceFromCenter) * 0.58) + motion * 0.28 * intensity;
+          const h = Math.min(height * 0.64, height * heightRatio);
+          const x = baseX + i * (barWidth + gap);
+          const y = centerY - h / 2;
+          const gradient = ctx.createLinearGradient(0, y, 0, y + h);
+          gradient.addColorStop(0, hexToRgba(accentColor, 0.45));
+          gradient.addColorStop(0.5, hexToRgba(accentColor, 0.9));
+          gradient.addColorStop(1, hexToRgba(accentColor, 0.45));
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth, h, barWidth / 2);
+          ctx.fill();
+        }
+
+        animationFrameId = requestAnimationFrame(draw);
+        return;
       }
 
       // Draw Wave Layers starting from deep to foreground with organic wave patterns

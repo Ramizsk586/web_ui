@@ -85,6 +85,7 @@ export class SandboxInstaller {
   getSandboxConfig(): SandboxConfig {
     const vmDir = path.join(this.luminaDataDir, 'vm');
     const snapshotsDir = path.join(vmDir, 'snapshots');
+    const imagePath = this.resolveBaseImagePath(vmDir);
 
     return {
       vmCount: 4,
@@ -101,7 +102,7 @@ export class SandboxInstaller {
       },
       workspaceMount: null,
       vmRootDir: vmDir,
-      imagePath: path.join(vmDir, 'lumina-base.img'),
+      imagePath,
       kernelPath: path.join(vmDir, 'kernel'),
       initrdPath: path.join(vmDir, 'initrd'),
       snapshotDir: snapshotsDir,
@@ -147,15 +148,29 @@ export class SandboxInstaller {
         );
       }
     } catch (e: any) {
-      log.warn(`VM build script failed, creating minimal placeholder: ${e.message}`);
+      // Important: do not create placeholder images when using Hyper-V differencing.
+      // Placeholder files can break Hyper-V VM creation with "not an existing virtual hard disk file".
+      if (detection.hyperVSupported) {
+        throw new Error(`VM build script failed while Hyper-V is available: ${e.message}`);
+      }
+      log.warn(`VM build script failed (Hyper-V not supported). Creating minimal placeholder: ${e.message}`);
       this.createMinimalImage(imgPath, detection);
     }
 
     const installedPath = fs.existsSync(vhdxPath) ? vhdxPath : imgPath;
-    if (fs.existsSync(installedPath)) {
-      const size = fs.statSync(installedPath).size;
-      log.info(`Base image installed: ${(size / 1024 / 1024).toFixed(1)} MB at ${installedPath}`);
+    if (!fs.existsSync(installedPath)) {
+      throw new Error(`Base image not created by VM build script. Expected: ${vhdxPath} or ${imgPath}`);
     }
+
+    const size = fs.statSync(installedPath).size;
+    if (size < 10 * 1024 * 1024) {
+      // 10MB threshold: placeholder buffers are typically tiny compared to real ISO-based images.
+      throw new Error(
+        `Base image seems invalid (too small: ${(size / 1024 / 1024).toFixed(1)}MB) at ${installedPath}`
+      );
+    }
+
+    log.info(`Base image installed: ${(size / 1024 / 1024).toFixed(1)} MB at ${installedPath}`);
   }
 
   private createMinimalImage(imgPath: string, detection: HostDetection): void {
@@ -163,6 +178,14 @@ export class SandboxInstaller {
     const buffer = Buffer.alloc(totalSize * 1024 * 1024, 0);
     fs.writeFileSync(imgPath, buffer);
     log.info(`Created minimal ${totalSize}MB base image (placeholder)`);
+  }
+
+  private resolveBaseImagePath(vmDir: string): string {
+    const vhdxPath = path.join(vmDir, 'lumina-base.vhdx');
+    if (fs.existsSync(vhdxPath)) {
+      return vhdxPath;
+    }
+    return path.join(vmDir, 'lumina-base.img');
   }
 
   private registerService(): void {

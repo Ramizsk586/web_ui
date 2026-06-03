@@ -29,6 +29,7 @@ export class SandboxManager implements ISandbox {
 
   private config: SandboxConfig;
   private initialized = false;
+  private initializingPromise: Promise<void> | null = null;
   private activePreviews: Map<string, PreviewForwardConfig> = new Map();
   private previewPortCounter = 4000;
 
@@ -54,18 +55,36 @@ export class SandboxManager implements ISandbox {
       return;
     }
 
-    log.info('Initializing sandbox...');
+    if (this.initializingPromise) {
+      return this.initializingPromise;
+    }
 
-    await this.ensureDirectories();
-    await this.vsock.start();
-    await this.registerVsockHandlers();
-    await this.ensureInstallation();
-    await this.vmPool.initialize();
-    await this.vmPool.prebootAll();
-    this.healthMonitor.start();
-    this.initialized = true;
+    this.initializingPromise = (async () => {
+      log.info('Initializing sandbox...');
+      try {
+        await this.ensureDirectories();
+        await this.vsock.start();
+        await this.registerVsockHandlers();
+        await this.ensureInstallation();
+        this.config = this.installer.getSandboxConfig();
+        this.vmPool.setBaseImagePath(this.config.imagePath);
+        await this.vmPool.initialize();
+        await this.vmPool.prebootAll();
+        this.healthMonitor.start();
+        this.initialized = true;
+        log.info('Sandbox initialized successfully');
+      } catch (error) {
+        this.initialized = false;
+        try {
+          await this.vsock.stop();
+        } catch {}
+        throw error;
+      } finally {
+        this.initializingPromise = null;
+      }
+    })();
 
-    log.info('Sandbox initialized successfully');
+    return this.initializingPromise;
   }
 
   async ensureInstallation(): Promise<void> {

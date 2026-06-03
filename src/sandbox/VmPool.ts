@@ -31,6 +31,7 @@ export class VmPool {
   }
 
   async initialize(): Promise<void> {
+    this.baseImagePath = this.config.imagePath;
     const count = this.config.vmCount;
 
     for (let i = 0; i < count; i++) {
@@ -67,6 +68,11 @@ export class VmPool {
 
       log.info(`VM '${vmId.id}' created with clean snapshot`);
     }
+  }
+
+  setBaseImagePath(imagePath: string): void {
+    this.baseImagePath = imagePath;
+    this.config.imagePath = imagePath;
   }
 
   async prebootAll(): Promise<void> {

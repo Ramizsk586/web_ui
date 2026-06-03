@@ -550,6 +550,7 @@ export default function AppContent({
     micVolume, setMicVolume,
     showVoiceControlPanel, setShowVoiceControlPanel,
     startVoiceDictation, stopVoiceDictation, toggleVoiceDictation,
+    setVoiceDirectSendCallback,
     attachedFiles, setAttachedFiles,
     searchQuery, setSearchQuery,
     showScrollButton, setShowScrollButton,
@@ -641,8 +642,16 @@ export default function AppContent({
     text = text.replace(/<artifact[^>]*>[\s\S]*?<\/artifact>/gi, '');
     text = text.replace(/<[^>]*>/g, '');
     text = text.replace(/```[a-zA-Z0-9-]*[\s\S]*?```/gi, '');
-    text = text.replace(/[\*_~`#]+/g, '');
+    text = text.replace(/^\s*(?:tool|function)\s*(?:call|result|output)s?\s*:.*$/gim, '');
+    text = text.replace(/^\s*(?:source|sources|citation|citations|reference|references|connected links?)\s*:.*$/gim, '');
+    text = text.replace(/https?:\/\/\S+/gi, '');
+    text = text.replace(/\b(?:www\.)[^\s]+/gi, '');
+    text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    text = text.replace(/\[[0-9,\s-]+\]/g, '');
+    text = text.replace(/^\s*[-*+]\s+(?:https?:\/\/|www\.)\S+.*$/gim, '');
+    text = text.replace(/[\*_~`#>|]+/g, '');
     text = text.replace(/\n+/g, ' ');
+    text = text.replace(/\s{2,}/g, ' ');
     return text.trim();
   };
 
@@ -3536,6 +3545,8 @@ const startCoderPreview = useCallback(async () => {
         messages={messages}
         isTyping={isTyping}
         speakText={speakText}
+        handleSend={handleSend}
+        setVoiceDirectSendCallback={setVoiceDirectSendCallback}
       />
 
       {/* Local model GGUF manual engine parameter loader */}

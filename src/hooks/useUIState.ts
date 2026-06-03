@@ -116,6 +116,11 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const animationFrameRef = useRef<number | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const autoSendAfterRecordingRef = useRef(true);
+  const voiceDirectSendCallbackRef = useRef<((transcript: string) => void) | null>(null);
+
+  const setVoiceDirectSendCallback = useCallback((cb: ((transcript: string) => void) | null) => {
+    voiceDirectSendCallbackRef.current = cb;
+  }, []);
 
   const releaseVoiceResources = useCallback(() => {
     if (micStreamRef.current) {
@@ -169,13 +174,18 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   };
 
   const transcribeRecordedAudio = async (audioBlob: Blob, language: string, shouldAutoSend: boolean) => {
+    const directSendCb = voiceDirectSendCallbackRef.current;
+    const isDirectVoiceMode = Boolean(directSendCb);
+
     if (!audioBlob.size) {
       setVoiceError('No audio was captured. Try speaking a little longer.');
       setVoiceInterimText('');
       return;
     }
 
-    setVoiceInterimText('Transcribing locally with Whisper...');
+    if (!isDirectVoiceMode) {
+      setVoiceInterimText('Transcribing locally with Whisper...');
+    }
     try {
       const response = await fetch('/api/stt/transcribe', {
         method: 'POST',
@@ -196,6 +206,12 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
       const transcript = String(data.transcript || '').trim();
       if (!transcript) {
         setVoiceError('Whisper did not detect speech in the recording.');
+        return;
+      }
+
+      if (directSendCb) {
+        voiceDirectSendCallbackRef.current = null;
+        directSendCb(transcript);
         return;
       }
 
@@ -246,8 +262,10 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
 
       recorder.onstart = () => {
         setIsVoiceListening(true);
-        setVoiceInterimText('Recording locally. Stop when you are done.');
-        showToast('Offline voice recording active. Speak now...');
+        if (!voiceDirectSendCallbackRef.current) {
+          setVoiceInterimText('Recording locally. Stop when you are done.');
+          showToast('Offline voice recording active. Speak now...');
+        }
       };
 
       recorder.ondataavailable = (event: BlobEvent) => {
@@ -328,7 +346,9 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
       try {
         if (mediaRecorderRef.current.state !== 'inactive') {
           mediaRecorderRef.current.stop();
-          setVoiceInterimText('Preparing local transcription...');
+          if (!voiceDirectSendCallbackRef.current) {
+            setVoiceInterimText('Preparing local transcription...');
+          }
           return;
         }
       } catch (err) {
@@ -396,6 +416,7 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     micVolume, setMicVolume,
     showVoiceControlPanel, setShowVoiceControlPanel,
     startVoiceDictation, stopVoiceDictation, toggleVoiceDictation,
+    setVoiceDirectSendCallback,
     attachedFiles, setAttachedFiles,
     searchQuery, setSearchQuery,
     showScrollButton, setShowScrollButton,

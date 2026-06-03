@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Builds the Lumina Sandbox VM base image using TinyCore Linux
+    Builds the Lumina Sandbox VM base image using SliTaz Linux
 .DESCRIPTION
-    Creates a minimal TinyCore Linux VHDX image with:
+    Creates a minimal SliTaz Linux VHDX image with:
     - Python 3.x
     - Node.js (LTS)
     - Git
@@ -76,27 +76,27 @@ try {
     return
 }
 
-# Step 3: Install TinyCore Linux
-Write-Host "[3/8] Installing TinyCore Linux..." -ForegroundColor Yellow
+# Step 3: Install SliTaz Linux
+Write-Host "[3/8] Installing SliTaz Linux..." -ForegroundColor Yellow
 $mountPoint = "${driveLetter}:\"
-$tinyCoreUrl = "http://tinycorelinux.net/15.x/x86_64/release/TinyCore-current.iso"
-$isoPath = Join-Path $OutputDir "tinycore.iso"
+$slitazUrl = "https://mirror1.slitaz.org/iso/rolling/slitaz-rolling-core64.iso"
+$isoPath = Join-Path $OutputDir "slitaz.iso"
 
 try {
-    Write-Host "  Downloading TinyCore Linux..."
+    Write-Host "  Downloading SliTaz Linux..."
     # Use BITS transfer or Invoke-WebRequest
     try {
-        Start-BitsTransfer -Source $tinyCoreUrl -Destination $isoPath -DisplayName "Downloading TinyCore Linux" -Priority High
+        Start-BitsTransfer -Source $slitazUrl -Destination $isoPath -DisplayName "Downloading SliTaz Linux" -Priority High
     } catch {
-        Invoke-WebRequest -Uri $tinyCoreUrl -OutFile $isoPath -UseBasicParsing
+        Invoke-WebRequest -Uri $slitazUrl -OutFile $isoPath -UseBasicParsing
     }
-    Write-Host "  Downloaded to $isoPath"
+    Write-Host "  Downloaded SliTaz ISO to $isoPath"
 
-    # Extract TinyCore to VHDX
-    Write-Host "  Extracting TinyCore to VHDX..."
-    $tinyCoreDir = Join-Path $OutputDir "tinycore-extract"
-    Remove-Item -Path $tinyCoreDir -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Path $tinyCoreDir -Force | Out-Null
+    # Extract SliTaz boot files and seed the VHDX
+    Write-Host "  Extracting SliTaz boot files..."
+    $slitazDir = Join-Path $OutputDir "slitaz-extract"
+    Remove-Item -Path $slitazDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $slitazDir -Force | Out-Null
 
     # Mount ISO and copy files
     $isoDisk = Mount-DiskImage -ImagePath $isoPath -PassThru
@@ -104,17 +104,17 @@ try {
     $isoMount = "${isoDriveLetter}:\"
 
     # Copy kernel and initrd
-    Copy-Item -Path "${isoMount}\boot\vmlinuz64" -Destination (Join-Path $OutputDir "kernel") -Force
-    Copy-Item -Path "${isoMount}\boot\corepure64.gz" -Destination (Join-Path $OutputDir "initrd") -Force
+    Copy-Item -Path "${isoMount}\boot\bzImage" -Destination (Join-Path $OutputDir "kernel") -Force
+    Copy-Item -Path "${isoMount}\boot\rootfs4.gz" -Destination (Join-Path $OutputDir "initrd") -Force
     Write-Host "  Copied kernel and initrd to $OutputDir"
 
     # Copy all ISO contents
     Copy-Item -Path "${isoMount}\*" -Destination $mountPoint -Recurse -Force -ErrorAction SilentlyContinue
 
     Dismount-DiskImage -ImagePath $isoPath
-    Write-Host "  TinyCore files deployed"
+    Write-Host "  SliTaz files deployed"
 } catch {
-    Write-Host "  Warning: TinyCore installation failed: $_" -ForegroundColor Red
+    Write-Host "  Warning: SliTaz installation failed: $_" -ForegroundColor Red
     Write-Host "  Continuing with minimal setup..."
 }
 
@@ -248,12 +248,12 @@ Write-Host "  Guest agent runtime installed"
 # Step 7: Create startup configuration
 Write-Host "[7/8] Configuring system startup..." -ForegroundColor Yellow
 
-# For TinyCore, create the bootlocal.sh
+# For SliTaz, create the bootlocal.sh
 $bootLocalPath = "${mountPoint}opt\bootlocal.sh"
 @"
 #!/bin/sh
 # Lumina Sandbox - bootlocal.sh
-# Runs at the end of TinyCore boot sequence
+# Runs at the end of SliTaz boot sequence
 
 /opt/lumina/etc/startup.sh &
 "@ | Out-File -FilePath $bootLocalPath -Encoding ASCII -Force
