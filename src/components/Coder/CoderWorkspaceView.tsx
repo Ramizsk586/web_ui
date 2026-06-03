@@ -88,6 +88,7 @@ interface CoderWorkspaceViewProps {
   rightIsInspectMode: boolean;
   setRightIsInspectMode: (inspect: boolean) => void;
   startCoderPreview: () => Promise<void>;
+  useVmSandbox: boolean;
 }
 
 export default function CoderWorkspaceView({
@@ -149,7 +150,8 @@ export default function CoderWorkspaceView({
   setRightIsGridEnabled,
   rightIsInspectMode,
   setRightIsInspectMode,
-  startCoderPreview
+  startCoderPreview,
+  useVmSandbox
 }: CoderWorkspaceViewProps) {
   
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -463,6 +465,9 @@ export default function CoderWorkspaceView({
               {/* Terminal Console Component */}
               <div className="flex-1 min-h-0">
                 <TerminalConsole 
+                  workspaceRoot={coderWorkspacePath}
+                  isCoderMode={true}
+                  useVmSandbox={useVmSandbox}
                   onToast={showToast} 
                   triggerRefresh={() => setWorkspaceRefreshKey((k: number) => k + 1)}
                   onElizaActiveChange={(active) => setIsElizaActive(active)}
@@ -583,6 +588,9 @@ export default function CoderWorkspaceView({
               {/* Interactive Terminal TerminalConsole */}
               <div className="flex-1 min-h-0 bg-[#060505]">
                 <TerminalConsole 
+                  workspaceRoot={coderWorkspacePath}
+                  isCoderMode={true}
+                  useVmSandbox={useVmSandbox}
                   onToast={showToast} 
                   triggerRefresh={() => setWorkspaceRefreshKey((k: number) => k + 1)}
                   onElizaActiveChange={(active) => setIsElizaActive(active)}

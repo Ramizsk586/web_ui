@@ -395,6 +395,7 @@ export default function AppContent({
     useBubbles, setUseBubbles,
     autoHideTopBar, setAutoHideTopBar,
     useTurboQuant, setUseTurboQuant,
+    useVmSandbox, setUseVmSandbox,
     modelSelectorMode, setModelSelectorMode,
     activeSettingsTab, setActiveSettingsTab,
     activePlusSubMenu, setActivePlusSubMenu,
@@ -1567,7 +1568,7 @@ const startCoderPreview = useCallback(async () => {
     setTranscriptionOptionsDoc,
     setActiveArtifact, setIsCanvasOpen, setCanvasView,
     showToast,
-    isCoderMode, setIsCoderMode,
+    isCoderMode, useVmSandbox, setIsCoderMode,
     isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen,
     activeAssistantMode,
     activeCommandType, activeCommandQuery,
@@ -2557,6 +2558,7 @@ const startCoderPreview = useCallback(async () => {
             rightIsInspectMode={rightIsInspectMode}
             setRightIsInspectMode={setRightIsInspectMode}
             startCoderPreview={startCoderPreview}
+            useVmSandbox={useVmSandbox}
           />) : (
           <>
             {showAgentCreation ? (
@@ -2646,6 +2648,8 @@ const startCoderPreview = useCallback(async () => {
                   onClose={() => setIsSettingsOpen(false)}
                   useLocalModelsOnly={useLocalModelsOnly}
                   setUseLocalModelsOnly={setUseLocalModelsOnly}
+                  useVmSandbox={useVmSandbox}
+                  setUseVmSandbox={setUseVmSandbox}
                   activeSettingsTab={activeSettingsTab}
                   setActiveSettingsTab={setActiveSettingsTab}
                   useBubbles={useBubbles}

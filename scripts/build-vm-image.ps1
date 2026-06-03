@@ -296,9 +296,6 @@ try {
     Write-Host "  Warning: Could not dismount VHDX: $_" -ForegroundColor Yellow
 }
 
-# Copy VHDX as the base image
-Copy-Item -Path $vhdxPath -Destination (Join-Path $OutputDir "lumina-base.img") -Force
-
 Write-Host ""
 Write-Host "=== Build Complete ===" -ForegroundColor Green
 Write-Host "Output files:" -ForegroundColor Cyan

@@ -336,11 +336,11 @@ async function startServer() {
   });
 
   // ─── Terminal Session Store ────────────────────────────────────────────────────
-  const terminalSessions = new Map<string, { cwd: string; lastAccess: number; vmId?: string }>();
+  const terminalSessions = new Map<string, { cwd: string; lastAccess: number; vmId?: string; mode?: 'sandbox' | 'wsl' | 'host' }>();
 
   function getTerminalSession(sessionId?: string) {
     if (!sessionId || !terminalSessions.has(sessionId)) {
-      const newSession: { cwd: string; lastAccess: number; vmId?: string } = {
+      const newSession: { cwd: string; lastAccess: number; vmId?: string; mode?: 'sandbox' | 'wsl' | 'host' } = {
         cwd: '/workspace',
         lastAccess: Date.now(),
       };
@@ -385,42 +385,119 @@ async function startServer() {
     return { newPath, changed: true };
   };
 
+  const canUseWsl = () => {
+    if (process.platform !== 'win32') return false;
+    try {
+      const result = spawnSync('wsl.exe', ['--status'], { encoding: 'utf8', timeout: 5000 });
+      return result.status === 0;
+    } catch {
+      return false;
+    }
+  };
+
+  const resolveTerminalMode = (useVmSandbox: boolean): 'sandbox' | 'wsl' | 'host' => {
+    if (useVmSandbox) return 'sandbox';
+    if (canUseWsl()) return 'wsl';
+    return 'host';
+  };
+
+  const toWslPath = (inputPath: string) => {
+    const normalized = path.resolve(inputPath).replace(/\\/g, '/');
+    const driveMatch = normalized.match(/^([A-Za-z]):\/(.*)$/);
+    if (!driveMatch) {
+      return normalized.startsWith('/') ? normalized : `/${normalized}`;
+    }
+    const drive = driveMatch[1].toLowerCase();
+    const rest = driveMatch[2];
+    return `/mnt/${drive}/${rest}`;
+  };
+
+  const executeLinuxLikeHostCommand = async (command: string, cwd: string) => {
+    if (process.platform === 'win32' && canUseWsl()) {
+      return await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
+        const proc = spawn('wsl.exe', ['bash', '-lc', `cd ${JSON.stringify(toWslPath(cwd))} && ${command}`], {
+          cwd,
+          env: process.env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+        proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+        proc.on('close', (code) => resolve({ stdout, stderr, exitCode: code ?? 0 }));
+        proc.on('error', (error) => resolve({ stdout: '', stderr: `WSL execution failed: ${error.message}\n`, exitCode: 1 }));
+      });
+    }
+
+    return {
+      stdout: '',
+      stderr: process.platform === 'win32'
+        ? 'Linux-style terminal mode requires WSL when VM sandbox is disabled.\n'
+        : 'Linux-style host terminal execution is not available in this environment.\n',
+      exitCode: 1,
+    };
+  };
+
   // GET /api/terminal/session — create or resume a session
   app.get("/api/terminal/session", (req, res) => {
+    const workspaceRoot = typeof req.query.workspaceRoot === 'string' && req.query.workspaceRoot.trim()
+      ? req.query.workspaceRoot
+      : process.cwd();
+    const useVmSandbox = String(req.query.useVmSandbox || '') === 'true';
     const { id, session } = getTerminalSession();
+    const mode = resolveTerminalMode(useVmSandbox);
+    session.mode = mode;
+    session.cwd = mode === 'sandbox' ? '/workspace' : workspaceRoot;
     res.json({
       sessionId: id,
       cwd: session.cwd,
       currentPath: session.cwd,
-      platform: 'linux-vm',
+      platform: mode === 'sandbox' ? 'linux-vm' : mode === 'wsl' ? 'linux-wsl' : process.platform,
       shell: 'bash',
-      hostname: session.vmId || 'lumina-sandbox',
-      username: 'agent',
-      sandboxRequired: true,
+      hostname: mode === 'sandbox' ? (session.vmId || 'lumina-sandbox') : os.hostname(),
+      username: mode === 'sandbox' ? 'agent' : os.userInfo().username,
+      sandboxRequired: mode === 'sandbox',
+      executionMode: mode,
     });
   });
 
   // POST /api/terminal/execute — shell command execution with sandbox routing
   app.post("/api/terminal/execute", async (req, res) => {
-    let { command, currentPath, sessionId: clientSessionId, workspaceRoot, vmId, isCoderMode } = req.body;
+    let { command, currentPath, sessionId: clientSessionId, workspaceRoot, vmId, isCoderMode, useVmSandbox } = req.body;
     if (!command || typeof command !== 'string') {
       return res.status(400).json({ stderr: 'No command provided.' });
     }
 
+    const mode = resolveTerminalMode(Boolean(useVmSandbox));
+    const hostWorkspaceRoot = path.resolve(workspaceRoot || currentPath || process.cwd());
+    const { id: sessionId, session } = getTerminalSession(clientSessionId);
+    session.mode = mode;
+
+    if (mode !== 'sandbox') {
+      if (currentPath && currentPath !== '.') {
+        const resolved = path.resolve(currentPath);
+        if (resolved === hostWorkspaceRoot || resolved.startsWith(hostWorkspaceRoot + path.sep)) {
+          session.cwd = resolved;
+        }
+      }
+      if (!(session.cwd === hostWorkspaceRoot || session.cwd.startsWith(hostWorkspaceRoot + path.sep))) {
+        session.cwd = hostWorkspaceRoot;
+      }
+    }
+
     let targetVmId = vmId;
 
-    if (!sandbox.isInitialized()) {
+    if (mode === 'sandbox' && !sandbox.isInitialized()) {
       try {
         console.log('[LUMINA_DEBUG] Initializing sandbox on-the-fly for shell execution...');
         await sandbox.initialize();
       } catch (initErr: any) {
-        return res.status(503).json({ sessionId: clientSessionId, stderr: `Sandbox is required for terminal execution and failed to initialize: ${initErr.message}`, stdout: '' });
+        return res.status(503).json({ sessionId, stderr: `Sandbox is required for terminal execution and failed to initialize: ${initErr.message}`, stdout: '' });
       }
     }
 
-    if (isCoderMode || vmId || sandbox.isInitialized()) {
+    if (mode === 'sandbox' && (isCoderMode || vmId || sandbox.isInitialized())) {
       if (!targetVmId) {
-        // Look up already acquired or booting/available VMs from the pool
         const poolStatus = sandbox.getPoolStatus();
         const activeVms = poolStatus.activeVms || [];
         if (activeVms.length > 0) {
@@ -433,7 +510,7 @@ async function startServer() {
             targetVmId = acquired.id;
             console.log(`[LUMINA_DEBUG] Successfully acquired VM: ${targetVmId}`);
           } catch (acqErr: any) {
-            return res.status(500).json({ sessionId: clientSessionId, stderr: `Failed to acquire Sandbox VM: ${acqErr.message}`, stdout: '' });
+            return res.status(500).json({ sessionId, stderr: `Failed to acquire Sandbox VM: ${acqErr.message}`, stdout: '' });
           }
         }
       }
@@ -441,8 +518,7 @@ async function startServer() {
 
     vmId = targetVmId;
 
-    // ─── Route through sandbox VM when available ───────────────────────────
-    if (sandbox.isInitialized() && vmId) {
+    if (mode === 'sandbox' && sandbox.isInitialized() && vmId) {
       try {
         const result = await sandbox.agentRuntime.exec(
           { id: vmId, tag: 'sandbox' },
@@ -453,98 +529,49 @@ async function startServer() {
           }
         );
         return res.json({
-          sessionId: clientSessionId,
+          sessionId,
           stdout: result.stdout,
           stderr: result.stderr,
           exitCode: result.exitCode,
           sandboxed: true,
+          executionMode: mode,
         });
       } catch (e: any) {
-        return res.status(500).json({ sessionId: clientSessionId, stderr: `Sandbox error: ${e.message}`, stdout: '' });
+        return res.status(500).json({ sessionId, stderr: `Sandbox error: ${e.message}`, stdout: '' });
       }
-    }
-
-    // ─── Fallback: host-side execution (legacy) ────────────────────────────
-    return res.status(503).json({
-      sessionId: clientSessionId,
-      stdout: '',
-      stderr: 'Sandbox VM is required. Host-side terminal execution is disabled.\n',
-      sandboxed: false,
-    });
-
-    /*
-    const { id: sessionId, session } = getTerminalSession(clientSessionId);
-    const sandboxRoot = path.resolve(workspaceRoot || currentPath || process.cwd());
-
-    const isInsideSandbox = (candidate: string) => {
-      const resolved = path.resolve(candidate);
-      return resolved === sandboxRoot || resolved.startsWith(sandboxRoot + path.sep);
-    };
-
-    if (currentPath && currentPath !== '.') {
-      const resolved = resolveTermPath(process.cwd(), currentPath);
-      try {
-        if (fs.statSync(resolved).isDirectory() && isInsideSandbox(resolved)) {
-          session.cwd = resolved;
-        }
-      } catch {}
-    }
-
-    if (!isInsideSandbox(session.cwd)) {
-      session.cwd = sandboxRoot;
     }
 
     const trimmed = command.trim();
     const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
 
-    const LOWER_CMD = trimmed.toLowerCase();
-    const BLOCKED_CLIS = ['opencode', 'claude', 'poolside', 'cline', 'aider', 'gptengineer', 'gpt-engineer', 'devin'];
-    if (BLOCKED_CLIS.some(cli => LOWER_CMD.includes(cli))) {
-      return res.status(400).json({
-        sessionId,
-        stderr: '✖ Command blocked: Interactivity with external AI CLIs is restricted to prevent terminal session freezes.\n'
-      });
-    }
-
     if (['cls', 'clear', 'clear-host'].includes(firstWord)) {
-      return res.json({ sessionId, clear: true, stdout: '', stderr: '' });
+      return res.json({ sessionId, clear: true, stdout: '', stderr: '', sandboxed: false, executionMode: mode });
     }
 
-    if (firstWord === 'cd' || firstWord === 'set-location' || firstWord === 'sl') {
+    if (firstWord === 'cd') {
       const args = trimmed.slice(firstWord.length).trim();
-      const targetPath = resolveTermPath(session.cwd, args || os.homedir());
-      if (!isInsideSandbox(targetPath)) {
-        return res.status(403).json({
-          sessionId, stdout: '',
-          stderr: `Permission denied: terminal is sandboxed to ${sandboxRoot}\n`,
-          newPath: toTermRelativePath(session.cwd),
-        });
+      const nextPath = path.resolve(session.cwd, args || hostWorkspaceRoot);
+      if (!(nextPath === hostWorkspaceRoot || nextPath.startsWith(hostWorkspaceRoot + path.sep))) {
+        return res.status(403).json({ sessionId, stdout: '', stderr: `Permission denied: terminal is sandboxed to ${hostWorkspaceRoot}\n`, newPath: session.cwd });
       }
-      const result = handleTermCd(args, session);
-      return res.json({
-        sessionId, stdout: '', stderr: result.stderr || '',
-        newPath: result.newPath !== undefined ? result.newPath : toTermRelativePath(session.cwd),
-      });
+      session.cwd = nextPath;
+      return res.json({ sessionId, stdout: '', stderr: '', newPath: session.cwd, sandboxed: false, executionMode: mode });
     }
 
-    if (firstWord === 'pwd' || firstWord === 'get-location' || firstWord === 'gl') {
-      return res.json({ sessionId, stdout: session.cwd + '\n', stderr: '', newPath: toTermRelativePath(session.cwd) });
+    if (firstWord === 'pwd') {
+      return res.json({ sessionId, stdout: session.cwd + '\n', stderr: '', newPath: session.cwd, sandboxed: false, executionMode: mode });
     }
 
-    try {
-      if (!isInsideSandbox(session.cwd)) {
-        return res.status(403).json({ sessionId, stderr: `Permission denied: terminal is sandboxed to ${sandboxRoot}\n`, stdout: '' });
-      }
-      const result = await executeTermCommand(trimmed, session.cwd);
-      try { fs.statSync(session.cwd); } catch { session.cwd = process.cwd(); }
-      return res.json({
-        sessionId, stdout: result.stdout, stderr: result.stderr,
-        exitCode: result.exitCode, newPath: toTermRelativePath(session.cwd),
-      });
-    } catch (err: any) {
-      return res.status(500).json({ sessionId, stderr: `Server error: ${err.message}`, stdout: '' });
-    }
-    */
+    const result = await executeLinuxLikeHostCommand(trimmed, session.cwd);
+    return res.json({
+      sessionId,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      newPath: session.cwd,
+      sandboxed: false,
+      executionMode: mode,
+    });
   });
 
   // Live Compiler/Transpiler Sandbox Interceptor for React / JSX / TSX and JS
@@ -5014,3 +5041,6 @@ ${contextStr}`;
 }
 
 startServer();
+
+
+

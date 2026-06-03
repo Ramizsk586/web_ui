@@ -189,6 +189,9 @@ export function useAppSettings({
   const [useLocalModelsOnly, setUseLocalModelsOnly] = useState(() => {
     return localStorage.getItem('lumina_use_local_models') === 'true';
   });
+  const [useVmSandbox, setUseVmSandbox] = useState(() => {
+    return localStorage.getItem('lumina_use_vm_sandbox') === 'true';
+  });
   const [modelSelectorMode, setModelSelectorMode] = useState<'popup' | 'drawer'>(() => {
     const saved = localStorage.getItem('lumina_model_selector_mode');
     return saved === 'drawer' ? 'drawer' : 'popup';
@@ -723,6 +726,7 @@ export function useAppSettings({
     handleSaveSearch,
     handleVerifySearch,
     handleSaveMcp,
-    useLocalModelsOnly, setUseLocalModelsOnly
+    useLocalModelsOnly, setUseLocalModelsOnly,
+    useVmSandbox, setUseVmSandbox
   };
 }

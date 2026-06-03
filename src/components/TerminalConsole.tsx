@@ -9,8 +9,10 @@ interface TerminalLine {
 }
 
 interface TerminalConsoleProps {
-  /** Backend base URL — defaults to same origin */
   apiBase?: string;
+  workspaceRoot?: string;
+  isCoderMode?: boolean;
+  useVmSandbox?: boolean;
   onToast?: (message: string) => void;
   triggerRefresh?: () => void;
   onElizaActiveChange?: (active: boolean) => void;
@@ -69,6 +71,9 @@ function parseAnsi(text: string): React.ReactNode[] {
 
 function TerminalConsole({
   apiBase = '',           // e.g. 'http://localhost:3001' or '' for same-origin
+  workspaceRoot,
+  isCoderMode = false,
+  useVmSandbox = false,
   onToast,
   triggerRefresh,
   onElizaActiveChange,
@@ -129,7 +134,12 @@ function TerminalConsole({
   useEffect(() => {
     (async () => {
       try {
-        const res  = await fetch(`${apiBase}/api/terminal/session`);
+        const params = new URLSearchParams();
+        if (workspaceRoot) params.set('workspaceRoot', workspaceRoot);
+        if (isCoderMode) params.set('isCoderMode', 'true');
+        if (useVmSandbox) params.set('useVmSandbox', 'true');
+        const suffix = params.toString() ? `?${params.toString()}` : '';
+        const res  = await fetch(`${apiBase}/api/terminal/session${suffix}`);
         const data = await res.json();
         setSessionId(data.sessionId);
         setCurrentPath(data.currentPath ?? '.');
@@ -153,8 +163,7 @@ function TerminalConsole({
         ]);
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [apiBase, isCoderMode, useVmSandbox, workspaceRoot]);
 
   // ── Eliza toggle ───────────────────────────────────────────────────────────
 
@@ -295,7 +304,7 @@ function TerminalConsole({
       const response = await fetch(`${apiBase}/api/terminal/execute`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ command: trimmed, currentPath, sessionId }),
+        body:    JSON.stringify({ command: trimmed, currentPath, sessionId, workspaceRoot, isCoderMode, useVmSandbox }),
       });
 
       if (!response.ok) {

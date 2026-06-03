@@ -66,12 +66,17 @@ export class SandboxInstaller {
 
     const imgPath = path.join(vmDir, 'lumina-base.img');
     const vhdxPath = path.join(vmDir, 'lumina-base.vhdx');
-    if (!fs.existsSync(vhdxPath) && !fs.existsSync(imgPath)) {
+    const hasVhdx = fs.existsSync(vhdxPath);
+    const hasImg = fs.existsSync(imgPath);
+    if (!hasVhdx && !hasImg) {
       issues.push('Base image not found');
     }
 
     try {
       const detection = await this.hypervisor.detect();
+      if (detection.hyperVEnabled && !hasVhdx) {
+        issues.push('Hyper-V requires a lumina-base.vhdx parent disk');
+      }
       if (!detection.hyperVEnabled && !detection.wslInstalled) {
         issues.push('Neither WSL nor Hyper-V is available');
       }
@@ -127,13 +132,22 @@ export class SandboxInstaller {
   private async installBaseImage(detection: HostDetection): Promise<void> {
     const vmDir = path.join(this.luminaDataDir, 'vm');
     const imgPath = path.join(vmDir, 'lumina-base.img');
-
     const vhdxPath = path.join(vmDir, 'lumina-base.vhdx');
-    if (fs.existsSync(vhdxPath) || fs.existsSync(imgPath)) {
-      const existingPath = fs.existsSync(vhdxPath) ? vhdxPath : imgPath;
-      const size = fs.statSync(existingPath).size;
-      log.info(`Base image already exists (${(size / 1024 / 1024).toFixed(1)} MB)`);
-      return;
+    const hasVhdx = fs.existsSync(vhdxPath);
+    const hasImg = fs.existsSync(imgPath);
+    const preferredPath = detection.hyperVEnabled ? vhdxPath : (hasVhdx ? vhdxPath : imgPath);
+
+    if (fs.existsSync(preferredPath)) {
+      const size = fs.statSync(preferredPath).size;
+      if (size >= 10 * 1024 * 1024) {
+        log.info(`Base image already exists (${(size / 1024 / 1024).toFixed(1)} MB)`);
+        return;
+      }
+      throw new Error(`Base image seems invalid (too small: ${(size / 1024 / 1024).toFixed(1)}MB) at ${preferredPath}`);
+    }
+
+    if (detection.hyperVEnabled && hasImg && !hasVhdx) {
+      log.warn(`Found raw image at ${imgPath}, but Hyper-V needs a VHDX parent disk. Rebuilding base image...`);
     }
 
     log.info('Generating Lumina VM base image...');
