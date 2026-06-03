@@ -25,6 +25,8 @@ interface VoiceAssistantPanelProps {
   speakText: (text: string) => void;
   handleSend?: (contentOverride?: string) => Promise<void>;
   setVoiceDirectSendCallback?: (cb: ((transcript: string) => void) | null) => void;
+  setInput?: (val: string) => void;
+  silenceCountdown: number | null;
 }
 
 export function VoiceAssistantPanel({
@@ -42,7 +44,9 @@ export function VoiceAssistantPanel({
   messages,
   isTyping,
   handleSend,
-  setVoiceDirectSendCallback
+  setVoiceDirectSendCallback,
+  setInput,
+  silenceCountdown
 }: VoiceAssistantPanelProps) {
   const [handsFree, setHandsFree] = useState(true);
   const wasSpeakingRef = useRef(false);
@@ -51,27 +55,31 @@ export function VoiceAssistantPanel({
   const assistantMessages = messages.filter(m => m.role === 'assistant');
   const lastAssistantMsg = assistantMessages[assistantMessages.length - 1];
 
-  // Set up callback to send transcript directly to AI
+  // Set up callback to write transcript to input box and auto-send
   const startDirectVoiceDictation = useCallback(() => {
     if (setVoiceDirectSendCallback && handleSend) {
       setVoiceDirectSendCallback((transcript) => {
-        handleSend(transcript);
+        const cleanedTranscript = transcript.trim();
+        if (!cleanedTranscript) {
+          return;
+        }
+        if (setInput) {
+          setInput(cleanedTranscript);
+        }
+        void handleSend(cleanedTranscript);
       });
     }
     startVoiceDictation();
-  }, [setVoiceDirectSendCallback, handleSend, startVoiceDictation]);
+  }, [setVoiceDirectSendCallback, handleSend, startVoiceDictation, setInput]);
 
   // Toggle that uses direct send mode for the voice panel
   const toggleDirectVoiceDictation = useCallback(() => {
     if (isVoiceListening) {
-      if (setVoiceDirectSendCallback) {
-        setVoiceDirectSendCallback(null);
-      }
       stopVoiceDictation();
     } else {
       startDirectVoiceDictation();
     }
-  }, [isVoiceListening, stopVoiceDictation, startDirectVoiceDictation, setVoiceDirectSendCallback]);
+  }, [isVoiceListening, stopVoiceDictation, startDirectVoiceDictation]);
 
   // Auto-start listening on mount when handsfree is enabled
   useEffect(() => {
@@ -367,9 +375,14 @@ export function VoiceAssistantPanel({
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="text-[var(--theme-secondary)] text-xs italic font-sans"
+                      className="text-[var(--theme-secondary)] text-xs italic font-sans flex flex-col gap-1 items-center"
                     >
-                      Listening...
+                      <span>Listening...</span>
+                      {silenceCountdown !== null && (
+                        <span className="text-[10px] text-[var(--theme-accent)] not-italic font-mono font-semibold animate-pulse">
+                          Auto-submitting in {silenceCountdown}s
+                        </span>
+                      )}
                     </motion.div>
                   )}
 
@@ -455,7 +468,7 @@ export function VoiceAssistantPanel({
               <div className="text-center">
                 <div className="text-[10px] font-mono text-[var(--theme-secondary)] tracking-tight">
                   {isVoiceListening 
-                    ? 'RECORDING...' 
+                    ? (silenceCountdown !== null ? `PAUSING (${silenceCountdown}S)...` : 'RECORDING...') 
                     : isAiSpeaking 
                     ? 'REPLYING...' 
                     : 'WAITING...'}

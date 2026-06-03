@@ -549,6 +549,7 @@ export default function AppContent({
     voiceError, setVoiceError,
     micVolume, setMicVolume,
     showVoiceControlPanel, setShowVoiceControlPanel,
+    silenceCountdown,
     startVoiceDictation, stopVoiceDictation, toggleVoiceDictation,
     setVoiceDirectSendCallback,
     attachedFiles, setAttachedFiles,
@@ -3527,6 +3528,8 @@ const startCoderPreview = useCallback(async () => {
         speakText={speakText}
         handleSend={handleSend}
         setVoiceDirectSendCallback={setVoiceDirectSendCallback}
+        setInput={setInput}
+        silenceCountdown={silenceCountdown}
       />
 
       {/* Local model GGUF manual engine parameter loader */}

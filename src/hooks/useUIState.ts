@@ -107,6 +107,7 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [micVolume, setMicVolume] = useState<number>(0);
   const [showVoiceControlPanel, setShowVoiceControlPanel] = useState(false);
+  const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -117,6 +118,9 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const micStreamRef = useRef<MediaStream | null>(null);
   const autoSendAfterRecordingRef = useRef(true);
   const voiceDirectSendCallbackRef = useRef<((transcript: string) => void) | null>(null);
+  const hasSpokenRef = useRef(false);
+  const lastSpeechTimeRef = useRef(0);
+  const minVolumeRef = useRef(100);
 
   const setVoiceDirectSendCallback = useCallback((cb: ((transcript: string) => void) | null) => {
     voiceDirectSendCallbackRef.current = cb;
@@ -241,6 +245,10 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const startVoiceDictation = async (languageOverride?: string) => {
     setVoiceError(null);
     setVoiceInterimText('');
+    setSilenceCountdown(null);
+    hasSpokenRef.current = false;
+    lastSpeechTimeRef.current = Date.now();
+    minVolumeRef.current = 100;
 
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       const message = 'Local voice recording is not available in this browser runtime.';
@@ -317,7 +325,33 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
             sum += dataArray[i];
           }
           const average = sum / bufferLength;
-          setMicVolume(Math.min(100, Math.round((average / 128) * 100)));
+          const currentVolume = Math.min(100, Math.round((average / 128) * 100));
+          setMicVolume(currentVolume);
+
+          // Adaptive VAD Silence Detection
+          minVolumeRef.current = Math.min(minVolumeRef.current, currentVolume);
+          const SILENCE_THRESHOLD = Math.max(8, minVolumeRef.current + 5);
+          const SILENCE_MS = 4000;
+          const now = Date.now();
+
+          if (currentVolume >= SILENCE_THRESHOLD) {
+            if (!hasSpokenRef.current) {
+              hasSpokenRef.current = true;
+            }
+            lastSpeechTimeRef.current = now;
+            setSilenceCountdown(null);
+          } else if (hasSpokenRef.current) {
+            const silentDuration = now - lastSpeechTimeRef.current;
+            const remaining = Math.max(0, Math.ceil((SILENCE_MS - silentDuration) / 1000));
+            setSilenceCountdown(remaining);
+            if (silentDuration >= SILENCE_MS) {
+              hasSpokenRef.current = false;
+              setSilenceCountdown(null);
+              stopVoiceDictation();
+              return;
+            }
+          }
+
           animationFrameRef.current = requestAnimationFrame(updateVolume);
         };
 
