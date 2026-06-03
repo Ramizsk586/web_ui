@@ -2492,233 +2492,235 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
 
             {/* Assistant Mode Selection Dropdown */}
             {isCoderMode && (
-              <>
-                <div className="relative" ref={permissionDropdownRef}>
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    transition={{ duration: 0.08 }}
-                    onClick={() =>
-                      setIsPermissionDropdownOpen(!isPermissionDropdownOpen)
-                    }
-                    className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
-                    title={`Coder permissions: ${permissionModeLabel(coderPermissionMode)}`}
-                  >
-                    {coderPermissionMode === "full-access" ? (
-                      <ShieldCheck size={14} className="text-emerald-400" />
-                    ) : coderPermissionMode === "auto-review" ? (
-                      <Shield size={14} className="text-violet-400" />
-                    ) : (
-                      <Hand size={14} className="text-zinc-400" />
-                    )}
-                    <span className="hidden xl:inline">
-                      {permissionModeLabel(coderPermissionMode)}
-                    </span>
-                    <ChevronDown
-                      size={14}
-                      className="text-[var(--theme-muted)] transition-transform duration-200 hidden xl:inline"
-                      style={{
-                        transform: isPermissionDropdownOpen
-                          ? "rotate(180deg)"
-                          : "rotate(0deg)",
-                      }}
-                    />
-                  </motion.button>
+              <div className="relative" ref={permissionDropdownRef}>
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  transition={{ duration: 0.08 }}
+                  onClick={() =>
+                    setIsPermissionDropdownOpen(!isPermissionDropdownOpen)
+                  }
+                  className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
+                  title={`Coder permissions: ${permissionModeLabel(coderPermissionMode)}`}
+                >
+                  {coderPermissionMode === "full-access" ? (
+                    <ShieldCheck size={14} className="text-emerald-400" />
+                  ) : coderPermissionMode === "auto-review" ? (
+                    <Shield size={14} className="text-violet-400" />
+                  ) : (
+                    <Hand size={14} className="text-zinc-400" />
+                  )}
+                  <span className="hidden xl:inline">
+                    {permissionModeLabel(coderPermissionMode)}
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    className="text-[var(--theme-muted)] transition-transform duration-200 hidden xl:inline"
+                    style={{
+                      transform: isPermissionDropdownOpen
+                        ? "rotate(180deg)"
+                        : "rotate(0deg)",
+                    }}
+                  />
+                </motion.button>
 
-                  <AnimatePresence>
-                    {isPermissionDropdownOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                        className="absolute bottom-full left-0 mb-2 w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[190] p-1.5 text-left"
-                      >
-                        {permissionOptions.map((option) => {
-                          const isActive = coderPermissionMode === option.id;
+                <AnimatePresence>
+                  {isPermissionDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                      className="absolute bottom-full left-0 mb-2 w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[190] p-1.5 text-left"
+                    >
+                      {permissionOptions.map((option) => {
+                        const isActive = coderPermissionMode === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => {
+                              setCoderPermissionMode(option.id);
+                              setIsPermissionDropdownOpen(false);
+                              showToast(`Coder permissions: ${option.label}`);
+                            }}
+                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors cursor-pointer ${
+                              isActive
+                                ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)]"
+                                : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]"
+                            }`}
+                          >
+                            <span className="text-[var(--theme-secondary)]">
+                              {option.icon}
+                            </span>
+                            <span className="flex-1 text-left">
+                              {option.label}
+                            </span>
+                            {isActive && (
+                              <Check
+                                size={14}
+                                className="text-[var(--theme-accent)]"
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                      <div className="mt-1.5 border-t border-[var(--theme-border)] pt-1.5 px-2 pb-1 text-[10px] text-[var(--theme-muted)] font-mono">
+                        {permissionAuditLog.length} permission action
+                        {permissionAuditLog.length === 1 ? "" : "s"} logged
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            {isCoderMode && (
+              <div className="relative" ref={modeDropdownRef}>
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  transition={{ duration: 0.08 }}
+                  onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
+                  className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
+                  title={`Assistant Mode: ${activeAssistantMode === "builder" ? "Builder" : activeAssistantMode === "planner" ? "Planner" : "Debugger"}`}
+                >
+                  <div className="shrink-0 flex items-center justify-center">
+                    {activeAssistantMode === "builder" && (
+                      <Bot
+                        size={14}
+                        className="text-orange-500 animate-pulse"
+                      />
+                    )}
+                    {activeAssistantMode === "planner" && (
+                      <Layers size={14} className="text-violet-500" />
+                    )}
+                    {activeAssistantMode === "debugger" && (
+                      <Bug size={14} className="text-amber-500" />
+                    )}
+                  </div>
+                  <span className="hidden xl:inline">
+                    {activeAssistantMode === "builder"
+                      ? "Builder"
+                      : activeAssistantMode === "planner"
+                        ? "Planner"
+                        : "Debugger"}
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    className="text-[var(--theme-muted)] transition-transform duration-200 hidden xl:inline"
+                    style={{
+                      transform: isModeDropdownOpen
+                        ? "rotate(180deg)"
+                        : "rotate(0deg)",
+                    }}
+                  />
+                </motion.button>
+
+                <AnimatePresence>
+                  {isModeDropdownOpen && (
+                    <motion.div
+                      ref={modeDropdownContentRef}
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      style={modeDropdownPosition.style}
+                      className="fixed w-56 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
+                    >
+                      <div className="p-2 space-y-1">
+                        {[
+                          {
+                            id: "builder",
+                            name: "Builder Mode",
+                            icon: <Bot size={13} />,
+                            color: "text-orange-500",
+                            bgColor: "bg-orange-500/10",
+                            accentColor: "bg-orange-500",
+                          },
+                          {
+                            id: "planner",
+                            name: "Planner Mode",
+                            icon: <Layers size={13} />,
+                            color: "text-violet-500",
+                            bgColor: "bg-violet-500/10",
+                            accentColor: "bg-violet-500",
+                          },
+                          {
+                            id: "debugger",
+                            name: "Debugger Mode",
+                            icon: <Bug size={13} />,
+                            color: "text-amber-500",
+                            bgColor: "bg-amber-500/10",
+                            accentColor: "bg-amber-500",
+                          },
+                        ].map((mode, idx) => {
+                          const isActive = activeAssistantMode === mode.id;
                           return (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onClick={() => {
-                                setCoderPermissionMode(option.id);
-                                setIsPermissionDropdownOpen(false);
-                                showToast(`Coder permissions: ${option.label}`);
+                            <motion.div
+                              key={mode.id}
+                              initial={{ opacity: 0, x: -8 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{
+                                delay: idx * 0.05,
+                                type: "spring",
+                                stiffness: 140,
                               }}
-                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors cursor-pointer ${
-                                isActive
-                                  ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)]"
-                                  : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]"
-                              }`}
                             >
-                              <span className="text-[var(--theme-secondary)]">
-                                {option.icon}
-                              </span>
-                              <span className="flex-1 text-left">
-                                {option.label}
-                              </span>
-                              {isActive && (
-                                <Check
-                                  size={14}
-                                  className="text-[var(--theme-accent)]"
-                                />
-                              )}
-                            </button>
+                              <button
+                                onClick={() => {
+                                  setActiveAssistantMode(mode.id as any);
+                                  setIsModeDropdownOpen(false);
+                                  showToast(
+                                    `Switched focus to ${mode.name}.`,
+                                  );
+                                }}
+                                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-left transition-colors relative group/item cursor-pointer text-xs font-semibold ${
+                                  isActive
+                                    ? "bg-[var(--theme-hover-bg)]"
+                                    : "hover:bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)]"
+                                }`}
+                              >
+                                <div
+                                  className={`p-1.5 rounded-lg shrink-0 flex items-center justify-center ${isActive ? mode.color + " " + mode.bgColor : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                >
+                                  {mode.icon}
+                                </div>
+                                <span
+                                  className={
+                                    isActive
+                                      ? mode.color
+                                      : "text-[var(--theme-primary)]"
+                                  }
+                                >
+                                  {mode.name}
+                                </span>
+                                {isActive && (
+                                  <div className="ml-auto flex items-center gap-1">
+                                    <motion.div
+                                      animate={{
+                                        scale: [1, 1.25, 1],
+                                        opacity: [0.5, 1, 0.5],
+                                      }}
+                                      transition={{
+                                        repeat: Infinity,
+                                        duration: 1.5,
+                                      }}
+                                      className={`w-1.5 h-1.5 rounded-full ${mode.accentColor}`}
+                                    />
+                                    <Check
+                                      size={12}
+                                      className="text-emerald-500 shrink-0"
+                                    />
+                                  </div>
+                                )}
+                              </button>
+                            </motion.div>
                           );
                         })}
-                        <div className="mt-1.5 border-t border-[var(--theme-border)] pt-1.5 px-2 pb-1 text-[10px] text-[var(--theme-muted)] font-mono">
-                          {permissionAuditLog.length} permission action
-                          {permissionAuditLog.length === 1 ? "" : "s"} logged
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                <div className="relative" ref={modeDropdownRef}>
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    transition={{ duration: 0.08 }}
-                    onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
-                    className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
-                    title={`Assistant Mode: ${activeAssistantMode === "builder" ? "Builder" : activeAssistantMode === "planner" ? "Planner" : "Debugger"}`}
-                  >
-                    <div className="shrink-0 flex items-center justify-center">
-                      {activeAssistantMode === "builder" && (
-                        <Bot
-                          size={14}
-                          className="text-orange-500 animate-pulse"
-                        />
-                      )}
-                      {activeAssistantMode === "planner" && (
-                        <Layers size={14} className="text-violet-500" />
-                      )}
-                      {activeAssistantMode === "debugger" && (
-                        <Bug size={14} className="text-amber-500" />
-                      )}
-                    </div>
-                    <span className="hidden xl:inline">
-                      {activeAssistantMode === "builder"
-                        ? "Builder"
-                        : activeAssistantMode === "planner"
-                          ? "Planner"
-                          : "Debugger"}
-                    </span>
-                    <ChevronDown
-                      size={14}
-                      className="text-[var(--theme-muted)] transition-transform duration-200 hidden xl:inline"
-                      style={{
-                        transform: isModeDropdownOpen
-                          ? "rotate(180deg)"
-                          : "rotate(0deg)",
-                      }}
-                    />
-                  </motion.button>
-
-                  <AnimatePresence>
-                    {isModeDropdownOpen && (
-                      <motion.div
-                        ref={modeDropdownContentRef}
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                        style={modeDropdownPosition.style}
-                        className="fixed w-56 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
-                      >
-                        <div className="p-2 space-y-1">
-                          {[
-                            {
-                              id: "builder",
-                              name: "Builder Mode",
-                              icon: <Bot size={13} />,
-                              color: "text-orange-500",
-                              bgColor: "bg-orange-500/10",
-                              accentColor: "bg-orange-500",
-                            },
-                            {
-                              id: "planner",
-                              name: "Planner Mode",
-                              icon: <Layers size={13} />,
-                              color: "text-violet-500",
-                              bgColor: "bg-violet-500/10",
-                              accentColor: "bg-violet-500",
-                            },
-                            {
-                              id: "debugger",
-                              name: "Debugger Mode",
-                              icon: <Bug size={13} />,
-                              color: "text-amber-500",
-                              bgColor: "bg-amber-500/10",
-                              accentColor: "bg-amber-500",
-                            },
-                          ].map((mode, idx) => {
-                            const isActive = activeAssistantMode === mode.id;
-                            return (
-                              <motion.div
-                                key={mode.id}
-                                initial={{ opacity: 0, x: -8 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{
-                                  delay: idx * 0.05,
-                                  type: "spring",
-                                  stiffness: 140,
-                                }}
-                              >
-                                <button
-                                  onClick={() => {
-                                    setActiveAssistantMode(mode.id as any);
-                                    setIsModeDropdownOpen(false);
-                                    showToast(
-                                      `Switched focus to ${mode.name}.`,
-                                    );
-                                  }}
-                                  className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-left transition-colors relative group/item cursor-pointer text-xs font-semibold ${
-                                    isActive
-                                      ? "bg-[var(--theme-hover-bg)]"
-                                      : "hover:bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)]"
-                                  }`}
-                                >
-                                  <div
-                                    className={`p-1.5 rounded-lg shrink-0 flex items-center justify-center ${isActive ? mode.color + " " + mode.bgColor : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
-                                  >
-                                    {mode.icon}
-                                  </div>
-                                  <span
-                                    className={
-                                      isActive
-                                        ? mode.color
-                                        : "text-[var(--theme-primary)]"
-                                    }
-                                  >
-                                    {mode.name}
-                                  </span>
-                                  {isActive && (
-                                    <div className="ml-auto flex items-center gap-1">
-                                      <motion.div
-                                        animate={{
-                                          scale: [1, 1.25, 1],
-                                          opacity: [0.5, 1, 0.5],
-                                        }}
-                                        transition={{
-                                          repeat: Infinity,
-                                          duration: 1.5,
-                                        }}
-                                        className={`w-1.5 h-1.5 rounded-full ${mode.accentColor}`}
-                                      />
-                                      <Check
-                                        size={12}
-                                        className="text-emerald-500 shrink-0"
-                                      />
-                                    </div>
-                                  )}
-                                </button>
-                              </motion.div>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             )}
           </div>
 
@@ -2757,7 +2759,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
               )}
             </motion.button>
 
-            {setIsVoicePanelOpen && (
+            {!isCoderMode && setIsVoicePanelOpen && (
               <motion.button
                 whileTap={{ scale: 0.92 }}
                 onClick={() => {

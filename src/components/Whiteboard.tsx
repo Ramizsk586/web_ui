@@ -54,9 +54,10 @@ const NOTE_COLORS = [
 interface WhiteboardProps {
   onAttachToChat?: (file: File) => void;
   onClose?: () => void;
+  attachTriggerRef?: React.MutableRefObject<(() => void) | null>;
 }
 
-function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
+function Whiteboard({ onAttachToChat, onClose, attachTriggerRef }: WhiteboardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -65,6 +66,7 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
   const [zoom, setZoom] = useState<'fit' | 0.5 | 1 | 1.5 | 2>('fit');
   const [color, setColor] = useState('#EDE6DD');
   const [brushSize, setBrushSize] = useState(3);
+  const [stabilizedDist, setStabilizedDist] = useState<number>(25);
   const [actions, setActions] = useState<DrawAction[]>([]);
   const [redoStack, setRedoStack] = useState<DrawAction[]>([]);
   const [stickyNotes, setStickyNotes] = useState<StickyNoteData[]>([]);
@@ -89,7 +91,37 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
   const startPosRef = useRef({ x: 0, y: 0 });
   const lastPointRef = useRef({ x: 0, y: 0 });
   const pointsRef = useRef<{ x: number; y: number }[]>([]);
+  const stabilizedPointRef = useRef({ x: 0, y: 0 });
+  const currentCursorPosRef = useRef({ x: 0, y: 0 });
   const canvasRectRef = useRef<DOMRect | null>(null);
+
+  const handleAttach = useCallback(async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    try {
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((nextBlob) => resolve(nextBlob), 'image/png');
+      });
+      if (!blob) {
+        throw new Error('Failed to export whiteboard image');
+      }
+      const file = new File([blob], `whiteboard-${Date.now()}.png`, { type: 'image/png' });
+      onAttachToChat?.(file);
+    } catch (err) {
+      console.error("Error attaching sketch:", err);
+    }
+  }, [onAttachToChat]);
+
+  useEffect(() => {
+    if (attachTriggerRef) {
+      attachTriggerRef.current = handleAttach;
+      return () => {
+        if (attachTriggerRef.current === handleAttach) {
+          attachTriggerRef.current = null;
+        }
+      };
+    }
+  }, [attachTriggerRef, handleAttach]);
 
   const getCanvasRect = useCallback(() => {
     if (!canvasRectRef.current && canvasRef.current) {
@@ -171,7 +203,23 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
         ctx.globalCompositeOperation = action.type === 'erase' ? 'destination-out' : 'source-over';
         ctx.beginPath();
         ctx.moveTo(action.points[0].x, action.points[0].y);
-        action.points.forEach(p => ctx.lineTo(p.x, p.y));
+        if (action.points.length > 2) {
+          // Quadratic bezier smoothing for gorgeous fluid curves
+          ctx.moveTo(action.points[0].x, action.points[0].y);
+          for (let i = 1; i < action.points.length - 1; i++) {
+            const xc = (action.points[i].x + action.points[i + 1].x) / 2;
+            const yc = (action.points[i].y + action.points[i + 1].y) / 2;
+            ctx.quadraticCurveTo(action.points[i].x, action.points[i].y, xc, yc);
+          }
+          ctx.lineTo(action.points[action.points.length - 1].x, action.points[action.points.length - 1].y);
+        } else if (action.points.length === 2) {
+          ctx.moveTo(action.points[0].x, action.points[0].y);
+          ctx.lineTo(action.points[1].x, action.points[1].y);
+        } else if (action.points.length === 1) {
+          ctx.moveTo(action.points[0].x, action.points[0].y);
+          ctx.arc(action.points[0].x, action.points[0].y, action.size / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.stroke();
         ctx.globalCompositeOperation = 'source-over';
       } else if (action.type === 'line' && action.x !== undefined) {
@@ -395,6 +443,8 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
     startPosRef.current = p;
     lastPointRef.current = p;
     pointsRef.current = [p];
+    stabilizedPointRef.current = p;
+    currentCursorPosRef.current = p;
 
     if (tool === 'pen' || tool === 'eraser') {
       // Small dot on initial click to feel responsive
@@ -520,7 +570,105 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
 
           ctx.beginPath();
           ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y);
-          ctx.lineTo(p.x, p.y);
+          if (stabilizedDist > 0) {
+            // Calculate distance from previous stabilized point to current mouse position
+            const dx = p.x - stabilizedPointRef.current.x;
+            const dy = p.y - stabilizedPointRef.current.y;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > stabilizedDist) {
+              const angle = Math.atan2(dy, dx);
+              const targetX = p.x - Math.cos(angle) * stabilizedDist;
+              const targetY = p.y - Math.sin(angle) * stabilizedDist;
+              const stabilizedP = { x: targetX, y: targetY };
+
+              // Smooth quadratic curve from lastPoint to stabilizedP through previous midpoint
+              const prevPoints = pointsRef.current;
+              if (prevPoints.length >= 1) {
+                const prev = prevPoints[prevPoints.length - 1];
+                const xc = (prev.x + stabilizedP.x) / 2;
+                const yc = (prev.y + stabilizedP.y) / 2;
+                ctx.quadraticCurveTo(prev.x, prev.y, xc, yc);
+                lastPointRef.current = { x: xc, y: yc };
+              } else {
+                ctx.lineTo(stabilizedP.x, stabilizedP.y);
+                lastPointRef.current = stabilizedP;
+              }
+
+              pointsRef.current.push(stabilizedP);
+              stabilizedPointRef.current = stabilizedP;
+
+              // Draw leash preview thread on preview canvas
+              const pCanvas = previewCanvasRef.current;
+              if (pCanvas) {
+                const pCtx = pCanvas.getContext('2d');
+                if (pCtx) {
+                  pCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                  pCtx.save();
+                  pCtx.strokeStyle = 'rgba(217, 119, 86, 0.45)';
+                  pCtx.lineWidth = 1.5;
+                  pCtx.setLineDash([4, 4]);
+                  pCtx.beginPath();
+                  pCtx.moveTo(stabilizedP.x, stabilizedP.y);
+                  pCtx.lineTo(p.x, p.y);
+                  pCtx.stroke();
+
+                  pCtx.fillStyle = '#D97756';
+                  pCtx.beginPath();
+                  pCtx.arc(stabilizedP.x, stabilizedP.y, 4, 0, Math.PI * 2);
+                  pCtx.fill();
+                  pCtx.restore();
+                }
+              }
+            } else {
+              // Just draw static preview thread
+              const pCanvas = previewCanvasRef.current;
+              if (pCanvas) {
+                const pCtx = pCanvas.getContext('2d');
+                if (pCtx) {
+                  pCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+                  pCtx.save();
+                  pCtx.strokeStyle = 'rgba(217, 119, 86, 0.45)';
+                  pCtx.lineWidth = 1.5;
+                  pCtx.setLineDash([4, 4]);
+                  pCtx.beginPath();
+                  pCtx.moveTo(stabilizedPointRef.current.x, stabilizedPointRef.current.y);
+                  pCtx.lineTo(p.x, p.y);
+                  pCtx.stroke();
+
+                  pCtx.fillStyle = '#D97756';
+                  pCtx.beginPath();
+                  pCtx.arc(stabilizedPointRef.current.x, stabilizedPointRef.current.y, 4, 0, Math.PI * 2);
+                  pCtx.fill();
+                  pCtx.restore();
+                }
+              }
+              // Prevent stroke from drawing any segment since brush didn't move
+              ctx.closePath();
+            }
+          } else {
+            // Freehand with optimization
+            const lastReg = pointsRef.current[pointsRef.current.length - 1];
+            const distFromLast = lastReg ? Math.hypot(p.x - lastReg.x, p.y - lastReg.y) : Infinity;
+
+            if (distFromLast >= 2.0 || pointsRef.current.length === 0) {
+              const prevPoints = pointsRef.current;
+              if (prevPoints.length >= 1) {
+                const prev = prevPoints[prevPoints.length - 1];
+                const xc = (prev.x + p.x) / 2;
+                const yc = (prev.y + p.y) / 2;
+                ctx.quadraticCurveTo(prev.x, prev.y, xc, yc);
+                lastPointRef.current = { x: xc, y: yc };
+              } else {
+                ctx.lineTo(p.x, p.y);
+                lastPointRef.current = p;
+              }
+              pointsRef.current.push(p);
+            } else {
+              // Skip line to avoid redundant close points
+              ctx.closePath();
+            }
+          }
           ctx.stroke();
           ctx.restore();
         }
@@ -836,7 +984,7 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
             <div className={groupTitleClass}>Tools</div>
           </div>
 
-          <div className={`${toolbarSectionClass} w-[128px]`}>
+          <div className={`${toolbarSectionClass} w-[164px]`}>
             <div className="flex flex-col gap-2">
               <div className="rounded-2xl border border-[#d4af6d]/65 bg-[#201a14] px-3 py-2 shadow-[0_0_0_1px_rgba(212,175,109,0.15)]">
                 <div className="flex items-center justify-between">
@@ -859,6 +1007,23 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
                   title="Brush Size"
                 />
               </div>
+              <div className="rounded-xl border border-[#d4af6d]/15 bg-white/4 px-3 py-1.5 shadow-[0_1px_1px_rgba(0,0,0,0.1)] select-none">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] font-bold text-gray-300 uppercase tracking-wider">Leash</span>
+                  <span className="text-[10px] font-mono font-bold text-orange-400">{stabilizedDist}px</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={80}
+                  value={stabilizedDist}
+                  onChange={e => {
+                    setStabilizedDist(Number(e.target.value));
+                  }}
+                  className="mt-1 w-full h-1 cursor-pointer appearance-none rounded bg-[#352a1e] accent-orange-500"
+                  title="Stabilizer Leash Length (0 px = Raw Drawing)"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={undo}
@@ -876,11 +1041,11 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
                 </button>
               </div>
             </div>
-            <div className={groupTitleClass}>Brushes</div>
+            <div className={groupTitleClass}>Stroke & Smooth</div>
           </div>
 
-          <div className={`${toolbarSectionClass} min-w-0 flex-1`}>
-            <div className="grid grid-cols-6 gap-2">
+          <div className={`${toolbarSectionClass} w-[150px]`}>
+            <div className="grid grid-cols-4 gap-1.5">
               {toolBtn('line', <Minus />, 'Line')}
               {toolBtn('rect', <Square />, 'Rect')}
               {toolBtn('circle', <Circle />, 'Circle')}
@@ -888,86 +1053,15 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
               {toolBtn('diamond', <Diamond />, 'Diamond')}
               {toolBtn('arrow', <ArrowRight />, 'Arrow')}
               {toolBtn('star', <Star />, 'Star')}
-              <button
-                onClick={clearCanvas}
-                className={`${panelButtonClass} bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-red-400 hover:text-red-300 hover:bg-red-500/10`}
-                title="Wipe canvas completely"
-              >
-                <Trash2 size={15} />
-              </button>
-              <button
-                onClick={exportCanvas}
-                className={`${panelButtonClass} bg-[var(--theme-bg)]/45 border-[var(--theme-border)]/35 text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-bg)]/80`}
-                title="Export Board to PNG image"
-              >
-                <Download size={15} />
-              </button>
-              {selectedActionIndex !== null ? (
-                <button
-                  onClick={() => {
-                    setActions(prev => prev.filter((_, idx) => idx !== selectedActionIndex));
-                    setSelectedActionIndex(null);
-                  }}
-                  className={`${panelButtonClass} bg-red-500/10 border-red-500/20 text-red-400 hover:text-red-300`}
-                  title="Delete selected item (Delete or Backspace)"
-                >
-                  <Trash2 size={15} />
-                </button>
-              ) : (
-                <div className="h-9 w-9 rounded-xl border border-dashed border-white/10 bg-transparent" />
-              )}
-              <div className="col-span-2 flex items-center rounded-xl border border-[var(--theme-border)]/35 bg-[var(--theme-bg)]/45 px-2">
-                <span className="mr-2 text-[9px] font-mono font-bold uppercase tracking-[0.14em] text-[var(--theme-muted)]">Scale</span>
-                <select
-                  value={zoom}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setZoom(val === 'fit' ? 'fit' : parseFloat(val) as any);
-                    canvasRectRef.current = null;
-                  }}
-                  className="w-full cursor-pointer bg-transparent text-[11px] font-semibold text-[var(--theme-primary)] outline-none"
-                >
-                  <option value="fit">Fit</option>
-                  <option value="0.5">50%</option>
-                  <option value="1">100%</option>
-                  <option value="1.5">150%</option>
-                  <option value="2">200%</option>
-                </select>
-              </div>
             </div>
             <div className={groupTitleClass}>Shapes</div>
           </div>
 
-          <div className={`${toolbarSectionClass} w-[370px]`}>
-            <div className="flex items-start gap-3">
-              <div className="grid grid-cols-2 gap-2 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setColor('#000000');
-                    if (selectedActionIndex !== null) {
-                      setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: '#000000' } : act));
-                    }
-                  }}
-                  className="h-10 w-10 rounded-full border-2 border-[#d4af6d] shadow-[0_0_0_3px_rgba(212,175,109,0.2)]"
-                  style={{ background: '#000000' }}
-                  title="Black"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setColor('#ffffff');
-                    if (selectedActionIndex !== null) {
-                      setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: '#ffffff' } : act));
-                    }
-                  }}
-                  className="h-10 w-10 rounded-full border border-white/25"
-                  style={{ background: '#ffffff' }}
-                  title="White"
-                />
-              </div>
-              <div className="grid flex-1 grid-cols-10 gap-x-2 gap-y-2">
-                {COLORS.map(c => (
+          <div className={`${toolbarSectionClass} w-[180px]`}>
+            <div className="flex flex-col items-center justify-center gap-1.5 p-0.5">
+              {/* Upper row: 5 colors */}
+              <div className="flex items-center gap-1.5 justify-center">
+                {COLORS.slice(0, 5).map(c => (
                   <button
                     key={c}
                     onClick={() => {
@@ -990,63 +1084,36 @@ function Whiteboard({ onAttachToChat, onClose }: WhiteboardProps) {
                     )}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const picker = document.getElementById('whiteboard-color-picker') as HTMLInputElement | null;
-                    picker?.click();
-                  }}
-                  className="col-span-2 ml-1 flex h-7 items-center justify-center rounded-full border border-white/15 bg-[conic-gradient(from_180deg_at_50%_50%,#ff004c,#ff8a00,#ffe600,#27d64d,#00c2ff,#5e5eff,#c03bff,#ff004c)]"
-                  title="Custom color"
-                >
-                  <span className="h-4 w-4 rounded-full border border-white/60 bg-black/25 backdrop-blur-sm" />
-                </button>
-                <input
-                  id="whiteboard-color-picker"
-                  type="color"
-                  value={color}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    setColor(next);
-                    if (selectedActionIndex !== null) {
-                      setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: next } : act));
-                    }
-                  }}
-                  className="hidden"
-                />
+              </div>
+              {/* Lower row: 4 colors */}
+              <div className="flex items-center gap-1.5 justify-center">
+                {COLORS.slice(5).map(c => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setColor(c);
+                      if (selectedActionIndex !== null) {
+                        setActions(prev => prev.map((act, idx) => idx === selectedActionIndex ? { ...act, color: c } : act));
+                      }
+                    }}
+                    className="relative h-7 w-7 rounded-full border transition-all cursor-pointer"
+                    style={{
+                      background: c,
+                      borderColor: color === c ? '#f2ddaa' : 'rgba(255,255,255,0.22)',
+                      boxShadow: color === c ? '0 0 0 2px rgba(242,221,170,0.22)' : 'none',
+                      transform: color === c ? 'scale(1.08)' : 'scale(1)'
+                    }}
+                    title={`Use Color: ${c}`}
+                  >
+                    {color === c && (
+                      <span className="absolute inset-0 m-auto h-2 w-2 rounded-full bg-black/40" />
+                    )}
+                  </button>
+                ))}
               </div>
             </div>
             <div className={groupTitleClass}>Colours</div>
           </div>
-
-          {onAttachToChat && (
-            <div className={`${toolbarSectionClass} w-[154px]`}>
-              <button
-                onClick={async () => {
-                  const canvas = canvasRef.current;
-                  if (!canvas) return;
-                  try {
-                    const blob = await new Promise<Blob | null>((resolve) => {
-                      canvas.toBlob((nextBlob) => resolve(nextBlob), 'image/png');
-                    });
-                    if (!blob) {
-                      throw new Error('Failed to export whiteboard image');
-                    }
-                    const file = new File([blob], `whiteboard-${Date.now()}.png`, { type: 'image/png' });
-                    onAttachToChat(file);
-                  } catch (err) {
-                    console.error("Error attaching sketch:", err);
-                  }
-                }}
-                className="flex h-full min-h-[74px] w-full flex-col items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(180deg,#e07c57,#c85e3d)] px-3 text-center text-white shadow-[0_12px_24px_rgba(200,94,61,0.22)] transition-all hover:brightness-105"
-                title="Attach this drawing directly to your chat input box as an image attachment"
-              >
-                <Send size={18} />
-                <span className="text-[12px] font-bold leading-tight">Attach Sketch</span>
-              </button>
-              <div className={groupTitleClass}>Export</div>
-            </div>
-          )}
         </div>
       </div>
 

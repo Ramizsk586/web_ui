@@ -826,6 +826,7 @@ export default function AppContent({
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const rightPreviewPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const whiteboardAttachRef = useRef<(() => void) | null>(null);
 
   // Layout & UI helper states
   const [activeAssistantMode, setActiveAssistantMode] = useState<'builder' | 'planner' | 'debugger'>('builder');
@@ -2552,6 +2553,10 @@ const startCoderPreview = useCallback(async () => {
             rightIsInspectMode={rightIsInspectMode}
             setRightIsInspectMode={setRightIsInspectMode}
             startCoderPreview={startCoderPreview}
+            activeModelId={activeModelId}
+            activeModelList={activeModelList}
+            availableModels={availableModels}
+            handleModelSelect={handleModelSelect}
           />) : (
           <>
             {showAgentCreation ? (
@@ -3462,6 +3467,15 @@ const startCoderPreview = useCallback(async () => {
 
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={() => {
+                      whiteboardAttachRef.current?.();
+                    }}
+                    className="p-2 hover:bg-[#D97756]/20 border border-[#D97756]/20 bg-[#D97756]/10 rounded-lg text-[#D97756] hover:text-[#ff8f6b] transition-all cursor-pointer flex items-center justify-center"
+                    title="Attach whiteboard drawing to chat input"
+                  >
+                    <Send size={14} />
+                  </button>
+                  <button
                     onClick={() => setIsWhiteboardOpen(false)}
                     className="p-2 hover:bg-[#2A2420] border border-[#2F2722] bg-[#1C1816]/50 rounded-lg text-[#AD9F91] hover:text-white transition-all cursor-pointer"
                     title="Close Whiteboard Popup"
@@ -3478,6 +3492,7 @@ const startCoderPreview = useCallback(async () => {
                     showToast('Sketch attached successfully to your message compose box!');
                   }}
                   onClose={() => setIsWhiteboardOpen(false)}
+                  attachTriggerRef={whiteboardAttachRef}
                 />
               </div>
 

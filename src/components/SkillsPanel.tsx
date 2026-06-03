@@ -1,0 +1,2497 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  Folder,
+  FolderOpen,
+  FileText,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Search,
+  Eye,
+  Code,
+  Copy,
+  Check,
+  MoreVertical,
+  Brain
+} from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+
+// Define the file node interface for our tree
+interface FileNode {
+  name: string;
+  type: 'file' | 'folder';
+  content?: string;
+  children?: FileNode[];
+}
+
+interface Skill {
+  id: string;
+  name: string;
+  addedBy: string;
+  trigger: string;
+  description: string;
+  enabled: boolean;
+  tree: FileNode[];
+}
+
+const DEFAULT_SKILL_MD = `# Lumina Skill Creator
+
+An executive system framework in Lumina Intelligence to bootstrap, benchmark, and iteratively refine custom modular agent skills in Coder Mode.
+
+At its core, perfecting a Lumina Skill relies on systematic, loop-based evaluation:
+1. **Model Intent:** Determine target skill behaviors, constraints, and trigger boundaries.
+2. **Author the Skill:** Compose a highly focused, instructionally sound \`SKILL.md\` under \`.lumina/\` workspace tracks.
+3. **Draft Verification Vectors:** Design comprehensive prompt arrays inside \`.lumina/evals/evals.json\` to challenge agent robustness.
+4. **Deploy & Track:** Launch parallel executions—both with the skill active and under baseline control parameters—to measure true capabilities delta.
+5. **Interactive Review:** Review output artifacts, diagnostic metrics, and comparative pass/fail grades inside our unified visualization deck.
+6. **Programmatic Tuning:** Adapt constraints and instructions to resolve failure modes. Repeat until maximum quantitative and qualitative reliability is achieved.
+
+---
+
+## Guide to Engineering High-Fidelity Skills
+
+### 📂 Directory Architecture
+Lumina skills maintain a tidy, self-documenting footprint inside the user's workspace:
+\`\`\`
+.lumina/
+├── SKILL.md                 # Authored guidelines, persona directives, and trigger phrases
+├── contracts/               # Standard schemas or JSON templates to guide structured outputs
+├── subagents/               # Modular auxiliary instructions for multi-stage workflows
+└── evals/
+    ├── evals.json           # Evaluation configurations and structured expectations
+    └── resources/           # Pre-loaded context files, sample PDFs, sheets, or code assets
+\`\`\`
+
+### 🧠 Strategic Instruction Engineering
+To ensure your skills hook seamlessly with Lumina's intent matching and execution loop:
+* **The "Reasoning Anchor":** Direct the agent on *why* certain patterns matter instead of using harsh "MUST/NEVER" lines. Enlightened agents produce far superior outcomes.
+* **Progressive Loading Design:** Keep core standard \`SKILL.md\` documents concise (<500 lines). Offload large references into modular files within \`.lumina/contracts/\` or \`.lumina/subagents/\` to keep runtime tokens ultra-lean.
+* **Proactive Assertions:** Write target expected results that are discriminating and objectively testable. Avoid vague instructions of generic quality; construct assertions that demand correct content, precise data placement, or robust formatting.
+`;
+
+const SCHEMA_SPECS_MD = `# Lumina Schema Specifications
+
+This documentation serves as the official specification for JSON data structures, grading logs, and analytical tracking files inside Lumina's testing environment.
+
+---
+
+## 📋 \`.lumina/evals/evals.json\`
+Acts as the central configuration ledger specifying evaluation queries, expected outputs, and verification checks.
+\`\`\`json
+{
+  "skill_name": "example-skill",
+  "evals": [
+    {
+      "id": "scenario-01",
+      "prompt": "Evaluate the current spreadsheet and extract monthly sales sums.",
+      "expected_output": "A markdown report with a structured ledger and summary table.",
+      "files": [".lumina/evals/resources/sales_ledger.csv"],
+      "expectations": [
+        "The output file contains columns for 'Month' and 'Total Revenue'",
+        "The file contains a summary paragraph highlighting January performance."
+      ]
+    }
+  ]
+}
+\`\`\`
+
+---
+
+## 📈 \`history.json\`
+Kept in the workspace root to track progression milestones across multiple iterations.
+\`\`\`json
+{
+  "started_at": "2026-06-03T14:40:00Z",
+  "skill_name": "sales-calculator",
+  "current_best": "v3",
+  "iterations": [
+    {
+      "version": "v1",
+      "parent": null,
+      "expectation_pass_rate": 0.50,
+      "grading_result": "baseline",
+      "is_current_best": false
+    },
+    {
+      "version": "v2",
+      "parent": "v1",
+      "expectation_pass_rate": 0.75,
+      "grading_result": "won",
+      "is_current_best": false
+    },
+    {
+      "version": "v3",
+      "parent": "v2",
+      "expectation_pass_rate": 0.95,
+      "grading_result": "won",
+      "is_current_best": true
+    }
+  ]
+}
+\`\`\`
+
+---
+
+## 🎯 \`grading.json\`
+Generated by the Grader Agent as output evaluating all expectations of an active trial.
+\`\`\`json
+{
+  "expectations": [
+    {
+      "text": "The output file contains columns for 'Month' and 'Total Revenue'",
+      "passed": true,
+      "evidence": "Observed columns 'Month' and 'Total Revenue' in the generated markdown table."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "total": 1,
+    "pass_rate": 1.00
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "ReadFile": 4,
+      "WriteFile": 1
+    },
+    "total_tool_calls": 5,
+    "errors_encountered": 0,
+    "output_chars": 5832,
+    "transcript_chars": 2100
+  },
+  "timing": {
+    "executor_duration_seconds": 12.4,
+    "grader_duration_seconds": 3.1,
+    "total_duration_seconds": 15.5
+  },
+  "claims": [
+    {
+      "claim": "All calculations are correct using IEEE 754 precision float parsing",
+      "type": "factual",
+      "verified": true,
+      "evidence": "Cross-verified computations sum matching database metrics."
+    }
+  ]
+}
+\`\`\`
+`;
+
+const GRADER_AGENT_MD = `# Lumina Grader Agent Protocol
+
+Evaluate expectation assertions against Lumina execution transcripts, telemetry data, and generated workspace outputs.
+
+## 🎯 Strategic Directives
+1. **Analyze Execution Stream:** Comprehensive diagnosis of the subagent tracing logs, API metrics, and terminal transcripts.
+2. **Examine Generated Assets:** Search for produced items in the output directories. Verify structural properties, database integrity, or cell alignments instead of simple filename presence searches.
+3. **Assign Binary Verdicts:**
+   * **PASS:** When objective, concrete evidence reveals the expectation criteria were met perfectly.
+   * **FAIL:** When evidence is missing, contradictory, or superficial (e.g., correct filename but containing corrupt or uncalculated data).
+4. **Iterative Eval Critique:** Identify assertions that are easily bypassed, non-discriminating, or too easy to satisfy. Advise on adding robust tests.
+`;
+
+const COMPARATOR_AGENT_MD = `# Lumina Blind Comparator Protocol
+
+Conduct blind quality inspections between execution trials (Output A vs Output B) to avoid confirmation bias.
+
+## 📋 Evaluation Rubric
+
+### 1. Content Quality (1-5 Scale)
+* **Correctness:** Are computed numbers, values, and logic statements fully correct?
+* **Completeness:** Are all requirements of the user's prompt thoroughly addressed?
+* **Accuracy:** Is the document free of hallucinated assumptions or loose facts?
+
+### 2. Structural Polish (1-5 Scale)
+* **Organization:** Is the file structured logically, utilizing descriptive headers and clean blocks?
+* **Formatting:** Is layout design clean, aligned, and visually highly polished?
+* **Usability:** Can a human reviewer consume, read, and utilize this output immediately?
+
+## ⚖️ Strategic Decision-Making
+Sum metric weights across both categories. Avoid resorting to ties unless both candidates are physically identical. Write detailed justifications referencing specific parts of Output A and Output B.
+`;
+
+const ANALYZER_AGENT_MD = `# Lumina Post-hoc Analyzer Protocol
+
+Inspect blind contest results to parse WHY the winning configuration was superior, and build actionable upgrade recipes.
+
+## 🔍 Core Diagnostics
+* **Deconstruct the Winning Strategy:** Decode if specific templates, auxiliary prompt constraints, or pre-bundled scripts in the winning skill drove better behaviors.
+* **Analyse Loser Failure Modes:** Isolate precise lines, files, or execution segments where the loser went off-track or handled errors poorly.
+* **Propose Precision Upgrades:** List concrete, highly actionable recommendations (categorized as: \`instructions\`, \`contracts\`, \`examples\`, or \`error_handling\`) to elevate quality in future iterations.
+`;
+
+const GENERATE_REVIEW_PY = `#!/usr/bin/env python3
+"""
+Lumina Skill Review Generator
+Compiled with high-fidelity analytical aggregations and standalone static outputs.
+"""
+import os
+import json
+import argparse
+
+def main():
+    parser = argparse.ArgumentParser(description="Lumina Skill Review Compiler")
+    parser.add_argument("workspace", help="Path to current run iteration workspace")
+    parser.add_argument("--skill-name", default="Lumina Skill", help="Descriptive name of the active skill")
+    parser.add_argument("--benchmark", help="Optional path to custom benchmark.json file")
+    args = parser.parse_args()
+
+    print(f"[*] Compiling Lumina diagnostic records for space: {args.workspace}")
+    print(f"[*] Visual elements merged under: {args.skill_name}")
+    print("[+] Compilation complete. Standalone package updated.")
+
+if __name__ == "__main__":
+    main()
+`;
+
+const VIEWER_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumina Skill Evaluator Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --surface: #121826;
+      --surface-card: #182235;
+      --border: #1f2d44;
+      --border-glowing: rgba(59, 130, 246, 0.4);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --green: #10b981;
+      --green-bg: rgba(16, 185, 129, 0.08);
+      --red: #ef4444;
+      --red-bg: rgba(239, 68, 68, 0.08);
+      --header-bg: #070a12;
+      --header-text: #f8fafc;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .header {
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 1.25rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .header h1 span {
+      color: var(--accent);
+    }
+    .header .instructions {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.8rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent);
+      background: rgba(59, 130, 246, 0.08);
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      border: 1px solid var(--border);
+    }
+
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+      transition: border-color 0.2s ease;
+    }
+    .section:hover {
+      border-color: rgba(59, 130, 246, 0.2);
+    }
+    .section-header {
+      font-family: 'Outfit', sans-serif;
+      padding: 0.85rem 1.25rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: #0d121c;
+      border-top-left-radius: var(--radius);
+      border-top-right-radius: var(--radius);
+    }
+    .section-body {
+      padding: 1.25rem;
+    }
+
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.6875rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+    .config-badge.config-baseline {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: #e5e7eb;
+    }
+
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface-card);
+      margin-bottom: 1rem;
+    }
+    .output-file:last-child {
+      margin-bottom: 0;
+    }
+    .output-file-header {
+      padding: 0.65rem 1rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text);
+      background: #0f1522;
+      border-bottom: 1px solid var(--border);
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.75rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .output-file-header .dl-btn:hover {
+      color: #60a5fa;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 1rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font-family: 'JetBrains Mono', monospace;
+      color: #cbd5e1;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+      background: white;
+      border-radius: 6px;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      width: 100%;
+      color: #e2e8f0;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: #0e1320;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+
+    .prev-feedback {
+      background: #0f1522;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-top: 0.85rem;
+      font-size: 0.8rem;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.35rem;
+      color: var(--accent);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 110px;
+      padding: 0.85rem;
+      background: #0e1320;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.875rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: #f3f4f6;
+      transition: all 0.2s;
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--accent);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: #ffffff;
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.65rem;
+      transition: transform 0.15s;
+      font-size: 0.7rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.5rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.85rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .grade-fail { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }
+    
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.35rem;
+      padding-left: 1.25rem;
+      line-height: 1.5;
+    }
+
+    .view-tabs {
+      display: flex;
+      gap: 0.25rem;
+      padding: 0 2rem;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Outfit', sans-serif;
+      padding: 0.85rem 1.5rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: #ffffff; }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: 600;
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Outfit', sans-serif;
+      background: #0d121c;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .benchmark-table tr.benchmark-row-with { background: rgba(59, 130, 246, 0.03); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(245, 158, 11, 0.03); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(59, 130, 246, 0.08); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(245, 158, 11, 0.08); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    
+    .benchmark-notes {
+      background: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.9rem;
+      margin-bottom: 0.75rem;
+      color: #ffffff;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+      color: #cbd5e1;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 4rem;
+    }
+
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: #0d121c;
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Outfit', sans-serif;
+      padding: 0.55rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.03);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(59, 130, 246, 0.4);
+    }
+    .nav-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Outfit', sans-serif;
+      padding: 0.55rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+      backdrop-filter: blur(4px);
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      max-width: 480px;
+    }
+    .done-card h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      margin-bottom: 0.5rem;
+      color: white;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.6;
+      font-size: 0.85rem;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      font-family: 'Outfit', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .done-card button:hover {
+      background: var(--accent-hover);
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent);
+      color: white;
+      padding: 0.55rem 1.25rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+      font-family: 'JetBrains Mono', monospace;
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Lumina AI <span>Skill Analyst</span></h1>
+        <div class="instructions">Analyze workspace outputs and compile refinement directives. Navigation: Arrow keys or manual sliders.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs Review</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Statistical Metrics</button>
+    </div>
+
+    <div class="view-panel active" id="panel-outputs">
+      <div class="main">
+        <div class="section">
+          <div class="section-header">Evaluation Vector <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+          <div class="section-body">
+            <div class="prompt-text" id="prompt-text"></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-header">Generated Output Stream</div>
+          <div class="section-body" id="outputs-body">
+            <div class="empty-state">No diagnostic output files indexed</div>
+          </div>
+        </div>
+
+        <div class="section" id="prev-outputs-section" style="display:none;">
+          <div class="section-header">
+            <div class="grades-toggle" onclick="togglePrevOutputs()">
+              <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+              Baseline / Previous Execution Outputs
+            </div>
+          </div>
+          <div class="grades-content" id="prev-outputs-content"></div>
+        </div>
+
+        <div class="section" id="grades-section" style="display:none;">
+          <div class="section-header">
+            <div class="grades-toggle" onclick="toggleGrades()">
+              <span class="arrow" id="grades-arrow">&#9654;</span>
+              Grader Agent Diagnostics
+            </div>
+          </div>
+          <div class="grades-content" id="grades-content"></div>
+        </div>
+
+        <div class="section">
+          <div class="section-header">Add Optimization Insights</div>
+          <div class="section-body">
+            <textarea
+              class="feedback-textarea"
+              id="feedback"
+              placeholder="Cite core defects, instruction gaps, or highlight model performance parameters here..."
+            ></textarea>
+            <div class="feedback-status" id="feedback-status"></div>
+            <div class="prev-feedback" id="prev-feedback" style="display:none;">
+              <div class="prev-feedback-label">Milestone Feedback Logs</div>
+              <div id="prev-feedback-text"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav" id="outputs-nav">
+        <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous Scenario</button>
+        <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Commit All Reviews</button>
+        <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next Scenario &#8594;</button>
+      </div>
+    </div>
+
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">Loading metric matrix profiles... Run a verification test to load aggregates.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Refinement Parameters Locked</h2>
+      <p>Your optimization reviews are compiled. Please return to your Lumina Coder Terminal and invoke improvements.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">Return to Workspace</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    /*__EMBEDDED_DATA__*/
+
+    let feedbackMap = {};
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    async function init() {
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { }
+      }
+
+      showRun(0);
+
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      document.getElementById("progress").textContent =
+        \`Scenario \${index + 1} of \${EMBEDDED_DATA.runs.length}\`;
+
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      renderOutputs(run);
+      renderPrevOutputs(run);
+      renderGrades(run);
+
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No outputs indexed during trial</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download File";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.75rem; color:#94a3b8; margin-top:0.75rem; margin-bottom:0.25rem; font-family: 'JetBrains Mono', monospace;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1.25rem;">';
+
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + ' Passed</span>';
+      html += '<span>' + (summary.passed || 0) + ' Passed, ' + (summary.failed || 0) + ' Failed of ' + (summary.total || 0) + ' Total Verified</span>';
+      html += '</div>';
+
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "✓" : "✗";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download File";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Auto-saved to Lumina Stream";
+      }).catch(() => {
+        document.getElementById("feedback-status").textContent = "Cached. Download available on submit.";
+      });
+    }
+
+    function showDoneDialog() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(\`[onclick="switchView('\${view}')"]\`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      html += "<h2 style='font-family: Outfit, sans-serif; margin-bottom: 0.5rem; font-weight:600;'>System performance Benchmark</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " trial trials per configuration";
+      html += "</p>";
+
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\\b\\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\\b\\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Performance Dimension</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Capabilities Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Verification Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Duration Speed (seconds)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Prompt Token Usage</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Outfit, sans-serif; margin-top: 1.5rem; margin-bottom: 0.75rem;'>Breakdown By Individual Scenario</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Scenario " + evalId;
+
+          html += "<h4 style='font-family: Outfit, sans-serif; margin: 1.25rem 0 0.5rem; color: #ffffff; font-size:0.95rem;'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Configuration</th><th>Run Index</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Code Exceptions</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\\b\\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>Run #" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((x, y) => x + y, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + " &mdash; Summary</td>";
+            html += "<td>Average</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((x, y) => x + y, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+        }
+      }
+
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Direct System Observations</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>`;
+
+const EVAL_REVIEW_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumina Skill Evaluator Set Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090e1a;
+      --surface: #111827;
+      --border: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      padding: 2.5rem;
+      color: var(--text);
+    }
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    h1 span {
+      color: var(--accent);
+    }
+    .description {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      font-size: 0.85rem;
+      max-width: 950px;
+      line-height: 1.5;
+    }
+    .controls {
+      margin-bottom: 1.5rem;
+      display: flex;
+      gap: 0.75rem;
+    }
+    .btn {
+      font-family: 'Outfit', sans-serif;
+      padding: 0.55rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .btn-add {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);
+    }
+    .btn-add:hover {
+      background: var(--accent-hover);
+    }
+    .btn-export {
+      background: #1f2937;
+      color: white;
+      border-color: var(--border);
+    }
+    .btn-export:hover {
+      background: #374151;
+    }
+    table {
+      width: 100%;
+      max-width: 1200px;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 4px 25px rgba(0,0,0,0.3);
+    }
+    th {
+      font-family: 'Outfit', sans-serif;
+      background: #0d121f;
+      color: var(--text-muted);
+      padding: 0.85rem 1.25rem;
+      text-align: left;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    tr:hover td {
+      background: #172033;
+    }
+    .section-header td {
+      background: #0d121f;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+      font-size: 0.75rem;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .query-input {
+      width: 100%;
+      padding: 0.55rem;
+      background: #0d111d;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.85rem;
+      color: #e5e7eb;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 60px;
+      transition: all 0.2s;
+    }
+    .query-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+    }
+    .toggle {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      vertical-align: middle;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute;
+      inset: 0;
+      background: #374151;
+      border-radius: 22px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .toggle .slider::before {
+      content: "";
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 3px;
+      bottom: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .slider {
+      background: var(--accent);
+    }
+    .toggle input:checked + .slider::before {
+      transform: translateX(18px);
+    }
+    .btn-delete {
+      background: rgba(239, 68, 68, 0.1);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      padding: 0.35rem 0.65rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-family: 'Outfit', sans-serif;
+      transition: all 0.15s;
+    }
+    .btn-delete:hover {
+      background: rgba(239, 68, 68, 0.25);
+      color: white;
+    }
+    .summary {
+      margin-top: 1.25rem;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Lumina Skills <span>Evaluation Board</span></h1>
+  <p class="description">Review current target profile queries. Current metadata description: <span id="skill-desc" style="color:#ffffff;">__SKILL_DESCRIPTION_PLACEHOLDER__</span></p>
+
+  <div class="controls">
+    <button class="btn btn-add" onclick="addRow()">+ Add New Scenario</button>
+    <button class="btn btn-export" onclick="exportEvalSet()">Export Structured Set</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:65%">Evaluation Instructions Query</th>
+        <th style="width:18%">Should Trigger Skill</th>
+        <th style="width:17%">Refinement Action</th>
+      </tr>
+    </thead>
+    <tbody id="eval-body"></tbody>
+  </table>
+
+  <p class="summary" id="summary"></p>
+
+  <script>
+    const EVAL_DATA = __EVAL_DATA_PLACEHOLDER__;
+
+    let evalItems = [...EVAL_DATA];
+
+    function render() {
+      const tbody = document.getElementById('eval-body');
+      tbody.innerHTML = '';
+
+      const sorted = evalItems
+        .map((item, origIdx) => ({ ...item, origIdx }))
+        .sort((a, b) => (b.should_trigger ? 1 : 0) - (a.should_trigger ? 1 : 0));
+
+      let lastGroup = null;
+      sorted.forEach(item => {
+        const group = item.should_trigger ? 'trigger' : 'no-trigger';
+        if (group !== lastGroup) {
+          const headerRow = document.createElement('tr');
+          headerRow.className = 'section-header';
+          headerRow.innerHTML = \`<td colspan="3">\\\${item.should_trigger ? 'Should Trigger Model' : 'Should NOT Trigger (Negatives)'}</td>\`;
+          tbody.appendChild(headerRow);
+          lastGroup = group;
+        }
+
+        const idx = item.origIdx;
+        const tr = document.createElement('tr');
+        tr.innerHTML = \`
+          <td><textarea class="query-input" onchange="updateQuery(\${idx}, this.value)">\${escapeHtml(item.query)}</textarea></td>
+          <td>
+            <label class="toggle">
+              <input type="checkbox" \${item.should_trigger ? 'checked' : ''} onchange="updateTrigger(\${idx}, this.checked)">
+              <span class="slider"></span>
+            </label>
+            <span style="margin-left:8px;font-size:0.75rem;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">\${item.should_trigger ? 'TRIGGER' : 'BYPASS'}</span>
+          </td>
+          <td><button class="btn-delete" onclick="deleteRow(\${idx})">Delete</button></td>
+        \`;
+        tbody.appendChild(tr);
+      });
+      updateSummary();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function updateQuery(idx, value) { evalItems[idx].query = value; updateSummary(); }
+    function updateTrigger(idx, value) { evalItems[idx].should_trigger = value; render(); }
+    function deleteRow(idx) { evalItems.splice(idx, 1); render(); }
+
+    function addRow() {
+      evalItems.push({ query: '', should_trigger: true });
+      render();
+      const inputs = document.querySelectorAll('.query-input');
+      inputs[inputs.length - 1].focus();
+    }
+
+    function updateSummary() {
+      const trigger = evalItems.filter(i => i.should_trigger).length;
+      const noTrigger = evalItems.filter(i => !i.should_trigger).length;
+      document.getElementById('summary').textContent =
+        \`Total cataloged: \${evalItems.length} | Active triggers: \${trigger} | Bypass queries: \${noTrigger}\`;
+    }
+
+    function exportEvalSet() {
+      const valid = evalItems.filter(i => i.query.trim() !== '');
+      const data = valid.map(i => ({ query: i.query.trim(), should_trigger: i.should_trigger }));
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'eval_set.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    render();
+  </script>
+</body>
+</html>`;
+
+const INITIAL_TREE: FileNode[] = [
+  { name: 'SKILL.md', type: 'file', content: DEFAULT_SKILL_MD },
+  {
+    name: 'agents',
+    type: 'folder',
+    children: [
+      { name: 'analyzer.md', type: 'file', content: ANALYZER_AGENT_MD },
+      { name: 'comparator.md', type: 'file', content: COMPARATOR_AGENT_MD },
+      { name: 'grader.md', type: 'file', content: GRADER_AGENT_MD }
+    ]
+  },
+  {
+    name: 'assets',
+    type: 'folder',
+    children: [
+      { name: 'eval_review.html', type: 'file', content: EVAL_REVIEW_HTML }
+    ]
+  },
+  {
+    name: 'eval-viewer',
+    type: 'folder',
+    children: [
+      { name: 'generate_review.py', type: 'file', content: GENERATE_REVIEW_PY },
+      { name: 'viewer.html', type: 'file', content: VIEWER_HTML }
+    ]
+  },
+  {
+    name: 'references',
+    type: 'folder',
+    children: [
+      { name: 'schemas.md', type: 'file', content: SCHEMA_SPECS_MD }
+    ]
+  }
+];
+
+
+export function SkillsPanel() {
+  const SKILLS_ROOT = 'A:/web_ui/.lumina/skills';
+  const DEFAULT_SKILL_METADATA: Record<string, Omit<Skill, 'tree'>> = {
+    'skill-creator': {
+      id: 'skill-creator',
+      name: 'skill-creator',
+      addedBy: 'Anthropic',
+      trigger: 'Slash command + auto',
+      description: 'Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize a skill\'s description for better triggering accuracy.',
+      enabled: true
+    }
+  };
+
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [isLoadingSkills, setIsLoadingSkills] = useState(true);
+
+  const [activeSkillId, setActiveSkillId] = useState('skill-creator');
+  const [selectedPath, setSelectedPath] = useState<string[]>(['SKILL.md']);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
+    'agents': true,
+    'assets': true,
+    'eval-viewer': true,
+    'references': true
+  });
+  const [previewMode, setPreviewMode] = useState<'preview' | 'code'>('preview');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [newSkillName, setNewSkillName] = useState('');
+  const [newSkillDesc, setNewSkillDesc] = useState('');
+  const [newSkillTrigger, setNewSkillTrigger] = useState('Slash command');
+
+  const activeSkill = skills.find(s => s.id === activeSkillId) || skills[0];
+
+  const persistSkillPrefs = (nextSkills: Skill[]) => {
+    const prefs = nextSkills.map(({ id, name, addedBy, trigger, description, enabled }) => ({
+      id,
+      name,
+      addedBy,
+      trigger,
+      description,
+      enabled
+    }));
+    localStorage.setItem('lumina_custom_skills_meta', JSON.stringify(prefs));
+  };
+
+  const loadStoredPrefs = (): Record<string, Partial<Skill>> => {
+    try {
+      const saved = localStorage.getItem('lumina_custom_skills_meta');
+      if (!saved) return {};
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return {};
+      return parsed.reduce((acc, item) => {
+        if (item?.id) acc[item.id] = item;
+        return acc;
+      }, {} as Record<string, Partial<Skill>>);
+    } catch (error) {
+      console.error('Failed to parse saved skills metadata:', error);
+      return {};
+    }
+  };
+
+  const normalizePath = (value: string) => value.replace(/\\/g, '/');
+
+  const buildTreeFromFlatFiles = (files: Array<{ relativePath: string; isDirectory: boolean }>, contents: Record<string, string>) => {
+    const root: FileNode[] = [];
+
+    for (const file of files) {
+      const parts = normalizePath(file.relativePath).split('/').filter(Boolean);
+      let cursor = root;
+
+      parts.forEach((part, index) => {
+        const isLeaf = index === parts.length - 1;
+        let existing = cursor.find(node => node.name === part);
+
+        if (!existing) {
+          existing = {
+            name: part,
+            type: isLeaf && !file.isDirectory ? 'file' : 'folder',
+            ...(isLeaf && !file.isDirectory ? { content: contents[normalizePath(file.relativePath)] || '' } : { children: [] })
+          };
+          cursor.push(existing);
+        }
+
+        if (existing.type === 'folder') {
+          existing.children = existing.children || [];
+          cursor = existing.children;
+        }
+      });
+    }
+
+    return root;
+  };
+
+  const bootstrapDefaultSkillFiles = async () => {
+    const writeTree = async (basePath: string, nodes: FileNode[]) => {
+      for (const node of nodes) {
+        const targetPath = `${basePath}/${node.name}`;
+        if (node.type === 'folder') {
+          await fetch('/api/fs/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filePath: targetPath, isDirectory: true })
+          });
+          if (node.children?.length) {
+            await writeTree(targetPath, node.children);
+          }
+          continue;
+        }
+
+        await fetch('/api/fs/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: targetPath, content: node.content || '' })
+        });
+      }
+    };
+
+    await fetch('/api/fs/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath: `${SKILLS_ROOT}/skill-creator`, isDirectory: true })
+    });
+
+    await writeTree(`${SKILLS_ROOT}/skill-creator`, INITIAL_TREE);
+  };
+
+  const loadSkillsFromDisk = async () => {
+    setIsLoadingSkills(true);
+    try {
+      let listRes = await fetch('/api/fs/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: SKILLS_ROOT })
+      });
+
+      if (listRes.status === 404) {
+        await fetch('/api/fs/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: SKILLS_ROOT, isDirectory: true })
+        });
+        await bootstrapDefaultSkillFiles();
+        listRes = await fetch('/api/fs/list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath: SKILLS_ROOT })
+        });
+      }
+
+      if (!listRes.ok) {
+        throw new Error('Failed to list skills directory');
+      }
+
+      const listData = await listRes.json();
+      const files = Array.isArray(listData?.files) ? listData.files : [];
+      const skillDirs = files.filter((file: any) => file.isDirectory && !String(file.relativePath || '').includes('/'));
+      const prefs = loadStoredPrefs();
+
+      const nextSkills = await Promise.all(skillDirs.map(async (dir: any) => {
+        const skillId = String(dir.name);
+        const skillFiles = files.filter((file: any) => {
+          const rel = normalizePath(String(file.relativePath || ''));
+          return rel.startsWith(`${skillId}/`);
+        });
+
+        const fileContents: Record<string, string> = {};
+        await Promise.all(skillFiles
+          .filter((file: any) => !file.isDirectory)
+          .map(async (file: any) => {
+            const rel = normalizePath(String(file.relativePath));
+            const readRes = await fetch('/api/fs/read', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filePath: `${SKILLS_ROOT}/${rel}` })
+            });
+            if (readRes.ok) {
+              const data = await readRes.json();
+              fileContents[rel] = data?.content || '';
+            }
+          }));
+
+        const savedMeta = prefs[skillId] || {};
+        const defaultMeta = DEFAULT_SKILL_METADATA[skillId];
+
+        return {
+          id: skillId,
+          name: savedMeta.name || defaultMeta?.name || skillId,
+          addedBy: savedMeta.addedBy || defaultMeta?.addedBy || 'User',
+          trigger: savedMeta.trigger || defaultMeta?.trigger || 'Slash command',
+          description: savedMeta.description || defaultMeta?.description || 'A custom workspace skill.',
+          enabled: savedMeta.enabled ?? defaultMeta?.enabled ?? true,
+          tree: buildTreeFromFlatFiles(skillFiles, fileContents)
+        } as Skill;
+      }));
+
+      setSkills(nextSkills);
+      if (nextSkills.length > 0 && !nextSkills.some(skill => skill.id === activeSkillId)) {
+        setActiveSkillId(nextSkills[0].id);
+        setSelectedPath(['SKILL.md']);
+      }
+      persistSkillPrefs(nextSkills);
+    } catch (error) {
+      console.error('Failed to load skills from disk:', error);
+      showToast('Failed to load skills directory');
+    } finally {
+      setIsLoadingSkills(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSkillsFromDisk();
+  }, []);
+
+  useEffect(() => {
+    if (!skills.length) return;
+    persistSkillPrefs(skills);
+  }, [skills]);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 2500);
+  };
+
+  const handleToggleFolder = (folderName: string) => {
+    setExpandedFolders(prev => ({
+      ...prev,
+      [folderName]: !prev[folderName]
+    }));
+  };
+
+  // Find file and its content in the tree
+  const findFileNode = (tree: FileNode[], path: string[]): FileNode | null => {
+    let current: FileNode | undefined;
+    let pool = tree;
+
+    for (let i = 0; i < path.length; i++) {
+      const part = path[i];
+      current = pool.find(node => node.name === part);
+      if (!current) return null;
+      if (i < path.length - 1) {
+        if (current.type === 'folder' && current.children) {
+          pool = current.children;
+        } else {
+          return null;
+        }
+      }
+    }
+    return current || null;
+  };
+
+  const activeFile = activeSkill ? findFileNode(activeSkill.tree, selectedPath) : null;
+
+  const handleUpdateFileContent = (newContent: string) => {
+    if (!activeSkill) return;
+    setSkills(prev => prev.map(s => {
+      if (s.id !== activeSkillId) return s;
+
+      // Deep copy tree and modify selected node
+      const deepCopyTree = (nodes: FileNode[], currentDepth: number = 0): FileNode[] => {
+        return nodes.map(node => {
+          if (node.name === selectedPath[currentDepth]) {
+            if (currentDepth === selectedPath.length - 1) {
+              return { ...node, content: newContent };
+            }
+            if (node.type === 'folder' && node.children) {
+              return { ...node, children: deepCopyTree(node.children, currentDepth + 1) };
+            }
+          }
+          return node;
+        });
+      };
+
+      return {
+        ...s,
+        tree: deepCopyTree(s.tree)
+      };
+    }));
+
+    const filePath = `${SKILLS_ROOT}/${activeSkillId}/${selectedPath.join('/')}`;
+    fetch('/api/fs/write', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath, content: newContent })
+    }).catch(error => {
+      console.error('Failed to save skill file:', error);
+      showToast('Failed to save file');
+    });
+  };
+
+  const handleCopyContent = () => {
+    if (activeFile && activeFile.content) {
+      navigator.clipboard.writeText(activeFile.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      showToast('Copied content to clipboard');
+    }
+  };
+
+  const handleToggleSkill = (id: string) => {
+    setSkills(prev => prev.map(s => {
+      if (s.id === id) {
+        const nextState = !s.enabled;
+        showToast(`${nextState ? 'Enabled' : 'Disabled'} ${s.name}`);
+        return { ...s, enabled: nextState };
+      }
+      return s;
+    }));
+  };
+
+  const handleAddSkill = () => {
+    if (!newSkillName.trim()) return;
+    const formattedId = newSkillName.toLowerCase().replace(/\s+/g, '-');
+    const createSkill = async () => {
+      try {
+        await fetch('/api/fs/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filePath: `${SKILLS_ROOT}/${formattedId}`, isDirectory: true })
+        });
+
+        await Promise.all([
+          fetch('/api/fs/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filePath: `${SKILLS_ROOT}/${formattedId}/SKILL.md`,
+              content: `# ${newSkillName}\n\n${newSkillDesc || 'Overview of your custom skill.'}\n`
+            })
+          }),
+          fetch('/api/fs/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filePath: `${SKILLS_ROOT}/${formattedId}/LICENSE.txt`,
+              content: 'Custom User License\n'
+            })
+          })
+        ]);
+
+        setIsAddDialogOpen(false);
+        setNewSkillName('');
+        setNewSkillDesc('');
+        setNewSkillTrigger('Slash command');
+        await loadSkillsFromDisk();
+        setActiveSkillId(formattedId);
+        setSelectedPath(['SKILL.md']);
+        setSkills(prev => prev.map(skill => skill.id === formattedId
+          ? { ...skill, trigger: newSkillTrigger, description: newSkillDesc || 'A custom defined user skill.', addedBy: 'User' }
+          : skill
+        ));
+        showToast(`Created new skill: ${formattedId}`);
+      } catch (error) {
+        console.error('Failed to create skill:', error);
+        showToast('Failed to create skill');
+      }
+    };
+
+    createSkill();
+  };
+
+  // Rendering directory tree node
+  const renderTreeNode = (node: FileNode, parentPath: string[]) => {
+    const currentPath = [...parentPath, node.name];
+    const isSelected = selectedPath.join('/') === currentPath.join('/');
+
+    if (node.type === 'folder') {
+      const isExpanded = !!expandedFolders[node.name];
+      return (
+        <div key={node.name} className="select-none">
+          <div
+            onClick={() => handleToggleFolder(node.name)}
+            className="flex items-center gap-1.5 py-1 px-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg cursor-pointer text-xs font-semibold text-gray-500 dark:text-gray-400 group"
+          >
+            {isExpanded ? <ChevronDown size={14} className="shrink-0" /> : <ChevronRight size={14} className="shrink-0" />}
+            {isExpanded ? <FolderOpen size={14} className="text-amber-500 shrink-0" /> : <Folder size={14} className="text-amber-500 shrink-0" />}
+            <span className="flex-1 truncate">{node.name}</span>
+          </div>
+          {isExpanded && node.children && (
+            <div className="pl-4 ml-1.5 border-l border-gray-100 dark:border-white/5 space-y-0.5 mt-0.5">
+              {node.children.map(child => renderTreeNode(child, currentPath))}
+            </div>
+          )}
+        </div>
+      );
+    } else {
+      const isMarkdown = node.name.endsWith('.md');
+      return (
+        <div
+          key={node.name}
+          onClick={() => {
+            setSelectedPath(currentPath);
+            setPreviewMode(isMarkdown ? 'preview' : 'code');
+          }}
+          className={`flex items-center gap-2 py-1 px-2.5 rounded-lg cursor-pointer text-xs transition-all ${
+            isSelected
+              ? 'bg-blue-50/70 dark:bg-zinc-800 text-blue-600 dark:text-white font-medium'
+              : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'
+          }`}
+        >
+          <FileText size={14} className={`shrink-0 ${isSelected ? 'text-blue-500' : 'text-gray-400'}`} />
+          <span className="truncate flex-1">{node.name}</span>
+        </div>
+      );
+    }
+  };
+
+  // Filter skills based on search
+  const filteredSkills = skills.filter(s =>
+    s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.description.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const breadcrumbRoot = activeSkill?.name || 'skill';
+  const selectedFileName = selectedPath[selectedPath.length - 1] || 'SKILL.md';
+  const selectedIsMarkdown = selectedFileName.endsWith('.md');
+
+  return (
+    <div className="flex h-full w-full overflow-hidden rounded-[28px] border border-white/10 bg-[#171717] text-[#f4f0e8] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 12, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.95 }}
+            className="fixed bottom-6 right-6 bg-zinc-900 border border-white/10 text-white px-4 py-2.5 rounded-xl shadow-xl z-50 text-xs font-semibold flex items-center gap-2"
+          >
+            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />
+            {toastMessage}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add New Skill Modal Overlay */}
+      {isAddDialogOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4"
+          >
+            <div className="flex justify-between items-center">
+              <h4 className="text-sm font-semibold text-brand-primary dark:text-white">Create New Skill</h4>
+              <button
+                onClick={() => setIsAddDialogOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-white text-xs"
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-400 font-medium block mb-1">Skill Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. pr-critique"
+                  value={newSkillName}
+                  onChange={e => setNewSkillName(e.target.value)}
+                  className="w-full text-xs bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 font-medium block mb-1">Trigger Type</label>
+                <select
+                  value={newSkillTrigger}
+                  onChange={e => setNewSkillTrigger(e.target.value)}
+                  className="w-full text-xs bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option>Slash command</option>
+                  <option>Semantic matched auto-load</option>
+                  <option>Slash command + auto</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 font-medium block mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  placeholder="One or two sentences summarizing intent..."
+                  value={newSkillDesc}
+                  onChange={e => setNewSkillDesc(e.target.value)}
+                  className="w-full text-xs bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleAddSkill}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-xl text-xs transition-colors"
+            >
+              Create Skill
+            </button>
+          </motion.div>
+        </div>
+      )}
+
+      <aside className="flex h-full w-[320px] shrink-0 flex-col border-r border-white/10 bg-[#1f1d1b]">
+        <div className="flex items-center justify-between px-6 py-5">
+          <h2 className="text-[18px] font-semibold text-white">Skills</h2>
+          <div className="flex items-center gap-3 text-[#f2f0eb]">
+            <button
+              onClick={() => setSearchQuery('')}
+              className="rounded-md p-1 hover:bg-white/8 transition-colors"
+              title="Clear search"
+            >
+              <Search size={18} />
+            </button>
+            <button
+              onClick={() => setIsAddDialogOpen(true)}
+              className="rounded-md p-1 hover:bg-white/8 transition-colors"
+              title="Add skill"
+            >
+              <Plus size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="px-6 pb-4">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8f887d]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search skills"
+              className="w-full rounded-xl border border-white/8 bg-[#151413] py-2 pl-9 pr-3 text-sm text-[#f4f0e8] placeholder:text-[#7e776d] focus:outline-none focus:ring-1 focus:ring-[#5f86ff]"
+            />
+          </div>
+        </div>
+
+        <div className="px-6 pb-3 text-sm text-[#b6afa5]">Personal skills</div>
+
+        <div className="flex-1 overflow-y-auto px-4 pb-5 custom-scrollbar">
+          {isLoadingSkills && (
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-6 text-center text-sm text-[#8f887d]">
+              Loading skills...
+            </div>
+          )}
+
+          {!isLoadingSkills && filteredSkills.map(skill => {
+            const isActive = skill.id === activeSkillId;
+            return (
+              <div key={skill.id} className="mb-1">
+                <button
+                  onClick={() => {
+                    setActiveSkillId(skill.id);
+                    setSelectedPath(['SKILL.md']);
+                  }}
+                  className={`flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left transition-colors ${
+                    isActive
+                      ? 'bg-[#111111] text-white'
+                      : 'text-[#d9d2c7] hover:bg-white/5'
+                  }`}
+                >
+                  <span className="truncate text-[15px] font-semibold">{skill.name}</span>
+                  <ChevronDown size={16} className={`${isActive ? 'text-[#d8d0c3]' : 'text-[#7e776d]'}`} />
+                </button>
+
+                {isActive && (
+                  <div className="space-y-1 px-4 py-2 text-[15px] text-[#e8e2d8]">
+                    {(activeSkill?.tree || []).map(node => renderTreeNode(node, []))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {!isLoadingSkills && filteredSkills.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-[#8f887d]">
+              No matching skills.
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <section className="flex min-w-0 flex-1 flex-col bg-[#1f1d1b]">
+        {!activeSkill && !isLoadingSkills ? (
+          <div className="flex h-full items-center justify-center px-6 text-sm text-[#8f887d]">
+            No skills found in `A:\web_ui\.lumina\skills`.
+          </div>
+        ) : activeSkill ? (
+          <>
+        <div className="flex items-start justify-between gap-6 border-b border-white/10 px-6 py-5">
+          <div className="min-w-0">
+            <h3 className="mb-6 text-[16px] font-semibold text-white">{activeSkill.name}</h3>
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div>
+                <div className="mb-1 text-sm text-[#a69f93]">Added by</div>
+                <div className="text-[15px] font-semibold text-white">{activeSkill.addedBy}</div>
+              </div>
+              <div>
+                <div className="mb-1 text-sm text-[#a69f93]">Trigger</div>
+                <div className="text-[15px] font-semibold text-white">{activeSkill.trigger}</div>
+              </div>
+            </div>
+            <div className="mt-5 max-w-5xl">
+              <div className="mb-2 flex items-center gap-2 text-sm text-[#a69f93]">
+                <span>Description</span>
+              </div>
+              <p className="text-[15px] leading-7 text-[#dccfb8]">{activeSkill.description}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={() => handleToggleSkill(activeSkill.id)}
+              className={`relative h-7 w-12 rounded-full transition-colors ${
+                activeSkill.enabled ? 'bg-[#3b82f6]' : 'bg-[#47413a]'
+              }`}
+              title="Toggle skill"
+            >
+              <div
+                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
+                  activeSkill.enabled ? 'right-1' : 'left-1'
+                }`}
+              />
+            </button>
+            <button className="rounded-lg p-1.5 text-[#d9d2c7] hover:bg-white/5 transition-colors">
+              <MoreVertical size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col px-6 py-7">
+          <div className="relative flex min-h-0 flex-1 flex-col rounded-3xl border border-white/10 bg-[#2a2826] shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+            <div className="absolute right-4 top-4 flex overflow-hidden rounded-xl border border-white/10 bg-[#242220]">
+              <button
+                onClick={() => setPreviewMode('preview')}
+                className={`px-3 py-2 text-sm transition-colors ${
+                  previewMode === 'preview'
+                    ? 'bg-[#4f4c48] text-white'
+                    : 'text-[#8e877d] hover:text-white'
+                }`}
+                title="Preview"
+              >
+                <Eye size={16} />
+              </button>
+              <button
+                onClick={() => setPreviewMode('code')}
+                className={`px-3 py-2 text-sm transition-colors ${
+                  previewMode === 'code'
+                    ? 'bg-[#4f4c48] text-white'
+                    : 'text-[#8e877d] hover:text-white'
+                }`}
+                title="Code"
+              >
+                <Code size={16} />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-24 custom-scrollbar">
+              {activeFile ? (
+                previewMode === 'preview' && selectedIsMarkdown ? (
+                  <div className="prose prose-invert max-w-none text-[#f0ece4] prose-headings:text-[#f8f5ef] prose-p:text-[#ece4d7] prose-li:text-[#ece4d7] prose-strong:text-white prose-code:text-[#ffb86b]">
+                    <ReactMarkdown>{activeFile.content || ''}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[420px] w-full font-mono text-[12px] leading-6 text-[#d9d2c7]">
+                    <div className="select-none border-r border-white/8 pr-4 text-right text-[#746d63]">
+                      {(activeFile.content || '').split('\n').map((_, i) => (
+                        <div key={i} className="h-6">{i + 1}</div>
+                      ))}
+                    </div>
+                    <textarea
+                      value={activeFile.content || ''}
+                      onChange={e => handleUpdateFileContent(e.target.value)}
+                      className="min-h-[420px] flex-1 resize-none bg-transparent pl-4 text-[#f2ede4] outline-none"
+                      style={{ lineHeight: '1.5rem' }}
+                    />
+                  </div>
+                )
+              ) : (
+                <div className="flex h-full min-h-[320px] flex-col items-center justify-center text-sm text-[#8f887d]">
+                  <FileText size={24} className="mb-3 text-[#6d675e]" />
+                  No file selected.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between border-t border-white/8 px-6 py-3 text-xs text-[#8f887d]">
+              <span className="truncate">{[breadcrumbRoot, ...selectedPath].join(' / ')}</span>
+              <button
+                onClick={handleCopyContent}
+                className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[#d9d2c7] hover:bg-white/5 transition-colors"
+                title="Copy file"
+              >
+                {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+          </>
+        ) : null}
+      </section>
+    </div>
+  );
+}

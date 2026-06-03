@@ -101,6 +101,61 @@ const normalizeToolFilePath = (filePath: string, workspaceRoot?: string) => {
   return withoutLeading.replace(/^[A-Za-z]:\/Project\/?/i, '');
 };
 
+const getVirtualSkillMatch = (filePath: string) => {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '').trim();
+  const match = normalized.match(/^(?:\.lumina\/)?skills\/([a-zA-Z0-9_-]+)\/(.+)$/i);
+  if (match) {
+    return {
+      skillId: match[1],
+      subPath: match[2]
+    };
+  }
+  return null;
+};
+
+const findVirtualSkillFile = (nodes: any[], pathParts: string[]): any => {
+  if (pathParts.length === 0) return null;
+  const currentPart = pathParts[0];
+  const found = nodes.find((n: any) => n.name.toLowerCase() === currentPart.toLowerCase());
+  if (!found) return null;
+  if (pathParts.length === 1) {
+    if (found.type === 'file') return found;
+    return null;
+  }
+  if (found.type === 'folder' && found.children) {
+    return findVirtualSkillFile(found.children, pathParts.slice(1));
+  }
+  return null;
+};
+
+const setVirtualSkillFileContent = (nodes: any[], pathParts: string[], newContent: string): boolean => {
+  if (pathParts.length === 0) return false;
+  const currentPart = pathParts[0];
+  const foundIndex = nodes.findIndex((n: any) => n.name.toLowerCase() === currentPart.toLowerCase());
+  
+  if (pathParts.length === 1) {
+    if (foundIndex !== -1 && nodes[foundIndex].type === 'file') {
+      nodes[foundIndex].content = newContent;
+      return true;
+    } else if (foundIndex === -1) {
+      nodes.push({ name: pathParts[0], type: 'file', content: newContent });
+      return true;
+    }
+    return false;
+  }
+  
+  if (foundIndex !== -1 && nodes[foundIndex].type === 'folder') {
+    if (!nodes[foundIndex].children) nodes[foundIndex].children = [];
+    return setVirtualSkillFileContent(nodes[foundIndex].children, pathParts.slice(1), newContent);
+  } else if (foundIndex === -1) {
+    const newFolder = { name: currentPart, type: 'folder', children: [] };
+    nodes.push(newFolder);
+    return setVirtualSkillFileContent(newFolder.children, pathParts.slice(1), newContent);
+  }
+  
+  return false;
+};
+
 export interface UseAppHandlersParams {
   input: string;
   setInput: (v: string) => void;
@@ -1144,6 +1199,80 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       const personaLine = `You are ${persona.name}. Character description/Role: ${persona.role || 'helpful digital assistant'}.${persona.systemPrompt ? `\nInstructions: ${persona.systemPrompt}` : ''}`;
       let systemPrompt = personaLine;
 
+      // Load custom skills from localStorage to connect AI directly with them
+      let customSkills: any[] = [];
+      try {
+        const saved = localStorage.getItem('lumina_custom_skills');
+        if (saved) {
+          customSkills = JSON.parse(saved);
+        }
+      } catch (e) {
+        console.error('Failed to parse custom skills for system prompt:', e);
+      }
+
+      const enabledCustomSkills = customSkills.filter((s: any) => s.enabled);
+      let activeCustomSkill: any = null;
+      const firstWord = content.trim().split(/\s+/)[0]?.toLowerCase() || '';
+
+      // 1. Direct command match (e.g. /skill-id or /skill-name)
+      if (firstWord.startsWith('/')) {
+        const candidateId = firstWord.substring(1);
+        activeCustomSkill = enabledCustomSkills.find(
+          (s: any) => s.id === candidateId || s.name.toLowerCase() === candidateId
+        );
+      }
+
+      // 2. Semantic/Keyword matched auto-load
+      if (!activeCustomSkill) {
+        for (const s of enabledCustomSkills) {
+          const isAuto = s.trigger?.toLowerCase().includes('auto') || s.trigger?.toLowerCase().includes('semantic');
+          if (isAuto) {
+            // Check direct mentions of skill name
+            const nameMention = content.toLowerCase().includes(s.id.toLowerCase()) || content.toLowerCase().includes(s.name.toLowerCase());
+            // Specialized matches based on specific default skills
+            const specMatch = s.id === 'skill-creator' && (
+              content.toLowerCase().includes('skill') || 
+              content.toLowerCase().includes('prompt') || 
+              content.toLowerCase().includes('system prompt') ||
+              content.toLowerCase().includes('benchmark')
+            );
+            
+            // Check descriptions keywords
+            const descWords = s.description.toLowerCase().split(/\s+/).filter((w: string) => w.length > 4);
+            const descMatch = descWords.some((w: string) => content.toLowerCase().includes(w));
+
+            if (nameMention || specMatch || descMatch) {
+              activeCustomSkill = s;
+              break;
+            }
+          }
+        }
+      }
+
+      // Append general custom skill registry so AI knows its capabilities
+      if (enabledCustomSkills.length > 0) {
+        systemPrompt += `\n\n[AVAILABLE CUSTOM MODULAR SKILLS]
+You have direct, real-time access to the following custom workspace skills. You can automatically invoke any of them or read/write their files:`;
+        enabledCustomSkills.forEach((s: any) => {
+          systemPrompt += `\n- **${s.name}** (Trigger: ${s.trigger}) — ${s.description}`;
+        });
+        systemPrompt += `\n\nYou can access or customize their configuration files in your virtual directory at \".lumina/skills/{skill-name}/SKILL.md\". If helpful, you can read them with 'read_file' or improve them with 'write_file'/'edit_file'!`;
+      }
+
+      // If a specific skill is active, set it as the primary system prompt!
+      if (activeCustomSkill) {
+        const skillMd = activeCustomSkill.tree?.find((t: any) => t.name === 'SKILL.md');
+        if (skillMd && skillMd.content) {
+          systemPrompt += `\n\n=== 🧠 ACTIVE DISPATCH SKILL PROMPT: ${activeCustomSkill.name} ===
+You have automatically transitioned your core system prompt to prioritize this specialized skill.
+Please execute the following skill guide with absolute discipline:
+
+${skillMd.content}
+
+=== END OF ACTIVE DISPATCH SKILL PROMPT ===`;
+        }
+      }
+
       if (!isCoderMode) {
         systemPrompt += `\n[CHAT MODE] Respond as a conversational assistant. Do not claim to be in Coder/Builder mode unless asked.`;
       }
@@ -1492,7 +1621,45 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 });
                 resultValue = { ...(await moveRes.json()), filePath: newPath, oldPath, newPath, action: 'renamed_file' };
                 showToast(`Renamed ${oldPath} → ${newPath}`);
-              } else if (name === 'write_file') {
+              } else if (name === 'write_file' && (() => {
+                const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
+                const skillMatch = getVirtualSkillMatch(cleanedPath);
+                if (skillMatch) {
+                  let customSkills: any[] = [];
+                  try {
+                    const saved = localStorage.getItem('lumina_custom_skills');
+                    if (saved) customSkills = JSON.parse(saved);
+                  } catch (e) {}
+                  let targetSkillIndex = customSkills.findIndex((s: any) => s.id === skillMatch.skillId || s.name.toLowerCase() === skillMatch.skillId.toLowerCase());
+                  if (targetSkillIndex === -1) {
+                    const formattedId = skillMatch.skillId.toLowerCase();
+                    const newSkill = {
+                      id: formattedId,
+                      name: formattedId,
+                      addedBy: 'AI',
+                      trigger: 'Slash command + auto',
+                      description: 'AI-created skill module.',
+                      enabled: true,
+                      tree: []
+                    };
+                    customSkills.push(newSkill);
+                    targetSkillIndex = customSkills.length - 1;
+                  }
+                  const skill = customSkills[targetSkillIndex];
+                  const pathParts = skillMatch.subPath.split('/');
+                  const isUpdated = setVirtualSkillFileContent(skill.tree, pathParts, args.content || '');
+                  if (isUpdated) {
+                    localStorage.setItem('lumina_custom_skills', JSON.stringify(customSkills));
+                    window.dispatchEvent(new Event('lumina_skills_updated'));
+                    resultValue = { success: true, filePath: cleanedPath, action: 'created_or_updated_skill_file' };
+                  } else {
+                    resultValue = { error: `Could not write virtual skill file ${cleanedPath}` };
+                  }
+                  showToast(`Wrote skill file ${cleanedPath}`);
+                  return false;
+                }
+                return true;
+              })()) {
                 const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 
@@ -1549,7 +1716,28 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 showToast(`Wrote ${cleanedPath}`);
               } else if (name === 'read_file') {
                 const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
-                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const skillMatch = getVirtualSkillMatch(cleanedPath);
+                if (skillMatch) {
+                  let customSkills: any[] = [];
+                  try {
+                    const saved = localStorage.getItem('lumina_custom_skills');
+                    if (saved) customSkills = JSON.parse(saved);
+                  } catch (e) {}
+                  const targetSkill = customSkills.find((s: any) => s.id === skillMatch.skillId || s.name.toLowerCase() === skillMatch.skillId.toLowerCase());
+                  if (targetSkill) {
+                    const pathParts = skillMatch.subPath.split('/');
+                    const foundFile = findVirtualSkillFile(targetSkill.tree, pathParts);
+                    if (foundFile && foundFile.content !== undefined) {
+                      resultValue = { success: true, content: foundFile.content, filePath: cleanedPath };
+                    } else {
+                      resultValue = { error: `File ${skillMatch.subPath} not found in skill ${skillMatch.skillId}` };
+                    }
+                  } else {
+                    resultValue = { error: `Skill ${skillMatch.skillId} not found in custom skills list` };
+                  }
+                  showToast(`Read skill file ${cleanedPath}`);
+                } else {
+                  const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 const readBody: any = { filePath: fullPath, ...workspaceArg };
                 if (args.offset) readBody.offset = Number(args.offset);
                 if (args.limit) readBody.limit = Number(args.limit);
@@ -1562,6 +1750,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 resultValue = { ...(await readRes.json()), filePath: cleanedPath };
                 const range = args.offset ? ` [offset=${args.offset}${args.limit ? `, limit=${args.limit}` : ''}]` : '';
                 showToast(`Read ${cleanedPath}${range}`);
+                }
               } else if (name === 'search_code') {
                 const maxResults = Math.max(1, Math.min(Number(args.maxResults || 30), 80));
                 const listRes = await fetch('/api/fs/list', {
@@ -1628,7 +1817,63 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 });
                 resultValue = { ...(await lspRes.json()), filePath: cleanedPath };
                 showToast(`LSP analyzed ${cleanedPath}`);
-              } else if (name === 'edit_file') {
+              } else if (name === 'edit_file' && (() => {
+                const cleanedPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
+                const skillMatch = getVirtualSkillMatch(cleanedPath);
+                if (skillMatch) {
+                  let customSkills: any[] = [];
+                  try {
+                    const saved = localStorage.getItem('lumina_custom_skills');
+                    if (saved) customSkills = JSON.parse(saved);
+                  } catch (e) {}
+                  const targetSkill = customSkills.find((s: any) => s.id === skillMatch.skillId || s.name.toLowerCase() === skillMatch.skillId.toLowerCase());
+                  if (targetSkill) {
+                    const pathParts = skillMatch.subPath.split('/');
+                    const foundFile = findVirtualSkillFile(targetSkill.tree, pathParts);
+                    if (foundFile && foundFile.content !== undefined) {
+                      const oldContent = foundFile.content || '';
+                      const searchText = String(args.search || '');
+                      const replaceText = String(args.replace ?? '');
+                      const occurrences = oldContent.split(searchText).length - 1;
+                      
+                      if (occurrences === 0) {
+                        throw new Error(`Exact search text was not found in ${cleanedPath}`);
+                      }
+                      
+                      const newContentVal = args.all ? oldContent.split(searchText).join(replaceText) : oldContent.replace(searchText, replaceText);
+                      foundFile.content = newContentVal;
+                      
+                      localStorage.setItem('lumina_custom_skills', JSON.stringify(customSkills));
+                      window.dispatchEvent(new Event('lumina_skills_updated'));
+                      
+                      const diffValues = computeLineDiff(oldContent, newContentVal);
+                      const matchingNode = toolCallNodes.find(n => n.id === tc.id);
+                      if (matchingNode) {
+                        matchingNode.addedCount = diffValues.added;
+                        matchingNode.removedCount = diffValues.removed;
+                        matchingNode.oldContent = oldContent;
+                        matchingNode.newContent = newContentVal;
+                        matchingNode.filePath = cleanedPath;
+                      }
+                      resultValue = {
+                        success: true,
+                        filePath: cleanedPath,
+                        replacements: args.all ? occurrences : 1,
+                        addedCount: diffValues.added,
+                        removedCount: diffValues.removed,
+                        action: 'edited_file'
+                      };
+                      showToast(`Patched virtual skill file ${cleanedPath}`);
+                    } else {
+                      resultValue = { error: `File ${skillMatch.subPath} not found in skill ${skillMatch.skillId}` };
+                    }
+                  } else {
+                    resultValue = { error: `Skill ${skillMatch.skillId} not found in custom skills list` };
+                  }
+                  return false;
+                }
+                return true;
+              })()) {
                 const cleanedPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
                 const searchText = String(args.search || '');
                 const replaceText = String(args.replace ?? '');

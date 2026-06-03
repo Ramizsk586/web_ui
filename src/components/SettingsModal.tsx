@@ -38,6 +38,7 @@ import {
   Database
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
+import { SkillsPanel } from './SkillsPanel';
 
 type AiProviderProfile = {
   id: string;
@@ -57,8 +58,8 @@ interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
   setUseLocalModelsOnly?: (val: boolean) => void;
-  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag';
-  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag') => void;
+  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills';
+  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills') => void;
   useBubbles: boolean;
   setUseBubbles: (val: boolean) => void;
   isCompactSidebar: boolean;
@@ -1760,6 +1761,7 @@ export function SettingsModal({
               { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
               { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
               { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
+              { id: 'skills', label: 'Skill', icon: <BookOpen size={16} /> },
               { id: 'llama_cpp', label: 'llama.cpp', icon: <Box size={16} /> },
               { id: 'models', label: 'Models', icon: <Brain size={16} /> },
             ].map((tab) => (
@@ -1787,7 +1789,11 @@ export function SettingsModal({
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <div className={`flex-1 p-8 pt-4 custom-scrollbar ${activeSettingsTab === 'models' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          <div className={`flex-1 custom-scrollbar ${
+            activeSettingsTab === 'skills'
+              ? 'p-0 overflow-hidden h-full'
+              : (activeSettingsTab === 'models' ? 'p-8 pt-4 overflow-hidden h-full' : 'p-8 pt-4 overflow-y-auto')
+          }`}>
               {activeSettingsTab === 'general' && (
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                 <div>
@@ -3867,6 +3873,12 @@ export function SettingsModal({
                   )}
 
                 </div>
+              </motion.div>
+            )}
+
+            {activeSettingsTab === 'skills' && (
+              <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="h-full flex flex-col font-sans text-left relative overflow-hidden">
+                <SkillsPanel />
               </motion.div>
             )}
 

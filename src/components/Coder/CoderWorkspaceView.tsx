@@ -16,7 +16,10 @@ import {
   Activity, 
   FileText, 
   FileJson,
-  GitBranch
+  GitBranch,
+  ChevronDown,
+  Check,
+  Search
 } from 'lucide-react';
 import { CoderLeftExplorer } from '../CoderLeftExplorer';
 import { MessageItem } from '../Chat/MessageItem';
@@ -88,6 +91,10 @@ interface CoderWorkspaceViewProps {
   rightIsInspectMode: boolean;
   setRightIsInspectMode: (inspect: boolean) => void;
   startCoderPreview: () => Promise<void>;
+  activeModelId: string;
+  activeModelList: any[];
+  availableModels: any[];
+  handleModelSelect: (id: string) => void;
 }
 
 export default function CoderWorkspaceView({
@@ -150,12 +157,40 @@ export default function CoderWorkspaceView({
   rightIsInspectMode,
   setRightIsInspectMode,
   startCoderPreview,
+  activeModelId,
+  activeModelList,
+  availableModels,
+  handleModelSelect,
 }: CoderWorkspaceViewProps) {
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
   const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [explorerWidth, setExplorerWidth] = useState(420);
+  const [explorerWidth, setExplorerWidth] = useState(280);
   const [isExplorerResizing, setIsExplorerResizing] = useState(false);
+
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredModelList = React.useMemo(() => {
+    if (!activeModelList) return [];
+    return activeModelList.filter((model: any) => {
+      const name = (model.name || '').toLowerCase();
+      const id = (model.id || '').toLowerCase();
+      const q = searchQuery.toLowerCase();
+      return name.includes(q) || id.includes(q);
+    });
+  }, [activeModelList, searchQuery]);
 
   const handleExplorerResizeStart = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -292,10 +327,126 @@ export default function CoderWorkspaceView({
             </div>
           </div>
 
-          {/* Center instance indicator */}
-          <div className="text-[11px] font-mono font-semibold tracking-wide text-zinc-500 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"></span>
-            <span>CODER WORKSPACE ACTIVE</span>
+          {/* Center section: Model button and workspace active status */}
+          <div className="flex items-center gap-4">
+
+            {/* Workspace-level Model Selector */}
+            <div className="relative inline-block text-left" ref={dropdownRef}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsDropdownOpen(!isDropdownOpen);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0E0C0B]/70 hover:bg-[#1D1917] border border-[#2C241E] rounded-full transition-all text-[11px] font-semibold text-[#EDE6DD] cursor-pointer select-none max-w-[210px] shadow-sm font-sans"
+                title="Change active model"
+              >
+                <Sparkles size={11} className="text-amber-500 shrink-0" />
+                <span className="truncate max-w-[120px]">
+                  {(() => {
+                    const matched = activeModelList.find((m) => m.id === activeModelId);
+                    if (matched) return matched.name;
+                    let name = activeModelId;
+                    if (name.includes("/")) {
+                      name = name.split("/").slice(-1)[0];
+                    }
+                    return (
+                      name
+                        .replace(/[-_]/g, " ")
+                        .replace(/\bgguf\b/gi, "")
+                        .trim() || activeModelId
+                    );
+                  })()}
+                </span>
+                <ChevronDown
+                  size={11}
+                  className={`text-[#9B8C7D] shrink-0 transition-transform duration-150 ${isDropdownOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              <AnimatePresence>
+                {isDropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
+                    className="absolute left-1/2 -translate-x-1/2 mt-2 w-[280px] bg-[#151211] border border-[#2C241E] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
+                  >
+                    {/* Header Label Info */}
+                    <div className="px-3.5 pt-3 pb-1 select-none flex items-center justify-between shrink-0">
+                      <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-[#9B8C7D]">
+                        System Model Cores
+                      </span>
+                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-[#0E0C0B] font-bold text-[#D97756]">
+                        {filteredModelList.length} Active
+                      </span>
+                    </div>
+
+                    {availableModels.length > 5 && (
+                      <div className="px-3 py-1.5 bg-[#151211] shrink-0">
+                        <div className="relative group">
+                          <Search
+                            size={12}
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9B8C7D] group-focus-within:text-[#D97756] transition-colors"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Filter model name..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full h-8 pl-8 pr-3 bg-[#0E0C0B] border border-[#2C241E] rounded-xl text-[11px] outline-none placeholder-[#635F59] focus:border-[#D97756] focus:ring-1 focus:ring-[#D97756]/15 text-[#EDE6DD] font-medium transition-all"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="max-h-[230px] overflow-y-auto p-1.5 space-y-1 custom-scrollbar shrink-0 border-t border-[#2C241E]/40 mt-1">
+                      {filteredModelList.length > 0 ? (
+                        filteredModelList.map((model) => {
+                          const isSelected = activeModelId === model.id;
+                          const isLocal = model.id.toLowerCase().includes("gguf");
+
+                          return (
+                            <button
+                              key={model.id}
+                              onClick={() => {
+                                handleModelSelect(model.id);
+                                setIsDropdownOpen(false);
+                              }}
+                              className={`w-full min-h-[40px] flex items-center gap-3 px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all shrink-0 border-l-[3px] cursor-pointer ${
+                                isSelected
+                                  ? "bg-[#1D1917] text-[#EDE6DD] border-[#D97756] shadow-sm"
+                                  : "text-[#9B8C7D] hover:bg-[#0E0C0B]/60 hover:text-[#EDE6DD] border-transparent"
+                              }`}
+                            >
+                              <div className="flex-1 text-left min-w-0">
+                                <span className={`block truncate ${isSelected ? "font-bold text-[#EDE6DD]" : "font-semibold text-[#9B8C7D]"}`}>
+                                  {model.name}
+                                </span>
+                                <span className="block text-[8px] font-mono text-[#635F59] truncate uppercase tracking-tight">
+                                  {isLocal ? "LOCAL GGUF • HOSTED" : model.id.split("/").slice(-1)[0]}
+                                </span>
+                              </div>
+
+                              {isSelected && (
+                                <div className="w-4 h-4 rounded-full bg-[#D97756]/10 flex items-center justify-center ml-auto shrink-0">
+                                  <Check size={11} className="text-[#D97756]" strokeWidth={3} />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="py-8 text-center text-[11px] text-[#635F59] select-none">
+                          No cores match criteria
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
 
           {/* Right side live preview panel toggle */}
