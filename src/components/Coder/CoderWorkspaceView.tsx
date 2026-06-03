@@ -88,7 +88,6 @@ interface CoderWorkspaceViewProps {
   rightIsInspectMode: boolean;
   setRightIsInspectMode: (inspect: boolean) => void;
   startCoderPreview: () => Promise<void>;
-  useVmSandbox: boolean;
 }
 
 export default function CoderWorkspaceView({
@@ -151,13 +150,6 @@ export default function CoderWorkspaceView({
   rightIsInspectMode,
   setRightIsInspectMode,
   startCoderPreview,
-  useVmSandbox
-}: CoderWorkspaceViewProps) {
-  
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('overview');
-  const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
-
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
       {/* LEFT PANEL: File Explorer (VS Code Styled collapsible sidebar) */}
@@ -467,7 +459,6 @@ export default function CoderWorkspaceView({
                 <TerminalConsole 
                   workspaceRoot={coderWorkspacePath}
                   isCoderMode={true}
-                  useVmSandbox={useVmSandbox}
                   onToast={showToast} 
                   triggerRefresh={() => setWorkspaceRefreshKey((k: number) => k + 1)}
                   onElizaActiveChange={(active) => setIsElizaActive(active)}
@@ -590,7 +581,6 @@ export default function CoderWorkspaceView({
                 <TerminalConsole 
                   workspaceRoot={coderWorkspacePath}
                   isCoderMode={true}
-                  useVmSandbox={useVmSandbox}
                   onToast={showToast} 
                   triggerRefresh={() => setWorkspaceRefreshKey((k: number) => k + 1)}
                   onElizaActiveChange={(active) => setIsElizaActive(active)}

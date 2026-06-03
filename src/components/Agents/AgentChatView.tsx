@@ -388,7 +388,7 @@ export function AgentChatView({
                (/\b(code|run|execute|calculate|math|eval|script)\b/i.test(text))) {
         const codeNode: any = {
           id: 'code-node',
-          label: 'Deploying isolated Node.js sandbox execution...',
+          label: 'Executing Node.js code...',
           type: 'terminal',
           status: 'active',
           icon: <Terminal size={11} />,

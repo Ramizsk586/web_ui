@@ -435,7 +435,7 @@ export const SidebarContent = ({
                       setCurrentChatId(null);
                     }}
                     className="text-[10px] text-zinc-500 hover:text-red-405 font-medium transition-colors shrink-0 px-2 py-0.5 rounded-md hover:bg-gray-100 dark:hover:bg-zinc-800 cursor-pointer"
-                    title="Exit project sandbox and return to general chats"
+                    title="Exit project and return to general chats"
                   >
                     Exit
                   </button>

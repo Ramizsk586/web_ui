@@ -12,7 +12,6 @@ interface TerminalConsoleProps {
   apiBase?: string;
   workspaceRoot?: string;
   isCoderMode?: boolean;
-  useVmSandbox?: boolean;
   onToast?: (message: string) => void;
   triggerRefresh?: () => void;
   onElizaActiveChange?: (active: boolean) => void;
@@ -73,7 +72,6 @@ function TerminalConsole({
   apiBase = '',           // e.g. 'http://localhost:3001' or '' for same-origin
   workspaceRoot,
   isCoderMode = false,
-  useVmSandbox = false,
   onToast,
   triggerRefresh,
   onElizaActiveChange,
@@ -137,7 +135,6 @@ function TerminalConsole({
         const params = new URLSearchParams();
         if (workspaceRoot) params.set('workspaceRoot', workspaceRoot);
         if (isCoderMode) params.set('isCoderMode', 'true');
-        if (useVmSandbox) params.set('useVmSandbox', 'true');
         const suffix = params.toString() ? `?${params.toString()}` : '';
         const res  = await fetch(`${apiBase}/api/terminal/session${suffix}`);
         const data = await res.json();
@@ -163,7 +160,7 @@ function TerminalConsole({
         ]);
       }
     })();
-  }, [apiBase, isCoderMode, useVmSandbox, workspaceRoot]);
+  }, [apiBase, isCoderMode, workspaceRoot]);
 
   // ── Eliza toggle ───────────────────────────────────────────────────────────
 
@@ -304,7 +301,7 @@ function TerminalConsole({
       const response = await fetch(`${apiBase}/api/terminal/execute`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ command: trimmed, currentPath, sessionId, workspaceRoot, isCoderMode, useVmSandbox }),
+        body:    JSON.stringify({ command: trimmed, currentPath, sessionId, workspaceRoot, isCoderMode }),
       });
 
       if (!response.ok) {

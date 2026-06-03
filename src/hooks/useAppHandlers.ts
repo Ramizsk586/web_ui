@@ -145,7 +145,6 @@ export interface UseAppHandlersParams {
   showToast: (v: string) => void;
 
   isCoderMode: boolean;
-  useVmSandbox: boolean;
   setIsCoderMode: (v: boolean) => void;
   isCoderWorkspacePanelOpen: boolean;
   setIsCoderWorkspacePanelOpen: (v: boolean) => void;
@@ -248,7 +247,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     setTranscriptionOptionsDoc,
     setActiveArtifact, setIsCanvasOpen, setCanvasView,
     showToast,
-    isCoderMode, useVmSandbox, setIsCoderMode,
+    isCoderMode, setIsCoderMode,
     isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen,
     activeAssistantMode,
     activeCommandType, activeCommandQuery,
@@ -1807,8 +1806,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                     command: commandText,
                     currentPath: coderWorkspacePath,
                     workspaceRoot: coderWorkspacePath,
-                    isCoderMode: isCoderMode,
-                    useVmSandbox
+                    isCoderMode: isCoderMode
                   }),
                   signal
                 });

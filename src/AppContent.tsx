@@ -215,7 +215,7 @@ import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 import { LivePreviewPanel } from './components/LivePreviewPanel';
 import { DevToolsPanel } from './components/DevToolsPanel';
-import { VmCorePanel } from './components/VmCorePanel';
+
 import { RAGPanel } from './components/RAGPanel';
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
 import TranscriptionOptionsModal from './components/TranscriptionOptionsModal';
@@ -395,7 +395,6 @@ export default function AppContent({
     useBubbles, setUseBubbles,
     autoHideTopBar, setAutoHideTopBar,
     useTurboQuant, setUseTurboQuant,
-    useVmSandbox, setUseVmSandbox,
     modelSelectorMode, setModelSelectorMode,
     activeSettingsTab, setActiveSettingsTab,
     activePlusSubMenu, setActivePlusSubMenu,
@@ -845,7 +844,6 @@ export default function AppContent({
   const [retroFilter, setRetroFilter] = useState(false);
   const [verboseDebug, setVerboseDebug] = useState(false);
   const [isDevToolsOpen, setIsDevToolsOpen] = useState(false);
-  const [isVmCorePanelOpen, setIsVmCorePanelOpen] = useState(false);
   const [isRagPanelOpen, setIsRagPanelOpen] = useState(false);
   const [simLatency, setSimLatency] = useState(120);
   const [activeDevTab, setActiveDevTab] = useState<'status' | 'console' | 'perf' | 'storage' | 'flags'>('status');
@@ -1568,7 +1566,7 @@ const startCoderPreview = useCallback(async () => {
     setTranscriptionOptionsDoc,
     setActiveArtifact, setIsCanvasOpen, setCanvasView,
     showToast,
-    isCoderMode, useVmSandbox, setIsCoderMode,
+    isCoderMode, setIsCoderMode,
     isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen,
     activeAssistantMode,
     activeCommandType, activeCommandQuery,
@@ -1989,7 +1987,6 @@ const startCoderPreview = useCallback(async () => {
                     if (prev) return false;
                     setShowProjectsPage(false);
                     setIsSettingsOpen(false);
-                    setIsVmCorePanelOpen(false);
                     setIsRagPanelOpen(false);
                     setShowAgentCreation(false);
                     setIsResearchMode(false);
@@ -2002,7 +1999,6 @@ const startCoderPreview = useCallback(async () => {
                     if (prev) return false;
                     setShowAgentsPage(false);
                     setIsSettingsOpen(false);
-                    setIsVmCorePanelOpen(false);
                     setIsRagPanelOpen(false);
                     setShowAgentCreation(false);
                     setIsResearchMode(false);
@@ -2086,7 +2082,6 @@ const startCoderPreview = useCallback(async () => {
                 if (prev) return false;
                 setShowAgentsPage(false);
                 setIsSettingsOpen(false);
-                setIsVmCorePanelOpen(false);
                 setIsRagPanelOpen(false);
                 setShowAgentCreation(false);
                 setIsResearchMode(false);
@@ -2114,7 +2109,6 @@ const startCoderPreview = useCallback(async () => {
                 if (prev) return false;
                 setShowProjectsPage(false);
                 setIsSettingsOpen(false);
-                setIsVmCorePanelOpen(false);
                 setIsRagPanelOpen(false);
                 setShowAgentCreation(false);
                 setIsResearchMode(false);
@@ -2448,7 +2442,6 @@ const startCoderPreview = useCallback(async () => {
                         { id: 'research_mode', label: isResearchMode ? 'Turn off Research Mode' : 'Turn on Deep Research', icon: <Bot size={16} className={isResearchMode ? 'text-teal-500' : ''} />, onClick: () => { const nextState = !isResearchMode; setIsResearchMode(nextState); setIsResearchWorkspaceOpen(nextState); if (nextState) { setIsCoderMode(false); setIsSidebarOpen(false); } createNewChat(null, false, nextState); setIsHeaderMenuOpen(false); } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(prev => !prev); setIsHeaderMenuOpen(false); } },
                         { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
-                        { id: 'vm_core', label: 'VM Core Sandbox', icon: <Box size={16} />, onClick: () => { setIsVmCorePanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
@@ -2478,7 +2471,7 @@ const startCoderPreview = useCallback(async () => {
           </header>
         )}
 
-        {isResearchMode && !isSettingsOpen && !isVmCorePanelOpen && !isRagPanelOpen && !showAgentCreation ? (
+        {isResearchMode && !isSettingsOpen && !isRagPanelOpen && !showAgentCreation ? (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2497,7 +2490,7 @@ const startCoderPreview = useCallback(async () => {
               />
             </div>
           </motion.div>
-        ) : isCoderMode && !isSettingsOpen && !isVmCorePanelOpen && !isRagPanelOpen && !showAgentCreation ? (
+        ) : isCoderMode && !isSettingsOpen && !isRagPanelOpen && !showAgentCreation ? (
           <CoderWorkspaceView
             isCoderLeftPanelOpen={isCoderLeftPanelOpen}
             setIsCoderLeftPanelOpen={setIsCoderLeftPanelOpen}
@@ -2558,7 +2551,6 @@ const startCoderPreview = useCallback(async () => {
             rightIsInspectMode={rightIsInspectMode}
             setRightIsInspectMode={setRightIsInspectMode}
             startCoderPreview={startCoderPreview}
-            useVmSandbox={useVmSandbox}
           />) : (
           <>
             {showAgentCreation ? (
@@ -2648,8 +2640,6 @@ const startCoderPreview = useCallback(async () => {
                   onClose={() => setIsSettingsOpen(false)}
                   useLocalModelsOnly={useLocalModelsOnly}
                   setUseLocalModelsOnly={setUseLocalModelsOnly}
-                  useVmSandbox={useVmSandbox}
-                  setUseVmSandbox={setUseVmSandbox}
                   activeSettingsTab={activeSettingsTab}
                   setActiveSettingsTab={setActiveSettingsTab}
                   useBubbles={useBubbles}
@@ -2723,20 +2713,6 @@ const startCoderPreview = useCallback(async () => {
                   onOpenLocalModelConfig={handleOpenLocalModelConfig}
                   activeModelId={activeModelId}
                   setActiveModelId={setActiveModelId}
-                />
-              </motion.div>
-            ) : isVmCorePanelOpen ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-zinc-950"
-              >
-                <VmCorePanel
-                  isOpen={isVmCorePanelOpen}
-                  onClose={() => setIsVmCorePanelOpen(false)}
-                  showToast={showToast}
                 />
               </motion.div>
             ) : isRagPanelOpen ? (

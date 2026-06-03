@@ -11,10 +11,7 @@ import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
 import { spawn, spawnSync, type ChildProcessByStdio, type ChildProcessWithoutNullStreams } from "child_process";
 import si from 'systeminformation';
-import { SandboxManager } from './src/sandbox/SandboxManager';
-import { createSandboxRouter } from './src/sandbox/SandboxApi';
-import { createLogger } from './src/sandbox/SandboxHealth';
-import { VmId } from './src/sandbox/types';
+
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 // @ts-ignore
@@ -51,23 +48,13 @@ async function startServer() {
     next();
   });
 
-  // ─── Sandbox Initialization ────────────────────────────────────────────────
-  const sandbox = new SandboxManager(
-    process.env.LUMINA_DATA_DIR || path.join(os.homedir(), '.lumina')
-  );
-  const sandboxLog = createLogger('Server');
   const ragBackend = new RagBackendService();
-
-  // Mount sandbox API routes
-  app.use('/api', createSandboxRouter(sandbox));
 
   // Health check endpoint
   app.get("/api/health", async (req, res) => {
-    const sandboxReady = sandbox.isInitialized();
     res.json({
       status: 'ok',
       server: 'Lumina Web UI Server',
-      sandbox: sandboxReady ? 'ready' : 'uninitialized',
     });
   });
 
@@ -273,75 +260,15 @@ async function startServer() {
     }
   });
 
-  // ─── Agent API Endpoints (routed through sandbox VM) ──────────────────────────
 
-  // Execute a command inside the sandbox VM
-  // Replaces ALL direct child_process.spawn/exec usage for agent commands
-  app.post("/api/agent/exec", async (req, res) => {
-    const { vmId, command, cwd, timeoutMs, env } = req.body;
-    if (!vmId || !command) {
-      return res.status(400).json({ error: 'vmId and command are required' });
-    }
-
-    if (!sandbox.isInitialized()) {
-      try {
-        sandboxLog.info('Auto-initializing sandbox on agent exec request...');
-        await sandbox.initialize();
-      } catch (initErr: any) {
-        return res.status(503).json({ error: `Sandbox initialization failed: ${initErr.message}` });
-      }
-    }
-
-    try {
-      const result = await sandbox.agentRuntime.exec(
-        { id: vmId, tag: 'sandbox' },
-        { command, cwd, timeoutMs, env }
-      );
-      res.json(result);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // Acquire a VM from the pool for an agent
-  app.post("/api/agent/acquire", async (req, res) => {
-    const { agentId, workspacePath } = req.body;
-    if (!agentId) return res.status(400).json({ error: 'agentId is required' });
-
-    try {
-      // Auto-initialize sandbox if needed
-      if (!sandbox.isInitialized()) {
-        sandboxLog.info('Auto-initializing sandbox on agent acquire request...');
-        await sandbox.initialize();
-      }
-
-      const vmId = await sandbox.acquireVm(agentId, workspacePath);
-      res.json({ success: true, vmId: vmId.id });
-    } catch (e: any) {
-      res.status(503).json({ error: e.message });
-    }
-  });
-
-  // Release a VM back to the pool
-  app.post("/api/agent/release", async (req, res) => {
-    const { vmId } = req.body;
-    if (!vmId) return res.status(400).json({ error: 'vmId is required' });
-
-    try {
-      await sandbox.releaseVm({ id: vmId, tag: 'sandbox' });
-      res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
 
   // ─── Terminal Session Store ────────────────────────────────────────────────────
-  const terminalSessions = new Map<string, { cwd: string; lastAccess: number; vmId?: string; mode?: 'sandbox' | 'wsl' | 'host' }>();
+  const terminalSessions = new Map<string, { cwd: string; lastAccess: number }>();
 
   function getTerminalSession(sessionId?: string) {
     if (!sessionId || !terminalSessions.has(sessionId)) {
-      const newSession: { cwd: string; lastAccess: number; vmId?: string; mode?: 'sandbox' | 'wsl' | 'host' } = {
-        cwd: '/workspace',
+      const newSession: { cwd: string; lastAccess: number } = {
+        cwd: process.cwd(),
         lastAccess: Date.now(),
       };
       const id = sessionId || `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -363,189 +290,49 @@ async function startServer() {
     }
   }, 10 * 60 * 1000);
 
-  const normalizeGuestWorkspacePath = (input?: string) => {
-    const target = input && input.trim() ? input.trim().replace(/\\/g, '/') : '/workspace';
-    const normalized = path.posix.normalize(path.posix.isAbsolute(target)
-      ? target
-      : path.posix.join('/workspace', target));
-    if (normalized !== '/workspace' && !normalized.startsWith('/workspace/')) {
-      throw new Error('Path escapes /workspace');
-    }
-    return normalized;
-  };
-
-  const resolveTermPath = (currentPath: string, segment: string) =>
-    normalizeGuestWorkspacePath(path.posix.resolve(currentPath || '/workspace', segment || '/workspace'));
-
-  const toTermRelativePath = (guestPath: string) => normalizeGuestWorkspacePath(guestPath);
-
-  const handleTermCd = (args: string, session: { cwd: string }) => {
-    const newPath = resolveTermPath(session.cwd, args || '/workspace');
-    session.cwd = newPath;
-    return { newPath, changed: true };
-  };
-
-  const canUseWsl = () => {
-    if (process.platform !== 'win32') return false;
-    try {
-      const result = spawnSync('wsl.exe', ['--status'], { encoding: 'utf8', timeout: 5000 });
-      return result.status === 0;
-    } catch {
-      return false;
-    }
-  };
-
-  const resolveTerminalMode = (useVmSandbox: boolean): 'sandbox' | 'wsl' | 'host' => {
-    if (useVmSandbox) return 'sandbox';
-    if (canUseWsl()) return 'wsl';
-    return 'host';
-  };
-
-  const toWslPath = (inputPath: string) => {
-    const normalized = path.resolve(inputPath).replace(/\\/g, '/');
-    const driveMatch = normalized.match(/^([A-Za-z]):\/(.*)$/);
-    if (!driveMatch) {
-      return normalized.startsWith('/') ? normalized : `/${normalized}`;
-    }
-    const drive = driveMatch[1].toLowerCase();
-    const rest = driveMatch[2];
-    return `/mnt/${drive}/${rest}`;
-  };
-
-  const executeLinuxLikeHostCommand = async (command: string, cwd: string) => {
-    if (process.platform === 'win32' && canUseWsl()) {
-      return await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
-        const proc = spawn('wsl.exe', ['bash', '-lc', `cd ${JSON.stringify(toWslPath(cwd))} && ${command}`], {
-          cwd,
-          env: process.env,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        let stdout = '';
-        let stderr = '';
-        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-        proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-        proc.on('close', (code) => resolve({ stdout, stderr, exitCode: code ?? 0 }));
-        proc.on('error', (error) => resolve({ stdout: '', stderr: `WSL execution failed: ${error.message}\n`, exitCode: 1 }));
-      });
-    }
-
-    return {
-      stdout: '',
-      stderr: process.platform === 'win32'
-        ? 'Linux-style terminal mode requires WSL when VM sandbox is disabled.\n'
-        : 'Linux-style host terminal execution is not available in this environment.\n',
-      exitCode: 1,
-    };
-  };
-
   // GET /api/terminal/session — create or resume a session
   app.get("/api/terminal/session", (req, res) => {
     const workspaceRoot = typeof req.query.workspaceRoot === 'string' && req.query.workspaceRoot.trim()
       ? req.query.workspaceRoot
       : process.cwd();
-    const useVmSandbox = String(req.query.useVmSandbox || '') === 'true';
     const { id, session } = getTerminalSession();
-    const mode = resolveTerminalMode(useVmSandbox);
-    session.mode = mode;
-    session.cwd = mode === 'sandbox' ? '/workspace' : workspaceRoot;
+    session.cwd = workspaceRoot;
     res.json({
       sessionId: id,
       cwd: session.cwd,
       currentPath: session.cwd,
-      platform: mode === 'sandbox' ? 'linux-vm' : mode === 'wsl' ? 'linux-wsl' : process.platform,
-      shell: 'bash',
-      hostname: mode === 'sandbox' ? (session.vmId || 'lumina-sandbox') : os.hostname(),
-      username: mode === 'sandbox' ? 'agent' : os.userInfo().username,
-      sandboxRequired: mode === 'sandbox',
-      executionMode: mode,
+      platform: process.platform,
+      shell: process.platform === 'win32' ? 'powershell' : 'bash',
+      hostname: os.hostname(),
+      username: os.userInfo().username,
     });
   });
 
-  // POST /api/terminal/execute — shell command execution with sandbox routing
+  // POST /api/terminal/execute — shell command execution
   app.post("/api/terminal/execute", async (req, res) => {
-    let { command, currentPath, sessionId: clientSessionId, workspaceRoot, vmId, isCoderMode, useVmSandbox } = req.body;
+    let { command, currentPath, sessionId: clientSessionId, workspaceRoot } = req.body;
     if (!command || typeof command !== 'string') {
       return res.status(400).json({ stderr: 'No command provided.' });
     }
 
-    const mode = resolveTerminalMode(Boolean(useVmSandbox));
     const hostWorkspaceRoot = path.resolve(workspaceRoot || currentPath || process.cwd());
     const { id: sessionId, session } = getTerminalSession(clientSessionId);
-    session.mode = mode;
 
-    if (mode !== 'sandbox') {
-      if (currentPath && currentPath !== '.') {
-        const resolved = path.resolve(currentPath);
-        if (resolved === hostWorkspaceRoot || resolved.startsWith(hostWorkspaceRoot + path.sep)) {
-          session.cwd = resolved;
-        }
-      }
-      if (!(session.cwd === hostWorkspaceRoot || session.cwd.startsWith(hostWorkspaceRoot + path.sep))) {
-        session.cwd = hostWorkspaceRoot;
+    if (currentPath && currentPath !== '.') {
+      const resolved = path.resolve(currentPath);
+      if (resolved === hostWorkspaceRoot || resolved.startsWith(hostWorkspaceRoot + path.sep)) {
+        session.cwd = resolved;
       }
     }
-
-    let targetVmId = vmId;
-
-    if (mode === 'sandbox' && !sandbox.isInitialized()) {
-      try {
-        console.log('[LUMINA_DEBUG] Initializing sandbox on-the-fly for shell execution...');
-        await sandbox.initialize();
-      } catch (initErr: any) {
-        return res.status(503).json({ sessionId, stderr: `Sandbox is required for terminal execution and failed to initialize: ${initErr.message}`, stdout: '' });
-      }
-    }
-
-    if (mode === 'sandbox' && (isCoderMode || vmId || sandbox.isInitialized())) {
-      if (!targetVmId) {
-        const poolStatus = sandbox.getPoolStatus();
-        const activeVms = poolStatus.activeVms || [];
-        if (activeVms.length > 0) {
-          targetVmId = activeVms[0];
-          console.log(`[LUMINA_DEBUG] Auto-routing coder shell execution to active VM: ${targetVmId}`);
-        } else {
-          try {
-            console.log('[LUMINA_DEBUG] No active VM found. Acquiring a new sandboxed VM on-the-fly...');
-            const acquired = await sandbox.acquireVm('coder-agent', workspaceRoot || currentPath || process.cwd());
-            targetVmId = acquired.id;
-            console.log(`[LUMINA_DEBUG] Successfully acquired VM: ${targetVmId}`);
-          } catch (acqErr: any) {
-            return res.status(500).json({ sessionId, stderr: `Failed to acquire Sandbox VM: ${acqErr.message}`, stdout: '' });
-          }
-        }
-      }
-    }
-
-    vmId = targetVmId;
-
-    if (mode === 'sandbox' && sandbox.isInitialized() && vmId) {
-      try {
-        const result = await sandbox.agentRuntime.exec(
-          { id: vmId, tag: 'sandbox' },
-          {
-            command,
-            cwd: normalizeGuestWorkspacePath(currentPath || '/workspace'),
-            timeoutMs: 120000,
-          }
-        );
-        return res.json({
-          sessionId,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          exitCode: result.exitCode,
-          sandboxed: true,
-          executionMode: mode,
-        });
-      } catch (e: any) {
-        return res.status(500).json({ sessionId, stderr: `Sandbox error: ${e.message}`, stdout: '' });
-      }
+    if (!(session.cwd === hostWorkspaceRoot || session.cwd.startsWith(hostWorkspaceRoot + path.sep))) {
+      session.cwd = hostWorkspaceRoot;
     }
 
     const trimmed = command.trim();
     const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
 
     if (['cls', 'clear', 'clear-host'].includes(firstWord)) {
-      return res.json({ sessionId, clear: true, stdout: '', stderr: '', sandboxed: false, executionMode: mode });
+      return res.json({ sessionId, clear: true, stdout: '', stderr: '' });
     }
 
     if (firstWord === 'cd') {
@@ -555,22 +342,33 @@ async function startServer() {
         return res.status(403).json({ sessionId, stdout: '', stderr: `Permission denied: terminal is sandboxed to ${hostWorkspaceRoot}\n`, newPath: session.cwd });
       }
       session.cwd = nextPath;
-      return res.json({ sessionId, stdout: '', stderr: '', newPath: session.cwd, sandboxed: false, executionMode: mode });
+      return res.json({ sessionId, stdout: '', stderr: '', newPath: session.cwd });
     }
 
     if (firstWord === 'pwd') {
-      return res.json({ sessionId, stdout: session.cwd + '\n', stderr: '', newPath: session.cwd, sandboxed: false, executionMode: mode });
+      return res.json({ sessionId, stdout: session.cwd + '\n', stderr: '', newPath: session.cwd });
     }
 
-    const result = await executeLinuxLikeHostCommand(trimmed, session.cwd);
+    const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
+      const proc = spawn(trimmed, [], {
+        cwd: session.cwd,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
+      });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('close', (code) => resolve({ stdout, stderr, exitCode: code ?? 0 }));
+      proc.on('error', (error) => resolve({ stdout: '', stderr: `Execution failed: ${error.message}\n`, exitCode: 1 }));
+    });
     return res.json({
       sessionId,
       stdout: result.stdout,
       stderr: result.stderr,
       exitCode: result.exitCode,
       newPath: session.cwd,
-      sandboxed: false,
-      executionMode: mode,
     });
   });
 
@@ -2393,36 +2191,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     }
   });
 
-  // Detect project type using sandbox VM if available
+  // Detect project type
   app.post("/api/fs/detect-project", async (req, res) => {
-    const { folderPath, workspaceRoot, vmId } = req.body;
-
-    // Route through sandbox VM when available
-    if (sandbox.isInitialized() && vmId) {
-      try {
-        const targetPath = folderPath || workspaceRoot || '/workspace';
-        const result = await sandbox.agentRuntime.exec(
-          { id: vmId, tag: 'sandbox' },
-          { command: `cd "${targetPath}" && if [ -f package.json ]; then cat package.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); deps={**d.get('dependencies',{}), **d.get('devDependencies',{})}; print('vite' if 'vite' in deps else 'next' if 'next' in deps else 'react' if 'react' in deps else 'node'); print(d.get('name','unknown'))" 2>/dev/null || echo "unknown"; else echo "static"; fi`, timeoutMs: 10000 }
-        );
-
-        const lines = result.stdout.trim().split('\n');
-        const framework = lines[0] || 'unknown';
-        const typeMap: Record<string, string> = {
-          vite: 'vite', next: 'next', react: 'react',
-          node: 'node', static: 'static', unknown: 'unknown',
-        };
-
-        return res.json({
-          type: typeMap[framework] || 'unknown',
-          entryPoint: framework === 'static' ? 'index.html' : null,
-          framework: framework === 'unknown' ? null : framework,
-          sandboxed: true,
-        });
-      } catch (e: any) {
-        // Fall back to host detection
-      }
-    }
+    const { folderPath, workspaceRoot } = req.body;
 
     const targetDir = folderPath
       ? resolveCoderPath(folderPath, workspaceRoot)
@@ -2583,21 +2354,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   });
 
   app.get("/api/os/info", (req, res) => {
-    const poolStatus = sandbox.isInitialized() ? sandbox.getPoolStatus() : null;
     res.json({
       platform: process.platform,
       isWindows: process.platform === 'win32',
       isMac: process.platform === 'darwin',
       isLinux: process.platform === 'linux',
-      shell: '/bin/bash',
+      shell: process.platform === 'win32' ? 'powershell' : '/bin/bash',
       hostname: os.hostname(),
-      sandbox: {
-        enabled: sandbox.isInitialized(),
-        poolSize: poolStatus?.total || 0,
-        available: poolStatus?.available || 0,
-        vmCpu: sandbox.isInitialized() ? sandbox.getConfig().vmCpuCount : 0,
-        vmMemory: sandbox.isInitialized() ? sandbox.getConfig().vmMemoryMb : 0,
-      },
     });
   });
 
@@ -2851,44 +2614,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   app.post('/api/preview/start', async (req, res) => {
     try {
       const workspaceRoot = resolveCoderPath(req.body?.folderPath);
-      let { vmId } = req.body;
-
-      if (!sandbox.isInitialized()) {
-        try {
-          await sandbox.initialize();
-        } catch (e: any) {
-          return res.status(503).json({ error: `Sandbox is required for previews and failed to initialize: ${e.message}` });
-        }
-      }
-
-      if (!vmId) {
-        try {
-          const acquired = await sandbox.acquireVm('preview-agent', workspaceRoot);
-          vmId = acquired.id;
-        } catch (e: any) {
-          return res.status(503).json({ error: `Failed to acquire Sandbox VM for preview: ${e.message}` });
-        }
-      }
-
-      try {
-        const preview = await sandbox.startPreview(
-          { id: vmId, tag: 'sandbox' },
-          '/workspace'
-        );
-        return res.json({
-          running: true,
-          url: `http://localhost:${preview.hostPort}`,
-          frameUrl: `http://localhost:${preview.hostPort}`,
-          logs: [`Preview started in VM '${vmId}' on port ${preview.hostPort}`],
-          detection: { kind: 'node', framework: 'Sandbox VM', packageManager: 'npm', devCommand: 'npm run dev', previewUrl: `http://localhost:${preview.hostPort}`, entryFile: null, notes: [] },
-          sandboxed: true,
-          vmId,
-        });
-      } catch (e: any) {
-        return res.status(500).json({ error: `Sandbox preview failed: ${e.message}` });
-      }
-
-      /*
       const samePreviewRoot = activePreviewRoot === workspaceRoot;
       activePreviewRoot = workspaceRoot;
       const detection = detectPreviewProject(workspaceRoot);
@@ -2951,7 +2676,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         logs: previewLogs,
         detection
       });
-      */
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

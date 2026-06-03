@@ -51,14 +51,4 @@ contextBridge.exposeInMainWorld('__electronAPI', {
   zoomOut: () => ipcRenderer.invoke('zoom:out'),
   zoomReset: () => ipcRenderer.invoke('zoom:reset'),
 
-  // ─── Sandbox API ─────────────────────────────────────────────────────────
-  getSandboxStatus: () => {
-    return ipcRenderer.invoke('sandbox:status');
-  },
-  checkSandbox: () => {
-    return ipcRenderer.invoke('sandbox:check');
-  },
-  initializeSandbox: () => {
-    return ipcRenderer.invoke('sandbox:initialize');
-  },
 });

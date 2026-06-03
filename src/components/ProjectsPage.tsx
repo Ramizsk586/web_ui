@@ -456,7 +456,7 @@ export function ProjectsPage({
               {searchQuery ? 'No matching projects' : 'No projects created'}
             </h3>
             <p className="text-xs text-[var(--theme-muted)] mt-1 max-w-sm">
-              {searchQuery ? 'Try adjusting your search query or clear the filter.' : 'Create a clean sandbox project to organize custom intelligence chats.'}
+              {searchQuery ? 'Try adjusting your search query or clear the filter.' : 'Create a clean project to organize custom intelligence chats.'}
             </p>
             {!searchQuery && (
               <button

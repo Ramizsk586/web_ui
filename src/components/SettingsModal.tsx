@@ -57,8 +57,6 @@ interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
   setUseLocalModelsOnly?: (val: boolean) => void;
-  useVmSandbox?: boolean;
-  setUseVmSandbox?: (val: boolean) => void;
   activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag';
   setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag') => void;
   useBubbles: boolean;
@@ -341,8 +339,6 @@ export function SettingsModal({
   onClose,
   useLocalModelsOnly = false,
   setUseLocalModelsOnly = () => {},
-  useVmSandbox = false,
-  setUseVmSandbox = () => {},
   activeSettingsTab,
   setActiveSettingsTab,
   useBubbles,
@@ -1842,26 +1838,6 @@ export function SettingsModal({
                         >
                           <motion.div 
                             animate={{ x: useLocalModelsOnly ? 24 : 4 }}
-                            className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
-                          />
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium text-sm">Enable VM Sandbox</div>
-                          <div className="text-xs text-gray-400">Use Hyper-V sandbox VMs for coder execution and terminal sessions</div>
-                        </div>
-                        <button
-                          onClick={() => {
-                            const nextVal = !useVmSandbox;
-                            setUseVmSandbox(nextVal);
-                            localStorage.setItem('lumina_use_vm_sandbox', nextVal.toString());
-                            showToast(nextVal ? 'VM sandbox enabled for coder mode.' : 'VM sandbox disabled. Using integrated Linux terminal mode.');
-                          }}
-                          className={`w-12 h-6 rounded-full transition-all relative ${useVmSandbox ? 'bg-emerald-600' : 'bg-gray-200'}`}
-                        >
-                          <motion.div
-                            animate={{ x: useVmSandbox ? 24 : 4 }}
                             className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
                           />
                         </button>

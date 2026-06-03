@@ -4,14 +4,7 @@ import fs from 'fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import http from 'http';
 
-// ─── Sandbox Integration ─────────────────────────────────────────────────────
-// The SandboxManager is bundled in server.cjs and initialized there.
-// This module provides the Electron-side IPC bridge for sandbox status
-// and coordinates sandbox lifecycle with the app startup.
-// ────────────────────────────────────────────────────────────────────────────
 
-let sandboxReady = false;
-let sandboxInitializationAttempted = false;
 
 // Suppress Electron's "Insecure CSP" dev warning.
 // 'unsafe-eval' is intentionally required at runtime by Monaco Editor,
@@ -260,78 +253,6 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
     return true;
   });
 
-  // ─── Sandbox IPC Handlers ────────────────────────────────────────────────
-  ipcMain.handle('sandbox:status', () => {
-    return { ready: sandboxReady, attempted: sandboxInitializationAttempted };
-  });
-
-  ipcMain.handle('sandbox:check', async () => {
-    try {
-      const http = require('http');
-      return new Promise((resolve) => {
-        http.get('http://localhost:3000/api/sandbox/health', (res: any) => {
-          let data = '';
-          res.on('data', (chunk: string) => { data += chunk; });
-          res.on('end', () => {
-            try {
-              const status = JSON.parse(data);
-              sandboxReady = status.status === 'ready';
-              resolve(status);
-            } catch {
-              resolve({ status: 'error' });
-            }
-          });
-        }).on('error', () => {
-          resolve({ status: 'unavailable' });
-        });
-      });
-    } catch {
-      return { status: 'unavailable' };
-    }
-  });
-
-  ipcMain.handle('sandbox:initialize', async () => {
-    sandboxInitializationAttempted = true;
-    try {
-      const http = require('http');
-      return new Promise((resolve, reject) => {
-        const postData = JSON.stringify({});
-        const options = {
-          hostname: 'localhost',
-          port: 3000,
-          path: '/api/sandbox/initialize',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData),
-          },
-        };
-        const req = http.request(options, (res: any) => {
-          let data = '';
-          res.on('data', (chunk: string) => { data += chunk; });
-          res.on('end', () => {
-            try {
-              const result = JSON.parse(data);
-              sandboxReady = result.success;
-              resolve(result);
-            } catch {
-              resolve({ success: false });
-            }
-          });
-        });
-        req.on('error', (err: Error) => {
-          sandboxReady = false;
-          reject(err);
-        });
-        req.write(postData);
-        req.end();
-      });
-    } catch (e: any) {
-      sandboxReady = false;
-      return { success: false, error: e.message };
-    }
-  });
-
   ipcMain.on('show-context-menu', () => {
     if (!mainWindow) return;
     const template: Electron.MenuItemConstructorOptions[] = [
@@ -408,50 +329,6 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
     sendLoadingStatus('Interface ready...', 'success', 90);
   }
 
-  function initializeSandboxInBackground() {
-    if (sandboxInitializationAttempted) return;
-    sandboxInitializationAttempted = true;
-
-    setTimeout(() => {
-      try {
-        const postData = JSON.stringify({});
-        const req = http.request({
-          hostname: 'localhost',
-          port: SERVER_PORT,
-          path: '/api/sandbox/initialize',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData),
-          },
-          timeout: 30000,
-        }, (res) => {
-          let data = '';
-          res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-          res.on('end', () => {
-            try {
-              const result = JSON.parse(data);
-              sandboxReady = !!result.success;
-            } catch {
-              sandboxReady = false;
-            }
-          });
-        });
-        req.on('timeout', () => {
-          req.destroy();
-          sandboxReady = false;
-        });
-        req.on('error', () => {
-          sandboxReady = false;
-        });
-        req.write(postData);
-        req.end();
-      } catch {
-        sandboxReady = false;
-      }
-    }, 1500);
-  }
-
   // Start both the loading animation sequence and server in parallel
   const loadingPromise = showLoadingSequence();
   const serverPromise = startServerProcess();
@@ -471,7 +348,6 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
       
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.loadURL(url);
-        initializeSandboxInBackground();
         if (isDev) {
           mainWindow?.webContents.on('did-finish-load', () => {
             mainWindow?.webContents.openDevTools({ mode: 'detach' });
