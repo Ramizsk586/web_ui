@@ -7,11 +7,15 @@ import { MessageItem } from '../Chat/MessageItem';
 import { AgentToolBadge } from './AgentToolBadge';
 import { AgentAvatar } from './AgentAvatar';
 
+const createAgentMessageId = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 interface AgentChatViewProps {
   agent: Agent;
   onBack: () => void;
   onUpdateAgent: (patch: Partial<Agent>) => void;
   onEditAgent: () => void;
+  bridgeTools?: any[];
   markdownComponents?: any;
   userProfile?: any;
   persona?: any;
@@ -23,6 +27,7 @@ export function AgentChatView({
   onBack,
   onUpdateAgent,
   onEditAgent,
+  bridgeTools = [],
   markdownComponents,
   userProfile,
   persona,
@@ -228,7 +233,7 @@ export function AgentChatView({
     setAttachedUrlDocs([]);
 
     const userMsg: AgentMessage = {
-      id: Date.now().toString(),
+      id: createAgentMessageId('agent-user'),
       role: 'user',
       content: combinedContent,
       timestamp: Date.now(),
@@ -409,21 +414,25 @@ export function AgentChatView({
       await runAgent({
         agent: {
           ...agent,
-          systemPrompt: finalSystemPrompt
+          systemPrompt: finalSystemPrompt,
+          executionMode: 'dispatcher'
         },
         userMessage: combinedContent,
         history: agent.chatHistory,
         imageUrls: pendingImageDataUrls.length > 0 ? pendingImageDataUrls : undefined,
+        bridgeTools,
         onToken: (token) => {
           setStreamingText(prev => prev + token);
         },
-        onDone: (fullText) => {
+        onDone: (fullText, events, runId) => {
           const assistantMsg: AgentMessage = {
-            id: (Date.now() + 1).toString(),
+            id: createAgentMessageId('agent-assistant'),
             role: 'assistant',
             content: fullText,
             timestamp: Date.now(),
-            toolCalls: localToolCalls.length > 0 ? localToolCalls : undefined
+            toolCalls: localToolCalls.length > 0 ? localToolCalls : undefined,
+            runId,
+            agentEvents: events
           };
           onUpdateAgent({ chatHistory: [...updatedHistory, assistantMsg] });
           setIsStreaming(false);
@@ -432,7 +441,7 @@ export function AgentChatView({
         },
         onError: (err) => {
           const systemErrorMsg: AgentMessage = {
-            id: (Date.now() + 1).toString(),
+            id: createAgentMessageId('agent-error'),
             role: 'assistant',
             content: `❌ **Agent Call Failed**:\n\n${err}\n\nPlease verify that your API endpoint has valid credentials in **Settings > Secrets**.`,
             timestamp: Date.now(),

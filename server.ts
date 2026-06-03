@@ -50,12 +50,359 @@ async function startServer() {
 
   const ragBackend = new RagBackendService();
 
+  type RuntimeTool = {
+    id: string;
+    name: string;
+    description: string;
+    enabled?: boolean;
+    active?: boolean;
+    parameters?: any;
+    source?: string;
+  };
+
+  type RuntimeAgent = {
+    id: string;
+    name: string;
+    description?: string;
+    systemPrompt?: string;
+    model?: string;
+    provider?: string;
+    apiKey?: string;
+    baseUrl?: string;
+    bridgeUrl?: string;
+    bridgeApiKey?: string;
+    bridgeModel?: string;
+    tools?: RuntimeTool[];
+    skills?: Array<{ id: string; name: string; enabled: boolean }>;
+    skillFiles?: Array<{ name: string; content: string; description?: string }>;
+  };
+
+  const randomRuntimeId = (prefix: string) =>
+    `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const writeAgentEvent = (res: express.Response, payload: Record<string, any>) => {
+    res.write(`${JSON.stringify(payload)}\n`);
+  };
+
+  const mapRuntimeToolSchema = (tool: RuntimeTool) => ({
+    type: 'function',
+    function: {
+      name: tool.name || tool.id,
+      description: tool.description || '',
+      parameters: tool.parameters || { type: 'object', properties: {}, required: [] }
+    }
+  });
+
+  const buildAgentInstruction = (agent: RuntimeAgent) => {
+    const skillBlock = (agent.skillFiles || [])
+      .map(file => `### ${file.name}\n${file.description || ''}\n\n${file.content}`)
+      .join('\n\n---\n\n');
+
+    const enabledTools = (agent.tools || []).filter(tool => tool.enabled !== false);
+    const enabledSkills = (agent.skills || []).filter(skill => skill.enabled);
+
+    return [
+      agent.systemPrompt || `You are ${agent.name}, a focused AI assistant.`,
+      enabledSkills.length ? `Enabled skills: ${enabledSkills.map(skill => skill.name || skill.id).join(', ')}` : '',
+      enabledTools.length ? `Available tools: ${enabledTools.map(tool => tool.name || tool.id).join(', ')}` : '',
+      skillBlock ? `Skill files:\n\n${skillBlock}` : '',
+      `Execution policy:
+- Decide whether to answer directly or spawn a focused sub-agent for tool-heavy work.
+- Spawn a sub-agent when the task needs web research, external APIs, file operations, or multiple-step execution.
+- Be concise, grounded, and only claim tool results you actually observed.`
+    ].filter(Boolean).join('\n\n');
+  };
+
+  const looksLikeResearchTask = (text: string) =>
+    /\b(search|find|latest|current|news|look up|lookup|scrape|research|compare|url|website|api|docs|documentation|weather|price|score|external|tool)\b/i.test(text);
+
+  const runOpenAiCompatibleChat = async ({
+    baseUrl,
+    apiKey,
+    model,
+    messages,
+    tools
+  }: {
+    baseUrl: string;
+    apiKey?: string;
+    model: string;
+    messages: any[];
+    tools?: any[];
+  }) => {
+    const body: any = {
+      model,
+      messages,
+      stream: false,
+      max_tokens: 2048,
+      temperature: 0.5,
+    };
+    if (tools?.length) {
+      body.tools = tools;
+      body.tool_choice = 'auto';
+    }
+
+    const response = await axios.post(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, body, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
+      timeout: 120000
+    });
+
+    return response.data;
+  };
+
+  const callBridgeToolDirect = async ({
+    bridgeUrl,
+    apiKey,
+    name,
+    args
+  }: {
+    bridgeUrl: string;
+    apiKey?: string;
+    name: string;
+    args: Record<string, any>;
+  }) => {
+    const response = await axios.post(
+      `${bridgeUrl.replace(/\/+$/, '')}/api/tools/${encodeURIComponent(name)}`,
+      args,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+        },
+        timeout: 120000
+      }
+    );
+    return response.data;
+  };
+
+  const runExecutionAgent = async ({
+    agent,
+    task,
+    bridgeTools,
+    res
+  }: {
+    agent: RuntimeAgent;
+    task: string;
+    bridgeTools: RuntimeTool[];
+    res: express.Response;
+  }) => {
+    const spawnId = randomRuntimeId('spawn');
+    const enabledTools = [...(agent.tools || []).filter(tool => tool.enabled !== false), ...bridgeTools.filter(tool => tool.enabled !== false)];
+
+    writeAgentEvent(res, {
+      type: 'event',
+      event: {
+        id: spawnId,
+        type: 'spawn',
+        name: agent.name,
+        status: 'active',
+        task,
+        integrations: enabledTools.map(tool => tool.name || tool.id)
+      }
+    });
+
+    const bridgeBacked = agent.bridgeUrl || process.env.LLAMA_BRIDGE_URL || 'http://localhost:8089';
+    const bridgeKey = agent.bridgeApiKey || process.env.LLAMA_BRIDGE_API_KEY || '';
+    const model = agent.bridgeModel || agent.model || 'openprovider/auto-free';
+    const toolSchemas = enabledTools.map(mapRuntimeToolSchema);
+
+    const messages: any[] = [
+      {
+        role: 'system',
+        content: `You are a focused execution sub-agent.\nUse tools when needed. If you use a tool, cite only real returned data.`
+      },
+      { role: 'user', content: task }
+    ];
+
+    let finalText = '';
+    let loopCount = 0;
+
+    while (loopCount < 6) {
+      loopCount += 1;
+      const response = await runOpenAiCompatibleChat({
+        baseUrl: bridgeBacked.endsWith('/v1') ? bridgeBacked : `${bridgeBacked}/v1`,
+        apiKey: bridgeKey,
+        model,
+        messages,
+        tools: toolSchemas
+      });
+
+      const choice = response?.choices?.[0]?.message;
+      if (!choice) break;
+
+      if (choice.content) {
+        finalText += typeof choice.content === 'string' ? choice.content : JSON.stringify(choice.content);
+      }
+
+      if (!choice.tool_calls?.length) {
+        break;
+      }
+
+      messages.push({
+        role: 'assistant',
+        content: choice.content || '',
+        tool_calls: choice.tool_calls
+      });
+
+      for (const toolCall of choice.tool_calls) {
+        const toolName = toolCall?.function?.name || 'unknown_tool';
+        const args = (() => {
+          try {
+            return JSON.parse(toolCall?.function?.arguments || '{}');
+          } catch {
+            return {};
+          }
+        })();
+
+        const toolEventId = randomRuntimeId('tool');
+        writeAgentEvent(res, {
+          type: 'event',
+          event: {
+            id: toolEventId,
+            type: 'tool',
+            name: toolName,
+            status: 'active',
+            input: args
+          }
+        });
+
+        let toolResult: any = null;
+        try {
+          toolResult = await callBridgeToolDirect({
+            bridgeUrl: bridgeBacked,
+            apiKey: bridgeKey,
+            name: toolName,
+            args
+          });
+
+          writeAgentEvent(res, {
+            type: 'event',
+            event: {
+              id: toolEventId,
+              type: 'tool',
+              name: toolName,
+              status: 'complete',
+              input: args,
+              output: JSON.stringify(toolResult).slice(0, 4000)
+            }
+          });
+        } catch (error: any) {
+          const message = error?.message || 'Tool execution failed';
+          writeAgentEvent(res, {
+            type: 'event',
+            event: {
+              id: toolEventId,
+              type: 'tool',
+              name: toolName,
+              status: 'failed',
+              input: args,
+              output: message
+            }
+          });
+          toolResult = { error: message };
+        }
+
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(toolResult)
+        });
+      }
+    }
+
+    writeAgentEvent(res, {
+      type: 'event',
+      event: {
+        id: spawnId,
+        type: 'spawn',
+        name: agent.name,
+        status: 'complete',
+        task,
+        integrations: enabledTools.map(tool => tool.name || tool.id),
+        result: finalText.slice(0, 4000)
+      }
+    });
+
+    return finalText.trim();
+  };
+
   // Health check endpoint
   app.get("/api/health", async (req, res) => {
     res.json({
       status: 'ok',
       server: 'Lumina Web UI Server',
     });
+  });
+
+  app.post("/api/agents/run", async (req, res) => {
+    const { agent, messages, bridgeTools = [] } = req.body as {
+      agent: RuntimeAgent;
+      messages: Array<{ role: string; content: any }>;
+      bridgeTools?: RuntimeTool[];
+    };
+
+    if (!agent || !messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'agent and messages are required' });
+    }
+
+    const runId = randomRuntimeId('run');
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    writeAgentEvent(res, { type: 'run_started', runId });
+
+    try {
+      const latestUserMessage = [...messages].reverse().find(message => message.role === 'user');
+      const userText = Array.isArray(latestUserMessage?.content)
+        ? latestUserMessage?.content?.map((part: any) => part?.text || '').join('\n')
+        : String(latestUserMessage?.content || '');
+
+      const dispatcherSystem = buildAgentInstruction(agent);
+      const dispatcherMessages = [
+        { role: 'system', content: dispatcherSystem },
+        ...messages.map(message => ({
+          role: message.role === 'tool' ? 'assistant' : message.role,
+          content: typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+        }))
+      ];
+
+      let finalReply = '';
+      if (looksLikeResearchTask(userText) || (agent.tools || []).some(tool => tool.active || tool.enabled)) {
+        finalReply = await runExecutionAgent({
+          agent,
+          task: userText,
+          bridgeTools,
+          res
+        });
+      } else {
+        const response = await runOpenAiCompatibleChat({
+          baseUrl: (agent.baseUrl || process.env.AI_BASE_URL || 'http://localhost:11434/v1').replace(/\/+$/, ''),
+          apiKey: agent.apiKey || process.env.AI_API_KEY || '',
+          model: agent.model || 'openprovider/auto-free',
+          messages: dispatcherMessages
+        });
+        finalReply = response?.choices?.[0]?.message?.content || '';
+      }
+
+      const chunks = String(finalReply || '').match(/.{1,120}/g) || [''];
+      for (const chunk of chunks) {
+        writeAgentEvent(res, { type: 'token', text: chunk });
+      }
+
+      writeAgentEvent(res, { type: 'done', runId });
+      res.end();
+    } catch (error: any) {
+      console.error('[agent-runtime] failed:', error);
+      writeAgentEvent(res, {
+        type: 'error',
+        runId,
+        error: error?.message || 'Agent runtime failed'
+      });
+      res.end();
+    }
   });
 
   const getUpstreamErrorDetail = (e: any) => {
@@ -2972,6 +3319,34 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       return index;
     };
 
+    const getLineNumberFromIndex = (content: string, index: number) => {
+      if (index < 0) return undefined;
+      const lines = content.split(/\r?\n/);
+      let charCount = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const lineLength = lines[i].length + 1;
+        if (charCount + lineLength > index) {
+          return i + 1;
+        }
+        charCount += lineLength;
+      }
+      return lines.length || undefined;
+    };
+
+    const getLineRangeForSnippet = (content: string, snippet: string, preferredIndex: number) => {
+      if (!snippet) return {};
+      let startIndex = preferredIndex >= 0 ? content.indexOf(snippet, Math.max(0, preferredIndex - 20)) : -1;
+      if (startIndex === -1) startIndex = content.indexOf(snippet);
+      if (startIndex === -1) return {};
+      const startLine = getLineNumberFromIndex(content, startIndex);
+      const endLine = getLineNumberFromIndex(content, startIndex + Math.max(0, snippet.length - 1));
+      return {
+        lineNumber: startLine,
+        lineRangeStart: startLine,
+        lineRangeEnd: endLine
+      };
+    };
+
     const findNeedleIndex = (content: string) => {
       const checks: string[] = [];
       if (id) checks.push(`id="${id}"`, `id='${id}'`, `id={${id}}`, `id={"${id}"}`, String(id));
@@ -3053,24 +3428,47 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     const extractFocusedJsxSnippet = (content: string, index: number) => {
       if (index < 0) return null;
       const lines = content.split(/\r?\n/);
-      let charCount = 0;
-      let lineIndex = 0;
-      for (; lineIndex < lines.length; lineIndex++) {
-        if (charCount + lines[lineIndex].length + 1 > index) break;
-        charCount += lines[lineIndex].length + 1;
-      }
+      const lineIndex = Math.max(0, (getLineNumberFromIndex(content, index) || 1) - 1);
 
-      let bestSnippet: string | null = null;
-      let bestScore = -1;
-      for (let start = lineIndex; start >= Math.max(0, lineIndex - 18); start--) {
-        for (let end = lineIndex; end <= Math.min(lines.length - 1, lineIndex + 18); end++) {
+      let bestSnippet: { snippet: string; startLine: number; endLine: number; score: number } | null = null;
+      for (let start = lineIndex; start >= Math.max(0, lineIndex - 12); start--) {
+        const firstLine = lines[start];
+        if (!new RegExp(`<${tag}(\\s|>|/)`, 'i').test(firstLine) && !firstLine.includes('<')) continue;
+        let tagBalance = 0;
+        let seenTargetTag = false;
+        for (let end = start; end <= Math.min(lines.length - 1, start + 24); end++) {
           const snippet = lines.slice(start, end + 1).join('\n').trim();
           if (!snippet) continue;
           if (snippet.length > 2200) break;
-          const snippetScore = scoreSnippet(snippet);
-          if (snippetScore > bestScore) {
-            bestScore = snippetScore;
-            bestSnippet = snippet;
+          const line = lines[end];
+          const openMatches = line.match(new RegExp(`<${tag}(?=\\s|>|/)`, 'gi')) || [];
+          const closeMatches = line.match(new RegExp(`</${tag}>`, 'gi')) || [];
+          const selfClosingMatches = line.match(new RegExp(`<${tag}[^>]*\\/\\s*>`, 'gi')) || [];
+          if (openMatches.length > 0) {
+            seenTargetTag = true;
+            tagBalance += openMatches.length;
+          }
+          if (closeMatches.length > 0) tagBalance -= closeMatches.length;
+          if (selfClosingMatches.length > 0) tagBalance -= selfClosingMatches.length;
+          if (!seenTargetTag) continue;
+          const snippetScore = scoreSnippet(snippet) - Math.floor(snippet.length / 160);
+          if (!bestSnippet || snippetScore > bestSnippet.score || (snippetScore === bestSnippet.score && snippet.length < bestSnippet.snippet.length)) {
+            bestSnippet = { snippet, startLine: start + 1, endLine: end + 1, score: snippetScore };
+          }
+          if (tagBalance <= 0 && (line.includes('>') || selfClosingMatches.length > 0)) break;
+        }
+      }
+
+      if (bestSnippet) return bestSnippet;
+
+      for (let start = lineIndex; start >= Math.max(0, lineIndex - 10); start--) {
+        for (let end = lineIndex; end <= Math.min(lines.length - 1, lineIndex + 10); end++) {
+          const snippet = lines.slice(start, end + 1).join('\n').trim();
+          if (!snippet) continue;
+          if (snippet.length > 1400) break;
+          const snippetScore = scoreSnippet(snippet) - Math.floor(snippet.length / 180);
+          if (!bestSnippet || snippetScore > bestSnippet.score || (snippetScore === bestSnippet.score && snippet.length < bestSnippet.snippet.length)) {
+            bestSnippet = { snippet, startLine: start + 1, endLine: end + 1, score: snippetScore };
           }
         }
       }
@@ -3079,7 +3477,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
     const extractBalancedSnippet = (content: string, index: number) => {
       const focusedSnippet = extractFocusedJsxSnippet(content, index);
-      if (focusedSnippet) return focusedSnippet.length > 2400 ? focusedSnippet.slice(0, 2400) : focusedSnippet;
+      if (focusedSnippet) {
+        return {
+          snippet: focusedSnippet.snippet.length > 2400 ? focusedSnippet.snippet.slice(0, 2400) : focusedSnippet.snippet,
+          lineNumber: focusedSnippet.startLine,
+          lineRangeStart: focusedSnippet.startLine,
+          lineRangeEnd: focusedSnippet.endLine
+        };
+      }
       if (index < 0) return content.substring(0, 1600);
       const lines = content.split(/\r?\n/);
       let charCount = 0;
@@ -3120,7 +3525,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       }
 
       const snippet = lines.slice(startLine, endLine + 1).join('\n').trim();
-      return snippet.length > 2800 ? snippet.slice(0, 2800) : snippet;
+      return {
+        snippet: snippet.length > 2800 ? snippet.slice(0, 2800) : snippet,
+        lineNumber: startLine + 1,
+        lineRangeStart: startLine + 1,
+        lineRangeEnd: endLine + 1
+      };
     };
 
     const allFiles = getFilesRecursively(previewRoot);
@@ -3276,8 +3686,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         if (matchIndex !== -1) {
           const focusedSnippet = extractFocusedJsxSnippet(content, matchIndex);
           if (focusedSnippet) {
-            score += scoreSnippet(focusedSnippet);
-            score -= Math.floor(focusedSnippet.length / 220);
+            score += scoreSnippet(focusedSnippet.snippet);
+            score -= Math.floor(focusedSnippet.snippet.length / 220);
           }
         }
 
@@ -3323,7 +3733,19 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     let matchIndex = typeof targetFile.matchIndex === 'number' ? targetFile.matchIndex : -1;
     if (matchIndex === -1) matchIndex = findNeedleIndex(fileContent);
 
-    fileContentWindow = extractBalancedSnippet(fileContent, matchIndex);
+    const extractedSnippet = extractBalancedSnippet(fileContent, matchIndex);
+    if (typeof extractedSnippet === 'string') {
+      fileContentWindow = extractedSnippet;
+    } else {
+      fileContentWindow = extractedSnippet.snippet;
+    }
+    const lineMetadata = typeof extractedSnippet === 'string'
+      ? getLineRangeForSnippet(fileContent, fileContentWindow, matchIndex)
+      : {
+          lineNumber: extractedSnippet.lineNumber,
+          lineRangeStart: extractedSnippet.lineRangeStart,
+          lineRangeEnd: extractedSnippet.lineRangeEnd
+        };
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -3335,6 +3757,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           fileName: targetFile.name,
           filePath: filePath,
           specificCode: specificSnippet,
+          lineNumber: lineMetadata.lineNumber,
+          lineRangeStart: lineMetadata.lineRangeStart,
+          lineRangeEnd: lineMetadata.lineRangeEnd,
           connections: [],
           elementWork: `Controls the UI view and rendering logic for selected <${tag}> element on the preview viewport.`
         }
@@ -3363,6 +3788,9 @@ Based on this content, extract/formulate the 4 parts required. Return a valid RA
 {
   "fileName": "The clean filename, e.g. '${targetFile.name}'",
   "filePath": "The path to the file, e.g. '${filePath}'",
+  "lineNumber": ${lineMetadata.lineNumber || sourceHint?.lineNumber || 1},
+  "lineRangeStart": ${lineMetadata.lineRangeStart || sourceHint?.lineNumber || 1},
+  "lineRangeEnd": ${lineMetadata.lineRangeEnd || sourceHint?.lineNumber || 1},
   "specificCode": "The specific functional subset of code from the file that controls/renders this element. Include its event handlers, styling, attributes or properties. Keep it to a clean and perfectly formatted block of code.",
   "connections": [
     { "fileName": "Name of connected/imported/associated file", "filePath": "Path of the connected file" }
@@ -3404,6 +3832,9 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         analysis: {
           fileName: parsed.fileName || targetFile.name,
           filePath: parsed.filePath || filePath,
+          lineNumber: parsed.lineNumber || lineMetadata.lineNumber || sourceHint?.lineNumber,
+          lineRangeStart: parsed.lineRangeStart || lineMetadata.lineRangeStart || parsed.lineNumber || sourceHint?.lineNumber,
+          lineRangeEnd: parsed.lineRangeEnd || lineMetadata.lineRangeEnd || parsed.lineNumber || sourceHint?.lineNumber,
           specificCode: parsed.specificCode || fileContentWindow.substring(0, 1000),
           connections: parsed.connections || [],
           elementWork: parsed.elementWork || `Controls interaction and state updates for this selected <${tag}> element.`
@@ -3417,6 +3848,9 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         analysis: {
           fileName: targetFile.name,
           filePath: filePath,
+          lineNumber: lineMetadata.lineNumber,
+          lineRangeStart: lineMetadata.lineRangeStart,
+          lineRangeEnd: lineMetadata.lineRangeEnd,
           specificCode: fileContentWindow.substring(0, 1000),
           connections: [],
           elementWork: `Controls state updates and visual layout representation for the selected <${tag}> element.`

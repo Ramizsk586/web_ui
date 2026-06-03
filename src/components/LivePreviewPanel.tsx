@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   RefreshCw, 
@@ -11,7 +11,13 @@ import {
   ChevronRight,
   Loader2,
   Check,
-  FileText
+  FileText,
+  RotateCw,
+  Maximize2,
+  Lock,
+  Signal,
+  Wifi,
+  Battery
 } from 'lucide-react';
 
 interface LivePreviewPanelProps {
@@ -46,6 +52,11 @@ interface DiffLine {
   newLine?: number;
   type: 'addition' | 'deletion' | 'normal' | 'hunk-header';
   content: string;
+}
+
+interface AndroidTimeState {
+  hours: string;
+  minutes: string;
 }
 
 export function parseGitDiff(diffText: string): DiffLine[] {
@@ -121,6 +132,14 @@ const renderFileIcon = (fileName: string) => {
   return <span className="bg-zinc-800 text-zinc-450 font-bold text-[9px] px-1 py-0.5 rounded border border-zinc-700 font-mono shrink-0 select-none">FILE</span>;
 };
 
+function getCurrentTime(): AndroidTimeState {
+  const now = new Date();
+  return {
+    hours: String(now.getHours()).padStart(2, '0'),
+    minutes: String(now.getMinutes()).padStart(2, '0'),
+  };
+}
+
 export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   isCoderRightPanelOpen,
   setIsCoderRightPanelOpen,
@@ -151,6 +170,54 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   const [fileDiffs, setFileDiffs] = useState<Record<string, string>>({});
   const [loadingChanges, setLoadingChanges] = useState(false);
   const [loadingDiff, setLoadingDiff] = useState<Record<string, boolean>>({});
+  const [isLandscape, setIsLandscape] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [androidTime, setAndroidTime] = useState<AndroidTimeState>(getCurrentTime);
+
+  const [panelWidth, setPanelWidth] = useState(() => activeTab === 'overview'
+    ? (rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440)
+    : 540);
+  const [isResizing, setIsResizing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const updateTime = () => setAndroidTime(getCurrentTime());
+    updateTime();
+    const interval = setInterval(updateTime, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleResizeStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    document.body.style.cursor = 'col-resize';
+  }, []);
+
+  const handleResizeMove = useCallback((e: PointerEvent) => {
+    if (!isResizing) return;
+    const newWidth = window.innerWidth - e.clientX;
+    if (newWidth >= 280 && newWidth <= window.innerWidth - 280) {
+      setPanelWidth(newWidth);
+    }
+  }, [isResizing]);
+
+  const handleResizeEnd = useCallback(() => {
+    setIsResizing(false);
+    document.body.style.cursor = 'default';
+  }, []);
+
+  useEffect(() => {
+    if (isResizing) {
+      window.addEventListener('pointermove', handleResizeMove);
+      window.addEventListener('pointerup', handleResizeEnd);
+      window.addEventListener('pointercancel', handleResizeEnd);
+    }
+    return () => {
+      window.removeEventListener('pointermove', handleResizeMove);
+      window.removeEventListener('pointerup', handleResizeEnd);
+      window.removeEventListener('pointercancel', handleResizeEnd);
+    };
+  }, [isResizing, handleResizeMove, handleResizeEnd]);
 
   const fetchGitChanges = async () => {
     setLoadingChanges(true);
@@ -200,21 +267,292 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
     }
   }, [isCoderRightPanelOpen, iframeKey, workspaceRootPath]);
 
+  const isDesktop = rightViewportMode === 'desktop';
+  const isMobile = rightViewportMode === 'mobile';
+  const isTablet = rightViewportMode === 'tablet';
+
+  const getViewportDimensions = () => {
+    if (isDesktop) {
+      return { width: '100%', height: '100%' };
+    }
+    if (isMobile) {
+      return {
+        width: isLandscape ? '780px' : '390px',
+        height: isLandscape ? '390px' : '780px',
+      };
+    }
+    return {
+      width: isLandscape ? '1024px' : '768px',
+      height: isLandscape ? '768px' : '1024px',
+    };
+  };
+
+  const vp = getViewportDimensions();
+
+  const renderPreviewFrame = () => (
+    <div
+      style={{
+        width: vp.width,
+        height: vp.height,
+        transform: `scale(${zoom})`,
+        transformOrigin: 'top center',
+      }}
+    >
+      {renderDeviceFrame()}
+    </div>
+  );
+
+  const renderDesktopFrame = () => (
+    <div className="flex items-center justify-center h-full w-full p-4 sm:p-6 md:p-8">
+      <div
+        className="relative w-full max-w-full h-full min-h-[400px] flex flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#1c1c1e] shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+        style={{ transform: `scale(${zoom})`, transformOrigin: 'center center' }}
+      >
+        <div className="h-9 bg-[#252528] border-b border-white/[0.06] flex items-center px-3 gap-3 shrink-0 select-none">
+          <div className="flex items-center gap-1.5 flex-row">
+            <div className="w-3 h-3 rounded-full bg-[#ff5f57] border border-[#ff5f57]/40 shadow-sm" />
+            <div className="w-3 h-3 rounded-full bg-[#febc2e] border border-[#febc2e]/40 shadow-sm" />
+            <div className="w-3 h-3 rounded-full bg-[#28c840] border border-[#28c840]/40 shadow-sm" />
+          </div>
+
+          <div className="flex-1 flex items-center justify-center min-w-0 font-sans">
+            <div className="flex items-center gap-2 bg-[#1c1c1e]/80 border border-white/[0.04] rounded-md px-3 py-0.5 max-w-[60%]">
+              <Lock size={8} className="text-emerald-400 shrink-0" />
+              <span className="text-[10px] text-white/50 font-mono truncate">
+                {devServerUrl || 'Preview'}
+              </span>
+            </div>
+          </div>
+
+          <div className="w-[52px]" />
+        </div>
+
+        <div className="flex-1 min-h-0 w-full relative bg-white overflow-hidden rounded-b-xl">
+          {renderIframeContent()}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderMobileFrame = () => {
+    const timeStr = `${androidTime.hours}:${androidTime.minutes}`;
+    return (
+      <div className="flex w-full justify-center min-h-full items-start px-4 pt-6 pb-12">
+        <div
+          className="relative shrink-0 overflow-hidden transition-all duration-300"
+          style={{ width: vp.width, height: vp.height }}
+        >
+          <div
+            className="relative flex h-full flex-col overflow-hidden rounded-[42px] border-[12px] border-[#222224] bg-[#0d0d0d] shadow-[0_30px_70px_rgba(0,0,0,0.9)]"
+          >
+            <div
+              className={`absolute bg-[#1a1a1c] border border-white/5 shadow-md z-30 ${
+                isLandscape
+                  ? 'top-[-13px] left-[120px] w-[50px] h-[3px] rounded-t-sm'
+                  : 'right-[-13px] top-[120px] w-[3px] h-[50px] rounded-r-sm'
+              }`}
+            />
+            <div
+              className={`absolute bg-[#1a1a1c] border border-white/5 shadow-md z-30 ${
+                isLandscape
+                  ? 'top-[-13px] left-[180px] w-[40px] h-[3px] rounded-t-sm'
+                  : 'right-[-13px] top-[180px] w-[3px] h-[40px] rounded-r-sm'
+              }`}
+            />
+
+            <div className="h-6 bg-black flex items-center justify-between px-4 select-none text-[10px] text-white/95 font-sans tracking-tight shrink-0 relative z-20 border-b border-white/[0.03]">
+              <span className="font-semibold tracking-wide">{timeStr}</span>
+              <div className="flex items-center gap-2">
+                <Signal size={11} className="text-white/80" />
+                <Wifi size={11} className="text-white/80" />
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[9px] font-mono opacity-80 mr-0.5">85%</span>
+                  <Battery size={11} className="text-white/80" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 w-full relative bg-white overflow-hidden">
+              {renderIframeContent()}
+            </div>
+
+            <div className="h-[28px] bg-black flex items-center justify-around px-16 select-none shrink-0 border-t border-white/[0.03] z-20">
+              <button
+                onClick={() => {
+                  try {
+                    if (rightIframeRef.current && rightIframeRef.current.contentWindow) {
+                      rightIframeRef.current.contentWindow.history.back();
+                    }
+                  } catch { }
+                }}
+                className="w-10 h-10 rounded-full hover:bg-white/[0.08] active:scale-90 flex items-center justify-center cursor-pointer group"
+              >
+                <svg className="w-3 h-3 text-white/45 group-hover:text-white/90 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="17,19 7,12 17,5" fill="currentColor" />
+                </svg>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (rightIframeRef.current) {
+                    setIframeKey(k => k + 1);
+                  }
+                }}
+                className="w-10 h-10 rounded-full hover:bg-white/[0.08] active:scale-95 flex items-center justify-center cursor-pointer group"
+              >
+                <div className="w-3.5 h-3.5 rounded-full border-2 border-white/45 group-hover:border-white/90 transition-colors" />
+              </button>
+
+              <button className="w-10 h-10 rounded-full active:scale-90 flex items-center justify-center cursor-default group opacity-60">
+                <div className="w-3 h-3 border-2 rounded-sm border-white/45" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTabletFrame = () => {
+    const timeStr = `${androidTime.hours}:${androidTime.minutes}`;
+    return (
+      <div className="flex w-full justify-center min-h-full items-start px-4 pt-6 pb-12">
+        <div
+          className="relative shrink-0 overflow-hidden transition-all duration-300"
+          style={{ width: vp.width, height: vp.height }}
+        >
+          <div
+            className="relative flex h-full flex-col overflow-hidden rounded-[32px] border-[8px] border-[#222224] bg-[#0d0d0d] shadow-[0_30px_70px_rgba(0,0,0,0.9)]"
+          >
+            <div
+              className={`absolute bg-[#1a1a1c] border border-white/5 shadow-md z-30 ${
+                isLandscape
+                  ? 'top-[-10px] left-[120px] w-[40px] h-[3px] rounded-t-sm'
+                  : 'right-[-10px] top-[120px] w-[3px] h-[40px] rounded-r-sm'
+              }`}
+            />
+
+            <div className="h-6 bg-black flex items-center justify-between px-5 select-none text-[10px] text-white/95 font-sans tracking-tight shrink-0 relative z-20 border-b border-white/[0.03]">
+              <span className="font-semibold tracking-wide">{timeStr}</span>
+              <div className="flex items-center gap-2.5">
+                <Signal size={11} className="text-white/80" />
+                <Wifi size={11} className="text-white/80" />
+                <div className="flex items-center gap-0.5">
+                  <span className="text-[9px] font-mono opacity-80 mr-0.5">92%</span>
+                  <Battery size={11} className="text-white/80" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 w-full relative bg-white overflow-hidden">
+              {renderIframeContent()}
+            </div>
+
+            <div className="h-[24px] bg-black flex items-center justify-center select-none shrink-0 border-t border-white/[0.03] z-20">
+              <div className="w-[120px] h-[4px] rounded-full bg-white/30" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDeviceFrame = () => {
+    if (isDesktop) return renderDesktopFrame();
+    if (isMobile) return renderMobileFrame();
+    if (isTablet) return renderTabletFrame();
+    return null;
+  };
+
+  const renderIframeContent = () => {
+    if (devServerUrl) {
+      return (
+        <iframe
+          ref={rightIframeRef}
+          key={iframeKey}
+          src={devServerUrl}
+          className="w-full h-full border-none bg-white"
+          referrerPolicy="no-referrer"
+          title="Workspace App Preview"
+        />
+      );
+    }
+
+    if (isRightPreviewStarting) {
+      return (
+        <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
+          <RefreshCw size={18} className="animate-spin text-[#D97756]" />
+          <span className="text-sm font-medium text-zinc-400">Starting preview</span>
+          <div className="max-w-md w-full rounded-lg border border-zinc-800 bg-black/30 p-3 text-left">
+            {(rightPreviewLogs.length ? rightPreviewLogs.slice(-5) : ['Detecting project']).map((log, idx) => (
+              <div key={idx} className="truncate text-[10px] font-mono text-zinc-500">&gt; {log}</div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (rightPreviewError) {
+      return (
+        <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
+          <span className="text-sm font-medium text-red-400">Preview could not start</span>
+          <span className="max-w-md text-center text-xs text-zinc-600">{rightPreviewError}</span>
+          <button
+            onClick={startCoderPreview}
+            className="mt-2 rounded-lg border border-[#D97756]/30 bg-[#D97756]/10 px-3 py-1.5 text-xs font-semibold text-[#D97756] hover:bg-[#D97756]/20"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500">
+        <div className="w-12 h-12 rounded-xl border border-zinc-800 bg-zinc-900/50 flex items-center justify-center">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-zinc-600">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+            <path d="M8 21h8"/>
+            <path d="M12 17v4"/>
+          </svg>
+        </div>
+        <span className="text-sm font-medium text-zinc-600">No preview running</span>
+        <button
+          onClick={startCoderPreview}
+          className="text-xs text-[#D97756] hover:underline"
+        >
+          Start workspace preview
+        </button>
+      </div>
+    );
+  };
+
   if (!isCoderRightPanelOpen) return null;
 
   return (
     <motion.div
+      ref={panelRef}
       initial={{ width: 0, opacity: 0 }}
       animate={{ 
-        width: activeTab === 'overview'
-          ? (rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440)
-          : 540, 
+        width: panelWidth,
         opacity: 1 
       }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
-      className="h-full border-l border-[#1e1e22] bg-[#141416] flex flex-col overflow-hidden shrink-0 z-10 shadow-2xl transition-all duration-300"
+      className="h-full border-l border-[#1e1e22] bg-[#141416] flex flex-col overflow-hidden shrink-0 z-10 shadow-2xl relative"
     >
+      {/* ── Drag Resize Handle ── */}
+      <div
+        onPointerDown={handleResizeStart}
+        className="absolute top-0 -left-1 w-2 h-full cursor-col-resize z-50 flex items-center justify-center group touch-none"
+      >
+        <div className="w-[3px] h-8 rounded-full bg-zinc-600/50 group-hover:bg-[#D97756] group-hover:h-12 transition-all duration-150" />
+      </div>
+
+      {/* ── Overlay during resize to block iframe pointer events ── */}
+      {isResizing && (
+        <div className="absolute inset-0 z-[60] bg-transparent cursor-col-resize select-none" />
+      )}
       {/* Tab Selector Header Bar */}
       <div className="shrink-0 bg-zinc-950 border-b border-zinc-900/80 flex items-center justify-between px-3 select-none">
         <div className="flex items-center gap-0.5 overflow-x-auto custom-scrollbar flex-1 pr-4">
@@ -343,7 +681,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
               <button
                 onClick={() => setRightViewportMode('desktop')}
                 className={`p-1 rounded-md transition-all cursor-pointer ${
-                  rightViewportMode === 'desktop'
+                  isDesktop
                     ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
                     : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                 }`}
@@ -354,25 +692,42 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
               <button
                 onClick={() => setRightViewportMode('tablet')}
                 className={`p-1 rounded-md transition-all cursor-pointer ${
-                  rightViewportMode === 'tablet'
+                  isTablet
                     ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
                     : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                 }`}
-                title="Tablet View (768px Width)"
+                title="Tablet View"
               >
                 <Tablet size={10} />
               </button>
               <button
                 onClick={() => setRightViewportMode('mobile')}
                 className={`p-1 rounded-md transition-all cursor-pointer ${
-                  rightViewportMode === 'mobile'
+                  isMobile
                     ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
                     : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                 }`}
-                title="Mobile View (390px Width)"
+                title="Mobile View"
               >
                 <Smartphone size={10} />
               </button>
+
+              <div className="w-[1px] h-3 bg-zinc-800 mx-1" />
+
+              {/* Orientation toggle - only for mobile/tablet */}
+              {!isDesktop && (
+                <button
+                  onClick={() => setIsLandscape(prev => !prev)}
+                  className={`p-1 rounded-md transition-all cursor-pointer ${
+                    isLandscape
+                      ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
+                      : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                  }`}
+                  title={isLandscape ? 'Switch to Portrait' : 'Switch to Landscape'}
+                >
+                  <RotateCw size={10} className={isLandscape ? 'rotate-90' : ''} />
+                </button>
+              )}
 
               <div className="w-[1px] h-3 bg-zinc-800 mx-1" />
 
@@ -400,13 +755,41 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                 <MousePointerClick size={10} className={rightIsInspectMode ? "text-teal-400" : ""} />
               </button>
             </div>
+
+            {/* Zoom controls */}
+            <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 ml-1">
+              <button
+                onClick={() => setZoom(z => Math.max(0.25, +(z - 0.1).toFixed(2)))}
+                className="px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+                title="Zoom out"
+              >
+                -
+              </button>
+              <span className="px-1 text-[9px] text-zinc-500 w-8 text-center font-mono select-none">{Math.round(zoom * 100)}%</span>
+              <button
+                onClick={() => setZoom(z => Math.min(2, +(z + 0.1).toFixed(2)))}
+                className="px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+                title="Zoom in"
+              >
+                +
+              </button>
+              <div className="w-[1px] h-3 bg-zinc-800 mx-0.5" />
+              <button
+                onClick={() => setZoom(1)}
+                className="px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+                title="Reset zoom"
+              >
+                <Maximize2 size={9} />
+              </button>
+            </div>
+
             {projectFramework && (
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 font-mono border border-teal-500/20 ml-auto">{projectFramework}</span>
             )}
           </div>
 
           {/* Frame Container */}
-          <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-[#070606] relative">
+          <div className="flex-1 overflow-auto flex items-center justify-center bg-[#070606] relative hide-scrollbar">
             {rightIsGridEnabled && (
               <div 
                 className="absolute inset-0 pointer-events-none z-10 opacity-35" 
@@ -417,65 +800,13 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
               />
             )}
 
-            <div 
-              style={{
-                width: rightViewportMode === 'mobile' ? '390px' : rightViewportMode === 'tablet' ? '768px' : '100%',
-                height: rightViewportMode === 'desktop' ? '100%' : '640px',
-                transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}
-              className={`relative bg-white shadow-2xl overflow-hidden ${
-                rightViewportMode !== 'desktop' ? 'rounded-2xl border-4 border-[#1D1917]' : 'w-full h-full'
-              }`}
-            >
-              {devServerUrl ? (
-                <iframe
-                  ref={rightIframeRef}
-                  key={iframeKey}
-                  src={devServerUrl}
-                  className="w-full h-full border-none bg-white"
-                  referrerPolicy="no-referrer"
-                  title="Workspace App Preview"
-                />
-              ) : isRightPreviewStarting ? (
-                <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
-                  <RefreshCw size={18} className="animate-spin text-[#D97756]" />
-                  <span className="text-sm font-medium text-zinc-400">Starting preview</span>
-                  <div className="max-w-md w-full rounded-lg border border-zinc-800 bg-black/30 p-3 text-left">
-                    {(rightPreviewLogs.length ? rightPreviewLogs.slice(-5) : ['Detecting project']).map((log, idx) => (
-                      <div key={idx} className="truncate text-[10px] font-mono text-zinc-500">&gt; {log}</div>
-                    ))}
-                  </div>
-                </div>
-              ) : rightPreviewError ? (
-                <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500 p-6">
-                  <span className="text-sm font-medium text-red-400">Preview could not start</span>
-                  <span className="max-w-md text-center text-xs text-zinc-600">{rightPreviewError}</span>
-                  <button
-                    onClick={startCoderPreview}
-                    className="mt-2 rounded-lg border border-[#D97756]/30 bg-[#D97756]/10 px-3 py-1.5 text-xs font-semibold text-[#D97756] hover:bg-[#D97756]/20"
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : (
-                <div className="w-full h-full bg-[#0A0808] flex flex-col items-center justify-center gap-3 text-zinc-500">
-                  <div className="w-12 h-12 rounded-xl border border-zinc-800 bg-zinc-900/50 flex items-center justify-center">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-zinc-600">
-                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                      <path d="M8 21h8"/>
-                      <path d="M12 17v4"/>
-                    </svg>
-                  </div>
-                  <span className="text-sm font-medium text-zinc-600">No preview running</span>
-                  <button
-                    onClick={startCoderPreview}
-                    className="text-xs text-[#D97756] hover:underline"
-                  >
-                    Start workspace preview
-                  </button>
-                </div>
-              )}
-            </div>
+            {isDesktop ? (
+              renderDesktopFrame()
+            ) : (
+              <div className="h-full w-full overflow-auto flex items-start justify-center hide-scrollbar">
+                {isMobile ? renderMobileFrame() : renderTabletFrame()}
+              </div>
+            )}
           </div>
         </div>
       )}

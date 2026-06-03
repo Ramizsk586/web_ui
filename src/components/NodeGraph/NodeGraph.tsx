@@ -25,7 +25,7 @@ import { ScrapingProgressIndicator } from '../ScrapingProgressIndicator';
 import { WikiArticleArtifact } from '../WikiArticleArtifact';
 import { WikiToolCallIndicator } from '../WikiToolCallIndicator';
 import { InlineFileDiffPreview, RealtimeEditCounter, normalizeDisplayPath } from './FileDiffNode';
-import { LuminaToolCallingAnimation, ToolCallingAnimation, WebSearchAnimation } from '../ui/Animations';
+import { AgentThinkingFlowAnimation, LuminaToolCallingAnimation, ToolCallingAnimation, WebSearchAnimation } from '../ui/Animations';
 
 const getDomain = (url: string) => {
   try {
@@ -522,8 +522,10 @@ export const NodeGraph = React.memo(({
       items.push({
         id: 'think-item',
         type: 'think',
-        title: isStreamingThinking ? 'Thinking...' : 'Formulated response plan',
-        icon: <Brain size={13} className={isStreamingThinking ? "text-blue-400 animate-pulse" : "text-zinc-500"} />,
+        title: isStreamingThinking ? 'Synthesizing final answer...' : 'Formulated response plan',
+        icon: isStreamingThinking
+          ? <AgentThinkingFlowAnimation />
+          : <Brain size={13} className="text-zinc-500" />,
         status: isStreamingThinking ? 'active' : 'complete'
       });
     }
@@ -697,6 +699,19 @@ export const NodeGraph = React.memo(({
                               className="overflow-hidden mt-1.5"
                             >
                               <div className="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-450 font-mono whitespace-pre-wrap max-h-52 overflow-y-auto custom-scrollbar italic bg-[#0c0c0e]/80 rounded-lg border border-zinc-900 p-2.5 shadow-inner">
+                                {isStreamingThinking && (
+                                  <div className="mb-3 flex items-center gap-3 rounded-lg border border-cyan-500/10 bg-cyan-500/[0.04] px-3 py-2 text-left not-italic">
+                                    <AgentThinkingFlowAnimation />
+                                    <div className="min-w-0">
+                                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300/80">
+                                        AI synthesis
+                                      </div>
+                                      <div className="text-[11px] text-zinc-350">
+                                        Collected tool output is being condensed into the final answer.
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
                                 {thinkContent}
                                 {isStreamingThinking && (
                                   <motion.span
@@ -869,10 +884,10 @@ export const InlineToolCallCard = React.memo(({
   useEffect(() => {
     if (node.status === 'active') {
       setIsCollapsed(false);
-    } else if (node.status === 'complete' || node.status === 'failed') {
+    } else if ((node.status === 'complete' || node.status === 'failed') && !node.result) {
       setIsCollapsed(true);
     }
-  }, [node.status]);
+  }, [node.status, node.result]);
 
   const isEditNode = node.toolName === 'write_file' || node.toolName === 'edit_file' || node.toolName === 'create_file';
   const isScriptNode = node.toolName === 'verify_changes' || node.toolName === 'run_command' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');

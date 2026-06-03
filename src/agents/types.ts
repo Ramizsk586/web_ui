@@ -31,11 +31,13 @@ export type AgentToolId =
   | 'news_reader';
 
 export interface AgentTool {
-  id: AgentToolId;
+  id: AgentToolId | string;
   name: string;
   description: string;
   icon: string;
   active: boolean;
+  parameters?: any;
+  source?: 'built_in' | 'bridge' | 'external';
 }
 
 export type AgentModel = string;
@@ -65,6 +67,10 @@ export interface Agent {
   apiKey?: string;               // Custom API Key
   baseUrl?: string;              // Custom Base URL
   skillFiles?: AgentSkillFile[]; // custom generated markdown skill files
+  bridgeUrl?: string;
+  bridgeApiKey?: string;
+  bridgeModel?: string;
+  executionMode?: 'legacy' | 'dispatcher';
 }
 
 export interface AgentMessage {
@@ -76,6 +82,8 @@ export interface AgentMessage {
   toolName?: string;
   isStreaming?: boolean;
   toolCalls?: any[]; // For render animations
+  runId?: string;
+  agentEvents?: AgentRunEvent[];
 }
 
 export interface AgentCreationDraft {
@@ -84,3 +92,31 @@ export interface AgentCreationDraft {
   generatedAgent: Partial<Agent> | null;
   error: string | null;
 }
+
+export interface AgentRunToolEvent {
+  id: string;
+  type: 'tool';
+  name: string;
+  status: 'active' | 'complete' | 'failed';
+  serverName?: string;
+  input?: any;
+  output?: string;
+}
+
+export interface AgentRunSpawnEvent {
+  id: string;
+  type: 'spawn';
+  name: string;
+  status: 'active' | 'complete' | 'failed';
+  task: string;
+  integrations: string[];
+  result?: string;
+}
+
+export interface AgentRunTextEvent {
+  id: string;
+  type: 'text';
+  text: string;
+}
+
+export type AgentRunEvent = AgentRunToolEvent | AgentRunSpawnEvent | AgentRunTextEvent;

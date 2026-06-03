@@ -196,3 +196,39 @@ export const LuminaToolCallingAnimation = () => (
     </motion.div>
   </div>
 );
+
+export const AgentThinkingFlowAnimation = () => (
+  <div className="relative flex h-8 w-14 items-center justify-center select-none pointer-events-none">
+    <motion.div
+      animate={{ opacity: [0.25, 0.55, 0.25] }}
+      transition={{ repeat: Infinity, duration: 2.2, ease: "easeInOut" }}
+      className="absolute inset-x-3 top-1/2 h-px -translate-y-1/2 bg-linear-to-r from-cyan-500/0 via-cyan-400/40 to-violet-400/0"
+    />
+
+    <motion.div
+      animate={{ y: [-7, 7, -7], opacity: [0, 1, 0], scale: [0.7, 1, 0.7] }}
+      transition={{ repeat: Infinity, duration: 1.35, ease: "easeInOut" }}
+      className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"
+    />
+
+    <motion.div
+      animate={{ scale: [1, 1.08, 1], opacity: [0.9, 1, 0.9] }}
+      transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
+      className="absolute top-0 flex h-4 w-4 items-center justify-center rounded-full border border-cyan-500/35 bg-cyan-950/25"
+    >
+      <Cpu size={10} className="text-cyan-300" />
+    </motion.div>
+
+    <motion.div
+      animate={{ scale: [1, 1.06, 1], boxShadow: [
+        '0 0 0 rgba(168,85,247,0.0)',
+        '0 0 14px rgba(168,85,247,0.24)',
+        '0 0 0 rgba(168,85,247,0.0)'
+      ] }}
+      transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
+      className="absolute bottom-0 flex h-4.5 w-4.5 items-center justify-center rounded-full border border-violet-500/35 bg-violet-950/25"
+    >
+      <Sparkles size={10} className="text-violet-300" />
+    </motion.div>
+  </div>
+);

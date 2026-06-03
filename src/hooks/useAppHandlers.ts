@@ -156,6 +156,14 @@ const setVirtualSkillFileContent = (nodes: any[], pathParts: string[], newConten
   return false;
 };
 
+const createStableTurnId = (prefix: string, ...parts: Array<string | number | undefined>) => {
+  const suffix = parts
+    .filter((part) => part !== undefined && part !== null && String(part).length > 0)
+    .map((part) => String(part).replace(/[^a-zA-Z0-9_.-]+/g, '-'))
+    .join('-');
+  return `${prefix}-${Date.now().toString(36)}-${suffix || 'item'}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
 export interface UseAppHandlersParams {
   input: string;
   setInput: (v: string) => void;
@@ -545,7 +553,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     }
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: createStableTurnId('msg', chatId, 'user'),
       role: 'user',
       content: content,
       timestamp: new Date(),
@@ -577,7 +585,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       inputRef.current.style.height = 'auto';
     }
 
-    const thinkingId = (Date.now() + 1).toString();
+    const thinkingId = createStableTurnId('msg', chatId, 'assistant');
     const isCoderPlanning = isCoderMode || content.startsWith('/coder');
     const thinkingMessage: Message = {
       id: thinkingId,
@@ -1391,7 +1399,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             if (m.elementAttachments && m.elementAttachments.length > 0) {
               text += `\n\n[INSPECTED CODE ATTACHMENT FOR CONTEXT]:`;
               m.elementAttachments.forEach((att: any) => {
-                text += `\n- File Name: ${att.fileName}\n- File Path: ${att.filePath}\n- Code Subsection:\n\`\`\`\n${att.specificCode}\n\`\`\`\n- Functional Role: ${att.elementWork}\n`;
+                const lineInfo = att.lineRangeStart && att.lineRangeEnd && att.lineRangeStart !== att.lineRangeEnd
+                  ? `${att.lineRangeStart}-${att.lineRangeEnd}`
+                  : (att.lineNumber || att.lineRangeStart || '');
+                text += `\n- File Name: ${att.fileName}\n- File Path: ${att.filePath}\n${lineInfo ? `- Line Reference: ${lineInfo}\n` : ''}- Code Subsection:\n\`\`\`\n${att.specificCode}\n\`\`\`\n- Functional Role: ${att.elementWork}\n`;
               });
             }
             return {
@@ -1452,7 +1463,8 @@ Store contract files at .lumina/contracts/ in the workspace.`;
       });
       if (isCoderMode || hasWebScrapeCall) {
         let successfulScrapesCount = 0;
-        let loopCount = 0;
+      let loopCount = 0;
+      const turnToolResultCache = new Map<string, any>();
         const maxLoops = 20;
         while (choice?.tool_calls && choice.tool_calls.length > 0 && loopCount < maxLoops) {
           loopCount++;
@@ -1523,7 +1535,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             const readRange = name === 'read_file' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
             const normalizedArgPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
             const node: ToolCallNode = {
-              id: tc.id || `tc-${Date.now()}-${loopCount}-${idx}`,
+              id: tc.id || createStableTurnId('tc', loopCount, idx, name),
               type: 'tool',
               label: isScrape ? `Web Scraper (${args.url})` : name === 'run_command' ? `Terminal command (${args.command})` : `${name} ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}`,
               status: 'active',
@@ -1578,13 +1590,29 @@ Store contract files at .lumina/contracts/ in the workspace.`;
             const name = fn.name || 'unknown';
             const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
             let resultValue: any = null;
+            const cacheKey = `${name}:${JSON.stringify({
+              ...args,
+              filePath: normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath),
+              newPath: normalizeToolFilePath(String(args.newPath || ''), coderWorkspacePath),
+              command: String(args.command || '').trim()
+            })}`;
 
             try {
-              if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'search_code', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
+              if (turnToolResultCache.has(cacheKey)) {
+                resultValue = {
+                  ...turnToolResultCache.get(cacheKey),
+                  reusedFromCache: true
+                };
+                const cachedNode = toolCallNodes.find(n => n.id === tc.id);
+                if (cachedNode) {
+                  cachedNode.resultSummary = 'Reused previously collected result in this turn';
+                }
+                showToast(`Reused cached result for ${name}`);
+              } else if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'search_code', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
-              }
-              const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
-              if (name === 'create_file') {
+              } else {
+                const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+                if (name === 'create_file') {
                 const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 if (cleanedPath.includes('/') && !args.isDirectory) {
@@ -1930,7 +1958,7 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 const action = String(args.action || '');
                 const items = (args.items || []).map((item: any, i: number) => ({
                   ...item,
-                  id: item.id || `todo-${Date.now()}-${i}`
+                  id: item.id || createStableTurnId('todo', i, item.text || item.content || 'task')
                 }));
                 if (action === 'create' || action === 'update') {
                   setCoderTodos(items);
@@ -2120,6 +2148,10 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   }
                   return chat;
                 }));
+              }
+
+              if (resultValue && !resultValue.error) {
+                turnToolResultCache.set(cacheKey, resultValue);
               } else if (name === 'search' || name === 'google_scholar') {
                 const rawQueries = Array.isArray(args.query) ? args.query : [args.query].filter(Boolean);
                 const queries = rawQueries.map((q: any) => String(q).trim()).filter(Boolean);
@@ -2456,8 +2488,13 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 if (currentN) {
                   currentN.resultSummary = `Trajectory logged: ${relatedList.length} related pages found`;
                 }
-              } else {
-                resultValue = { error: `Unsupported coder tool: ${name}` };
+                } else {
+                  resultValue = { error: `Unsupported coder tool: ${name}` };
+                }
+
+                if (resultValue && !resultValue.error) {
+                  turnToolResultCache.set(cacheKey, resultValue);
+                }
               }
             } catch (err: any) {
               resultValue = { error: err.message };

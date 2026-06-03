@@ -126,6 +126,9 @@ function cleanMessageTextForSpeech(content: string): string {
   // 3. Strip code blocks completely
   text = text.replace(/```[a-zA-Z0-9-]*[\s\S]*?```/gi, '');
 
+  // 3.5 Strip tool call placeholders completely
+  text = text.replace(/\[\[tool_call:[^\]]+\]\]/g, '');
+
   // 4. Strip inline LaTeX blocks
   text = text.replace(/\$\$[\s\S]*?\$\$/g, '');
   text = text.replace(/\$[^\$]+\$/g, '');
@@ -536,6 +539,13 @@ export const MessageItem = React.memo(({
                       <div className="text-sm font-semibold text-zinc-150 leading-none mt-1.5 truncate">
                         {att.fileName}
                       </div>
+                      {(att.lineNumber || att.lineRangeStart) && (
+                        <div className="text-[10px] text-teal-400 font-mono mt-1">
+                          {att.lineRangeStart && att.lineRangeEnd && att.lineRangeStart !== att.lineRangeEnd
+                            ? `Lines ${att.lineRangeStart}-${att.lineRangeEnd}`
+                            : `Line ${att.lineNumber || att.lineRangeStart}`}
+                        </div>
+                      )}
                     </div>
                   </div>
 

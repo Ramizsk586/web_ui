@@ -2722,9 +2722,8 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                 </AnimatePresence>
               </div>
             )}
-          </div>
 
-          <div className="flex items-center gap-3">
+            {/* Mic and send buttons */}
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={() => {

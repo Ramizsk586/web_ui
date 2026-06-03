@@ -432,6 +432,9 @@ interface ElementAnalysisModalProps {
     filePath: string;
     elementWork?: string;
     specificCode?: string;
+    lineNumber?: number;
+    lineRangeStart?: number;
+    lineRangeEnd?: number;
     connections?: Array<{ fileName: string; filePath?: string; name?: string }>;
   } | null;
   onClose: () => void;
@@ -486,6 +489,13 @@ export function ElementAnalysisModal({
                   <div className="truncate pr-4">
                     <span className="font-semibold text-zinc-150 block text-xs truncate font-sans">{attachment.fileName}</span>
                     <span className="text-[10px] text-zinc-500 truncate block mt-1 font-mono">{attachment.filePath}</span>
+                    {(attachment.lineNumber || attachment.lineRangeStart) && (
+                      <span className="text-[10px] text-[#D97756] block mt-1 font-mono">
+                        {attachment.lineRangeStart && attachment.lineRangeEnd && attachment.lineRangeStart !== attachment.lineRangeEnd
+                          ? `Lines ${attachment.lineRangeStart}-${attachment.lineRangeEnd}`
+                          : `Line ${attachment.lineNumber || attachment.lineRangeStart}`}
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={() => {

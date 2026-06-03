@@ -2160,6 +2160,7 @@ const startCoderPreview = useCallback(async () => {
             onBack={() => setActiveAgent(null)}
             onUpdateAgent={(patch) => handleUpdateAgent(activeAgent.id, patch)}
             onEditAgent={() => handleEditAgent(activeAgent)}
+            bridgeTools={bridgeTools}
             markdownComponents={markdownComponents}
             userProfile={userProfile}
             persona={persona}

@@ -1,5 +1,12 @@
 import { Artifact, Chat } from '../types';
 
+function stripToolCallPlaceholders(content: string): string {
+  return String(content || '')
+    .replace(/\[\[tool_call:[^\]]+\]\]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function getArtifactFilename(art: Artifact): string {
   if (art.title && /[\w\.-]+\.\w+/.test(art.title)) {
     return art.title.trim();
@@ -112,7 +119,9 @@ export function extractArtifacts(
   currentChatId: string | null
 ): Artifact[] {
   // Strip the <think>...</think> portion from the content analyzed for artifacts
-  const cleanContent = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  const cleanContent = stripToolCallPlaceholders(
+    content.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+  );
   const artifacts: Artifact[] = [];
   const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
   let match;

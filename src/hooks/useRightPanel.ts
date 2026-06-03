@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, RefObject } from 'react';
 
+const createAttachmentId = () => `att-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 export interface UseRightPanelProps {
   rightIframeRef: RefObject<HTMLIFrameElement | null>;
   iframeKey: number;
@@ -56,10 +58,13 @@ export function useRightPanel({
         const data = await response.json();
         if (data.success && data.analysis) {
           const newAtt = {
-            id: Date.now().toString(),
+            id: createAttachmentId(),
             fileName: data.analysis.fileName,
             filePath: data.analysis.filePath,
             specificCode: data.analysis.specificCode,
+            lineNumber: data.analysis.lineNumber,
+            lineRangeStart: data.analysis.lineRangeStart,
+            lineRangeEnd: data.analysis.lineRangeEnd,
             connections: data.analysis.connections || [],
             elementWork: data.analysis.elementWork
           };
