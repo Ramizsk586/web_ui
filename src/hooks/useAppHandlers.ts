@@ -30,6 +30,7 @@ import { Chat, Message, ToolCallNode } from '../types';
 import { CoderPermissionMode } from '../types';
 import { scrapeUrl, ScrapeResult } from '../services/scrapingService';
 import { explainCommandRestriction, shouldRequestCommandPermission } from '../utils/permissionUtils';
+import { executeViaTerminal, isTerminalRegistered } from '../utils/terminalService';
 import {
   wikiSearch,
   wikiGetPage,
@@ -1799,22 +1800,11 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                   });
                 }
                 showToast(`Running: ${commandText.substring(0, 30)}...`);
-                const runRes = await fetch('/api/terminal/execute', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    command: commandText,
-                    currentPath: coderWorkspacePath,
-                    workspaceRoot: coderWorkspacePath,
-                    isCoderMode: isCoderMode
-                  }),
-                  signal
+                const runData = await executeViaTerminal(commandText, coderWorkspacePath, {
+                  workspaceRoot: coderWorkspacePath,
+                  isCoderMode: isCoderMode,
+                  signal,
                 });
-                if (!runRes.ok) {
-                  const errText = await runRes.text();
-                  throw new Error(`Command execution error: ${errText}`);
-                }
-                const runData = await runRes.json();
                 resultValue = {
                   exitCode: runData.exitCode,
                   stdout: runData.stdout,

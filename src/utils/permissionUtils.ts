@@ -1,16 +1,24 @@
 import { CoderPermissionMode } from '../types';
 
-const SAFE_COMMANDS = new Set(['ls', 'dir', 'cd', 'mkdir', 'pwd', 'cat', 'type', 'echo']);
+const SAFE_COMMANDS = new Set([
+  'ls', 'dir', 'cd', 'mkdir', 'pwd', 'cat', 'type', 'echo',
+  'grep', 'findstr', 'head', 'tail', 'wc', 'sort', 'diff',
+  'which', 'where', 'whoami', 'date', 'alias', 'history',
+  'man', 'help', 'clear', 'cls', 'touch', 'ping',
+]);
 const DANGEROUS_COMMANDS = new Set([
   'rm', 'rmdir', 'del', 'erase', 'unlink', 'remove-item', 'rd',
   'sudo', 'su', 'chmod', 'chown', 'mkfs', 'format', 'diskpart',
-  'shutdown', 'reboot', 'reg', 'taskkill', 'kill'
+  'shutdown', 'reboot', 'reg', 'taskkill', 'kill',
+  'cp', 'copy', 'mv', 'move', 'rename-item',
 ]);
 
 const DANGEROUS_PATTERNS = [
-  /\brm\s+-(?:r|f|rf|fr)\b/i,
+  /\brm\s+-(?:[rRfF]+)\b/i,
   /\bremove-item\b[\s\S]*\s-(?:recurse|force)\b/i,
   /\bdel(?:ete)?\b[\s\S]*\/[sq]\b/i,
+  /\bcp\s+-(?:[rRfF]+)\b/i,
+  /\bmv\s+-[fF]\b/i,
   />\s*[^>]/,
   /\|\s*(?:sh|bash|powershell|pwsh|cmd)\b/i,
   /\b(?:curl|wget)\b[\s\S]*\|\s*(?:sh|bash|powershell|pwsh|cmd)\b/i

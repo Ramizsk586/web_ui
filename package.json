@@ -46,7 +46,7 @@
       {
         "from": "loading.html",
         "to": "loading.html"
-      },
+      }
     ],
     "win": {
       "target": [

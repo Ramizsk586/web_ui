@@ -308,6 +308,187 @@ async function startServer() {
     });
   });
 
+  // ─── Unix → PowerShell command translation (Windows only) ─────────────────
+  const PS_CMD_MAP: Record<string, string> = {
+    'cat': 'Get-Content', 'cp': 'Copy-Item', 'mv': 'Move-Item',
+    'rm': 'Remove-Item', 'grep': 'Select-String', 'which': 'Get-Command',
+    'head': 'Select-Object', 'tail': 'Select-Object',
+    'wc': 'Measure-Object', 'sort': 'Sort-Object', 'diff': 'Compare-Object',
+    'find': 'Where-Object', 'touch': 'New-Item',
+    'whoami': 'whoami', 'echo': 'Write-Output',
+    'ps': 'Get-Process', 'kill': 'Stop-Process',
+    'curl': 'Invoke-WebRequest', 'wget': 'Invoke-WebRequest',
+    'date': 'Get-Date', 'alias': 'Get-Alias', 'history': 'Get-History',
+    'man': 'Get-Help', 'ping': 'Test-Connection',
+  };
+
+  /** Extract the first word (command name) from a trimmed command string */
+  function firstWordOf(s: string): string {
+    return s.split(/\s+/)[0].replace(/["']/g, '').toLowerCase();
+  }
+
+  /** Translate ls flags to PowerShell parameters */
+  function translateLs(rest: string): string {
+    let target = '';
+    let hasForce = false, hasRecurse = false, hasReverse = false;
+    let extraPipes = '';
+    const parts = rest.match(/\S+/g) || [];
+    for (const p of parts) {
+      if (p.startsWith('--')) {
+        const f = p.slice(2);
+        if (f === 'all' || f === 'almost-all') hasForce = true;
+        else if (f === 'recursive') hasRecurse = true;
+        else if (f === 'reverse') hasReverse = true;
+        else target = p;
+      } else if (p.startsWith('-') && p.length > 1) {
+        for (const ch of p.slice(1)) {
+          switch (ch) {
+            case 'a': hasForce = true; break;
+            case 'R': hasRecurse = true; break;
+            case 'r': hasReverse = true; break;
+            case 'S': extraPipes = ' | Sort-Object Length -Descending'; break;
+            case 't': extraPipes = ' | Sort-Object LastWriteTime -Descending'; break;
+          }
+        }
+      } else {
+        target = p;
+      }
+    }
+    let cmd = 'Get-ChildItem';
+    if (target) cmd += ` -Path "${target.replace(/"/g, '\\"')}"`;
+    if (hasForce) cmd += ' -Force';
+    if (hasRecurse) cmd += ' -Recurse';
+    cmd += extraPipes || ' | Format-Table -AutoSize';
+    return cmd;
+  }
+
+  /** Translate rm flags to PowerShell parameters */
+  function translateRm(rest: string): string {
+    let target = '';
+    let recurse = false, force = false;
+    const parts = rest.match(/\S+/g) || [];
+    for (const p of parts) {
+      if (p.startsWith('-') && p.length > 1) {
+        for (const ch of p.slice(1)) {
+          if (ch === 'r' || ch === 'R') recurse = true;
+          if (ch === 'f') force = true;
+        }
+      } else {
+        target = p;
+      }
+    }
+    if (!target) return 'Remove-Item';
+    let cmd = `Remove-Item -Path "${target.replace(/"/g, '\\"')}"`;
+    if (recurse) cmd += ' -Recurse';
+    if (force) cmd += ' -Force';
+    return cmd;
+  }
+
+  /** Translate cp/mv flags */
+  function translateCpMv(rest: string, cmd: string): string {
+    let src = '', dst = '';
+    let recurse = false, force = false;
+    const parts = rest.match(/\S+/g) || [];
+    for (const p of parts) {
+      if (p.startsWith('-') && p.length > 1) {
+        for (const ch of p.slice(1)) {
+          if (ch === 'r' || ch === 'R') recurse = true;
+          if (ch === 'f') force = true;
+        }
+      } else if (!src) {
+        src = p;
+      } else {
+        dst = p;
+      }
+    }
+    let ps = cmd;
+    if (src) ps += ` -Path "${src.replace(/"/g, '\\"')}"`;
+    if (dst) ps += ` -Destination "${dst.replace(/"/g, '\\"')}"`;
+    if (recurse) ps += ' -Recurse';
+    if (force) ps += ' -Force';
+    return ps;
+  }
+
+  /** Translate grep patterns to PowerShell Select-String */
+  function translateGrep(rest: string): string {
+    const parts = rest.match(/\S+/g) || [];
+    const pattern: string[] = [];
+    const files: string[] = [];
+    let inPattern = false, invert = false, ignoreCase = false;
+    for (const p of parts) {
+      if (p.startsWith('-') && p.length > 1) {
+        for (const ch of p.slice(1)) {
+          if (ch === 'i') ignoreCase = true;
+          if (ch === 'v') invert = true;
+          if (ch === 'r' || ch === 'R') { /* -r not needed */ }
+          if (ch === 'E') { /* extended regex not needed */ }
+        }
+      } else if (!inPattern) {
+        pattern.push(p);
+        inPattern = true;
+      } else {
+        files.push(p);
+      }
+    }
+    let ps = `Select-String -Pattern "${pattern.join(' ').replace(/"/g, '\\"')}"`;
+    if (files.length > 0) ps += ` -Path "${files.map(f => f.replace(/"/g, '\\"')).join(',')}"`;
+    if (ignoreCase) ps += ' -CaseSensitive:$false';
+    if (invert) ps += ' -NotMatch';
+    return ps;
+  }
+
+  /** Translate one segment (before/after a pipe) */
+  function translateSegment(seg: string): string {
+    const t = seg.trim();
+    if (!t) return t;
+    const fw = firstWordOf(t);
+    const rest = t.slice(fw.length).trim();
+
+    switch (fw) {
+      case 'ls': return translateLs(rest);
+      case 'rm': return translateRm(rest);
+      case 'cp': return translateCpMv(rest, 'Copy-Item');
+      case 'mv': return translateCpMv(rest, 'Move-Item');
+      case 'grep': return translateGrep(rest);
+      case 'mkdir': return `New-Item -ItemType Directory -Path "${rest.replace(/"/g, '\\"')}"`;
+      case 'touch': return `New-Item -ItemType File -Path "${(rest || '.').replace(/"/g, '\\"')}" -Force`;
+      case 'pwd': return 'Get-Location | Select-Object -ExpandProperty Path';
+      case 'ps': return 'Get-Process | Format-Table -AutoSize';
+      case 'kill': return `Stop-Process ${rest.replace(/^-/, '-Id ')}`;
+      case 'which': return `Get-Command ${rest || ''} | Select-Object -ExpandProperty Source`;
+      case 'chmod': return 'Write-Output "chmod is not available on Windows"';
+      case 'chown': return 'Write-Output "chown is not available on Windows"';
+      case 'ifconfig': return 'Get-NetIPConfiguration | Format-Table -AutoSize';
+      case 'netstat': return 'Get-NetTCPConnection | Format-Table -AutoSize';
+      case 'uname': return rest?.includes('-a') ? '[Environment]::OSVersion | Format-List *' : '[Environment]::OSVersion.OSVersion.Platform';
+      case 'head': {
+        const n = rest.match(/-n\s+(\d+)/);
+        return `Select-Object -First ${n ? n[1] : 10}`;
+      }
+      case 'tail': {
+        const n = rest.match(/-n\s+(\d+)/);
+        return `Select-Object -Last ${n ? n[1] : 10}`;
+      }
+      case 'wc': return 'Measure-Object -Line -Word -Character | Select-Object Lines, Words, Characters';
+      case 'clear': return 'Clear-Host';
+      case 'exit': return 'exit';
+      default: {
+        if (PS_CMD_MAP[fw]) {
+          return `${PS_CMD_MAP[fw]} ${rest}`;
+        }
+        return seg;
+      }
+    }
+  }
+
+  /** Translate a full command (handling pipes) */
+  function translateCommand(cmd: string): string {
+    return cmd.split(/(\||;)/g).map((part, idx) => {
+      if (part === '|' || part === ';') return part;
+      return translateSegment(part);
+    }).join('');
+  }
+
   // POST /api/terminal/execute — shell command execution
   app.post("/api/terminal/execute", async (req, res) => {
     let { command, currentPath, sessionId: clientSessionId, workspaceRoot } = req.body;
@@ -330,6 +511,9 @@ async function startServer() {
 
     const trimmed = command.trim();
     const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
+    // Translate Unix commands to PowerShell equivalents on Windows
+    const isWin = process.platform === 'win32';
+    const translatedCommand = isWin ? translateCommand(trimmed) : trimmed;
 
     if (['cls', 'clear', 'clear-host'].includes(firstWord)) {
       return res.json({ sessionId, clear: true, stdout: '', stderr: '' });
@@ -350,12 +534,19 @@ async function startServer() {
     }
 
     const result = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
-      const proc = spawn(trimmed, [], {
-        cwd: session.cwd,
-        env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
-      });
+      // Use PowerShell on Windows for Unix command compatibility, /bin/sh elsewhere
+      const proc = isWin
+        ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', translatedCommand], {
+            cwd: session.cwd,
+            env: process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+        : spawn(translatedCommand, [], {
+            cwd: session.cwd,
+            env: process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            shell: true,
+          });
       let stdout = '';
       let stderr = '';
       proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
@@ -4741,14 +4932,8 @@ ${contextStr}`;
   });
 
   // Graceful shutdown on Ctrl+C / SIGTERM
-  const shutdown = async () => {
+  const shutdown = () => {
     console.log('\n🛑 Shutting down server...');
-    try {
-      await sandbox.shutdown();
-      console.log('✅ Sandbox shut down.');
-    } catch (e: any) {
-      console.warn('⚠️ Sandbox shutdown error:', e.message);
-    }
     server.close(() => {
       console.log('✅ Server closed.');
       process.exit(0);
@@ -4757,10 +4942,9 @@ ${contextStr}`;
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  process.on('uncaughtException', async (err) => {
+  process.on('uncaughtException', (err) => {
     console.error('❌ Uncaught exception:', err);
-    await sandbox.shutdown().catch(() => {});
-    process.exit(1);
+    server.close(() => process.exit(1));
   });
 }
 

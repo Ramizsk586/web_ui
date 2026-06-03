@@ -150,6 +150,10 @@ export default function CoderWorkspaceView({
   rightIsInspectMode,
   setRightIsInspectMode,
   startCoderPreview,
+}: CoderWorkspaceViewProps) {
+  const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
+  const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
       {/* LEFT PANEL: File Explorer (VS Code Styled collapsible sidebar) */}
