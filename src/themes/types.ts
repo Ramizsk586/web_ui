@@ -36,4 +36,11 @@ export interface ThemeContextType {
   setTheme: (id: string) => void;
   themes: Theme[];
   isDark: boolean;
+  // Custom theme engine integration
+  setThemeColor: (colorKey: keyof ThemeColors, value: string) => void;
+  setFontFamily: (font: string) => void;
+  setBorderRadius: (radius: string) => void;
+  customThemeColors: Record<string, string>;
+  customFont: string;
+  customRadius: string;
 }

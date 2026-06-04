@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Hammer, Search, Cpu, Sparkles } from 'lucide-react';
+import { Hammer, Search, Cpu, Sparkles, Workflow, Cable } from 'lucide-react';
 
 /**
  * 🎨 Web Search Animation
@@ -198,37 +198,97 @@ export const LuminaToolCallingAnimation = () => (
 );
 
 export const AgentThinkingFlowAnimation = () => (
-  <div className="relative flex h-8 w-14 items-center justify-center select-none pointer-events-none">
+  <div className="flex items-center justify-center relative w-7 h-7 select-none pointer-events-none">
+    {/* Radiant circular radar line */}
     <motion.div
-      animate={{ opacity: [0.25, 0.55, 0.25] }}
-      transition={{ repeat: Infinity, duration: 2.2, ease: "easeInOut" }}
-      className="absolute inset-x-3 top-1/2 h-px -translate-y-1/2 bg-linear-to-r from-cyan-500/0 via-cyan-400/40 to-violet-400/0"
+      initial={{ scale: 0.8, opacity: 0.8 }}
+      animate={{ scale: 1.9, opacity: 0 }}
+      transition={{
+        repeat: Infinity,
+        duration: 2.0,
+        ease: "easeOut"
+      }}
+      className="absolute inset-0 rounded-full border border-cyan-500/30"
     />
 
-    <motion.div
-      animate={{ y: [-7, 7, -7], opacity: [0, 1, 0], scale: [0.7, 1, 0.7] }}
-      transition={{ repeat: Infinity, duration: 1.35, ease: "easeInOut" }}
-      className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]"
-    />
+    {/* Ambient shadow glow */}
+    <div className="absolute inset-0 bg-cyan-500/15 blur-lg rounded-full" />
 
+    {/* Ring with a pulsing orbit dot */}
     <motion.div
-      animate={{ scale: [1, 1.08, 1], opacity: [0.9, 1, 0.9] }}
-      transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
-      className="absolute top-0 flex h-4 w-4 items-center justify-center rounded-full border border-cyan-500/35 bg-cyan-950/25"
+      animate={{ rotate: 360 }}
+      transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
+      className="absolute inset-0 rounded-full border border-cyan-500/20"
     >
-      <Cpu size={10} className="text-cyan-300" />
+      <div className="absolute bottom-0 left-1/2 -ml-0.5 w-1 h-1 bg-cyan-400 rounded-full shadow-[0_0_6px_#22d3ee]" />
     </motion.div>
 
+    {/* Centered Cpu core */}
     <motion.div
-      animate={{ scale: [1, 1.06, 1], boxShadow: [
-        '0 0 0 rgba(168,85,247,0.0)',
-        '0 0 14px rgba(168,85,247,0.24)',
-        '0 0 0 rgba(168,85,247,0.0)'
-      ] }}
-      transition={{ repeat: Infinity, duration: 1.8, ease: "easeInOut" }}
-      className="absolute bottom-0 flex h-4.5 w-4.5 items-center justify-center rounded-full border border-violet-500/35 bg-violet-950/25"
+      animate={{ 
+        scale: [1, 1.1, 1],
+        rotate: [0, 5, -5, 0]
+      }}
+      transition={{ 
+        repeat: Infinity, 
+        duration: 2, 
+        ease: "easeInOut" 
+      }}
+      className="relative z-10 flex items-center justify-center text-cyan-400 bg-cyan-950/20 border border-cyan-500/40 rounded-full w-5.5 h-5.5"
     >
-      <Sparkles size={10} className="text-violet-300" />
+      <Cpu size={11} strokeWidth={2.2} />
+    </motion.div>
+  </div>
+);
+
+/**
+ * 🔗 Composio Tool Calling Animation
+ * A beautiful violet/indigo high-tech socket/flow representation
+ * representing data pipeline integration, api tunnels, and secure triggers.
+ */
+export const ComposioToolCallingAnimation = () => (
+  <div className="flex items-center justify-center relative w-7 h-7 select-none pointer-events-none">
+    {/* Concentric outward wave */}
+    <motion.div
+      initial={{ scale: 0.8, opacity: 0.8 }}
+      animate={{ scale: 2.1, opacity: 0 }}
+      transition={{
+        repeat: Infinity,
+        duration: 1.8,
+        ease: "easeOut"
+      }}
+      className="absolute inset-0 rounded-full border border-violet-500/40"
+    />
+
+    {/* Purple core glow backing */}
+    <div className="absolute inset-0 bg-violet-500/15 blur-md rounded-full" />
+
+    {/* Rotating dashed planetary ring */}
+    <motion.div
+      animate={{ rotate: 360 }}
+      transition={{ repeat: Infinity, duration: 5, ease: "linear" }}
+      className="absolute -inset-1 rounded-full border border-dashed border-indigo-500/30 dark:border-indigo-400/20"
+    />
+
+    {/* Orbiting flow dot */}
+    <motion.div
+      animate={{ rotate: -360 }}
+      transition={{ repeat: Infinity, duration: 2.5, ease: "linear" }}
+      className="absolute inset-0.5 rounded-full border border-violet-500/10"
+    >
+      <div className="absolute top-0 left-1/2 -ml-0.5 w-1 h-1 bg-violet-400 rounded-full shadow-[0_0_8px_#8b5cf6]" />
+    </motion.div>
+
+    {/* Central Pulsing Connector */}
+    <motion.div
+      animate={{ 
+        scale: [1, 1.12, 1],
+        rotate: [0, 5, -5, 0]
+      }}
+      transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut" }}
+      className="relative z-10 flex items-center justify-center text-violet-600 dark:text-violet-400 bg-violet-950/20 border border-indigo-500/40 rounded-full w-5.5 h-5.5 shadow-[0_0_10px_rgba(139,92,246,0.2)]"
+    >
+      <Workflow size={11} strokeWidth={2.4} />
     </motion.div>
   </div>
 );

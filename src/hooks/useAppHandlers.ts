@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { 
   Globe, 
   Sparkles, 
@@ -304,6 +304,7 @@ export interface UseAppHandlersParams {
   setAlwaysAllowedCommands: React.Dispatch<React.SetStateAction<string[]>>;
   requestCommandPermission: (command: string, reason: string) => Promise<'allow-once' | 'allow-always' | 'deny'>;
   logPermissionAction: (entry: { command?: string; action: string; detail?: string; mode?: CoderPermissionMode }) => void;
+  luminaConvex?: any;
 }
 
 const isLikelyCoderTask = (message: string) => {
@@ -324,6 +325,21 @@ const isLikelyCoderTask = (message: string) => {
   ];
 
   return coderTriggers.some(trigger => trimmed.includes(trigger));
+};
+
+const ORCHESTRATION_TRIGGERS = [
+  'full app', 'entire', 'complete project', 'everything', 'end-to-end',
+  'full-stack', 'full stack', 'whole thing', 'the whole', 'from scratch', 'build me a',
+  'create a complete', 'scaffold', 'production ready', 'deploy',
+  'walkthrough', 'walk through', 'sub-agent', 'subagent', 'big feature', 'big project', 'complex app', 'complex project'
+];
+
+const shouldActivateOrchestration = (msg: string): boolean => {
+  const lower = msg.toLowerCase();
+  return ORCHESTRATION_TRIGGERS.some(trigger => lower.includes(trigger));
+};
+
+const dummysum = () => {
 };
 
 export function useAppHandlers(params: UseAppHandlersParams) {
@@ -387,7 +403,220 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     setAlwaysAllowedCommands,
     requestCommandPermission,
     logPermissionAction
+    , luminaConvex
   } = params;
+
+  const retrieveAndRecallMemories = useCallback((userQuery: string): { systemPromptAddendum: string; matchedMemories: any[] } => {
+    let records: any[] = [];
+    try {
+      const raw = localStorage.getItem('lumina_memory_records');
+      if (raw) records = JSON.parse(raw);
+    } catch (e) {
+      console.error('Failed to parse memories for recall', e);
+    }
+
+    if (!records || records.length === 0) {
+      return { systemPromptAddendum: '', matchedMemories: [] };
+    }
+
+    const activeRecords = records.filter(r => r.lifecycle !== 'archived' && r.lifecycle !== 'pruned');
+    const queryWords = userQuery.toLowerCase().split(/[\s,.:;?!#@()\'\"]+/).filter(w => w.length > 3);
+    
+    const stopWords = new Set([
+      'this', 'that', 'with', 'from', 'your', 'have', 'what', 'some', 'about', 'would', 'could', 'should',
+      'there', 'their', 'them', 'then', 'than', 'were', 'been', 'will', 'make', 'just', 'more', 'much',
+      'here', 'there', 'want', 'need', 'like', 'good', 'well', 'know', 'think', 'find', 'take', 'come',
+      'create', 'build', 'using', 'please', 'help', 'show', 'view', 'open', 'close', 'edit', 'inside', 'index'
+    ]);
+
+    const matchedMemories: any[] = [];
+
+    activeRecords.forEach(mem => {
+      const contentLower = mem.content.toLowerCase();
+      let isMatch = false;
+
+      if (queryWords.length > 0) {
+        if (contentLower.includes(userQuery.toLowerCase().trim())) {
+          isMatch = true;
+        } else {
+          let overlapCount = 0;
+          for (const word of queryWords) {
+            if (!stopWords.has(word) && contentLower.includes(word)) {
+              overlapCount++;
+            }
+          }
+          if (queryWords.length <= 2 && overlapCount >= 1) {
+            isMatch = true;
+          } else if (queryWords.length > 2 && overlapCount >= 2) {
+            isMatch = true;
+          }
+        }
+      }
+
+      if (isMatch) {
+         matchedMemories.push(mem);
+      }
+    });
+
+    if (matchedMemories.length === 0) {
+      return { systemPromptAddendum: '', matchedMemories: [] };
+    }
+
+    matchedMemories.sort((a, b) => {
+      const aScore = (a.importance || 0.5) * 2 + (a.decay || a.decayRate || 0) + (a.accessCount || 0) * 0.1;
+      const bScore = (b.importance || 0.5) * 2 + (b.decay || b.decayRate || 0) + (b.accessCount || 0) * 0.1;
+      return bScore - aScore;
+    });
+
+    const topMemories = matchedMemories.slice(0, 5);
+
+    topMemories.forEach(mem => {
+      const mId = mem.memoryId || mem.id;
+      if (mId && luminaConvex?.recallMemory) {
+        luminaConvex.recallMemory(mId);
+      }
+      
+      if (luminaConvex?.addEvent) {
+        const snippet = mem.content.length > 50 ? mem.content.substring(0, 50) + '...' : mem.content;
+        luminaConvex.addEvent('memory.recalled', 'Main Chat', `Recalled memory: "${snippet}"`, { memoryId: mId });
+      }
+    });
+
+    let addendum = `\n\n=== 🧠 RECALLED MEMORIES ABOUT USER/PROJECT (REAL-TIME CONTEXT) ===
+You have recalled the following structured memories from your memory vault. These are objective facts, user preferences, corrections, or relationship parameters. Use them to customize your behaviour and provide a highly personalized, evolved experience. Keep in mind that some might be project-specific or stylistic:`;
+    
+    topMemories.forEach((mem, idx) => {
+      addendum += `\n${idx + 1}. [Segment: ${mem.segment}, Tier: ${mem.tier}] ${mem.content}`;
+    });
+    addendum += `\n\nEnsure you respect these preferences implicitly without necessarily stating "I retrieved this from memory" unless the user asks how you knew.`;
+
+    return { systemPromptAddendum: addendum, matchedMemories: topMemories };
+  }, [luminaConvex]);
+
+  const triggerBackgroundMemoryExtraction = useCallback(async (userContent: string, assistantContent: string) => {
+    if (!userContent || !assistantContent || assistantContent.length < 10) return;
+
+    try {
+      console.log('[LUMINA_DEBUG] Running background Cognitive Memory Extractor...');
+
+      const extractionPrompt = [
+        {
+          role: 'system',
+          content: `You are the Cognitive Memory Consolidation Processor for the Lumina AI agent.
+Your job is to analyze the preceding single conversational turn (the user's request and the assistant's response) and extract any key, durable memories to commit to the long-term memory vault.
+
+Focus strictly on high-value facts:
+- **identity**: Facts about who the user is, their job, goals, background, habits.
+- **preference**: Style, framing, coding conventions, themes (e.g. prefers Tailwind, Inter font, Space Grotesk, Cosmic slate theme, etc.).
+- **relationship**: How they interact, their sentiment or inside jokes, nickname preferences, expectations.
+- **project**: Current file structures, app goals, target functionality being built, tech stack decisions.
+- **knowledge**: Critical domain knowledge or solutions discovered in the turn.
+- **correction**: Direct instructions to fix something, changes in styling, or behavioral rules.
+
+Do NOT extract trivial conversational filler, general greetings, or temporary questions. Only extract items of high long-term utility.
+
+You must respond with a JSON array under the "memories" key. Each memory object must have:
+- "content": A concise declarative sentence expressing the memory (e.g. "User prefers a Swiss minimal dark aesthetic for their dashboards.").
+- "segment": "identity" | "preference" | "relationship" | "project" | "knowledge" | "correction" | "context"
+- "tier": "short" | "long" | "permanent"
+
+If no durable memories are found, return an empty array.
+
+Return EXACTLY JSON in this format (do not include any conversational text or markdown wrap, just the raw JSON):
+{
+  "memories": [
+    {
+      "content": "User prefers Inter font paired with Space Grotesk headings.",
+      "segment": "preference",
+      "tier": "long"
+    }
+  ]
+}`
+        },
+        {
+          role: 'user',
+          content: `CONVERSATION TURN TO ANALYZE:
+[USER]: "${userContent.replace(/"/g, '\\"')}"
+[ASSISTANT]: "${assistantContent.substring(0, 1500).replace(/"/g, '\\"')}${assistantContent.length > 1500 ? '... [truncated for token safety]' : ''}"`
+        }
+      ];
+
+      const res = await callLlamaBridge(extractionPrompt, []);
+      const text = res?.choices?.[0]?.message?.content || '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (Array.isArray(parsed.memories) && parsed.memories.length > 0) {
+          console.log('[LUMINA_DEBUG] Extracted memories from turn:', parsed.memories);
+
+          for (const rawMem of parsed.memories) {
+            if (!rawMem.content || !rawMem.content.trim()) continue;
+
+            const generatedId = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const generatedUuid = `uuid_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+            
+            const tierVal = ['short', 'long', 'permanent'].includes(rawMem.tier) ? rawMem.tier : 'long';
+            const segmentVal = ['identity', 'preference', 'relationship', 'project', 'knowledge', 'correction', 'context'].includes(rawMem.segment) ? rawMem.segment : 'knowledge';
+
+            const compatMem = {
+              id: generatedId,
+              decay: tierVal === 'permanent' ? 0.99 : tierVal === 'long' ? 0.85 : 0.6,
+              lastAccessed: Date.now(),
+              agentId: null,
+              memoryId: generatedUuid,
+              content: rawMem.content.trim(),
+              tier: tierVal,
+              segment: segmentVal,
+              importance: 0.8,
+              decayRate: tierVal === 'short' ? 0.002 : tierVal === 'long' ? 0.0003 : 0.00001,
+              accessCount: 1,
+              lastAccessedAt: Date.now(),
+              lifecycle: 'active',
+              source: 'conversation',
+              createdAt: Date.now(),
+            };
+
+            if (luminaConvex?.addMemory) {
+              await luminaConvex.addMemory(compatMem);
+            } else {
+              try {
+                const currentRecordsRaw = localStorage.getItem('lumina_memory_records');
+                const currentRecords = currentRecordsRaw ? JSON.parse(currentRecordsRaw) : [];
+                currentRecords.unshift(compatMem);
+                localStorage.setItem('lumina_memory_records', JSON.stringify(currentRecords));
+              } catch (err) {
+                console.error('Local fallback saving failed', err);
+              }
+            }
+
+            if (luminaConvex?.addEvent) {
+              const snippet = compatMem.content.length > 40 ? compatMem.content.substring(0, 40) + '...' : compatMem.content;
+              
+              await luminaConvex.addEvent(
+                'memory.extracted',
+                'Cognitive Extractor',
+                `Extracted new raw perception: "${snippet}"`,
+                { memoryId: compatMem.id, segment: segmentVal }
+              );
+
+              await luminaConvex.addEvent(
+                'memory.written', 
+                'Cognitive Extractor',
+                `Successfully consolidated and stored memory about user: [Segment: ${segmentVal}]`,
+                { memoryId: compatMem.id, tier: tierVal }
+              );
+            }
+          }
+
+          if (showToast) {
+            showToast(`🧠 Lumina consolidated ${parsed.memories.length} new memory insights.`);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[LUMINA_DEBUG] Background memory extraction error or JSON parsing failure:', err);
+    }
+  }, [luminaConvex, callLlamaBridge, showToast]);
 
   const handleClearChat = () => {
     setChats(prev => prev.map(chat => {
@@ -404,6 +633,80 @@ export function useAppHandlers(params: UseAppHandlersParams) {
   };
 
   const handleSend = async (contentOverride?: string) => {
+    // START OF HANDLESEND METHOD
+    // INTENT INTERCEPTION FOR SUBAGENT WALKTHROUGH APPROVALS
+    const cleanContent = (contentOverride || input.trim()).trim().toLowerCase().replace(/[.,!?:;]/g, '');
+    const isWalkthroughApproval = ['ok', 'okay', 'continue', 'doit', 'do it', 'approve', 'go', 'yes', 'proceed', 'start', 'run', 'lets go', 'let is go', 'yea', 'yep', 'y', 'correct'].includes(cleanContent) || cleanContent.startsWith('ok ') || cleanContent.startsWith('continue ') || cleanContent.startsWith('do it ');
+
+    if (isCoderMode && orchestrationState.isActive && orchestrationState.awaitingUserConfirmation && isWalkthroughApproval && currentChatId) {
+      const activeChat = chats.find(c => c.id === currentChatId);
+      if (activeChat) {
+        const lastAssMsg = activeChat.messages.slice().reverse().find(m => m.role === 'assistant' && m.todoPlan && !m.todoPlan.isConfirmed);
+        if (lastAssMsg && lastAssMsg.todoPlan) {
+          showToast("Walkthrough Plan approved! Spawning subagents step-by-step...");
+
+          setOrchestrationState((prev: any) => ({
+            ...prev,
+            awaitingUserConfirmation: false,
+            agents: prev.agents.map((a: any, idx: number) => idx === 0 ? { ...a, status: 'done', completedAt: Date.now() } : a)
+          }));
+
+          setChats((prev: any[]) => prev.map(chat => {
+            if (chat.id === currentChatId) {
+              return {
+                ...chat,
+                messages: chat.messages.map((m: any) => m.id === lastAssMsg.id ? {
+                  ...m,
+                  todoPlan: {
+                    ...m.todoPlan!,
+                    isConfirmed: true,
+                    countdown: 0
+                  }
+                } : m)
+              };
+            }
+            return chat;
+          }));
+
+          // Self-contained walk-through implementation launch
+          const todos = lastAssMsg.todoPlan.todos;
+          const todoContent = `# Tasks Checklist\n\n` + 
+            todos.map((t: any) => `- [ ] ${t.text || t.content}`).join('\n') + '\n';
+            
+          const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+          const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md` : `./TODO.md`;
+          
+          fetch('/api/fs/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filePath: fullPath, content: todoContent, ...workspaceArg })
+          }).then(() => {
+            if (triggerWorkspaceRefresh) {
+              triggerWorkspaceRefresh();
+            }
+            setTimeout(() => {
+              if ((window as any).openFileInPreview) {
+                (window as any).openFileInPreview('TODO.md');
+              }
+            }, 300);
+          }).catch(err => {
+            console.error("Failed to write TODO.md in interceptor:", err);
+          });
+
+          setActiveCommandType("coder");
+          setCoderTodos(todos.map((t: any, idx: number) => ({ id: String(idx + 1), content: t.text || t.content, status: idx === 0 ? 'in_progress' as const : 'pending' as const })));
+          setShowTodoPanel(true);
+
+          setInput('');
+          setIsTyping(false);
+          
+          setTimeout(() => {
+            handleSend("Excellent. Proceed and implement the approved Walkthrough Plan step-by-step.");
+          }, 400);
+          return;
+        }
+      }
+    }
     if (isVoiceListening) {
       stopVoiceDictation();
     }
@@ -759,7 +1062,13 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                 ...chat,
                 messages: chat.messages.map(m => m.id === thinkingId ? {
                   ...m,
-                  thinking: 'Coder TODOs ready. Starting agent...',
+                  thinking: shouldActivateOrchestration(content) ? 'Subagent plan prepared. Awaiting walkthrough approval...' : 'Coder TODOs ready. Starting agent...',
+                  todoPlan: {
+                    title: shouldActivateOrchestration(content) ? "📋 Multi-Agent Walkthrough Plan" : "📋 Lumina Agent Task Checklist",
+                    todos: mapped,
+                    isConfirmed: false,
+                    countdown: shouldActivateOrchestration(content) ? undefined : 15
+                  },
                   toolCalls: [
                     {
                       id: 'coder-plan-node',
@@ -797,7 +1106,17 @@ export function useAppHandlers(params: UseAppHandlersParams) {
             ...chat,
             messages: chat.messages.map(m => m.id === thinkingId ? {
               ...m,
-              thinking: 'Using fallback TODOs. Starting agent...',
+              thinking: shouldActivateOrchestration(content) ? 'Fallback plan prepared. Awaiting walkthrough approval...' : 'Using fallback TODOs. Starting agent...',
+              todoPlan: {
+                title: shouldActivateOrchestration(content) ? "📋 Multi-Agent Walkthrough Plan" : "📋 Lumina Agent Task Checklist",
+                todos: [
+                  { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' as const },
+                  { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' as const },
+                  { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' as const }
+                ],
+                isConfirmed: false,
+                countdown: shouldActivateOrchestration(content) ? undefined : 15
+              },
               toolCalls: [
                 {
                   id: 'coder-plan-node',
@@ -854,12 +1173,14 @@ export function useAppHandlers(params: UseAppHandlersParams) {
           researchMode.setIsResearchActive(false);
           setTimeout(() => {
             researchMode.setCustomQueries(content);
+            // researchMode.setIsResearchMode(true);
+            // setIsSidebarOpen(false);
             researchMode.setIsResearchActive(true);
             researchMode.setResearchLogs([
               `[${new Date().toLocaleTimeString()}] [Orchestrator] Deep recursive search triggered via Chat Toggle: "${content}"`,
               `[${new Date().toLocaleTimeString()}] [System] Allocating multi-agent parallel loops...`
             ]);
-            researchMode.setIsResearchWorkspaceOpen(true);
+            // researchMode.setIsResearchWorkspaceOpen(true);
           }, 100);
         }
 
@@ -1249,8 +1570,19 @@ export function useAppHandlers(params: UseAppHandlersParams) {
         );
       }
 
+      if (isCoderMode && orchestrationState.awaitingUserConfirmation) {
+        activeTools = [];
+      }
       const personaLine = `You are ${persona.name}. Character description/Role: ${persona.role || 'helpful digital assistant'}.${persona.systemPrompt ? `\nInstructions: ${persona.systemPrompt}` : ''}`;
       let systemPrompt = personaLine;
+
+      // Integrate long term memories recalled from the Lumina memory vault based on user demand
+      try {
+        const { systemPromptAddendum } = retrieveAndRecallMemories(content);
+        systemPrompt += systemPromptAddendum;
+      } catch (err) {
+        console.warn('Lumina memory recall failed:', err);
+      }
 
       // Load custom skills from localStorage to connect AI directly with them
       let customSkills: any[] = [];
@@ -1345,7 +1677,7 @@ ${skillMd.content}
         } else {
           systemPrompt += `\n\n[CODER MODE — ${osName}]
 You are a software engineering agent. When asked to build/modify code:
-1. Use tools to make real file system changes. Always 'read_file' before editing.
+1. Create, read, and maintain the task checklist in TODO.md at the project root. Before starting, and after completing each engineering step, use 'edit_file' or 'write_file' on TODO.md to mark that step as complete (e.g. changing '- [ ]' to '- [x]'). Also use tools to make real file system changes. Always 'read_file' before editing.
 2. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
 3. Use 'glob_tool' to find files by name patterns. Use 'grep_tool' to search text inside files. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
 4. Work in tool-call cycles until the task is complete. Give a summary when done.
@@ -1369,6 +1701,43 @@ Provide specific and detailed task strings so they know exactly what to build.
             systemPrompt += `\n[MODE: BUILDER] Implement features, create files, write working code.`;
           } else if (activeAssistantMode === 'planner') {
             systemPrompt += `\n[MODE: PLANNER] Plan architecture and sequencing. Ask before executing.`;
+          } else if (activeAssistantMode === 'reviewer') {
+            systemPrompt += `\n[MODE: REVIEWER]
+Your primary objective is to perform a comprehensive code review focusing on:
+1. Static code analysis and finding logical errors or anti-patterns
+2. Detecting dead, unreachable, or unused code/variables
+3. Verifying architectural consistency (e.g. state management, API separation, responsive CSS layouts)
+
+When the user types "start" (or other equivalent command / trigger), you MUST automatically start browsing and analyzing the codebase to build a detailed review report.
+To complete the task quickly and precisely, you can spawn specialized review and developer subagents IN PARALLEL:
+- Use 'spawn_analyzer' to scan directories or find code usages.
+- Use 'spawn_reviewer' to perform static analysis on different specific files.
+- Combine these parallel agents to gather context.
+
+Once the review is completed, output a highly detailed, professional, structured Markdown report. Avoid generic statements; specify exact file names, lines, and patterns. Title the report "🔍 LUMINA CODE REVIEW & ANALYSIS REPORT". Include sections:
+- Executive Summary
+- Dead/Unused Code Analysis (specific file and line references if any)
+- Logic Flaws & Edge Cases
+- Architectural/Style Recommendations`;
+          } else if (activeAssistantMode === 'tester') {
+            systemPrompt += `\n[MODE: TESTER]
+Your primary objective is to execute deep auditing, security checking, and logical testing:
+1. Check for security vulnerabilities (XSS, Injection, exposed secrets, unchecked inputs, missing exception handling)
+2. Identify incorrect or wrong business logic, performance bottlenecks, and edge cases
+3. Suggest clear, constructive, technical improvements
+4. Rate the overall security & logic health of the codebase (e.g. Health Score / 100)
+
+When the user types "start" (or other equivalent command / trigger), you MUST automatically inspect the codebase to build a premium test/security analysis report.
+To complete the task quickly and precisely, you can spawn specialized auditing subagents IN PARALLEL:
+- Use 'spawn_debugger' or 'spawn_analyzer' to query specific files for bad logic, edge cases, vulnerabilities, or test compilation.
+- Gather their parallel findings to compile your final analysis.
+
+Once compliance has been assessed, output a highly detailed, structured Markdown report. Title it "🛡️ LUMINA SECURITY & LOGICAL TESTING REPORT". Ensure it includes:
+- Security & Vulnerability Audit (rated with severity: HIGH, MEDIUM, LOW)
+- Logic Correctness & Functional Issues
+- Design & Code Improvement Recommendations
+- Health Score Rating (e.g. Health Score: 85/100)
+- Step-by-Step Resolution Guide (clear step-by-step instructions with code examples on how to address every issue with proper guidelines)`;
           } else if (activeAssistantMode === 'debugger') {
             systemPrompt += `\n[MODE: DEBUGGER] Trace errors, fix bugs with minimal changes.`;
           }
@@ -1379,7 +1748,7 @@ Provide specific and detailed task strings so they know exactly what to build.
       const ORCHESTRATION_TRIGGERS = [
         'full app', 'entire', 'complete project', 'everything', 'end-to-end',
         'full-stack', 'full stack', 'whole thing', 'the whole', 'from scratch', 'build me a',
-        'create a complete', 'scaffold', 'production ready', 'deploy'
+        'create a complete', 'scaffold', 'production ready', 'deploy', 'walkthrough', 'walk through', 'sub-agent', 'subagent', 'big feature', 'big project', 'complex app', 'complex project'
       ];
       const shouldActivateOrchestration = (msg: string): boolean => {
         const lower = msg.toLowerCase();
@@ -1395,14 +1764,44 @@ Provide specific and detailed task strings so they know exactly what to build.
             domainsDetected: ['frontend', 'backend', 'database', 'auth', 'devops'],
             recommendedStrategy: 'SUBAGENT_TEAM',
           },
-          agents: [],
+          agents: [
+            {
+              id: 'plan-analyzer',
+              name: 'Analyzer Subagent',
+              phase: 1,
+              status: 'running',
+              filesCreated: [],
+              startedAt: Date.now(),
+              events: [
+                { id: 'evt-1', text: 'Analyzing existing project layout & dependencies...', timestamp: Date.now() },
+                { id: 'evt-2', text: 'Decomposing task requirements into modular segments...', timestamp: Date.now() },
+                { id: 'evt-3', text: 'Formulating multi-agent phased walkthrough blueprint...', timestamp: Date.now() },
+              ]
+            }
+          ],
+          currentPhase: 1,
+          totalPhases: 5,
+          awaitingUserConfirmation: true,
+          conflicts: [],
+        });
+        const bypassed = ({
           currentPhase: 1,
           totalPhases: 5,
           awaitingUserConfirmation: false,
           conflicts: [],
         });
 
-        systemPrompt += `\n\n[SUBAGENT ORCHESTRATION MODE]
+        systemPrompt += `\n\n[SUBAGENT ORCHESTRATION MODE: WALKTHROUGH PLANNING]
+You are the Lumina AI Master Orchestrator in Coder Mode. The user has initiated a walkthrough/plan/big project request.
+You MUST outline a comprehensive architecture walkthrough and multi-agent plan first.
+1. Present a clear PROJECT ANALYSIS BOARD using unicode box characters (e.g., 🔍 PROJECT ANALYSIS).
+2. Briefly describe the roles of subagents involved (Analyzer, Coder, Debugger, Reviewer).
+3. Outline a phased task plan.
+4. Stop and ask the user for confirmation (e.g. "To approve this walkthrough and begin step-by-step implementation, please click the 'Start Building' button below or reply with 'ok', 'continue', or 'doit'").
+
+Do NOT invoke any tools or execute code edits yet. Just print this beautiful plaintext plan and stop.`;
+        if (false) {
+          const dummyTemp = `
 You are the Lumina AI Master Orchestrator operating in Coder Mode.
 Your primary role is to analyze incoming software projects and INTELLIGENTLY DECOMPOSE
 large, complex work into coordinated subagent tasks that run with maximum parallelism
@@ -1424,6 +1823,7 @@ Then output a SUBAGENT TASK DECOMPOSITION PLAN with phases.
 Then ask the user for confirmation before beginning.
 
 Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger, spawn_reviewer.`;
+        }
       }
 
       // Inject search context into systemPrompt BEFORE building apiMessages
@@ -2096,7 +2496,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                       `[${new Date().toLocaleTimeString()}] [Orchestrator] Deep recursive search triggered via tool call: "${searchQueryVal}"`,
                       `[${new Date().toLocaleTimeString()}] [System] Allocating multi-agent parallel loops...`
                     ]);
-                    researchMode.setIsResearchWorkspaceOpen(true);
+                    // researchMode.setIsResearchWorkspaceOpen(true);
                   }, 100);
                 }
 
@@ -3198,6 +3598,16 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         setActiveArtifact(finalArtifacts[0]);
         setIsCanvasOpen(true);
         setCanvasView(['html', 'markdown', 'report'].includes(finalArtifacts[0].type) ? 'preview' : 'code');
+      }
+
+      // Extract brand-new memories from this conversation turn asynchronously
+      try {
+        triggerBackgroundMemoryExtraction(content, finalDisplayContent || finalContent.trim());
+      } catch (err) {
+        console.warn('Memory extraction invocation failed:', err);
+      }
+
+      if (false) {
       }
 
       setChats(prev => prev.map(chat => {

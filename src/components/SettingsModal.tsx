@@ -40,10 +40,12 @@ import {
   Edit3,
   Save,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  ChevronDown
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
 import { SkillsPanel } from './SkillsPanel';
+import { ComposioPanelRefactored } from './ComposioPanelRefactored';
 
 type AiProviderProfile = {
   id: string;
@@ -432,6 +434,7 @@ export function SettingsModal({
   });
   const [customInstructions, setCustomInstructions] = React.useState(() => localStorage.getItem('lumina_profile_instructions') || '');
   const [profileNameDrafts, setProfileNameDrafts] = React.useState<Record<string, string>>({});
+  const [openDropdown, setOpenDropdown] = React.useState<{ agentId: string, type: 'provider' | 'model' } | null>(null);
   type SubagentConfig = {
     modelId: string;
     providerProfileId?: string;
@@ -1921,33 +1924,28 @@ export function SettingsModal({
               { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
               { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
               { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
-              { id: 'skills', label: 'Skill', icon: <BookOpen size={16} /> },
+              { id: 'skills', label: 'Skills', icon: <BookOpen size={16} /> },
               { id: 'llama_cpp', label: 'llama.cpp', icon: <Box size={16} /> },
               { id: 'models', label: 'Models', icon: <Brain size={16} /> },
-              { id: 'convex', label: 'Convex', icon: <Database size={16} /> },
-              { id: 'composio', label: 'Composio', icon: <Server size={16} /> },
+
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveSettingsTab(tab.id as any)}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all relative ${
                   activeSettingsTab === tab.id 
                     ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm border border-gray-100 dark:border-white/10' 
                     : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5'
                 }`}
               >
                 {tab.icon}
-                {tab.label}
+                <span className="flex-1 text-left">{tab.label}</span>
+                {tab.id === 'skills' && (
+                  <span className="absolute right-3 w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
+                )}
               </button>
             ))}
           </nav>
-          <button
-            onClick={onClose}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 transition-all mt-auto"
-          >
-            <X size={16} />
-            Close
-          </button>
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
@@ -3253,24 +3251,24 @@ export function SettingsModal({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setIsDownloadsPanelOpen(!isDownloadsPanelOpen)}
-                      className={`p-2 rounded-xl border transition-all hover:bg-gray-100 dark:hover:bg-zinc-800/60 relative ${
+                      className={`px-3 py-1.5 rounded-xl border transition-all hover:bg-gray-105 dark:hover:bg-zinc-800/60 flex items-center gap-1.5 text-[11px] font-bold relative ${
                         isDownloadsPanelOpen 
-                          ? 'bg-gray-100 dark:bg-zinc-805 border-[var(--theme-accent)] text-[var(--theme-accent)]' 
-                          : 'border-gray-200 dark:border-white/10 text-gray-500'
+                          ? 'bg-gray-100 dark:bg-zinc-800 border-[var(--theme-accent)] text-[var(--theme-accent)] shadow-sm' 
+                          : 'border-gray-200 dark:border-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-zinc-300'
                       }`}
                       title="Download Drawer"
                     >
-                      <Download size={15} />
-                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[var(--theme-accent)] rounded-full animate-pulse border-2 border-white dark:border-zinc-900" />
-                    </button>
-                    <button
-                      className="p-2 rounded-xl border border-gray-200 dark:border-white/10 text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-800/60 transition-all"
-                      title="Toggle Split Panel"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <rect x="3" y="3" width="18" height="18" rx="2" strokeLinecap="round" strokeLinejoin="round" />
-                        <line x1="9" y1="3" x2="9" y2="21" />
-                      </svg>
+                      {hfDownloadStatus === 'downloading' ? (
+                        <RefreshCw size={13} className="animate-spin text-[var(--theme-accent)]" />
+                      ) : (
+                        <Download size={13} />
+                      )}
+                      <span>Downloads</span>
+                      {hfDownloadStatus !== 'idle' && hfDownloadStatus !== 'completed' && (
+                        <span className="ml-1 px-1 py-0.5 rounded text-[8px] bg-[var(--theme-accent)]/15 text-[var(--theme-accent)] animate-pulse font-mono font-bold">
+                          {hfDownloadProgress}%
+                        </span>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -3915,13 +3913,13 @@ export function SettingsModal({
                   {/* DOWNLOADS DRAWER WITH SMOOTH TRANSITION AND HIGH FIDELITY LAYOUT */}
                   {isDownloadsPanelOpen && (
                     <motion.div
-                      initial={{ opacity: 0, x: 20, width: 0 }}
-                      animate={{ opacity: 1, x: 0, width: 510 }}
-                      exit={{ opacity: 0, x: 20, width: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="border-l border-gray-150 dark:border-white/10 pl-4 h-full flex flex-col shrink-0 text-left min-w-0"
+                      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                      transition={{ duration: 0.18, ease: "easeOut" }}
+                      className="absolute right-0 top-0 z-50 w-[460px] h-full flex flex-col shrink-0 text-left min-w-0"
                     >
-                      <div className="p-4 rounded-2xl border border-gray-150 dark:border-white/10 bg-white dark:bg-zinc-900/60 h-full flex flex-col min-h-0 min-w-0 shadow-lg">
+                      <div className="p-4 rounded-2xl border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md h-full flex flex-col min-h-0 min-w-0 shadow-2xl">
                         {/* Title panel */}
                         <div className="flex items-center justify-between border-b border-gray-100 dark:border-white/10 pb-2 mb-3 shrink-0">
                           <h4 className="text-xs font-bold tracking-wider uppercase text-zinc-500">Downloads</h4>
@@ -4167,43 +4165,6 @@ export function SettingsModal({
                       </div>
                     )}
 
-                    <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--theme-border)' }}>
-                      <div className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest" style={{ background: 'var(--theme-surface)', color: 'var(--theme-secondary)', borderBottom: '1px solid var(--theme-border)' }}>
-                        Supported Endpoints
-                      </div>
-                      <div className="divide-y" style={{ borderColor: 'var(--theme-border)' }}>
-                        {[
-                          { path: '/health', method: 'GET', desc: 'Server health check' },
-                          { path: '/v1/models', method: 'GET', desc: 'List available models' },
-                          { path: '/v1/chat/completions', method: 'POST', desc: 'Chat & tool execution' },
-                          { path: '/v1/tools', method: 'GET', desc: 'List bridge tools' },
-                          { path: '/v1/tools/call', method: 'POST', desc: 'Call a bridge tool' },
-                          { path: '/v1/messages', method: 'POST', desc: 'Anthropic-compatible chat' },
-                          { path: '/v1/embeddings', method: 'POST', desc: 'Text embeddings' },
-                          { path: '/mcp', method: 'POST', desc: 'MCP JSON-RPC endpoint' },
-                          { path: '/api/generate', method: 'POST', desc: 'Ollama-compatible generate' },
-                          { path: '/api/chat', method: 'POST', desc: 'Ollama-compatible chat' },
-                        ].map((ep, i) => (
-                          <div key={i} className="flex items-center gap-3 px-4 py-2" style={{ background: i % 2 === 0 ? 'transparent' : 'var(--theme-surface-alt)' }}>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase shrink-0 ${
-                              ep.method === 'GET' ? 'text-emerald-500 bg-emerald-500/10' : 'text-blue-500 bg-blue-500/10'
-                            }`}>{ep.method}</span>
-                            <code className="text-[10px] font-mono" style={{ color: 'var(--theme-primary)' }}>{ep.path}</code>
-                            <span className="text-[10px] ml-auto" style={{ color: 'var(--theme-secondary)' }}>{ep.desc}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="p-4 rounded-xl border" style={{ background: 'var(--theme-surface)', borderColor: 'var(--theme-border)' }}>
-                      <div className="flex gap-3">
-                        <Terminal size={16} className="shrink-0 mt-0.5" style={{ color: 'var(--theme-accent)' }} />
-                        <p className="text-xs leading-relaxed" style={{ color: 'var(--theme-secondary)' }}>
-                          The Llama Bridge is a universal API gateway that translates between OpenAI, Anthropic, Cohere, Gemini, and Ollama formats. Chat requests go directly to <strong style={{ color: 'var(--theme-primary)' }}>{llamaBridgeUrl}</strong>. Bridge tools are auto-discovered via <code style={{ color: 'var(--theme-accent)' }}>/v1/tools</code>.
-                        </p>
-                      </div>
-                    </div>
-
                   </div>
                 </div>
               </motion.div>
@@ -4292,56 +4253,164 @@ export function SettingsModal({
                               </p>
                             </div>
                             <div className="shrink-0 flex flex-col gap-2 min-w-[220px]">
-                              <div className="flex flex-col gap-1.5">
+                              <div className="flex flex-col gap-1.5 relative">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Provider</label>
-                                <select
-                                  value={cfg.providerProfileId || ''}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    handleAgentProviderChange(agent.id, val || null);
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenDropdown(
+                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'provider'
+                                        ? null
+                                        : { agentId: agent.id, type: 'provider' }
+                                    );
                                   }}
-                                  className="h-8 px-3 text-[11px] bg-gray-50 dark:bg-zinc-950 border border-gray-150 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 w-full text-zinc-300 font-medium"
+                                  className="flex items-center justify-between w-full h-8 px-3 text-[11px] bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-gray-200/90 dark:hover:bg-zinc-700/90 border border-gray-200 dark:border-zinc-700/60 rounded-full transition-all text-gray-700 dark:text-gray-200 cursor-pointer select-none font-bold shadow-sm outline-none"
                                 >
-                                  <option value="">Default (Auto Free)</option>
-                                  {(aiProviderProfiles || []).filter(p => p.active).map(p => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Model</label>
-                                <select
-                                  value={cfg.modelId}
-                                  onChange={(e) => {
-                                    const selectedId = e.target.value;
-                                    const modelObj = (availableModels || []).find((m: any) => m.id === selectedId);
-                                    handleAgentModelChange(agent.id, selectedId, modelObj?.providerProfileId);
-                                  }}
-                                  className="h-8 px-3 text-[11px] bg-gray-50 dark:bg-zinc-950 border border-gray-150 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 w-full text-zinc-300 font-medium"
-                                >
-                                  {cfg.providerProfileId ? (
-                                    (() => {
-                                      const profile = aiProviderProfiles.find(p => p.id === cfg.providerProfileId);
-                                      const models = profile ? profile.models.filter(m => profile.selectedModelIds.includes(m.id)) : [];
-                                      return models.length > 0 ? (
-                                        models.map(m => (
-                                          <option key={m.id} value={m.id}>{m.name || m.id}</option>
-                                        ))
-                                      ) : (
-                                        <option value={cfg.modelId}>{cfg.modelId}</option>
-                                      );
-                                    })()
-                                  ) : (
-                                    <>
-                                      <option value="openprovider/auto-free">OpenProvider Auto Free</option>
-                                      {(availableModels || []).filter((m: any) => m.id !== 'openprovider/auto-free').map((m: any) => (
-                                        <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                                  <span className="truncate">
+                                    {cfg.providerProfileId
+                                      ? aiProviderProfiles.find((p) => p.id === cfg.providerProfileId)?.name || cfg.providerProfileId
+                                      : 'Default (Auto Free)'}
+                                  </span>
+                                  <ChevronDown
+                                    size={11}
+                                    className={`text-gray-400 shrink-0 transition-transform duration-150 ${
+                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'provider' ? 'rotate-180' : ''
+                                    }`}
+                                  />
+                                </button>
+                                {openDropdown?.agentId === agent.id && openDropdown?.type === 'provider' && (
+                                  <>
+                                    <div 
+                                      className="fixed inset-0 z-40" 
+                                      onClick={() => setOpenDropdown(null)} 
+                                    />
+                                    <div className="absolute top-[100%] left-0 mt-1 w-full rounded-xl border border-gray-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-900 shadow-xl py-1 max-h-48 overflow-y-auto custom-scrollbar z-50">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleAgentProviderChange(agent.id, null);
+                                          setOpenDropdown(null);
+                                        }}
+                                        className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
+                                          !cfg.providerProfileId ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
+                                        }`}
+                                      >
+                                        Default (Auto Free)
+                                      </button>
+                                      {(aiProviderProfiles || []).filter(p => p.active).map(p => (
+                                        <button
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                            handleAgentProviderChange(agent.id, p.id);
+                                            setOpenDropdown(null);
+                                          }}
+                                          className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
+                                            cfg.providerProfileId === p.id ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
+                                          }`}
+                                        >
+                                          {p.name}
+                                        </button>
                                       ))}
-                                    </>
-                                  )}
-                                </select>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                              <div className="flex flex-col gap-1.5 relative">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Model</label>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenDropdown(
+                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'model'
+                                        ? null
+                                        : { agentId: agent.id, type: 'model' }
+                                    );
+                                  }}
+                                  className="flex items-center justify-between w-full h-8 px-3 text-[11px] bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-gray-200/90 dark:hover:bg-zinc-700/90 border border-gray-200 dark:border-zinc-700/60 rounded-full transition-all text-gray-700 dark:text-gray-200 cursor-pointer select-none font-bold shadow-sm outline-none"
+                                >
+                                  <span className="truncate">
+                                    {cfg.modelId === 'openprovider/auto-free' ? 'OpenProvider Auto Free' : cfg.modelId.split('/').pop() || cfg.modelId}
+                                  </span>
+                                  <ChevronDown
+                                    size={11}
+                                    className={`text-gray-400 shrink-0 transition-transform duration-150 ${
+                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'model' ? 'rotate-180' : ''
+                                    }`}
+                                  />
+                                </button>
+                                {openDropdown?.agentId === agent.id && openDropdown?.type === 'model' && (
+                                  <>
+                                    <div 
+                                      className="fixed inset-0 z-40" 
+                                      onClick={() => setOpenDropdown(null)} 
+                                    />
+                                    <div className="absolute top-[100%] left-0 mt-1 w-full rounded-xl border border-gray-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-900 shadow-xl py-1 max-h-48 overflow-y-auto custom-scrollbar z-50">
+                                      {cfg.providerProfileId ? (
+                                        (() => {
+                                          const profile = aiProviderProfiles.find(p => p.id === cfg.providerProfileId);
+                                          const models = profile ? profile.models.filter(m => profile.selectedModelIds.includes(m.id)) : [];
+                                          return models.length > 0 ? (
+                                            models.map(m => (
+                                              <button
+                                                key={m.id}
+                                                type="button"
+                                                onClick={() => {
+                                                  handleAgentModelChange(agent.id, m.id, profile?.id);
+                                                  setOpenDropdown(null);
+                                                }}
+                                                className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
+                                                  cfg.modelId === m.id ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
+                                                }`}
+                                              >
+                                                {m.name || m.id}
+                                              </button>
+                                            ))
+                                          ) : (
+                                            <button
+                                              key={cfg.modelId}
+                                              type="button"
+                                              onClick={() => setOpenDropdown(null)}
+                                              className="w-full text-left px-3 py-1.5 text-[11px] text-gray-400 font-medium"
+                                            >
+                                              {cfg.modelId}
+                                            </button>
+                                          );
+                                        })()
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              handleAgentModelChange(agent.id, 'openprovider/auto-free', undefined);
+                                              setOpenDropdown(null);
+                                            }}
+                                            className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
+                                              cfg.modelId === 'openprovider/auto-free' ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
+                                            }`}
+                                          >
+                                            OpenProvider Auto Free
+                                          </button>
+                                          {(availableModels || []).filter((m: any) => m.id !== 'openprovider/auto-free').map((m: any) => (
+                                            <button
+                                              key={m.id}
+                                              type="button"
+                                              onClick={() => {
+                                                handleAgentModelChange(agent.id, m.id, m.providerProfileId);
+                                                setOpenDropdown(null);
+                                              }}
+                                              className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
+                                                cfg.modelId === m.id ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
+                                              }`}
+                                            >
+                                              {m.name || m.id}
+                                            </button>
+                                          ))}
+                                        </>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -4427,7 +4496,177 @@ export function SettingsModal({
   );
 }
 
+// ─── Composio Tool Counts Map ──────────────────────────────────────────────────
+const TOOLKIT_TOOL_COUNTS: Record<string, number> = {
+  gmail: 61,
+  googlecalendar: 44,
+  googledrive: 76,
+  googlesheets: 40,
+  googledocs: 33,
+  slack: 145,
+  github: 846,
+  linear: 64,
+  notion: 82,
+  twitter: 28,
+  discord: 37,
+  jira: 105,
+  trello: 48,
+  asana: 74,
+  hubspot: 112,
+  linkedin: 12,
+  figma: 15,
+  stripe: 52,
+  airtable: 36,
+  dropbox: 25,
+  supabase: 18,
+  salesforce: 180,
+};
+
+// ─── Composio Brand Logos ──────────────────────────────────────────────────────
+const renderBrandLogo = (slug: string) => {
+  const s = slug.toLowerCase();
+  switch (s) {
+    case 'gmail':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 48 48">
+          <path fill="#4285F4" d="M45 42H41V19L24 31L7 19V42H3V10c0-.8.5-1.5 1.2-1.8c.8-.3 1.8-.1 2.3.5L24 21L41.5 8.7c.6-.6 1.5-.7 2.3-.4c.7.3 1.2 1 1.2 1.7V42z"/>
+          <path fill="#34A853" d="M3 10v32h8V19L3 10z"/>
+          <path fill="#EA4335" d="M45 10v32h-8V19L45 10z"/>
+          <path fill="#FBBC05" d="M7 19l17 12l17-12V8.7L24 21L7 8.7V19z"/>
+        </svg>
+      );
+    case 'googlecalendar':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 48 48">
+          <rect x="4" y="8" width="40" height="34" rx="4" fill="#4285F4"/>
+          <path fill="#FFF" d="M11 20H37V38H11V20z"/>
+          <path fill="#4285F4" d="M11 11h26v6H11v-6z"/>
+          <text x="24" y="33" fill="#4285F4" fontSize="16" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">31</text>
+        </svg>
+      );
+    case 'googledrive':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 48 48">
+          <path fill="#FFCC00" d="M16 33L7 18.5h18L16 33z"/>
+          <path fill="#34A853" d="M32 33H14.5L23.5 18H41L32 33z"/>
+          <path fill="#0066CC" d="M32 33h-9L14.5 18H23L32 33z" fillOpacity="0.1"/>
+          <path fill="#0066CC" d="M23 18L14.5 3h18l8.5 15H23z"/>
+        </svg>
+      );
+    case 'googlesheets':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 48 48">
+          <rect x="6" y="4" width="36" height="40" rx="3" fill="#0F9D58" />
+          <path d="M32 4l10 10H32V4z" fill="#57BB8A" />
+          <rect x="12" y="18" width="24" height="20" rx="1.5" fill="#FFFFFF" />
+          <line x1="20" y1="18" x2="20" y2="38" stroke="#0F9D58" strokeWidth="2" />
+          <line x1="28" y1="18" x2="28" y2="38" stroke="#0F9D58" strokeWidth="2" />
+          <line x1="12" y1="24" x2="36" y2="24" stroke="#0F9D58" strokeWidth="2" />
+          <line x1="12" y1="31" x2="36" y2="31" stroke="#0F9D58" strokeWidth="2" />
+        </svg>
+      );
+    case 'googledocs':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 48 48">
+          <rect x="6" y="4" width="36" height="40" rx="3" fill="#4285F4" />
+          <path d="M32 4l10 10H32V4z" fill="#AFC4FC" />
+          <rect x="14" y="20" width="20" height="3" fill="#FFFFFF" rx="1" />
+          <rect x="14" y="27" width="20" height="3" fill="#FFFFFF" rx="1" />
+          <rect x="14" y="34" width="14" height="3" fill="#FFFFFF" rx="1" />
+        </svg>
+      );
+    case 'slack':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 100 100">
+          <path d="M 22,46 A 8,8 0 1,1 22,30 H 38 V 46 Z" fill="#36C5F0" />
+          <path d="M 22,54 A 8,8 0 1,1 38,54 V 70 H 22 Z" fill="#E01E5A" />
+          <path d="M 46,22 A 8,8 0 1,1 46,38 V 54 H 30 V 38 Z" fill="#36C5F0" />
+          <path d="M 54,22 A 8,8 0 1,1 70,22 V 38 H 54 Z" fill="#2EB67D" />
+          <path d="M 78,54 A 8,8 0 1,1 78,70 H 62 V 54 Z" fill="#2EB67D" />
+          <path d="M 78,46 A 8,8 0 1,1 62,46 V 30 H 78 Z" fill="#ECB22E" />
+          <path d="M 54,78 A 8,8 0 1,1 54,62 V 46 H 70 V 62 Z" fill="#ECB22E" />
+          <path d="M 46,78 A 8,8 0 1,1 30,78 V 62 H 46 Z" fill="#E01E5A" />
+        </svg>
+      );
+    case 'github':
+      return (
+        <svg className="w-6 h-6 shrink-0 text-black dark:text-white fill-current" viewBox="0 0 24 24">
+          <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.579.688.481C19.137 20.162 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+        </svg>
+      );
+    case 'notion':
+      return (
+        <svg className="w-6 h-6 shrink-0 fill-current text-white bg-black rounded-lg p-0.5" viewBox="0 0 24 24">
+          <path d="M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm1.5 3v12H7V9.7L15.3 18h2.2V6H16v8.3L7.7 6H5.5z" />
+        </svg>
+      );
+    case 'linear':
+      return (
+        <svg className="w-6 h-6 shrink-0 text-white fill-current" viewBox="0 0 24 24">
+          <path d="M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8zm-1-13h2v5H11V7zm0 7h2v2H11v-2z" />
+        </svg>
+      );
+    case 'trello':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="8" fill="#0079BF"/>
+          <rect x="8" y="8" width="13" height="30" rx="3" fill="#FFF"/>
+          <rect x="27" y="8" width="13" height="18" rx="3" fill="#FFF"/>
+        </svg>
+      );
+    case 'jira':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24" fill="#0052CC">
+          <path d="M11.53 2c0 2.4 1.96 4.35 4.37 4.35H20V2h-8.47zm-5.7 5.7c0 2.42 1.95 4.38 4.38 4.38H14.5V7.7H5.83zm-5.7 5.7c0 2.42 1.96 4.38 4.38 4.38H9V13.4H.13z"/>
+        </svg>
+      );
+    case 'asana':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="6" r="3.5" fill="#FC636B"/>
+          <circle cx="6.5" cy="15.5" r="3.5" fill="#FC636B"/>
+          <circle cx="17.5" cy="15.5" r="3.5" fill="#FC636B"/>
+        </svg>
+      );
+    case 'discord':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 127.14 96.36" fill="#5865F2">
+          <path d="M107.7,8.07c-9.53-4.4-19.78-7.7-30.56-9.67a.35.35,0,0,0-.38.18,74.45,74.45,0,0,0-3.37,6.94C71.3,5.19,59,5.19,47.1,5.52a71.86,71.86,0,0,0-3.41-6.94.38.38,0,0,0-.38-.18C32.53.37,22.28,3.67,12.75,8.07a.41.41,0,0,0-.18.15C-7.06,37.6-.46,66.45,12.35,85.25a.43.43,0,0,0,.32.22c13.12,9.65,25.83,15.54,38.14,19.34a.39.39,0,0,0,.42-.14c2.9-4,5.47-8.31,7.66-12.87a.38.38,0,0,0-.21-.52,49,49,0,0,1-5.93-2.83.4.4,0,0,1-.05-.66,35.25,35.25,0,0,0,1.24-1c7.22,4.19,15.2,4.19,22.21,0a30.82,30.82,0,0,0,1.24,1,.41.41,0,0,1-.05.66c-1.89,1.11-3.87,2.06-5.92,2.83a.4.4,0,0,0-.2.52c2.19,4.56,4.76,8.91,7.66,12.87a.42.42,0,0,0,.42.14c12.31-3.8,25-9.69,38.14-19.34a.4.4,0,0,0,.32-.22C128.53,66.45,121.75,37.6,107.88,8.22A.38.38,0,0,0,107.7,8.07ZM42.45,65.69c-7.51,0-13.75-6.93-13.75-15.43S34.82,34.83,42.45,34.83,56.24,41.76,56.12,50.26C56.12,58.76,50,65.69,42.45,65.69Zm42.24,0c-7.51,0-13.75-6.93-13.75-15.43S77.06,34.83,84.69,34.83,98.48,41.76,98.36,50.26C98.36,58.76,92.21,65.69,84.69,65.69Z"/>
+        </svg>
+      );
+    case 'stripe':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24" fill="#635BFF">
+          <path d="M13.996 11.23c0-.98-.79-1.42-2.1-1.42-1.74 0-3.32.55-4.57 1.25V5.55A12.021 12.021 0 0 1 12.214 4c3.48 0 5.92 1.76 5.92 5.56 0 4.96-4.04 5.96-7.39 6.84-1.28.34-2.6.61-2.6 1.48 0 .96.86 1.44 2.22 1.44 1.93 0 3.8-.76 5.25-1.63v5.6c-1.57.73-3.69 1.16-5.46 1.16-3.8 0-6.15-1.84-6.15-5.69 0-4.99 4.12-6 7.42-6.85 1.54-.42 2.58-.69 2.58-1.68z"/>
+        </svg>
+      );
+    case 'hubspot':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24" fill="#FF7A59">
+          <path d="M18.8 10.1c-.2-.1-.5-.2-.8-.2h-4.2l-2.1-3.6c.4-.3.7-.7.9-1.2.2-.6.2-1.2 0-1.8-.2-.6-.5-1.1-1-1.4-.4-.3-1-.5-1.6-.4s-1.1.3-1.4.8c-.3.4-.5 1-.4 1.6.1.6.3 1.1.8 1.4.3.2.6.3.9.3l2.1 3.6h-1c-.6 0-1.1.2-1.5.6l-3.3.6C5.5 8.1 4.3 8.3 3.3 9c-.9.6-1.7 1.5-2.2 2.5s-.6 2.2-.4 3.3c.3 1.1.9 2.1 1.7 2.8.9.8 1.9 1.2 3.1 1.3l.1-1.7c-.8-.1-1.5-.4-2.1-.9-.6-.5-1-1.2-1.2-2s-.1-1.6.2-2.3c.4-.7.9-1.3 1.6-1.7.6-.3 1.2-.5 1.9-.5l3.2-.6c.4-.1.7-.3 1-.5h1.2v3.7c-.4.2-.8.6-1 1-.2.5-.2 1.1-.1 1.6.1.5.4 1 .8 1.3.4.3.9.5 1.4.5.5 0 1-.2 1.4-.5.4-.3.7-.8.8-1.3s.1-1.1-.1-1.6c-.3-.4-.6-.8-1-1v-3.7h1.4c.5 0 1-.2 1.4-.5l4.3 1.2c.5.2.9.4 1.3.8.4.3.7.8.9 1.3s.2 1 .1 1.5c-.1.5-.3 1-.7 1.3-.3.3-.8.6-1.3.7s-1 .1-1.5-.1c-.5-.2-.9-.5-1.2-.9l-1.3.9c.5.7 1.2 1.2 2 1.5s1.7.3 2.5.1a3.94 3.94 0 0 0 2.5-1.8 4.09 4.09 0 0 0 .5-3.1c-.2-1-.7-1.9-1.5-2.5s-1.7-.9-2.7-1zm-10-8c-.3 0-.6-.1-.8-.3-.2-.2-.3-.5-.3-.8s.1-.6.3-.8c.2-.2.5-.3.8-.3s.6.1.8.3c.2.2.3.5.3.8s-.1.6-.3.8c-.2.2-.5.3-.8.3zm3.2 13.8c-.3 0-.6-.1-.8-.3-.2-.2-.3-.5-.3-.8s.1-.6.3-.8c.2-.2.5-.3.8-.3s.6.1.8.3c.2.2.3.5.3.8s-.1.6-.3.8c-.2.2-.5.3-.8.3z"/>
+        </svg>
+      );
+    case 'salesforce':
+      return (
+        <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24" fill="#00A1E0">
+          <path d="M19.4 10.7a4.45 4.45 0 0 0-4.4-4.4 4.8 4.8 0 0 0-3-.9A5.8 5.8 0 0 0 6.2 11c-.5-.1-1-.1-1.4-.1a3.84 3.84 0 0 0-3.8 3.8 3.8 3.8 0 0 0 3.8 3.8h14.6a3.84 3.84 0 0 0 3.8-3.8 4.3 4.3 0 0 0-3.8-4z"/>
+        </svg>
+      );
+    default:
+      return (
+        <div className="w-6 h-6 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-750 flex items-center justify-center text-zinc-600 dark:text-zinc-400 shrink-0 font-bold text-[10px] uppercase font-mono">
+          {slug.substring(0, 2)}
+        </div>
+      );
+  }
+};
+
 function ComposioPanel() {
+  return <ComposioPanelRefactored />;
+}
+
+function OldComposioPanel() {
+
   const [apiKey, setApiKey] = React.useState(() => localStorage.getItem('COMPOSIO_API_KEY') || '');
   const [isVerifying, setIsVerifying] = React.useState(false);
   const [isEnabled, setIsEnabled] = React.useState(false);
@@ -4436,6 +4675,10 @@ function ComposioPanel() {
   const [busy, setBusy] = React.useState<string | null>(null);
   const [verifyError, setVerifyError] = React.useState<string | null>(null);
   const authPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const [showKeyForm, setShowKeyForm] = React.useState(false);
+  const [expandedToolsSlug, setExpandedToolsSlug] = React.useState<string | null>(null);
+  const [expandedToolsList, setExpandedToolsList] = React.useState<any[]>([]);
+  const [loadingTools, setLoadingTools] = React.useState(false);
 
   React.useEffect(() => () => { if (authPollRef.current) clearInterval(authPollRef.current); }, []);
 
@@ -4517,6 +4760,29 @@ function ComposioPanel() {
       await fetchToolkits();
     } catch {}
     setBusy(null);
+  };
+
+  const toggleShowTools = async (slug: string) => {
+    if (expandedToolsSlug === slug) {
+      setExpandedToolsSlug(null);
+      setExpandedToolsList([]);
+      return;
+    }
+    setExpandedToolsSlug(slug);
+    setLoadingTools(true);
+    try {
+      const r = await fetch(`/api/composio/toolkit-tools/${slug}`);
+      if (r.ok) {
+        const data = await r.json();
+        setExpandedToolsList(data.tools || []);
+      } else {
+        setExpandedToolsList([]);
+      }
+    } catch {
+      setExpandedToolsList([]);
+    } finally {
+      setLoadingTools(false);
+    }
   };
 
   const statusColor = (status: string) => {

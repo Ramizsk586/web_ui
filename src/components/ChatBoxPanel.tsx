@@ -38,7 +38,11 @@ import {
   LayoutGrid,
   Settings,
   BookOpen,
-  Puzzle
+  Puzzle,
+  Eye,
+  ShieldAlert,
+  GraduationCap,
+  Workflow
 } from "lucide-react";
 import { DocumentSelector } from "./DocumentSelectorModal";
 import { WRITING_STYLES, SKILLS, SUPPORTED_VOICE_LANGUAGES } from "../constants";
@@ -191,6 +195,7 @@ export interface ChatBoxPanelProps {
   useLocalModelsOnly?: boolean;
   isVoicePanelOpen?: boolean;
   setIsVoicePanelOpen?: (open: boolean) => void;
+  researchState?: any;
 }
 
 export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
@@ -198,6 +203,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   theme,
   isWhiteboardOpen,
   setIsWhiteboardOpen,
+  researchState,
   writingStyle,
   isWebSearchEnabled,
   setIsWebSearchEnabled,
@@ -334,6 +340,8 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   setIsVoicePanelOpen,
 }) => {
   const [isRagSelectorOpen, setIsRagSelectorOpen] = React.useState(false);
+  const [isDeepResearchPresetOpen, setIsDeepResearchPresetOpen] = React.useState(false);
+  const deepResearchPresetRef = React.useRef<HTMLDivElement | null>(null);
   const [ragEnabled, setRagEnabled] = React.useState(() => {
     return localStorage.getItem('lumina_rag_enabled') !== 'false';
   });
@@ -398,10 +406,17 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
       ) {
         setIsPlusMenuOpen(false);
       }
+      if (
+        isDeepResearchPresetOpen &&
+        deepResearchPresetRef.current &&
+        !deepResearchPresetRef.current.contains(target)
+      ) {
+        setIsDeepResearchPresetOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isGridMenuOpen, isPlusMenuOpen, plusMenuRef, menuContentRef]);
+  }, [isGridMenuOpen, isPlusMenuOpen, plusMenuRef, menuContentRef, isDeepResearchPresetOpen, deepResearchPresetRef]);
 
   const permissionOptions: Array<{
     id: CoderPermissionMode;
@@ -510,6 +525,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
         {(writingStyle !== "default" ||
           isWebSearchEnabled ||
           isDeepSearchEnabled ||
+          luminaTools.some((t) => t.enabled) ||
           bridgeTools.some((t) => t.enabled) ||
           activeSkills.length > 0 ||
           useTurboQuant) && (
@@ -573,26 +589,53 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                 </span>
               </motion.button>
             )}
-            {luminaTools.some((t) => t.enabled) && (
+            {(() => {
+              const nonWikiTools = luminaTools.filter((t) => t.enabled && !t.id.startsWith('wiki_'));
+              const isWikiEnabled = luminaTools.some((t) => t.enabled && t.id.startsWith('wiki_'));
+              
+              const elements = nonWikiTools.map((tool) => (
+                <motion.button
+                  key={tool.id}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsPlusMenuOpen(true);
+                    setActivePlusSubMenu("lumina_tools");
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-450 border border-indigo-500/20 shadow-sm cursor-pointer hover:bg-indigo-500/15 text-xs font-semibold"
+                >
+                  {tool.icon || <Hammer size={12} />}
+                  <span>{tool.name}</span>
+                </motion.button>
+              ));
+
+              if (isWikiEnabled) {
+                elements.push(
+                  <motion.button
+                    key="wiki_scrab_tag"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsPlusMenuOpen(true);
+                      setActivePlusSubMenu("lumina_tools");
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-450 border border-indigo-500/20 shadow-sm cursor-pointer hover:bg-indigo-500/15 text-xs font-semibold"
+                  >
+                    <BookOpen size={12} className="text-indigo-450" />
+                    <span>Wiki Scrab</span>
+                  </motion.button>
+                );
+              }
+
+              return elements;
+            })()}
+            {bridgeTools.filter((t) => t.enabled).map((tool) => (
               <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsPlusMenuOpen(true);
-                  setActivePlusSubMenu("lumina_tools");
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 shadow-sm cursor-pointer hover:bg-indigo-500/15 text-xs font-semibold"
-              >
-                <Hammer size={12} />
-                <span>
-                  Lumina Tools ({luminaTools.filter((t) => t.enabled).length})
-                </span>
-              </motion.button>
-            )}
-            {bridgeTools.some((t) => t.enabled) && (
-              <motion.button
+                key={tool.id}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -603,12 +646,10 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm cursor-pointer hover:bg-emerald-500/15 text-xs font-semibold"
               >
-                <Wrench size={12} />
-                <span>
-                  Bridge Tools ({bridgeTools.filter((t) => t.enabled).length})
-                </span>
+                {tool.icon || <Wrench size={12} />}
+                <span>{tool.name}</span>
               </motion.button>
-            )}
+            ))}
             {activeSkills.map((skillId) => {
               const skill = SKILLS.find((s) => s.id === skillId);
               if (!skill) return null;
@@ -1361,7 +1402,11 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                 ? "Describe the feature or component you want me to build autonomously..."
                 : activeAssistantMode === "planner"
                   ? "Describe a complex high-level task to draft a detailed architecture blueprint..."
-                  : "Trace syntax errors, explain complex codes, or hot-fix bugs..."
+                  : activeAssistantMode === "debugger"
+                    ? "Trace syntax errors, explain complex codes, or hot-fix bugs..."
+                    : activeAssistantMode === "reviewer"
+                      ? "Type 'start' to perform a complete code review, find dead code, and analyze code logic..."
+                      : "Type 'start' to verify vulnerabilities, trace logical errors, check security, and score the project..."
             }
             rows={1}
             className="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[16px] p-0 resize-none min-h-[40px] text-[var(--theme-primary)] placeholder-zinc-500/70 scroll-none cursor-text pointer-events-auto"
@@ -1430,14 +1475,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                   setIsPlusMenuOpen(!isPlusMenuOpen);
                   setActivePlusSubMenu("main");
                 }}
-                className={`p-2 rounded-2xl transition-all ${
-                  isWebSearchEnabled
-                    ? "text-blue-500 bg-blue-500/10 hover:bg-blue-500/20"
-                    : luminaTools.some((t) => t.enabled) ||
-                        bridgeTools.some((t) => t.enabled)
-                      ? "text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/40"
-                      : "text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]"
-                }`}
+                className="p-2 rounded-2xl transition-all text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]"
               >
                 <Plus
                   size={20}
@@ -1477,6 +1515,18 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             label: "Take a screenshot",
                             icon: <Camera size={16} />,
                           },
+                          {
+                            id: "search",
+                            label: "Web search",
+                            icon: <Globe size={16} />,
+                            isSelected: isWebSearchEnabled,
+                          },
+                          {
+                            id: "deep_research",
+                            label: "Deep Research",
+                            icon: <GraduationCap size={16} className="text-purple-400" />,
+                            isSelected: isDeepSearchEnabled,
+                          },
                         ].map((item) => (
                           <button
                             key={item.id}
@@ -1497,16 +1547,37 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                 case "screenshot":
                                   handleScreenshot();
                                   break;
+                                case "search":
+                                  setIsPlusMenuOpen(false);
+                                  (() => {
+                                    const newVal = !isWebSearchEnabled;
+                                    setIsWebSearchEnabled(newVal);
+                                    if (newVal) setIsDeepSearchEnabled(false);
+                                  })();
+                                  break;
+                                case "deep_research":
+                                  setIsPlusMenuOpen(false);
+                                  setIsDeepSearchEnabled((prev) => {
+                                    const nextVal = !prev;
+                                    if (nextVal) {
+                                      setIsWebSearchEnabled(false);
+                                    }
+                                    return nextVal;
+                                  });
+                                  break;
                               }
                             }}
                             className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-colors group/item"
                           >
                             <div className="flex items-center gap-3">
-                              <span className="transition-colors group-hover/item:text-[var(--theme-primary)]">
+                              <span className={`transition-colors ${(item as any).isSelected ? (item.id === "deep_research" ? "text-purple-500" : "text-blue-500") : "group-hover/item:text-[var(--theme-primary)]"}`}>
                                 {item.icon}
                               </span>
                               {item.label}
                             </div>
+                            {(item as any).isSelected && (
+                              <Check size={14} className={item.id === "deep_research" ? "text-purple-500" : "text-blue-500"} />
+                            )}
                           </button>
                         ))}
                       </div>
@@ -1874,6 +1945,101 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
               </AnimatePresence>
             </div>
 
+            {/* Deep Research Premium Segment */}
+            {isDeepSearchEnabled && (
+              <div className="flex items-center gap-1 border border-[var(--theme-border)] bg-[var(--theme-surface)]/40 rounded-xl p-0.5">
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  type="button"
+                  onClick={() => {
+                    const nextVal = !isDeepSearchEnabled;
+                    setIsDeepSearchEnabled(nextVal);
+                    if (nextVal) {
+                      setIsWebSearchEnabled(false);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none ${
+                    isDeepSearchEnabled
+                      ? "bg-purple-500/10 text-purple-400 border border-purple-500/10"
+                      : "text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] border border-transparent"
+                  }`}
+                  title="Toggle Deep Research Mode"
+                >
+                  <GraduationCap size={14} className={isDeepSearchEnabled ? "animate-pulse" : ""} />
+                  <span>Deep Research</span>
+                </motion.button>
+
+                <div className="relative" ref={deepResearchPresetRef}>
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    type="button"
+                    onClick={() => setIsDeepResearchPresetOpen(!isDeepResearchPresetOpen)}
+                    className="flex items-center gap-0.5 px-1 py-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-xs font-semibold text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all cursor-pointer select-none"
+                  >
+                    <span>{researchState?.depthPreset === "extreme" ? "Advanced" : "Normal"}</span>
+                    <ChevronDown
+                      size={11}
+                      className="text-[var(--theme-muted)] transition-transform duration-200"
+                      style={{ transform: isDeepResearchPresetOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                    />
+                  </motion.button>
+                  <AnimatePresence>
+                    {isDeepResearchPresetOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                        className="absolute bottom-full left-0 mb-2 w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[190] p-1.5 text-left"
+                      >
+                        {[
+                          {
+                            id: "standard",
+                            label: "Normal",
+                            icon: <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0 mt-1.5 ml-1" />,
+                            desc: "Fast, reliable responses for quick tasks."
+                          },
+                          {
+                            id: "extreme",
+                            label: "Advanced",
+                            icon: <Workflow size={11} className="text-purple-400 shrink-0 mt-0.5" />,
+                            desc: "Devoting extra time to a deeper analysis."
+                          }
+                        ].map((item) => {
+                          const isActive = (researchState?.depthPreset || "standard") === item.id;
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => {
+                                researchState?.setDepthPreset(item.id as "standard" | "extreme");
+                                setIsDeepResearchPresetOpen(false);
+                              }}
+                              className={`w-full flex items-start gap-2 px-2.5 py-2 rounded-xl text-left transition-colors cursor-pointer ${
+                                isActive
+                                  ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)]"
+                                  : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]"
+                              }`}
+                            >
+                              <span className="flex-shrink-0 mt-0.5">
+                                {item.icon}
+                              </span>
+                              <div className="flex-1 flex flex-col min-w-0">
+                                <span className="text-xs font-semibold">{item.label}</span>
+                                <span className="text-[10px] text-[var(--theme-muted)] font-normal leading-tight">{item.desc}</span>
+                              </div>
+                              {isActive && (
+                                <Check size={11} className="text-[var(--theme-accent)] self-center flex-shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            )}
+
             {/* Vertical separator */}
             <div className="w-[1px] h-4 bg-[var(--theme-border)] mx-0.5 opacity-60 shrink-0" />
 
@@ -1952,18 +2118,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             hasArrow: true,
                             isSelected: composioEnabled && composioTools.some((t: any) => t.enabled),
                           },
-                          {
-                            id: "search",
-                            label: "Web search",
-                            icon: <Globe size={16} />,
-                            isSelected: isWebSearchEnabled,
-                          },
-                          {
-                            id: "deep_search",
-                            label: "Deep search",
-                            icon: <Bot size={16} />,
-                            isSelected: isDeepSearchEnabled,
-                          },
                         ].map((item, idx) =>
                           item.type === "separator" ? (
                             <div
@@ -1983,12 +2137,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                     break;
                                   case "style":
                                     setActiveGridSubMenu("style");
-                                    break;
-                                  case "deep_search":
-                                    (() => { const newVal = !isDeepSearchEnabled; setIsDeepSearchEnabled(newVal); if (newVal) setIsWebSearchEnabled(false); })();
-                                    break;
-                                  case "search":
-                                    (() => { const newVal = !isWebSearchEnabled; setIsWebSearchEnabled(newVal); if (newVal) setIsDeepSearchEnabled(false); })()
                                     break;
                                   case "lumina_tools":
                                     setActiveGridSubMenu("lumina_tools");
@@ -2493,7 +2641,17 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                   transition={{ duration: 0.08 }}
                   onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
                   className="flex items-center gap-1.5 px-3 py-2 hover:bg-[var(--theme-hover-bg)] rounded-2xl text-sm font-medium text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all active:scale-95 cursor-pointer select-none"
-                  title={`Assistant Mode: ${activeAssistantMode === "builder" ? "Builder" : activeAssistantMode === "planner" ? "Planner" : "Debugger"}`}
+                  title={`Assistant Mode: ${
+                    activeAssistantMode === "builder"
+                      ? "Builder"
+                      : activeAssistantMode === "planner"
+                        ? "Planner"
+                        : activeAssistantMode === "debugger"
+                          ? "Debugger"
+                          : activeAssistantMode === "reviewer"
+                            ? "Reviewer"
+                            : "Tester"
+                  }`}
                 >
                   <div className="shrink-0 flex items-center justify-center">
                     {activeAssistantMode === "builder" && (
@@ -2508,13 +2666,23 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     {activeAssistantMode === "debugger" && (
                       <Bug size={14} className="text-amber-500" />
                     )}
+                    {activeAssistantMode === "reviewer" && (
+                      <Eye size={14} className="text-emerald-400" />
+                    )}
+                    {activeAssistantMode === "tester" && (
+                      <ShieldAlert size={14} className="text-rose-400" />
+                    )}
                   </div>
                   <span className="hidden xl:inline">
                     {activeAssistantMode === "builder"
                       ? "Builder"
                       : activeAssistantMode === "planner"
                         ? "Planner"
-                        : "Debugger"}
+                        : activeAssistantMode === "debugger"
+                          ? "Debugger"
+                          : activeAssistantMode === "reviewer"
+                            ? "Reviewer"
+                            : "Tester"}
                   </span>
                   <ChevronDown
                     size={14}
@@ -2562,6 +2730,22 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             color: "text-amber-500",
                             bgColor: "bg-amber-500/10",
                             accentColor: "bg-amber-500",
+                          },
+                          {
+                            id: "reviewer",
+                            name: "Reviewer Mode",
+                            icon: <Eye size={13} />,
+                            color: "text-emerald-400",
+                            bgColor: "bg-[#10b981]/10",
+                            accentColor: "bg-[#10b981]",
+                          },
+                          {
+                            id: "tester",
+                            name: "Tester Mode",
+                            icon: <ShieldAlert size={13} />,
+                            color: "text-rose-400",
+                            bgColor: "bg-[#f43f5e]/10",
+                            accentColor: "bg-[#f43f5e]",
                           },
                         ].map((mode, idx) => {
                           const isActive = activeAssistantMode === mode.id;

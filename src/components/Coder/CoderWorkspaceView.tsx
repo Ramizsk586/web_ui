@@ -182,6 +182,19 @@ export default function CoderWorkspaceView({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  React.useEffect(() => {
+    (window as any).openFileInPreview = (filePath: string) => {
+      setOpenFileTabs(prev => {
+        if (prev.includes(filePath)) return prev;
+        return [...prev, filePath];
+      });
+      setRightPanelTab(filePath);
+    };
+    return () => {
+      delete (window as any).openFileInPreview;
+    };
+  }, []);
+
   const filteredModelList = React.useMemo(() => {
     if (!activeModelList) return [];
     return activeModelList.filter((model: any) => {
@@ -200,7 +213,22 @@ export default function CoderWorkspaceView({
 
     const handleMove = (e: PointerEvent) => {
       const newWidth = e.clientX;
-      if (newWidth >= 200 && newWidth <= 600) {
+      
+      // Look up current width of the right preview panel
+      let rightPanelWidth = 0;
+      if (isCoderRightPanelOpen) {
+        const rightPanelEl = document.getElementById('live-preview-panel');
+        if (rightPanelEl) {
+          rightPanelWidth = rightPanelEl.getBoundingClientRect().width;
+        } else {
+          rightPanelWidth = 450; // default state fallback
+        }
+      }
+      
+      const maxLeftWidth = window.innerWidth - rightPanelWidth - 550; // Keep at least 550px for center chat area
+      const finalLeftWidth = Math.min(600, Math.max(200, maxLeftWidth));
+
+      if (newWidth >= 200 && newWidth <= finalLeftWidth) {
         setExplorerWidth(newWidth);
       }
     };
@@ -260,7 +288,7 @@ export default function CoderWorkspaceView({
       </AnimatePresence>
 
       {/* CENTER PANEL: Standard & customized Coder chat and text layout */}
-      <div className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0A0908]">
+      <div id="coder-chat-area" className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0A0908] min-w-[550px]">
         
         {/* Coder Top Navigation Bar */}
         <div className="h-12 border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 bg-[#151211] backdrop-blur-md relative z-[150]" style={{ backgroundColor: '#151211' }}>
@@ -686,6 +714,8 @@ export default function CoderWorkspaceView({
           workspaceRootPath={coderWorkspacePath}
           orchestrationState={orchestrationState}
           onOpenFile={setFloatingEditFile}
+          isCoderLeftPanelOpen={isCoderLeftPanelOpen}
+          explorerWidth={explorerWidth}
         />
       </AnimatePresence>
 

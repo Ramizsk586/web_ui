@@ -236,17 +236,75 @@ export function useAppSettings({
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
   const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', DEFAULT_API_KEY));
 
+  const [selectedProvider, setSelectedProvider] = useState(() => safeGetItem('lumina_provider', 'openprovider'));
   const [searchProvider, setSearchProvider] = useState(() => localStorage.getItem('lumina_search_provider') || 'tavily');
   const [tavilyApiKey, setTavilyApiKey] = useState(() => safeGetItem('lumina_tavily_key', ''));
   const [serpApiKey, setSerpApiKey] = useState(() => safeGetItem('lumina_serp_key', ''));
 
-  const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
-  const [searchVerificationState, setSearchVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle');
+  const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>(() => {
+    try {
+      const savedKey = localStorage.getItem('lumina_verified_api_key') || '';
+      const savedUrl = localStorage.getItem('lumina_verified_server_url') || '';
+      const savedProv = localStorage.getItem('lumina_verified_provider') || '';
+      const currentKey = localStorage.getItem('lumina_api_key') || '';
+      const currentUrl = localStorage.getItem('lumina_server_url') || 'https://openprovider.mimika.in/v1';
+      const currentProv = localStorage.getItem('lumina_provider') || 'openprovider';
+      const isVerified = localStorage.getItem('lumina_ai_verified') === 'true';
+      if (isVerified && savedKey === currentKey && savedUrl === currentUrl && savedProv === currentProv) {
+        return 'success';
+      }
+    } catch {}
+    return 'idle';
+  });
+
+  const [searchVerificationState, setSearchVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>(() => {
+    try {
+      const savedSearchProvider = localStorage.getItem('lumina_verified_search_provider') || '';
+      const savedTavilyKey = localStorage.getItem('lumina_verified_tavily_key') || '';
+      const savedSerpKey = localStorage.getItem('lumina_verified_serp_key') || '';
+      const currentSearchProvider = localStorage.getItem('lumina_search_provider') || 'tavily';
+      const currentTavilyKey = localStorage.getItem('lumina_tavily_key') || '';
+      const currentSerpKey = localStorage.getItem('lumina_serp_key') || '';
+      const isVerified = localStorage.getItem('lumina_search_verified') === 'true';
+      if (isVerified && savedSearchProvider === currentSearchProvider && savedTavilyKey === currentTavilyKey && savedSerpKey === currentSerpKey) {
+        return 'success';
+      }
+    } catch {}
+    return 'idle';
+  });
+
+  useEffect(() => {
+    try {
+      const savedKey = localStorage.getItem('lumina_verified_api_key') || '';
+      const savedUrl = localStorage.getItem('lumina_verified_server_url') || '';
+      const savedProv = localStorage.getItem('lumina_verified_provider') || '';
+      if (apiKey !== savedKey || serverUrl !== savedUrl || selectedProvider !== savedProv) {
+        localStorage.setItem('lumina_ai_verified', 'false');
+        setAiVerificationState('idle');
+      } else if (localStorage.getItem('lumina_ai_verified') === 'true') {
+        setAiVerificationState('success');
+      }
+    } catch {}
+  }, [apiKey, serverUrl, selectedProvider]);
+
+  useEffect(() => {
+    try {
+      const savedSearchProvider = localStorage.getItem('lumina_verified_search_provider') || '';
+      const savedTavilyKey = localStorage.getItem('lumina_verified_tavily_key') || '';
+      const savedSerpKey = localStorage.getItem('lumina_verified_serp_key') || '';
+      if (searchProvider !== savedSearchProvider || tavilyApiKey !== savedTavilyKey || serpApiKey !== savedSerpKey) {
+        localStorage.setItem('lumina_search_verified', 'false');
+        setSearchVerificationState('idle');
+      } else if (localStorage.getItem('lumina_search_verified') === 'true') {
+        setSearchVerificationState('success');
+      }
+    } catch {}
+  }, [searchProvider, tavilyApiKey, serpApiKey]);
+
   const [isAiSaved, setIsAiSaved] = useState(false);
   const [isSearchSaved, setIsSearchSaved] = useState(false);
   const [isMcpSaved, setIsMcpSaved] = useState(false);
   const [writingStyle, setWritingStyle] = useState('default');
-  const [selectedProvider, setSelectedProvider] = useState(() => safeGetItem('lumina_provider', 'openprovider'));
   const [aiProviderProfiles, setAiProviderProfiles] = useState<AiProviderProfile[]>(() => {
     try {
       return normalizeProviderProfiles(JSON.parse(localStorage.getItem('lumina_ai_provider_profiles') || '[]'));
@@ -382,8 +440,15 @@ export function useAppSettings({
           }
           saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
+          try {
+            localStorage.setItem('lumina_ai_verified', 'true');
+            localStorage.setItem('lumina_verified_api_key', apiKey);
+            localStorage.setItem('lumina_verified_server_url', serverUrl);
+            localStorage.setItem('lumina_verified_provider', selectedProvider);
+          } catch {}
         } else {
           setAiVerificationState('error');
+          setTimeout(() => setAiVerificationState('idle'), 3000);
         }
       } else {
         const isOpenCode = selectedProvider === 'opencode';
@@ -411,14 +476,20 @@ export function useAppSettings({
           }
           saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
+          try {
+            localStorage.setItem('lumina_ai_verified', 'true');
+            localStorage.setItem('lumina_verified_api_key', apiKey);
+            localStorage.setItem('lumina_verified_server_url', serverUrl);
+            localStorage.setItem('lumina_verified_provider', selectedProvider);
+          } catch {}
         } else {
           setAiVerificationState('error');
+          setTimeout(() => setAiVerificationState('idle'), 3000);
         }
       }
     } catch (error) {
       console.error('Verification failed:', error);
       setAiVerificationState('error');
-    } finally {
       setTimeout(() => setAiVerificationState('idle'), 3000);
     }
   }, [serverUrl, apiKey, selectedProvider, editingAiProfileId, aiProviderProfiles, persistAiProviderProfiles, getProfileDisplayName]);
@@ -649,13 +720,19 @@ export function useAppSettings({
       });
       if (response.ok) {
         setSearchVerificationState('success');
+        try {
+          localStorage.setItem('lumina_search_verified', 'true');
+          localStorage.setItem('lumina_verified_search_provider', searchProvider);
+          localStorage.setItem('lumina_verified_tavily_key', tavilyApiKey);
+          localStorage.setItem('lumina_verified_serp_key', serpApiKey);
+        } catch {}
       } else {
         setSearchVerificationState('error');
+        setTimeout(() => setSearchVerificationState('idle'), 3000);
       }
     } catch (error) {
       console.error('Search verification failed:', error);
       setSearchVerificationState('error');
-    } finally {
       setTimeout(() => setSearchVerificationState('idle'), 3000);
     }
   }, [searchProvider, tavilyApiKey, serpApiKey]);

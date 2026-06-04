@@ -171,6 +171,7 @@ export function extractArtifacts(
   }
 
   // Heuristics fallback if no document, poem or report artifacts were detected
+  return artifacts;
   if (artifacts.filter(a => ['poem', 'report', 'markdown'].includes(a.type)).length === 0) {
     const lowerContent = cleanContent.toLowerCase();
     const stanzas = cleanContent.split('\n\n').filter(s => s.trim().length > 0);

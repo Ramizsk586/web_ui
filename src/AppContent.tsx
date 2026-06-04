@@ -209,6 +209,7 @@ import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 import { LivePreviewPanel } from './components/LivePreviewPanel';
 import { DevToolsPanel } from './components/DevToolsPanel';
+import { ThemeCustomizerPanel } from './components/ThemeCustomizerPanel';
 
 import { RAGPanel } from './components/RAGPanel';
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
@@ -464,6 +465,7 @@ export default function AppContent({
   const [showProjectsPage, setShowProjectsPage] = useState(false);
   const [showAgentsPage, setShowAgentsPage] = useState(false);
   const [isLuminaAgentOpen, setIsLuminaAgentOpen] = useState(false);
+  const [isCustomThemeOpen, setIsCustomThemeOpen] = useState(false);
 
   const [selectedProjectForChats, setSelectedProjectForChats] = useState<any | null>(null);
   const [selectedAgentForChats, setSelectedAgentForChats] = useState<any | null>(null);
@@ -727,7 +729,7 @@ export default function AppContent({
   const whiteboardAttachRef = useRef<(() => void) | null>(null);
 
   // Layout & UI helper states
-  const [activeAssistantMode, setActiveAssistantMode] = useState<'builder' | 'planner' | 'debugger'>('builder');
+  const [activeAssistantMode, setActiveAssistantMode] = useState<'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester'>('builder');
   const [coderPermissionMode, setCoderPermissionMode] = useState<CoderPermissionMode>(() => {
     return (localStorage.getItem('lumina_coder_permission_mode') as CoderPermissionMode) || 'default';
   });
@@ -1052,6 +1054,39 @@ export default function AppContent({
   };
 
   const handleStartBuilding = (chatId: string, messageId: string, todos: any[]) => {
+    // Dynamically write TODO.md checklist to the project workspace
+    const todoContent = `# Tasks Checklist\n\n` + 
+      todos.map((t) => `- [ ] ${t.text || t.content}`).join('\n') + '\n';
+      
+    const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+    const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md` : `./TODO.md`;
+    
+    fetch('/api/fs/write', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath: fullPath, content: todoContent, ...workspaceArg })
+    }).then(() => {
+      if (triggerWorkspaceRefresh) {
+        triggerWorkspaceRefresh();
+      }
+      setTimeout(() => {
+        if ((window as any).openFileInPreview) {
+          (window as any).openFileInPreview('TODO.md');
+        }
+      }, 300);
+    }).catch(err => {
+      console.error("Failed to write TODO.md:", err);
+    });
+    if (orchestrationState.isActive && orchestrationState.awaitingUserConfirmation) {
+      setOrchestrationState((prev: any) => ({
+        ...prev,
+        awaitingUserConfirmation: false,
+        agents: prev.agents.map((a: any, idx: number) => idx === 0 ? { ...a, status: 'done', completedAt: Date.now() } : a)
+      }));
+      setTimeout(() => {
+        handleSend("Excellent. Proceed and implement the approved Walkthrough Plan step-by-step.");
+      }, 500);
+    }
     setActiveCommandType("coder");
     setCoderTodos(todos.map((t, idx) => ({ id: String(idx + 1), content: t.text || t.content, status: idx === 0 ? 'in_progress' : 'pending' })));
     setShowTodoPanel(true);
@@ -1501,7 +1536,8 @@ const startCoderPreview = useCallback(async () => {
     alwaysAllowedCommands,
     setAlwaysAllowedCommands,
     requestCommandPermission,
-    logPermissionAction
+    logPermissionAction,
+    luminaConvex
   });
 
   useEffect(() => {
@@ -1667,6 +1703,7 @@ const startCoderPreview = useCallback(async () => {
   const renderChatBox = (isCenteredState: boolean = false) => {
     return (
       <ChatBoxPanel
+        researchState={researchMode}
         isCenteredState={isCenteredState}
         theme={theme}
         writingStyle={writingStyle}
@@ -2085,7 +2122,38 @@ const startCoderPreview = useCallback(async () => {
           <div className="flex-1 flex flex-row overflow-hidden w-full h-full relative">
             <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden relative">
 
-        {!isCoderMode && (
+        {isSettingsOpen && (
+          <header className="h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md sticky top-0 z-[150] shrink-0 opacity-100 shadow-none">
+            {/* Left section: Settings Panel label & Profile Name setting */}
+            <div className="flex-1 flex items-center justify-start min-w-0 gap-2">
+              <div className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 rounded-full transition-colors">
+                <Settings size={20} />
+              </div>
+              <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-400 truncate ml-2">
+                System Settings
+              </h2>
+            </div>
+
+            {/* Center section: Clean/Empty */}
+            <div className="flex-none flex items-center justify-center">
+            </div>
+
+            {/* Right section: Close button styled matching the high-fidelity aesthetics */}
+            <div className="flex-1 flex items-center justify-end gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="flex items-center gap-1.5 h-8 px-3.5 bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-rose-500/10 dark:hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 border border-gray-200 dark:border-zinc-700/60 hover:border-rose-300 dark:hover:border-rose-900/60 rounded-full transition-all text-xs font-bold shadow-sm cursor-pointer select-none text-gray-600 dark:text-gray-300"
+                title="Close Settings Panel"
+              >
+                <X size={11} strokeWidth={2.5} />
+                <span className="uppercase tracking-wider">Close</span>
+              </button>
+            </div>
+          </header>
+        )}
+
+        {!isCoderMode && !isLuminaAgentOpen && !isSettingsOpen && !isRagPanelOpen && (
           <header className={`h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md transition-all duration-300 ease-in-out ${
             autoHideTopBar 
               ? 'absolute top-0 left-0 right-0 z-[160] transform -translate-y-[48px] hover:translate-y-0 opacity-0 hover:opacity-100 hover:shadow-lg' 
@@ -2362,6 +2430,7 @@ const startCoderPreview = useCallback(async () => {
                         { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
                         { id: 'lumina_agent', label: 'Lumina Agent', icon: <Bot size={16} className="text-emerald-500" />, onClick: () => { setIsLuminaAgentOpen(true); setIsHeaderMenuOpen(false); } },
+                        { id: 'theme_customizer', label: 'Theme Studio', icon: <Palette size={16} className="text-amber-500" />, onClick: () => { setIsCustomThemeOpen(true); setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -2668,6 +2737,8 @@ const startCoderPreview = useCallback(async () => {
                     setShowAgentsPage(true);
                   }}
                   convex={luminaConvex}
+                  isSidebarOpen={isSidebarOpen}
+                  onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
                 />
               </motion.div>
             ) : false ? (
@@ -2748,7 +2819,7 @@ const startCoderPreview = useCallback(async () => {
                             <button
                               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                               className="flex items-center gap-2.5 px-4.5 py-2.5 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800/80 text-gray-700 dark:text-zinc-200 rounded-xl text-xs font-semibold border border-gray-200 dark:border-white/10 shadow-sm cursor-pointer transition-all active:scale-[0.98] animate-focus-target"
-                              id="slidepanel-toggle-option"
+                              id="slidepanel-toggle-option" style={{ display: 'none' }}
                               title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
                             >
                               <SidebarIcon size={14} className={isSidebarOpen ? "text-blue-500" : "text-gray-400"} />
@@ -3484,6 +3555,12 @@ const startCoderPreview = useCallback(async () => {
         setVoiceDirectSendCallback={setVoiceDirectSendCallback}
         setInput={setInput}
         silenceCountdown={silenceCountdown}
+      />
+
+      {/* Theme Studio Custom sliding panel */}
+      <ThemeCustomizerPanel
+        isOpen={isCustomThemeOpen}
+        onClose={() => setIsCustomThemeOpen(false)}
       />
 
       {/* Local model GGUF manual engine parameter loader */}

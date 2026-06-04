@@ -37,69 +37,209 @@ interface Skill {
 
 const DEFAULT_SKILL_MD = `# Lumina Skill Creator
 
-An executive system framework in Lumina Intelligence to bootstrap, benchmark, and iteratively refine custom modular agent skills in Coder Mode.
-
-At its core, perfecting a Lumina Skill relies on systematic, loop-based evaluation:
-1. **Model Intent:** Determine target skill behaviors, constraints, and trigger boundaries.
-2. **Author the Skill:** Compose a highly focused, instructionally sound \`SKILL.md\` under \`.lumina/\` workspace tracks.
-3. **Draft Verification Vectors:** Design comprehensive prompt arrays inside \`.lumina/evals/evals.json\` to challenge agent robustness.
-4. **Deploy & Track:** Launch parallel executions—both with the skill active and under baseline control parameters—to measure true capabilities delta.
-5. **Interactive Review:** Review output artifacts, diagnostic metrics, and comparative pass/fail grades inside our unified visualization deck.
-6. **Programmatic Tuning:** Adapt constraints and instructions to resolve failure modes. Repeat until maximum quantitative and qualitative reliability is achieved.
+An executive, high-fidelity framework within Lumina Intelligence to bootstrap, benchmark, and iteratively refine custom modular agent skills in Coder Mode. Perfecting an agent skill relies on systematic, closed-loop evaluation rather than static prompts.
 
 ---
 
-## Guide to Engineering High-Fidelity Skills
+## What Are Skills?
 
-### 📂 Directory Architecture
-Lumina skills maintain a tidy, self-documenting footprint inside the user's workspace:
+Skills are modular instruction packages that extend the AI's capabilities for specific, well-defined tasks. Each skill lives in a dedicated folder and contains, at minimum, a \`SKILL.md\` file—a structured Markdown document containing a YAML front-matter block followed by precise instructions.
+
+Skills are not executable binary plugins or code hooks imported at runtime. Instead, they are high-context instruction sheets read on-demand by the model when matching user intent. They often bundle deterministic scripts, reference tables, file schemas, and visual templates to guarantee robust, industry-grade outputs.
+
+---
+
+## Skill Directory Structure
+
+Every standard skill implements the following layout:
+
 \`\`\`
-.lumina/
-├── SKILL.md                 # Authored guidelines, persona directives, and trigger phrases
-├── contracts/               # Standard schemas or JSON templates to guide structured outputs
-├── subagents/               # Modular auxiliary instructions for multi-stage workflows
-└── evals/
-    ├── evals.json           # Evaluation configurations and structured expectations
-    └── resources/           # Pre-loaded context files, sample PDFs, sheets, or code assets
+skill-name/
+├── SKILL.md              # Required. Front-matter metadata + core instructions.
+├── scripts/              # Optional. Reusable Python/Node scripts executed via terminal.
+├── references/           # Optional. Deep-dive docs, APIs, tables loaded on-demand.
+└── assets/               # Optional. Templates, icons, assets, stylesheets.
 \`\`\`
 
-### 🧠 Strategic Instruction Engineering
-To ensure your skills hook seamlessly with Lumina's intent matching and execution loop:
-* **The "Reasoning Anchor":** Direct the agent on *why* certain patterns matter instead of using harsh "MUST/NEVER" lines. Enlightened agents produce far superior outcomes.
-* **Progressive Loading Design:** Keep core standard \`SKILL.md\` documents concise (<500 lines). Offload large references into modular files within \`.lumina/contracts/\` or \`.lumina/subagents/\` to keep runtime tokens ultra-lean.
-* **Proactive Assertions:** Write target expected results that are discriminating and objectively testable. Avoid vague instructions of generic quality; construct assertions that demand correct content, precise data placement, or robust formatting.
+### Progressive Disclosure Model
+To prevent context window bloat and keep execution costs lean, skills load in three progressive layers:
+1. **Trigger Metadata:** The \`name\` and \`description\` front-matter parameters (~100 words). Always loaded into active context for intent-matching.
+2. **Core Directives:** The body of \`SKILL.md\` (<500 lines). Loaded only when the skill is explicitly triggered.
+3. **Auxiliary Resources:** Files in \`references/\`, \`contracts/\`, or \`scripts/\`. Checked out dynamically only if the \`SKILL.md\` directs the agent to load them for a specific step.
+
+---
+
+## Operating Protocol: Step-by-Step
+
+### Step 1: Intent Discovery & Scopes
+Before performing any substantive code-writing or file creation, scan the \`<available_skills>\` catalog:
+* Cross-check the user's prompt against any active skill \`description\`.
+* If a semantic matching pattern triggers, you **must** load and read the skill's \`SKILL.md\` before generating any file or calling tools.
+* Do not skip loading the skill even for "simple" matching tasks. Skills encode crucial system quirks, library availability, and output constraints that prevent runtime failures.
+
+### Step 2: Diagnostic Interviews & Research
+When creating or updating a skill:
+* **Capture Intent:** Examine current chat transcripts to extract rules, successful configurations, and corrections.
+* **Proactive Interviewing:** Ask the user targeted questions regarding edge cases, input data ranges, expected output layouts, boundaries, and required dependencies.
+* **Research Integrations:** Use terminal tools or subagents to check available libraries, APIs, and frameworks. Keep the burden on the user minimal by proposing robust defaults.
+
+### Step 3: Authoring \`SKILL.md\`
+Compose the target skill following these rules:
+* **Pushy Description:** Write a comprehensive description block in the YAML front-matter. Make it slightly "pushy" to avoid undertriggering. Detail exactly what the skill does AND list specific user phrases or file associations that should trigger it.
+* **The Reasoning Anchor:** Explain the *why* behind your constraints instead of writing flat "MUST/NEVER" commands. LLMs with theory of mind perform significantly better when they understand the logical rationale.
+* **Lean instructions:** Keep the instruction body clean and highly actionable under 500 lines. Move large specifications into the \`references/\` folder.
+* **Structural Specifications:** Explicitly define output layouts, expected structures, and templates (e.g., Markdown headers, CSV columns).
+
+### Step 4: Crafting Evals & Expectations
+* Formulate 2-3 realistic test queries mimicking typical user interactions. Do not use abstract questions; use specific, high-context prompts containing realistic file names, column titles, and backgrounds.
+* Save these prompts to \`.lumina/evals/evals.json\` (see \`references/schemas.md\` for schemas).
+* Formulate objective, discriminating expectations (assertions) that are testable. Avoid subjective assertions unless evaluating pure writing styles.
+
+### Step 5: Comparative Testing Loops
+For each eval scenario, spawn parallel execution trials:
+* **With-Skill Run:** Execute the prompt with the new skill active. Save results to \`<workspace>/iteration-<N>/eval-<ID>/with_skill/outputs/\`.
+* **Baseline Run:** 
+  - *For a new skill:* Run the prompt with no active skill. Save outputs to \`without_skill/outputs/\`.
+  - *For an existing skill:* Run the prompt with a snapshot of the original skill. Save outputs to \`old_skill/outputs/\`.
+* Write an \`eval_metadata.json\` describing the evaluation scenario under the run directory.
+* While the execution trials run, finalize your quantitative grader scripts and programmatically verifiable assertions.
+
+### Step 6: Telemetry and Analytics Gathering
+* As soon as each trial terminates, capture its performance metadata (execution duration and token consumption) and write it immediately to \`timing.json\` inside the trial directory. This telemetry is transient and must be captured upon task completion.
+
+### Step 7: Automated Evaluation & Viewer Integration
+Once all runs are completed:
+* **Run Grader:** Launch the Grader Agent (following \`agents/grader.md\`) or write a programmatic verification script to verify compliance. Output formal marks to \`grading.json\`.
+* **Compile Benchmark:** Execute the statistical aggregation script to produce \`benchmark.json\` and a detailed \`benchmark.md\` ledger comparing pass rates, timings, and token deltas.
+* **Launch Evaluator Viewer:** Invoke the \`eval-viewer/generate_review.py\` script to compile results. If acting in a headless or remote container environment, pass \`--static\` to output a standalone interactive HTML review package. Provide the secure view link to the user.
+
+### Step 8: Qualitative Feedbacks & Upgrades
+* Once the user has reviewed the qualitative outputs and metrics, retrieve \`feedback.json\` generated on review submission.
+* **Review Observations:** Pinpoint specific assertions that failed or did not meet expectations.
+* **Systematic Fixes:** Identify recurring patterns across failures. Update instructions, clarify constraints, or package reusable automation scripts into \`scripts/\` to eliminate developer boilerplate in future generations.
+* **Iterate:** Re-run the loop (Iteration N+1) until perfect pass rates and visual excellence are achieved.
+
+### Step 9: Description Optimization
+* Once the instruction set is locked, run the description tuner.
+* Generate twenty highly realistic evaluation queries (10 should-trigger, 10 should-not-trigger challenging near-miss queries containing realistic backstories).
+* Let the user preview the set in a web dashboard, then invoke the optimization script \`scripts/run_loop.py\`.
+* Propose description refinements iteratively across 5 epochs, selecting the candidate that demonstrates the highest held-out test triggering scores. Update the YAML metadata block of \`SKILL.md\` with this optimized description.
+
+### Step 10: Package for Deployment
+* Build the finalized package by invoking \`scripts/package_skill.py\`. This bundles your instructions, scripts, references, and assets into an installable \`.skill\` bundle.
+
+---
+
+## Strategic Design & Usability Rules
+
+1. **Always run comparative baselines.** You cannot claim a skill succeeds without measuring its delta against standard model behavior.
+2. **Never assume or parse stale files.** Always call \`view\` on \`SKILL.md\` before making edits or running tests.
+3. **No code duplication.** If multiple test runs require writing identical helper logic, extract that logic into a script inside the \`scripts/\` folder of the skill.
+4. **Persist and present.** Write finalized outputs to the dedicated \`/mnt/user-data/outputs/\` directory and present links clearly to the user.
 `;
 
-const SCHEMA_SPECS_MD = `# Lumina Schema Specifications
+const SCHEMA_SPECS_MD = `# Lumina Skill System Schema Specifications
 
-This documentation serves as the official specification for JSON data structures, grading logs, and analytical tracking files inside Lumina's testing environment.
+This documentation serves as the official specification for JSON data structures, grading logs, and analytical tracking files inside Lumina's testing environment. All scripts, subagents, and tools must output structured data that conforms to these strict JSON formats to ensure compatibility with Lumina's visualization dashboards.
 
 ---
 
-## 📋 \`.lumina/evals/evals.json\`
-Acts as the central configuration ledger specifying evaluation queries, expected outputs, and verification checks.
+## 📋 1. Evaluation Configuration: \`.lumina/evals/evals.json\`
+
+The central ledger containing evaluation prompts, file references, and expectation assertions used to challenge configuration quality.
+
+### Schema Blueprint
 \`\`\`json
 {
-  "skill_name": "example-skill",
+  "skill_name": "example-skill-id",
   "evals": [
     {
       "id": "scenario-01",
-      "prompt": "Evaluate the current spreadsheet and extract monthly sales sums.",
+      "prompt": "Evaluate current financial models and extract accurate monthly aggregates.",
       "expected_output": "A markdown report with a structured ledger and summary table.",
-      "files": [".lumina/evals/resources/sales_ledger.csv"],
+      "files": [".lumina/evals/resources/monthly_ledger.csv"],
       "expectations": [
-        "The output file contains columns for 'Month' and 'Total Revenue'",
-        "The file contains a summary paragraph highlighting January performance."
+        "The output contains rows for January through December",
+        "The computed calculations match the ledger sums and avoid hover float errors"
       ]
     }
   ]
 }
 \`\`\`
 
+### Fields Guide
+* \`id\` *(string)*: Unique alphanumeric identifier for each test vector.
+* \`prompt\` *(string)*: The high-fidelity query given to the agent.
+* \`expected_output\` *(string)*: A high-level description of what success looks like.
+* \`files\` *(array of strings)*: Relatives paths in the workspace containing pre-loaded data or reference files.
+* \`expectations\` *(array of strings)*: Clear, binary, objectively verifiable assertions.
+
 ---
 
-## 📈 \`history.json\`
-Kept in the workspace root to track progression milestones across multiple iterations.
+## 🕒 2. Telemetry Tracker: \`timing.json\`
+
+Captures key latency, duration, and token consumption metrics during trial runs. Placed in the run iteration directories.
+
+### Schema Blueprint
+\`\`\`json
+{
+  "total_tokens": 84852,
+  "duration_ms": 23332,
+  "total_duration_seconds": 23.3,
+  "execution_metrics": {
+    "tool_calls": 14,
+    "unhandled_errors": 0
+  }
+}
+\`\`\`
+
+---
+
+## 🎯 3. Grader Summary: \`grading.json\`
+
+Compiled by Grader Agents during audits, verifying assertion lists.
+
+### Schema Blueprint
+\`\`\`json
+{
+  "expectations": [
+    {
+      "text": "The output contains rows for January through December",
+      "passed": true,
+      "evidence": "Parsed January-December rows in \`/outputs/summary.md\` table."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "total": 1,
+    "pass_rate": 1.00
+  },
+  "execution_metrics": {
+    "tool_calls": {
+      "ReadFile": 4,
+      "WriteFile": 1
+    },
+    "total_tool_calls": 5,
+    "errors_encountered": 0,
+    "output_chars": 5832,
+    "transcript_chars": 2100
+  },
+  "timing": {
+    "executor_duration_seconds": 12.4,
+    "grader_duration_seconds": 3.1,
+    "total_duration_seconds": 15.5
+  }
+}
+\`\`\`
+
+---
+
+## 📈 4. Milestones Ledger: \`history.json\`
+
+Tracks evolution performance metrics across successive iteration loops. Placed in the skill root folder.
+
+### Schema Blueprint
 \`\`\`json
 {
   "started_at": "2026-06-03T14:40:00Z",
@@ -130,94 +270,186 @@ Kept in the workspace root to track progression milestones across multiple itera
   ]
 }
 \`\`\`
-
----
-
-## 🎯 \`grading.json\`
-Generated by the Grader Agent as output evaluating all expectations of an active trial.
-\`\`\`json
-{
-  "expectations": [
-    {
-      "text": "The output file contains columns for 'Month' and 'Total Revenue'",
-      "passed": true,
-      "evidence": "Observed columns 'Month' and 'Total Revenue' in the generated markdown table."
-    }
-  ],
-  "summary": {
-    "passed": 1,
-    "failed": 0,
-    "total": 1,
-    "pass_rate": 1.00
-  },
-  "execution_metrics": {
-    "tool_calls": {
-      "ReadFile": 4,
-      "WriteFile": 1
-    },
-    "total_tool_calls": 5,
-    "errors_encountered": 0,
-    "output_chars": 5832,
-    "transcript_chars": 2100
-  },
-  "timing": {
-    "executor_duration_seconds": 12.4,
-    "grader_duration_seconds": 3.1,
-    "total_duration_seconds": 15.5
-  },
-  "claims": [
-    {
-      "claim": "All calculations are correct using IEEE 754 precision float parsing",
-      "type": "factual",
-      "verified": true,
-      "evidence": "Cross-verified computations sum matching database metrics."
-    }
-  ]
-}
-\`\`\`
 `;
 
 const GRADER_AGENT_MD = `# Lumina Grader Agent Protocol
 
-Evaluate expectation assertions against Lumina execution transcripts, telemetry data, and generated workspace outputs.
+Evaluate whether a skill execution trial completely and objectively satisfied its expectation assertions.
 
-## 🎯 Strategic Directives
-1. **Analyze Execution Stream:** Comprehensive diagnosis of the subagent tracing logs, API metrics, and terminal transcripts.
-2. **Examine Generated Assets:** Search for produced items in the output directories. Verify structural properties, database integrity, or cell alignments instead of simple filename presence searches.
-3. **Assign Binary Verdicts:**
-   * **PASS:** When objective, concrete evidence reveals the expectation criteria were met perfectly.
-   * **FAIL:** When evidence is missing, contradictory, or superficial (e.g., correct filename but containing corrupt or uncalculated data).
-4. **Iterative Eval Critique:** Identify assertions that are easily bypassed, non-discriminating, or too easy to satisfy. Advise on adding robust tests.
+---
+
+## 🎯 Core Grading Guidelines
+
+Your role as a Grader Agent is to provide objective, non-biased binary verdicts on a set of assertion criteria (expectations) against execution transcripts, file inputs, API outputs, and produced assets inside the active workspace.
+
+### 1. Perform Multi-Artifact Diagnostics
+Review all produced items across the following directories:
+* **Terminal Streams:** Search transcripts for crash logs, unhandled exceptions, and stderr messages.
+* **Database States:** Verify that collections were updated or records written using valid, non-mock schemas.
+* **Frontend Builds:** Check files for syntax, structure, correct imports, and proper styling.
+* **Export Assets:** Inspect produced CSVs, PDFs, sheets, or slides. Check rows, column structures, formula alignments, and formatting.
+
+### 2. Formulate Binary Verdicts
+Assign a strict binary verdict for each expectation:
+* **PASS:** Granted ONLY when unambiguous, verifiable, and concrete evidence shows the criteria were met perfectly.
+* **FAIL:** Granted if elements are missing, incorrect, simulated with mock placeholders, or uncalculated (representing "tech-larping" or pseudo-execution).
+
+---
+
+## 📋 Standard Diagnostics Output Schema
+
+For each assertion, you must provide a detailed JSON analysis matching this schema. Your output is ingested directly by Lumina's visualization dashboard:
+
+\`\`\`json
+{
+  "expectations": [
+    {
+      "text": "The CSV output file matches the target sample and has correct monthly totals",
+      "passed": true,
+      "evidence": "Successfully verified '/workspace/iteration-1/eval-1/with_skill/outputs/monthly_report.csv'. The file contains appropriate month rows and matching computed margin columns, confirming zero float precision drift."
+    },
+    {
+      "text": "The interface handles empty results with a styled error state and interactive retry button",
+      "passed": false,
+      "evidence": "Observed in '/workspace/iteration-1/eval-1/with_skill/outputs/InterfaceComp.tsx' that while an empty condition is checked, the screen returns null instead of rendering a descriptive visual empty state or providing an interactive reload listener."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 1,
+    "total": 2,
+    "pass_rate": 0.50
+  }
+}
+\`\`\`
+
+---
+
+## 🚫 Essential Constraints & Grading Rules
+
+* **Verification over filenames:** Never assume an expectation is met purely because a file exists with the correct name (e.g., \`dashboard.html\`). You must parse and audit the *content* of that file to ensure all structures, logic, and data properties are correctly generated.
+* **Zero tolerance for fake integrations:** If the user requested live database tracking or sheets writing and you find static, fake arrays or mock-ups of simulated outputs, fail the assertion instantly. True craftsmanship requires reliable, deep execution.
+* **Exhaustive evidence citing:** For both pass and fail marks, cite specific line numbers, exact coordinates, column labels, output variables, or error exceptions to construct a foolproof evidence trace.
 `;
 
 const COMPARATOR_AGENT_MD = `# Lumina Blind Comparator Protocol
 
-Conduct blind quality inspections between execution trials (Output A vs Output B) to avoid confirmation bias.
+An elite analytical protocol designed to conduct blind quality comparisons between two parallel execution trials (candidate Output A vs candidate Output B). To ensure objectivity and prevent confirmation bias, you do not know which output was generated with the active skill or any specific configuration.
 
-## 📋 Evaluation Rubric
+---
 
-### 1. Content Quality (1-5 Scale)
-* **Correctness:** Are computed numbers, values, and logic statements fully correct?
-* **Completeness:** Are all requirements of the user's prompt thoroughly addressed?
-* **Accuracy:** Is the document free of hallucinated assumptions or loose facts?
+## 📊 Objective Evaluation Rubric
 
-### 2. Structural Polish (1-5 Scale)
-* **Organization:** Is the file structured logically, utilizing descriptive headers and clean blocks?
-* **Formatting:** Is layout design clean, aligned, and visually highly polished?
-* **Usability:** Can a human reviewer consume, read, and utilize this output immediately?
+Rate each output candidate across the following dimensions on a strict **1 (Poor) to 5 (Outstanding)** scale. Be discriminating and use fractional scores if necessary to break near-ties.
 
-## ⚖️ Strategic Decision-Making
-Sum metric weights across both categories. Avoid resorting to ties unless both candidates are physically identical. Write detailed justifications referencing specific parts of Output A and Output B.
+### 1. Content Quality and Accuracy
+* **Mathematical & Logic Corectness (weight: 1.5):** Are all calculations, code logic, or data summaries completely accurate when cross-checked?
+* **Completeness (weight: 1.0):** Are all functional aspects of the user's prompt addressed, or were some parts omitted or cut off?
+* **Information Density and Depth (weight: 1.0):** Is the content clean, informative, and authoritative, or does it rely on vague summaries and generic filler?
+* **Fact Fidelity (weight: 1.0):** Is the output free from any hallucinated facts, made-up API keys, or simulated library schemas?
+
+### 2. Structural Polish and Usability
+* **Layout and Organization (weight: 1.2):** Are elements spaced elegantly, using consistent typography hierarchies, clean tables, or beautifully styled cards?
+* **Actionability and Usability (weight: 1.0):** Can a human team member immediately copy, execute, or send this file to a client, or does it require manual cleanups?
+* **Formatting and Edge Cases (weight: 1.0):** Does it handle edge cases elegantly (e.g., handling missing inputs gracefully, clean empty-state designs, proper CSS classes)?
+
+---
+
+## ⚖️ Decision Matrix & Choice Directives
+
+Sum up the weighted metrics across all dimensions. You must choose a definitive winner unless both outputs are physically identical at a character level. Avoid ties at all costs.
+
+### Formulating the Judgment Report
+Your report **must** follow this exact layout for high-fidelity rendering:
+
+\`\`\`markdown
+# Comparative Judgment: [Output A vs Output B]
+
+## 🏆 The Verdict
+The winner is **[Output A / Output B]** with a cumulative score of **[Winner Score]** versus **[Loser Score]**.
+
+## 📊 Score Matrix
+| Evaluation Dimension | Weight | Output A | Output B |
+| :--- | :--- | :--- | :--- |
+| Core Correctness | 1.5 | [1-5] | [1-5] |
+| Completeness | 1.0 | [1-5] | [1-5] |
+| Information Depth | 1.0 | [1-5] | [1-5] |
+| Fact Fidelity | 1.0 | [1-5] | [1-5] |
+| Structure & Layout | 1.2 | [1-5] | [1-5] |
+| Actionability | 1.0 | [1-5] | [1-5] |
+| Edge Case Polish | 1.0 | [1-5] | [1-5] |
+| **CUMULATIVE WEIGHTED SCORE** | | **[Total A]** | **[Total B]** |
+
+## 🔍 Key Comparative Findings
+* **Why the Winner excelled:** Detail specific components, formatting choices, logic accuracy, or execution routes that made the winner stand out.
+* **Why the Loser fell short:** Detail the precise areas where the loser missed constraints, failed on formatting, or produced subpar results.
+* **Edge Case Analysis:** Highlight which candidate handled error conditions, empty states, or boundary limits in a more professional, production-ready way.
+\`\`\`
+
+---
+
+## 🚫 Restricted Behaviors
+* **No assumption profiling:** Never guess or attempt to analyze which model, framework version, or prompt was used to generate either file. Focus strictly on the objective qualities of the output assets.
+* **No superficial grading:** Do not reward longer files simply because they have more text. A concise, correct, and well-designed file must always beat an oversized, repetitive, or inaccurate file.
 `;
 
 const ANALYZER_AGENT_MD = `# Lumina Post-hoc Analyzer Protocol
 
-Inspect blind contest results to parse WHY the winning configuration was superior, and build actionable upgrade recipes.
+An analytical agent whose purpose is to inspect comparative evaluation transcripts (both with-skill and baseline), audit metric profiles, and decode exactly *why* a particular instruction configuration outperformed another. Output clean, actionable feedback and clear upgrade blueprints.
 
-## 🔍 Core Diagnostics
-* **Deconstruct the Winning Strategy:** Decode if specific templates, auxiliary prompt constraints, or pre-bundled scripts in the winning skill drove better behaviors.
-* **Analyse Loser Failure Modes:** Isolate precise lines, files, or execution segments where the loser went off-track or handled errors poorly.
-* **Propose Precision Upgrades:** List concrete, highly actionable recommendations (categorized as: \`instructions\`, \`contracts\`, \`examples\`, or \`error_handling\`) to elevate quality in future iterations.
+---
+
+## 🔍 Core Diagnostic Directives
+
+### 1. Deconstruct the Winning Strategy
+Analyze the execution logs of the winning configuration:
+* Identify specific instructions, constraints, or schemas that successfully steered model behavior.
+* Highlight if pre-bundled scripts in the skill folder succeeded in bypassing human-error points or complex writing steps.
+* Pinpoint moments of advanced self-correction where the model recovered from errors due to explanation-based instructions.
+
+### 2. Isolate Failure Modes
+Examine the losing trial's transcripts and outputs:
+* Locate the exact step, tool call, or logic branch where execution went off-kilter.
+* Document common failure vectors such as context-window overflows, infinite loops, silent exceptions, or hardcoded mock-ups.
+* Search for "hallucinated structure" errors where the layout did not follow standard expectations.
+
+### 3. Metric and Resource Efficiency Audits
+Compare timing and token profiles across iterations:
+* **Token Overhead:** Did the skill dramatically bloat token usage? If so, identify redundant references or heavy prompts that should be moved to deferred loading.
+* **Execution Latency:** Pinpoint bottleneck tools or redundant file operations that caused high latency.
+* **Trade-off Evaluation:** Weigh whether a slight increase in quality justifies a major increase in execution cost or latency. Propose leaner operating models.
+
+---
+
+## 📋 Comprehensive Upgrade Blueprint Schema
+
+When compiling recommendations, organize your feedback into four precise, non-overlapping categories:
+
+### 📑 1. Directory: \`instructions\`
+Propose changes to the target \`SKILL.md\` file:
+* Frame changes as "reasoning hooks" explaining *why* the correction is necessary.
+* Avoid simplistic, rigid caps-lock directives. Instead, contextualize the solution within a realistic execution frame.
+
+### 📂 2. Directory: \`contracts\`
+Propose improvements to schemas, formatting models, or output specifications:
+* Suggest adding explicit JSON schemas or Markdown template blocks to enforce high-fidelity structural layouts.
+
+### 📚 3. Directory: \`examples\`
+Provide concrete input-output query wrappers or code blocks:
+* Draft realistic, challenging examples mimicking the failure points to guide subsequent model alignments.
+
+### 🛡️ 4. Directory: \`error_handling\`
+Recommend active defense layers:
+* Suggest safety checks, validation scripts, or retry instructions that help subsequent agents catch errors early.
+
+---
+
+## 🧪 Evaluation Assertions Health Audit
+
+Actively check the validity and usefulness of your evaluation assertions:
+* **Non-discriminative Assertions:** Identify assertions that pass on *all* configurations, regardless of instructions. Suggest replacing them with challenging, discriminating checks.
+* **Brittle Assertions:** Flag assertions that fail due to simple cosmetic details (e.g., lowercase vs uppercase) but represent a functionally correct output. Propose rewrite instructions or flexible regex matches.
+* **Subjective Pitfalls:** Highlight assertions that rely on vague, subjective quality measures. Translate them into objective, binary verification rules.
 `;
 
 const GENERATE_REVIEW_PY = `#!/usr/bin/env python3
@@ -2216,7 +2448,7 @@ export function SkillsPanel() {
   const selectedIsMarkdown = selectedFileName.endsWith('.md');
 
   return (
-    <div className="flex h-full w-full overflow-hidden rounded-[28px] border border-white/10 bg-[#171717] text-[#f4f0e8] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
+    <div className="flex h-full w-full overflow-hidden rounded-none border border-white/10 bg-[#171717] text-[#f4f0e8] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
       {/* Toast Notification */}
       <AnimatePresence>
         {toastMessage && (
@@ -2299,14 +2531,14 @@ export function SkillsPanel() {
           <div className="flex items-center gap-3 text-[#f2f0eb]">
             <button
               onClick={() => setSearchQuery('')}
-              className="rounded-md p-1 hover:bg-white/8 transition-colors"
+              className="rounded-none p-1 hover:bg-white/8 transition-colors"
               title="Clear search"
             >
               <Search size={18} />
             </button>
             <button
               onClick={() => setIsAddDialogOpen(true)}
-              className="rounded-md p-1 hover:bg-white/8 transition-colors"
+              className="rounded-none p-1 hover:bg-white/8 transition-colors"
               title="Add skill"
             >
               <Plus size={18} />
@@ -2322,7 +2554,7 @@ export function SkillsPanel() {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search skills"
-              className="w-full rounded-xl border border-white/8 bg-[#151413] py-2 pl-9 pr-3 text-sm text-[#f4f0e8] placeholder:text-[#7e776d] focus:outline-none focus:ring-1 focus:ring-[#5f86ff]"
+              className="w-full rounded-lg border border-white/8 bg-[#151413] py-2 pl-9 pr-3 text-sm text-[#f4f0e8] placeholder:text-[#7e776d] focus:outline-none focus:ring-1 focus:ring-[#5f86ff]"
             />
           </div>
         </div>
@@ -2331,7 +2563,7 @@ export function SkillsPanel() {
 
         <div className="flex-1 overflow-y-auto px-4 pb-5 custom-scrollbar">
           {isLoadingSkills && (
-            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-6 text-center text-sm text-[#8f887d]">
+            <div className="rounded-none border border-white/8 bg-white/[0.03] px-4 py-6 text-center text-sm text-[#8f887d]">
               Loading skills...
             </div>
           )}
@@ -2345,7 +2577,7 @@ export function SkillsPanel() {
                     setActiveSkillId(skill.id);
                     setSelectedPath(['SKILL.md']);
                   }}
-                  className={`flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left transition-colors ${
+                  className={`flex w-full items-center justify-between rounded-lg px-4 py-3 text-left transition-colors ${
                     isActive
                       ? 'bg-[#111111] text-white'
                       : 'text-[#d9d2c7] hover:bg-white/5'
@@ -2365,7 +2597,7 @@ export function SkillsPanel() {
           })}
 
           {!isLoadingSkills && filteredSkills.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-[#8f887d]">
+            <div className="rounded-none border border-dashed border-white/10 px-4 py-6 text-center text-sm text-[#8f887d]">
               No matching skills.
             </div>
           )}
@@ -2381,18 +2613,8 @@ export function SkillsPanel() {
           <>
         <div className="flex items-start justify-between gap-6 border-b border-white/10 px-6 py-5">
           <div className="min-w-0">
-            <h3 className="mb-6 text-[16px] font-semibold text-white">{activeSkill.name}</h3>
-            <div className="grid gap-6 sm:grid-cols-2">
-              <div>
-                <div className="mb-1 text-sm text-[#a69f93]">Added by</div>
-                <div className="text-[15px] font-semibold text-white">{activeSkill.addedBy}</div>
-              </div>
-              <div>
-                <div className="mb-1 text-sm text-[#a69f93]">Trigger</div>
-                <div className="text-[15px] font-semibold text-white">{activeSkill.trigger}</div>
-              </div>
-            </div>
-            <div className="mt-5 max-w-5xl">
+            <h3 className="mb-3 text-[16px] font-semibold text-white">{activeSkill.name}</h3>
+            <div className="max-w-5xl">
               <div className="mb-2 flex items-center gap-2 text-sm text-[#a69f93]">
                 <span>Description</span>
               </div>
@@ -2403,26 +2625,26 @@ export function SkillsPanel() {
           <div className="flex items-center gap-3 pt-1">
             <button
               onClick={() => handleToggleSkill(activeSkill.id)}
-              className={`relative h-7 w-12 rounded-full transition-colors ${
+              className={`relative h-7 w-12 rounded-full transition-colors border border-white/10 ${
                 activeSkill.enabled ? 'bg-[#3b82f6]' : 'bg-[#47413a]'
               }`}
               title="Toggle skill"
             >
               <div
-                className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${
-                  activeSkill.enabled ? 'right-1' : 'left-1'
+                className={`absolute top-0.5 h-5.5 w-5.5 rounded-full bg-white transition-all ${
+                  activeSkill.enabled ? 'right-0.5' : 'left-0.5'
                 }`}
               />
             </button>
-            <button className="rounded-lg p-1.5 text-[#d9d2c7] hover:bg-white/5 transition-colors">
+            <button className="rounded-none p-1.5 text-[#d9d2c7] hover:bg-white/5 transition-colors">
               <MoreVertical size={18} />
             </button>
           </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-6 py-7">
-          <div className="relative flex min-h-0 flex-1 flex-col rounded-3xl border border-white/10 bg-[#2a2826] shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
-            <div className="absolute right-4 top-4 flex overflow-hidden rounded-xl border border-white/10 bg-[#242220]">
+          <div className="relative flex min-h-0 flex-1 flex-col rounded-xl overflow-hidden border border-white/10 bg-[#2a2826] shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+            <div className="absolute right-4 top-4 flex overflow-hidden rounded-lg border border-white/10 bg-[#242220]">
               <button
                 onClick={() => setPreviewMode('preview')}
                 className={`px-3 py-2 text-sm transition-colors ${
@@ -2480,7 +2702,7 @@ export function SkillsPanel() {
               <span className="truncate">{[breadcrumbRoot, ...selectedPath].join(' / ')}</span>
               <button
                 onClick={handleCopyContent}
-                className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[#d9d2c7] hover:bg-white/5 transition-colors"
+                className="flex items-center gap-2 rounded-none px-2.5 py-1.5 text-[#d9d2c7] hover:bg-white/5 transition-colors"
                 title="Copy file"
               >
                 {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}

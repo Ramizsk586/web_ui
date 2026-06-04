@@ -28,6 +28,11 @@ export const AVAILABLE_AVATARS = [
   "https://api.dicebear.com/7.x/avataaars/svg?seed=Sophia",
   "https://api.dicebear.com/7.x/avataaars/svg?seed=John",
   "https://api.dicebear.com/7.x/avataaars/svg?seed=Sasha",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Jack",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Buster",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Lily",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=Max",
+  "https://api.dicebear.com/7.x/avataaars/svg?seed=George",
 ];
 
 export const CLOUD_PROVIDERS = [

@@ -27,6 +27,7 @@ import {
   Activity
 } from 'lucide-react';
 import { getTerminalSessionId } from '../utils/terminalService';
+import Markdown from 'react-markdown';
 
 interface LivePreviewPanelProps {
   isCoderRightPanelOpen: boolean;
@@ -55,6 +56,8 @@ interface LivePreviewPanelProps {
   workspaceRootPath?: string;
   orchestrationState?: any;
   onOpenFile?: (filePath: string) => void;
+  isCoderLeftPanelOpen?: boolean;
+  explorerWidth?: number;
 }
 
 interface DiffLine {
@@ -176,12 +179,17 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   setOpenFileTabs,
   workspaceRootPath,
   orchestrationState,
-  onOpenFile
+  onOpenFile,
+  isCoderLeftPanelOpen,
+  explorerWidth
 }) => {
   const [gitChanges, setGitChanges] = useState<any[]>([]);
   const [fileDiffs, setFileDiffs] = useState<Record<string, string>>({});
   const [loadingChanges, setLoadingChanges] = useState(false);
   const [loadingDiff, setLoadingDiff] = useState<Record<string, boolean>>({});
+  const [fileContents, setFileContents] = useState<Record<string, string>>({});
+  const [loadingContents, setLoadingContents] = useState<Record<string, boolean>>({});
+  const [fileViewMode, setFileViewMode] = useState<Record<string, 'diff' | 'rendered'>>({});
   const [isLandscape, setIsLandscape] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [androidTime, setAndroidTime] = useState<AndroidTimeState>(getCurrentTime);
@@ -210,10 +218,14 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   const handleResizeMove = useCallback((e: PointerEvent) => {
     if (!isResizing) return;
     const newWidth = window.innerWidth - e.clientX;
-    if (newWidth >= 280 && newWidth <= window.innerWidth - 280) {
+    const leftWidth = isCoderLeftPanelOpen ? (explorerWidth ?? 280) : 0;
+    const maxRightWidth = window.innerWidth - leftWidth - 550; // Keep at least 550px for the chat center area
+    const finalRightWidth = Math.min(maxRightWidth, window.innerWidth - 280);
+    
+    if (newWidth >= 280 && newWidth <= finalRightWidth) {
       setPanelWidth(newWidth);
     }
-  }, [isResizing]);
+  }, [isResizing, isCoderLeftPanelOpen, explorerWidth]);
 
   const handleResizeEnd = useCallback(() => {
     setIsResizing(false);
@@ -297,6 +309,26 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
     }
   };
 
+  const fetchFileContent = async (filePath: string) => {
+    setLoadingContents(prev => ({ ...prev, [filePath]: true }));
+    try {
+      const fullPath = workspaceRootPath ? `${workspaceRootPath.replace(/\\/g, '/')}/${filePath}` : `./${filePath}`;
+      const res = await fetch('/api/fs/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: fullPath, workspaceRoot: workspaceRootPath || '.' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFileContents(prev => ({ ...prev, [filePath]: data.content || '' }));
+      }
+    } catch (err) {
+      console.error(`Failed to read content for ${filePath}:`, err);
+    } finally {
+      setLoadingContents(prev => ({ ...prev, [filePath]: false }));
+    }
+  };
+
   useEffect(() => {
     if (isCoderRightPanelOpen) {
       if (activeTab === 'workflow') {
@@ -304,6 +336,9 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
         fetchArtifacts();
       } else if (activeTab === 'review') {
         fetchGitChanges();
+      } else if (activeTab !== 'overview') {
+        fetchFileDiff(activeTab);
+        fetchFileContent(activeTab);
       }
     }
   }, [isCoderRightPanelOpen, activeTab, iframeKey, workspaceRootPath]);
@@ -344,10 +379,10 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   );
 
   const renderDesktopFrame = () => (
-    <div className="flex items-center justify-center h-full w-full p-4 sm:p-6 md:p-8">
+    <div className="flex items-start justify-center h-full w-full p-4 sm:p-6 md:p-8 overflow-auto hide-scrollbar">
       <div
-        className="relative w-full max-w-full h-full min-h-[400px] flex flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#1c1c1e] shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
-        style={{ transform: `scale(${zoom})`, transformOrigin: 'center center' }}
+        className="relative w-full max-w-full h-full min-h-[400px] flex flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#1c1c1e] shadow-[0_20px_60px_rgba(0,0,0,0.5)] shrink-0"
+        style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
       >
         <div className="h-9 bg-[#252528] border-b border-white/[0.06] flex items-center px-3 gap-3 shrink-0 select-none">
           <div className="flex items-center gap-1.5 flex-row">
@@ -381,7 +416,12 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       <div className="flex w-full justify-center min-h-full items-start px-4 pt-6 pb-12">
         <div
           className="relative shrink-0 overflow-hidden transition-all duration-300"
-          style={{ width: vp.width, height: vp.height }}
+          style={{ 
+            width: vp.width, 
+            height: vp.height,
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top center'
+          }}
         >
           <div
             className="relative flex h-full flex-col overflow-hidden rounded-[42px] border-[12px] border-[#222224] bg-[#0d0d0d] shadow-[0_30px_70px_rgba(0,0,0,0.9)]"
@@ -460,7 +500,12 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       <div className="flex w-full justify-center min-h-full items-start px-4 pt-6 pb-12">
         <div
           className="relative shrink-0 overflow-hidden transition-all duration-300"
-          style={{ width: vp.width, height: vp.height }}
+          style={{ 
+            width: vp.width, 
+            height: vp.height,
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top center'
+          }}
         >
           <div
             className="relative flex h-full flex-col overflow-hidden rounded-[32px] border-[8px] border-[#222224] bg-[#0d0d0d] shadow-[0_30px_70px_rgba(0,0,0,0.9)]"
@@ -572,6 +617,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
 
   return (
     <motion.div
+      id="live-preview-panel"
       ref={panelRef}
       initial={{ width: 0, opacity: 0 }}
       animate={{ 
@@ -709,13 +755,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
               <RefreshCw size={12} />
             </button>
           )}
-          <button 
-            onClick={() => setIsCoderRightPanelOpen(false)}
-            className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer"
-            title="Close panel"
-          >
-            <X size={12} />
-          </button>
+
         </div>
       </div>
 
@@ -780,21 +820,22 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                 <Smartphone size={10} />
               </button>
 
-              <div className="w-[1px] h-3 bg-zinc-800 mx-1" />
-
               {/* Orientation toggle - only for mobile/tablet */}
               {!isDesktop && (
-                <button
-                  onClick={() => setIsLandscape(prev => !prev)}
-                  className={`p-1 rounded-md transition-all cursor-pointer ${
-                    isLandscape
-                      ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
-                      : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-                  }`}
-                  title={isLandscape ? 'Switch to Portrait' : 'Switch to Landscape'}
-                >
-                  <RotateCw size={10} className={isLandscape ? 'rotate-90' : ''} />
-                </button>
+                <>
+                  <div className="w-[1px] h-3 bg-zinc-800 mx-1" />
+                  <button
+                    onClick={() => setIsLandscape(prev => !prev)}
+                    className={`p-1 rounded-md transition-all cursor-pointer ${
+                      isLandscape
+                        ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]'
+                        : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                    }`}
+                    title={isLandscape ? 'Switch to Portrait' : 'Switch to Landscape'}
+                  >
+                    <RotateCw size={10} className={isLandscape ? 'rotate-90' : ''} />
+                  </button>
+                </>
               )}
 
               <div className="w-[1px] h-3 bg-zinc-800 mx-1" />
@@ -840,14 +881,6 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                 title="Zoom in"
               >
                 +
-              </button>
-              <div className="w-[1px] h-3 bg-zinc-800 mx-0.5" />
-              <button
-                onClick={() => setZoom(1)}
-                className="px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-white hover:bg-zinc-800 rounded transition-colors cursor-pointer"
-                title="Reset zoom"
-              >
-                <Maximize2 size={9} />
               </button>
             </div>
 
@@ -1275,83 +1308,124 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
         </div>
       )}
 
-      {activeTab !== 'overview' && activeTab !== 'review' && activeTab !== 'workflow' && (
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#0d0c0c] text-left">
-          <div className="h-9 border-b border-zinc-900 bg-zinc-950/80 px-4 flex items-center justify-between shrink-0 select-none">
-            <span className="text-[10px] text-zinc-550 font-mono uppercase tracking-wider truncate mr-4">{activeTab}</span>
-            <button
-              onClick={() => {
-                fetchFileDiff(activeTab);
-              }}
-              className="text-[9px] bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white px-2 py-0.5 rounded font-mono font-bold transition-all cursor-pointer"
-            >
-              Refresh Diff
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-auto">
-            {loadingDiff[activeTab] ? (
-              <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-2">
-                <Loader2 size={16} className="animate-spin text-[#D97756]" />
-                <span className="text-xs font-mono">Computing diff lines...</span>
-              </div>
-            ) : fileDiffs[activeTab] ? (
-              <div className="font-mono text-[11.5px] leading-normal overflow-auto h-full w-full bg-[#070606] text-zinc-350 select-text p-2 custom-scrollbar">
-                {parseGitDiff(fileDiffs[activeTab]).map((line, idx) => {
-                  let bgColor = '';
-                  let oldNumStr = '';
-                  let newNumStr = '';
-                  let textColor = '';
-                  let borderStyle = '';
-                  
-                  if (line.type === 'addition') {
-                    bgColor = 'bg-emerald-950/25 border-l-2 border-emerald-500';
-                    newNumStr = String(line.newLine);
-                    textColor = 'text-[#a7f3d0] dark:text-[#a7f3d0]';
-                  } else if (line.type === 'deletion') {
-                    bgColor = 'bg-rose-950/25 border-l-2 border-rose-500';
-                    oldNumStr = String(line.oldLine);
-                    textColor = 'text-[#fecdd3] dark:text-[#fecdd3]';
-                  } else if (line.type === 'hunk-header') {
-                    bgColor = 'bg-[#18110f]/70 border-b border-[#2C241E]/40 text-zinc-500 py-1.5 font-bold text-[10px]';
-                  } else {
-                    oldNumStr = String(line.oldLine);
-                    newNumStr = String(line.newLine);
-                  }
-                  
-                  return (
-                    <div key={idx} className={`flex items-stretch w-full hover:bg-zinc-850/20 ${bgColor} ${borderStyle}`}>
-                      {line.type !== 'hunk-header' ? (
-                        <>
-                          <div className="w-10 text-right pr-2 select-none opacity-30 border-r border-zinc-900 shrink-0 py-0.5">
-                            {oldNumStr}
-                          </div>
-                          <div className="w-10 text-right pr-2 select-none opacity-30 border-r border-zinc-900 shrink-0 py-0.5">
-                            {newNumStr}
-                          </div>
-                          <div className={`pl-3.5 whitespace-pre-wrap break-all py-0.5 flex-1 font-mono font-medium ${textColor}`}>
-                            {line.content}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="pl-3.5 py-1 font-mono font-bold text-[10px] text-[#D97756]/80 w-full select-none">
-                          {line.content}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 select-none gap-1">
-                <FileText size={18} className="text-zinc-650" />
-                <span className="text-xs font-semibold text-zinc-400">No diff contents</span>
-                <span className="text-[9px] text-zinc-600 font-mono">This file has no changes compared to HEAD</span>
+      {activeTab !== 'overview' && activeTab !== 'review' && activeTab !== 'workflow' && (() => {
+        const viewMode = fileViewMode[activeTab] || (activeTab.toLowerCase().endsWith('.md') ? 'rendered' : 'diff');
+        return (
+          <div className="flex-1 flex flex-col overflow-hidden bg-[#0d0c0c] text-left">
+            {!activeTab.toLowerCase().endsWith('.md') && (
+              <div className="h-9 border-b border-zinc-900 bg-zinc-950/80 px-4 flex items-center justify-between shrink-0 select-none">
+                <span className="text-[10px] text-zinc-550 font-mono uppercase tracking-wider truncate mr-4">{activeTab}</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => {
+                      setFileViewMode(prev => ({
+                        ...prev,
+                        [activeTab]: viewMode === 'rendered' ? 'diff' : 'rendered'
+                      }));
+                    }}
+                    className="text-[9px] h-5 px-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[#D97756] hover:text-[#e48f73] rounded font-mono font-bold transition-all cursor-pointer flex items-center justify-center"
+                  >
+                    {viewMode === 'rendered' ? 'Show Diff' : 'Show Document'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (viewMode === 'rendered') {
+                        fetchFileContent(activeTab);
+                      } else {
+                        fetchFileDiff(activeTab);
+                      }
+                    }}
+                    className="text-[9px] h-5 px-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white rounded font-mono font-bold transition-all cursor-pointer flex items-center justify-center"
+                  >
+                    Refresh
+                  </button>
+                </div>
               </div>
             )}
+
+            <div className="flex-1 overflow-hidden flex flex-col bg-[#070606]">
+              {viewMode === 'rendered' ? (
+                loadingContents[activeTab] ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-2 p-12">
+                    <Loader2 size={16} className="animate-spin text-[#D97756]" />
+                    <span className="text-xs font-mono">Loading file contents...</span>
+                  </div>
+                ) : fileContents[activeTab] !== undefined ? (
+                  <div className="p-6 text-left select-text markdown-body overflow-y-auto h-full text-zinc-300 font-sans space-y-4 max-w-3xl mx-auto custom-scrollbar [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-white [&_h1]:border-b [&_h1]:border-zinc-850 [&_h1]:pb-2 [&_h1]:mb-4 [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-zinc-100 [&_h2]:mt-4 [&_h2]:mb-2 [&_p]:text-sm [&_p]:text-zinc-300 [&_ul]:space-y-2.5 [&_li]:list-none [&_li]:flex [&_li]:items-start [&_li]:gap-3 [&_li]:text-sm [&_li]:text-zinc-300 [&_input[type=checkbox]]:mt-1 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:rounded [&_input[type=checkbox]]:border-zinc-750 [&_input[type=checkbox]]:bg-zinc-900 [&_input[type=checkbox]]:text-[#D97756] [&_input[type=checkbox]]:focus:ring-0 [&_input[type=checkbox]]:pointer-events-none">
+                    <Markdown>{fileContents[activeTab]}</Markdown>
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 py-12 select-none gap-1">
+                    <FileText size={18} className="text-zinc-650" />
+                    <span className="text-xs font-semibold text-zinc-400">Empty or unreadable file</span>
+                    <span className="text-[9px] text-zinc-600 font-mono">The content of this file is empty or could not be loaded</span>
+                  </div>
+                )
+              ) : (
+                loadingDiff[activeTab] ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-2">
+                    <Loader2 size={16} className="animate-spin text-[#D97756]" />
+                    <span className="text-xs font-mono">Computing diff lines...</span>
+                  </div>
+                ) : fileDiffs[activeTab] ? (
+                  <div className="font-mono text-[11.5px] leading-normal overflow-auto h-full w-full bg-[#070606] text-zinc-350 select-text p-2 custom-scrollbar">
+                    {parseGitDiff(fileDiffs[activeTab]).map((line, idx) => {
+                      let bgColor = '';
+                      let oldNumStr = '';
+                      let newNumStr = '';
+                      let textColor = '';
+                      let borderStyle = '';
+                      
+                      if (line.type === 'addition') {
+                        bgColor = 'bg-emerald-950/25 border-l-2 border-emerald-500';
+                        newNumStr = String(line.newLine);
+                        textColor = 'text-[#a7f3d0] dark:text-[#a7f3d0]';
+                      } else if (line.type === 'deletion') {
+                        bgColor = 'bg-rose-950/25 border-l-2 border-rose-500';
+                        oldNumStr = String(line.oldLine);
+                        textColor = 'text-[#fecdd3] dark:text-[#fecdd3]';
+                      } else if (line.type === 'hunk-header') {
+                        bgColor = 'bg-[#18110f]/70 border-b border-[#2C241E]/40 text-zinc-500 py-1.5 font-bold text-[10px]';
+                      } else {
+                        oldNumStr = String(line.oldLine);
+                        newNumStr = String(line.newLine);
+                      }
+                      
+                      return (
+                        <div key={idx} className={`flex items-stretch w-full hover:bg-zinc-850/20 ${bgColor} ${borderStyle}`}>
+                          {line.type !== 'hunk-header' ? (
+                            <>
+                              <div className="w-10 text-right pr-2 select-none opacity-30 border-r border-zinc-900 shrink-0 py-0.5">
+                                {oldNumStr}
+                              </div>
+                              <div className="w-10 text-right pr-2 select-none opacity-30 border-r border-zinc-900 shrink-0 py-0.5">
+                                {newNumStr}
+                              </div>
+                              <div className={`pl-3.5 whitespace-pre-wrap break-all py-0.5 flex-1 font-mono font-medium ${textColor}`}>
+                                {line.content}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="pl-3.5 py-1 font-mono font-bold text-[10px] text-[#D97756]/80 w-full select-none">
+                              {line.content}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 select-none gap-1">
+                    <FileText size={18} className="text-zinc-650" />
+                    <span className="text-xs font-semibold text-zinc-400">No diff contents</span>
+                    <span className="text-[9px] text-zinc-600 font-mono">This file has no changes compared to HEAD</span>
+                  </div>
+                )
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </motion.div>
   );
 };

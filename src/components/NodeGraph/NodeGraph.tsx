@@ -25,8 +25,9 @@ import { ScrapingResultArtifact } from '../ScrapingResultArtifact';
 import { ScrapingProgressIndicator } from '../ScrapingProgressIndicator';
 import { WikiArticleArtifact } from '../WikiArticleArtifact';
 import { WikiToolCallIndicator } from '../WikiToolCallIndicator';
+import { ComposioToolCallIndicator } from '../ComposioToolCallIndicator';
 import { InlineFileDiffPreview, RealtimeEditCounter, normalizeDisplayPath } from './FileDiffNode';
-import { AgentThinkingFlowAnimation, LuminaToolCallingAnimation, ToolCallingAnimation, WebSearchAnimation } from '../ui/Animations';
+import { AgentThinkingFlowAnimation, LuminaToolCallingAnimation, ToolCallingAnimation, WebSearchAnimation, ComposioToolCallingAnimation } from '../ui/Animations';
 
 const getDomain = (url: string) => {
   try {
@@ -557,6 +558,9 @@ export const NodeGraph = React.memo(({
         type: 'tool',
         title: humanizeToolName(node.toolName, node.label),
         icon: node.status === 'active' ? (
+          node.toolName?.startsWith('composio_') ? (
+            <ComposioToolCallingAnimation />
+          ) :
           node.toolName === 'web_search' || node.toolName === 'web_scrape' || node.toolName === 'fetch_url' ? (
             <WebSearchAnimation />
           ) : node.toolName?.startsWith('wiki_') ? (
@@ -710,7 +714,9 @@ export const NodeGraph = React.memo(({
                               <div className="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-450 font-mono whitespace-pre-wrap max-h-52 overflow-y-auto custom-scrollbar italic bg-[#0c0c0e]/80 rounded-lg border border-zinc-900 p-2.5 shadow-inner">
                                 {isStreamingThinking && (
                                   <div className="mb-3 flex items-center gap-3 rounded-lg border border-cyan-500/10 bg-cyan-500/[0.04] px-3 py-2 text-left not-italic">
-                                    <AgentThinkingFlowAnimation />
+                                    <div className="w-7 h-7 flex items-center justify-center bg-cyan-950/20 border border-cyan-500/30 rounded-full shrink-0">
+                                      <Brain className="text-cyan-400 animate-pulse" size={13} />
+                                    </div>
                                     <div className="min-w-0">
                                       <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300/80">
                                         AI synthesis
@@ -813,6 +819,8 @@ export const NodeGraph = React.memo(({
                                       url={item.node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
                                     />
                                   )
+                                ) : item.node.toolName?.startsWith('composio_') ? (
+                                  <ComposioToolCallIndicator node={item.node} />
                                 ) : item.node.toolName?.startsWith('wiki_') ? (
                                   item.node.status === 'complete' ? (
                                     (() => {
@@ -946,6 +954,9 @@ export const InlineToolCallCard = React.memo(({
         <div className="flex items-center gap-2.5 min-w-0 pr-4">
           <div className="shrink-0 flex items-center justify-center">
             {node.status === 'active' ? (
+              node.toolName?.startsWith('composio_') ? (
+                <ComposioToolCallingAnimation />
+              ) :
               node.toolName === 'web_search' || node.toolName === 'web_scrape' || node.toolName === 'fetch_url' ? (
                 <WebSearchAnimation />
               ) : node.toolName?.startsWith('wiki_') ? (
@@ -1025,6 +1036,8 @@ export const InlineToolCallCard = React.memo(({
                     url={node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
                   />
                 )
+              ) : node.toolName?.startsWith('composio_') ? (
+                <ComposioToolCallIndicator node={node} />
               ) : node.toolName?.startsWith('wiki_') ? (
                 node.status === 'complete' ? (
                   (() => {

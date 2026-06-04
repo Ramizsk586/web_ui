@@ -627,7 +627,7 @@ export default function ResearchWorkspacePanel({
                                     : 'text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] border border-transparent'
                                 }`}
                               >
-                                <span className="font-sans text-[9px]">{preset}</span>
+                                <span className="font-sans text-[9px]">{preset === 'standard' ? 'Normal' : 'Advanced'}</span>
                                 <span className="text-[7px] font-mono text-[var(--theme-secondary)]/40 font-normal">
                                   {preset === 'standard' ? '2.5s loops' : '4.5s extreme'}
                                 </span>

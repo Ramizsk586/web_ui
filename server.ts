@@ -112,7 +112,66 @@ async function startServer() {
   });
 
   const buildAgentInstruction = (agent: RuntimeAgent) => {
-    const skillBlock = (agent.skillFiles || [])
+    // 1. Check if any docs/ files exist in skillFiles (e.g. docs/soul.md, docs/guidelines.md, etc.)
+    const docFiles = (agent.skillFiles || []).filter(f => f.name.startsWith('docs/'));
+    
+    let bootSequenceBlock = '';
+    let soulContent = '';
+    let guidelinesContent = '';
+    let promptContent = '';
+    let knowledgeContent = '';
+    let toolsContent = '';
+    
+    if (docFiles.length > 0) {
+      // We have the new agent sub-pipeline design files! Let's build the Mandatory Boot Sequence.
+      const loaded: string[] = [];
+      const skipped: string[] = [];
+      const fileNames = ['soul.md', 'guidelines.md', 'prompt.md', 'knowledge.md', 'tools.md'];
+      
+      for (const fname of fileNames) {
+        const fileObj = (agent.skillFiles || []).find(f => f.name === `docs/${fname}`);
+        if (fileObj && fileObj.content) {
+          loaded.push(fname);
+          if (fname === 'soul.md') soulContent = fileObj.content;
+          else if (fname === 'guidelines.md') guidelinesContent = fileObj.content;
+          else if (fname === 'prompt.md') promptContent = fileObj.content;
+          else if (fname === 'knowledge.md') knowledgeContent = fileObj.content;
+          else if (fname === 'tools.md') toolsContent = fileObj.content;
+        } else {
+          skipped.push(fname);
+        }
+      }
+      
+      bootSequenceBlock = `
+## MANDATORY BOOT SEQUENCE
+Before responding to ANY query, you MUST silently execute this boot sequence:
+ON_START:
+${loaded.map(f => `  READ /docs/${f} → internalized\n  LOG "Loaded: ${f}"`).join('\n')}
+${skipped.map(f => `  LOG "Skipped (not present): ${f}"`).join('\n')}
+
+  SET identity FROM soul.md
+  SET behavior_rules FROM guidelines.md
+  SET system_prompt FROM prompt.md
+  ${knowledgeContent ? 'SET domain_knowledge FROM knowledge.md' : ''}
+  ${toolsContent ? 'SET available_tools FROM tools.md' : ''}
+
+  CONFIRM_READY: "${agent.name} initialized. Docs loaded: ${loaded.length}/${fileNames.length}"
+
+***
+
+### BOOT LOADER CONTENTS LOADED:
+
+${soulContent ? `#### [soul.md]\n${soulContent}\n\n` : ''}
+${guidelinesContent ? `#### [guidelines.md]\n${guidelinesContent}\n\n` : ''}
+${promptContent ? `#### [prompt.md]\n${promptContent}\n\n` : ''}
+${knowledgeContent ? `#### [knowledge.md]\n${knowledgeContent}\n\n` : ''}
+${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
+`;
+    }
+
+    // Standard skill files (if any non-doc files)
+    const otherSkillFiles = (agent.skillFiles || []).filter(f => !f.name.startsWith('docs/'));
+    const skillBlock = otherSkillFiles
       .map(file => `### ${file.name}\n${file.description || ''}\n\n${file.content}`)
       .join('\n\n---\n\n');
 
@@ -120,7 +179,8 @@ async function startServer() {
     const enabledSkills = (agent.skills || []).filter(skill => skill.enabled);
 
     return [
-      agent.systemPrompt || `You are ${agent.name}, a focused AI assistant.`,
+      bootSequenceBlock ? `System Prompt & Persona override from boot sequence. Main System Prompt:\n${promptContent || agent.systemPrompt || ''}` : (agent.systemPrompt || `You are ${agent.name}, a focused AI assistant.`),
+      bootSequenceBlock || '',
       enabledSkills.length ? `Enabled skills: ${enabledSkills.map(skill => skill.name || skill.id).join(', ')}` : '',
       enabledTools.length ? `Available tools: ${enabledTools.map(tool => tool.name || tool.id).join(', ')}` : '',
       skillBlock ? `Skill files:\n\n${skillBlock}` : '',
@@ -699,7 +759,7 @@ async function startServer() {
         const model = process.env.LLAMA_BRIDGE_MODEL || 'openprovider/auto-free';
 
         const messages: any[] = [
-          { role: 'system', content: `${systemPrompt}\n\nExecution context: Working on workspace ${resolvedWorkspace}. Only write code inside this workspace. When you are finished, output ✅ ${agentName.toUpperCase()} COMPLETE and a summary.` },
+          { role: 'system', content: `${systemPrompt}\n\nExecution context: Working on workspace ${resolvedWorkspace}. Only write code inside this workspace. When you are finished, output ✅ ${agentName.toUpperCase()} COMPLETE and a summary.\n\nCRITICAL DIRECTIVE:\n- There is a TODO.md file in the workspace root. Before you begin work, read it to see the checklist. After completing each logical step of your task, USE the 'edit_file' or 'write_file' tool to modify TODO.md, changing '[ ]' to '[x]' for that completed task step. Never forget to update TODO.md to mark your progress after completing every step!` },
           { role: 'user', content: task }
         ];
 
