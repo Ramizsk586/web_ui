@@ -444,42 +444,42 @@ export function SettingsModal({
       id: 'orchestrator',
       name: 'Orchestrator Agent',
       role: 'Coordinates execution, plans subtasks, and assigns work.',
-      tools: ['read_file', 'search_code', 'run_command'],
+      tools: ['read_file', 'run_command', 'glob_tool', 'grep_tool'],
       prompt: 'You are the Orchestrator subagent. Your role is to analyze the high-level request, check the codebase state, plan the subtasks, and coordinate execution. Break down complex tasks into subtasks for specialized subagents.'
     },
     {
       id: 'analyzer',
       name: 'Analyzer Agent',
       role: 'Researches codebase, traces dependencies, and locates functions.',
-      tools: ['read_file', 'search_code'],
+      tools: ['read_file', 'glob_tool', 'grep_tool'],
       prompt: 'You are the Analyzer subagent. Your role is to explore the codebase, research files, locate functions and types, trace dependencies, and summarize architecture or bugs. You do not write or modify code.'
     },
     {
       id: 'coder',
       name: 'Coder Agent',
       role: 'Implements features, refactors, and edits workspace files.',
-      tools: ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'search_code'],
+      tools: ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'glob_tool', 'grep_tool'],
       prompt: 'You are the Coder subagent. Your role is to write clean, maintainable, and correct code in the workspace. Read the necessary files first, implement requested features or refactors, and ensure file paths are resolved properly.'
     },
     {
       id: 'debugger',
       name: 'Debugger Agent',
       role: 'Diagnoses failures, runs compiler checks, and verifies fixes.',
-      tools: ['read_file', 'write_file', 'edit_file', 'run_command', 'search_code'],
+      tools: ['read_file', 'write_file', 'edit_file', 'run_command', 'glob_tool', 'grep_tool'],
       prompt: 'You are the Debugger subagent. Your role is to diagnose bugs, run test suites, analyze compiler or runtime errors, and modify code to fix failures. Run relevant commands to verify your fixes.'
     },
     {
       id: 'reviewer',
       name: 'Reviewer Agent',
       role: 'Performs static analysis, reviews code, and checks styles.',
-      tools: ['read_file', 'search_code'],
+      tools: ['read_file', 'glob_tool', 'grep_tool'],
       prompt: 'You are the Reviewer subagent. Your role is to perform static code analysis, code review, check for style compliance, find potential logic errors, security vulnerabilities, or performance bottlenecks, and provide recommendations.'
     }
   ];
 
   const ALL_AVAILABLE_TOOLS = [
     'read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file',
-    'search_code', 'analyze_file', 'run_command', 'execute_code', 'ask_user', 'fetch_url', 'web_search'
+    'glob_tool', 'grep_tool', 'analyze_file', 'run_command', 'ask_user', 'fetch_url', 'web_search'
   ];
 
   const [subagentConfigs, setSubagentConfigs] = React.useState<Record<string, SubagentConfig>>(() => {

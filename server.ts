@@ -82,6 +82,22 @@ async function startServer() {
   const randomRuntimeId = (prefix: string) =>
     `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+  const sanitizeRuntimeToolName = (rawName: string) => {
+    const name = String(rawName || '').trim();
+    if (!name) return '';
+    const normalized = name
+      .replace(/<\|[^|>]+?\|>/g, '')
+      .replace(/\[[^\]]+\]/g, '')
+      .replace(/[|>]+/g, '')
+      .trim()
+      .toLowerCase();
+    const knownTools = ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool'];
+    const exact = knownTools.find(tool => normalized === tool);
+    if (exact) return exact;
+    const partial = knownTools.find(tool => normalized.startsWith(tool));
+    return partial || normalized;
+  };
+
   const writeAgentEvent = (res: express.Response, payload: Record<string, any>) => {
     res.write(`${JSON.stringify(payload)}\n`);
   };
@@ -249,7 +265,7 @@ async function startServer() {
       });
 
       for (const toolCall of choice.tool_calls) {
-        const toolName = toolCall?.function?.name || 'unknown_tool';
+        const toolName = sanitizeRuntimeToolName(toolCall?.function?.name || 'unknown_tool');
         const args = (() => {
           try {
             return JSON.parse(toolCall?.function?.arguments || '{}');
@@ -455,7 +471,7 @@ async function startServer() {
           systemPrompt = customPrompt;
           configuredTools = Array.isArray(customTools) && customTools.length > 0
             ? customTools
-            : ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'search_code'];
+            : ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool'];
         } else {
           const promptPath = path.join(resolvedWorkspace, '.lumina', 'subagents', `${agentName}.prompt`);
           let promptContent = '';
@@ -490,7 +506,7 @@ async function startServer() {
                 } else if (rt === 'command' || rt === 'run_command') {
                   mappedTools.push('run_command');
                 } else if (rt === 'search' || rt === 'search_code') {
-                  mappedTools.push('search_code');
+                  mappedTools.push('glob_tool', 'grep_tool');
                 } else {
                   mappedTools.push(rt);
                 }
@@ -500,6 +516,15 @@ async function startServer() {
               }
             }
           }
+        }
+
+        if (agentName.toLowerCase().includes('analyzer')) {
+          systemPrompt += `\n\nAnalyzer operating rules:
+- Never call read_file with ".", "./", an empty path, or the workspace root by itself.
+- Never call search_code with an empty query, ".", or whitespace-only text.
+- Use search_code only for concrete filenames, symbols, selectors, error messages, or text fragments.
+- Do not repeat the same tool call with the same arguments once it has already returned.
+- Prefer specific files discovered from earlier results instead of broad retries.`;
         }
 
         const subagentToolsSchemas = [];
@@ -619,17 +644,33 @@ async function startServer() {
           }
         });
 
-        toolMap.set('search_code', {
+        toolMap.set('glob_tool', {
           type: 'function',
           function: {
-            name: 'search_code',
-            description: 'Search for text in workspace files.',
+            name: 'glob_tool',
+            description: 'Finds files by matching patterns against their file names or directory paths.',
             parameters: {
               type: 'object',
               properties: {
-                query: { type: 'string', description: 'Search term.' },
-                fileGlob: { type: 'string', description: 'Filter files e.g. *.ts' },
-                maxResults: { type: 'number', description: 'Max matches.' }
+                fileGlob: { type: 'string', description: 'File filter pattern like "**/*.tsx" or "*.css".' },
+                maxResults: { type: 'number', description: 'Max results (default 30).' }
+              },
+              required: ['fileGlob']
+            }
+          }
+        });
+
+        toolMap.set('grep_tool', {
+          type: 'function',
+          function: {
+            name: 'grep_tool',
+            description: 'Finds text lines inside files by matching regular expressions against the file contents.',
+            parameters: {
+              type: 'object',
+              properties: {
+                query: { type: 'string', description: 'Regex/text to search for.' },
+                fileGlob: { type: 'string', description: 'Optional file filter like "*.tsx".' },
+                maxResults: { type: 'number', description: 'Max results (default 30).' }
               },
               required: ['query']
             }
@@ -649,7 +690,7 @@ async function startServer() {
             toolMap.get('write_file'),
             toolMap.get('edit_file'),
             toolMap.get('create_file'),
-            toolMap.get('search_code')
+            toolMap.get('glob_tool')
           );
         }
 
@@ -724,7 +765,12 @@ async function startServer() {
             });
 
             try {
-              if (toolName === 'read_file') {
+              const normalizedFilePath = String(args.filePath || '').trim();
+              const normalizedQuery = String(args.query || '').trim();
+
+              if (toolName === 'read_file' && (!normalizedFilePath || normalizedFilePath === '.' || normalizedFilePath === './')) {
+                toolOutput = { error: 'read_file requires a concrete file path, not "." or an empty path' };
+              } else if (toolName === 'read_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
                 if (fs.existsSync(fileRes) && fs.statSync(fileRes).isFile()) {
                   const offset = args.offset !== undefined ? Math.max(0, Number(args.offset) - 1) : 0;
@@ -808,8 +854,21 @@ async function startServer() {
                   });
                   toolOutput = runRes;
                 }
-              } else if (toolName === 'search_code') {
-                const query = (args.query || '').trim();
+              } else if (toolName === 'glob_tool') {
+                const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
+                let files = getFilesRecursively(resolvedWorkspace);
+                if (fileGlob) {
+                  files = files.filter(f => !f.isDirectory && f.relativePath.toLowerCase().includes(fileGlob));
+                } else {
+                  files = files.filter(f => !f.isDirectory);
+                }
+                const maxResults = Math.min(Number(args.maxResults) || 30, 80);
+                toolOutput = { fileGlob, count: files.length, files: files.slice(0, maxResults).map(f => ({ filePath: f.relativePath, isDirectory: f.isDirectory })) };
+              } else if (toolName === 'grep_tool') {
+                const query = normalizedQuery;
+                if (!query || query === '.') {
+                  toolOutput = { query, count: 0, matches: [], skipped: 'Blocked empty or non-specific search query to save tokens' };
+                } else {
                 const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
                 let files = getFilesRecursively(resolvedWorkspace);
                 if (fileGlob) {
@@ -837,6 +896,7 @@ async function startServer() {
                   }
                 }
                 toolOutput = { query, count: matches.length, matches };
+                }
               } else {
                 toolOutput = { error: `Tool ${toolName} not implemented` };
               }

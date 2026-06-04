@@ -40,122 +40,14 @@ import {
   BookOpen
 } from "lucide-react";
 import { DocumentSelector } from "./DocumentSelectorModal";
-import { WRITING_STYLES, SKILLS } from "../constants";
+import { WRITING_STYLES, SKILLS, SUPPORTED_VOICE_LANGUAGES } from "../constants";
 import { CoderPermissionMode, PendingCommandPermission } from "../types";
 import { permissionModeLabel } from "../utils/permissionUtils";
 import { useSmartPopupPosition } from "../hooks/useSmartPopupPosition";
 
-const ModelImage = ({ 
-  src, 
-  fallback, 
-  title,
-  bgClass = "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800"
-}: { 
-  src: string; 
-  fallback: React.ReactNode; 
-  title?: string;
-  bgClass?: string;
-}) => {
-  const [error, setError] = React.useState(false);
-  if (error || !src) return <>{fallback}</>;
-  const isSvg = src.endsWith('.svg') || src.includes('.svg');
-  const imgClass = isSvg ? "w-[75%] h-[75%] object-contain" : "w-full h-full object-cover";
-  return (
-    <div 
-      className={`w-7 h-7 rounded-lg flex items-center justify-center overflow-hidden shrink-0 ${bgClass}`}
-      title={title}
-    >
-      <img
-        src={src}
-        alt="Model logo"
-        className={imgClass}
-        onError={() => setError(true)}
-        referrerPolicy="no-referrer"
-      />
-    </div>
-  );
-};
-
-const renderAppModelLogo = (fullName: string, modelId: string, fallback: React.ReactNode) => {
-  return fallback;
-  const normAuthor = (fullName || '').toLowerCase();
-  const normId = (modelId || '').toLowerCase();
-
-  // Define avatar mappings for requested specific brands
-  let avatarUrl = '';
-  let customTitle = '';
-  let bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
-
-  if (normAuthor.includes('liquid') || normId.includes('lfm')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/61b8e2ba285851687028d395/EsTgVtnM2IqVRKgPdfqcB.png';
-    customTitle = 'Liquid Labs Model';
-    bgClass = "bg-[#201511] border border-[#E26D2E]/25 p-0.5";
-  } else if (normAuthor.includes('nvidia') || normId.includes('nemotron')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/65df9200dc3292a8983e5017/Vs5FPVCH-VZBipV3qKTuy.png';
-    customTitle = 'NVIDIA Model';
-    bgClass = "bg-black border border-zinc-850 p-0.5";
-  } else if (normAuthor.includes('qwen') || normId.includes('qwen')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/620760a26e3b7210c2ff1943/-s1gyJfvbE1RgO5iBeNOi.png';
-    customTitle = 'Qwen AI';
-    bgClass = "bg-[#1C1A2E] border border-indigo-500/20 p-0.5";
-  } else if (normAuthor.includes('deepseek') || normId.includes('deepseek')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6538815d1bdb3c40db94fbfa/xMBly9PUMphrFVMxLX4kq.png';
-    customTitle = 'DeepSeek Model';
-    bgClass = "bg-[#10192A] border border-blue-500/20 p-0.5";
-  } else if (normAuthor.includes('stepfun') || normId.includes('stepfun')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/644f7e6233ac8f46fa0b9e26/CmF2ocXhkr2UtHXgmwq7-.png';
-    customTitle = 'StepFun Model';
-    bgClass = "bg-[#0B152A] border border-blue-500/15 p-0.5";
-  } else if (normAuthor.includes('unsloth') || normId.includes('unsloth')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/62ecdc18b72a69615d6bd857/E4lkPz1TZNLzIFr_dR273.png';
-    customTitle = 'Unsloth Model';
-    bgClass = "bg-amber-500/5 border border-amber-500/15 p-0.5";
-  } else if (normAuthor.includes('openbmp') || normAuthor.includes('openbmb') || normId.includes('openbmp') || normId.includes('openbmb')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/1670387859384-633fe7784b362488336bbfad.png';
-    customTitle = 'OpenBMB Model';
-    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
-  } else if (normAuthor.includes('bytedance') || normId.includes('bytedance')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/6535c9e88bde2fae19b6fb25/7a1zq0juEwFJVCIShnLI-.png';
-    customTitle = 'ByteDance Model';
-    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
-  } else if (normAuthor.includes('prism') || normId.includes('prism')) {
-    avatarUrl = 'https://cdn-avatars.huggingface.co/v1/production/uploads/635a0b777a8ece20fa001ad5/7_KshfAsW9T-U3GZzV2j_.png';
-    customTitle = 'Prism ML Model';
-    bgClass = "bg-white dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 p-0.5";
-  } else if (normAuthor.includes('meta') || normAuthor.includes('llama') || normId.includes('llama')) {
-    avatarUrl = 'https://upload.wikimedia.org/wikipedia/commons/7/7b/Meta_Platforms_Inc._logo.svg';
-    customTitle = 'Meta Llama Model';
-    bgClass = "bg-[#0B0F19] border border-blue-900/40 p-1.5";
-  }
-
-  if (avatarUrl) {
-    return (
-      <ModelImage
-        src={avatarUrl}
-        fallback={fallback}
-        title={customTitle}
-        bgClass={bgClass}
-      />
-    );
-  }
-
+const renderAppModelLogo = (_fullName: string, _modelId: string, fallback: React.ReactNode) => {
   return fallback;
 };
-
-const SUPPORTED_VOICE_LANGUAGES = [
-  { code: "en-US", label: "English (US)" },
-  { code: "en-GB", label: "English (UK)" },
-  { code: "es-ES", label: "Español (España)" },
-  { code: "es-MX", label: "Español (México)" },
-  { code: "fr-FR", label: "Français (France)" },
-  { code: "de-DE", label: "Deutsch (Deutschland)" },
-  { code: "it-IT", label: "Italiano (Italia)" },
-  { code: "pt-BR", label: "Português (Brasil)" },
-  { code: "hi-IN", label: "हिन्दी (भारत) / Hindi" },
-  { code: "zh-CN", label: "中文 (简体) / Chinese" },
-  { code: "ja-JP", label: "日本語 / Japanese" },
-  { code: "ar-SA", label: "العربية / Arabic" },
-];
 
 export interface ChatBoxPanelProps {
   isCenteredState?: boolean;

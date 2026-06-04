@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Sparkles, ArrowLeft, Bot, Check, ChevronDown, ChevronUp, AlertCircle, RefreshCw, Wand2, Terminal, Key, Eye, EyeOff, Server, Globe, Cpu, Brain, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { X, Sparkles, ArrowLeft, Bot, Check, ChevronDown, ChevronUp, AlertCircle, RefreshCw, Wand2, Terminal, Key, Eye, EyeOff, Server, Globe, Cpu, Brain, FileText, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Agent, AgentSkill, AgentTool, AgentModel, AgentSkillFile } from '../../agents/types';
 import { ALL_AGENT_SKILLS, ALL_AGENT_TOOLS, AGENT_AVATARS, AGENT_AVATAR_COLORS, MAX_AGENT_SKILLS, MAX_AGENT_TOOLS } from '../../agents/constants';
@@ -204,6 +204,70 @@ export function AgentCreationModal({
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const [skillFiles, setSkillFiles] = useState<AgentSkillFile[]>([]);
   const [activeSkillFileIdx, setActiveSkillFileIdx] = useState<number>(0);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+  const allModelEntries = useMemo(() => {
+    const entries: { provider: string; providerLabel: string; label: string; value: string }[] = [];
+    Object.entries(PROVIDER_MODELS).forEach(([provId, models]) => {
+      const provDef = PROVIDERS.find(p => p.id === provId);
+      const provLabel = provDef?.label || provId;
+      models.forEach(m => {
+        entries.push({ provider: provId, providerLabel: provLabel, label: m.label, value: m.value });
+      });
+    });
+    return entries;
+  }, []);
+
+  const filteredModelEntries = modelSearchQuery
+    ? allModelEntries.filter(m =>
+        m.label.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+        m.providerLabel.toLowerCase().includes(modelSearchQuery.toLowerCase()) ||
+        m.value.toLowerCase().includes(modelSearchQuery.toLowerCase())
+      )
+    : allModelEntries;
+
+  // Click outside to close model menu
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setIsModelMenuOpen(false);
+        setModelSearchQuery('');
+      }
+    };
+    if (isModelMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isModelMenuOpen]);
+
+  const handleModelSelect = (provId: string, modelVal: string) => {
+    setProvider(provId);
+    setModel(modelVal as AgentModel);
+    setCustomModelText('');
+    if (provId === 'google-gemini') setBaseUrl('https://generativelanguage.googleapis.com/v1beta');
+    else if (provId === 'openai') setBaseUrl('https://api.openai.com/v1');
+    else if (provId === 'anthropic') setBaseUrl('https://api.anthropic.com/v1');
+    else if (provId === 'deepseek') setBaseUrl('https://api.deepseek.com');
+    else if (provId === 'groq') setBaseUrl('https://api.groq.com/openai/v1');
+    else if (provId === 'opencode') setBaseUrl('https://opencode.ai/zen/v1');
+    else if (provId === 'openprovider') setBaseUrl('https://openprovider.mimika.in/v1');
+    else if (provId === 'openrouter') setBaseUrl('https://openrouter.ai/api/v1');
+    else if (provId === 'together') setBaseUrl('https://api.together.xyz/v1');
+    else if (provId === 'mistral') setBaseUrl('https://api.mistral.ai/v1');
+    else if (provId === 'cohere') setBaseUrl('https://api.cohere.com/compatibility/v1');
+    else if (provId === 'sarvamai') setBaseUrl('https://api.sarvam.ai/v1');
+    else if (provId === 'kilo') setBaseUrl('https://api.kilo.ai/api/gateway');
+    else if (provId === 'cline') setBaseUrl('https://api.cline.bot');
+    else if (provId === 'nvidia_nim') setBaseUrl('https://integrate.api.nvidia.com/v1');
+    else if (provId === 'ollama') setBaseUrl('http://localhost:11434/v1');
+    else if (provId === 'ollama_cloud') setBaseUrl('https://ollama.com');
+    else if (provId === 'lm-studio') setBaseUrl('http://localhost:1234/v1');
+    else setBaseUrl('');
+    setIsModelMenuOpen(false);
+    setModelSearchQuery('');
+  };
 
   // Initialize skills, tools, and configurations if entering edit modes or reset
   useEffect(() => {
@@ -691,73 +755,84 @@ Ensure that skillFiles contains highly detailed custom markdown content. Do NOT 
                       <span className="text-xs font-bold uppercase tracking-wider text-white">LLM Engine Configuration</span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Selector 1: Provider */}
-                      <div className="flex flex-col gap-1.5 text-left font-sans">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Provider</label>
-                        <div className="relative">
-                          <select
-                            value={provider}
-                            onChange={(e) => {
-                              const nextProv = e.target.value;
-                              setProvider(nextProv);
-                              const firstModel = PROVIDER_MODELS[nextProv]?.[0]?.value || 'custom';
-                              setModel(firstModel);
-                              setCustomModelText('');
-                              if (nextProv === 'google-gemini') setBaseUrl('https://generativelanguage.googleapis.com/v1beta');
-                              else if (nextProv === 'openai') setBaseUrl('https://api.openai.com/v1');
-                              else if (nextProv === 'anthropic') setBaseUrl('https://api.anthropic.com/v1');
-                              else if (nextProv === 'deepseek') setBaseUrl('https://api.deepseek.com');
-                              else if (nextProv === 'groq') setBaseUrl('https://api.groq.com/openai/v1');
-                              else if (nextProv === 'opencode') setBaseUrl('https://opencode.ai/zen/v1');
-                              else if (nextProv === 'openprovider') setBaseUrl('https://openprovider.mimika.in/v1');
-                              else if (nextProv === 'openrouter') setBaseUrl('https://openrouter.ai/api/v1');
-                              else if (nextProv === 'together') setBaseUrl('https://api.together.xyz/v1');
-                              else if (nextProv === 'mistral') setBaseUrl('https://api.mistral.ai/v1');
-                              else if (nextProv === 'cohere') setBaseUrl('https://api.cohere.com/compatibility/v1');
-                              else if (nextProv === 'sarvamai') setBaseUrl('https://api.sarvam.ai/v1');
-                              else if (nextProv === 'kilo') setBaseUrl('https://api.kilo.ai/api/gateway');
-                              else if (nextProv === 'cline') setBaseUrl('https://api.cline.bot');
-                              else if (nextProv === 'nvidia_nim') setBaseUrl('https://integrate.api.nvidia.com/v1');
-                              else if (nextProv === 'ollama') setBaseUrl('http://localhost:11434/v1');
-                              else if (nextProv === 'ollama_cloud') setBaseUrl('https://ollama.com');
-                              else if (nextProv === 'lm-studio') setBaseUrl('http://localhost:1234/v1');
-                              else setBaseUrl('');
-                            }}
-                            className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-750 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 appearance-none cursor-pointer text-left"
-                          >
-                            {PROVIDERS.map(p => (
-                              <option key={p.id} value={p.id}>{p.label}</option>
-                            ))}
-                          </select>
-                          <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
-                            <ChevronDown size={12} />
-                          </div>
-                        </div>
-                      </div>
+                    {/* Model Selection Button (replaces provider + model selects) */}
+                    <div className="flex flex-col gap-1.5 text-left font-sans">
+                      <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Choose Model</label>
+                      <div className="relative" ref={modelDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                          className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 focus:border-zinc-750 focus:outline-none rounded-xl text-xs text-zinc-200 cursor-pointer select-none transition-all"
+                        >
+                          <Sparkles size={11} className="text-amber-500 shrink-0" />
+                          <span className="flex-1 text-left truncate font-semibold">
+                            {(() => {
+                              if (customModelText) return customModelText;
+                              const foundProvider = PROVIDERS.find(p => p.id === provider);
+                              const foundModel = (PROVIDER_MODELS[provider] || []).find(m => m.value === model);
+                              const modelLabel = foundModel?.label || model;
+                              const providerLabel = foundProvider?.label || provider;
+                              return `${modelLabel}  ·  ${providerLabel}`;
+                            })()}
+                          </span>
+                          <ChevronDown size={11} className={`text-zinc-500 shrink-0 transition-transform duration-150 ${isModelMenuOpen ? 'rotate-180' : ''}`} />
+                        </button>
 
-                      {/* Selector 2: Choose/Select Model */}
-                      <div className="flex flex-col gap-1.5 text-left font-sans">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Select Model</label>
-                        <div className="relative">
-                          <select
-                            value={model}
-                            onChange={(e) => {
-                              setModel(e.target.value);
-                              if (e.target.value !== 'custom') {
-                                setCustomModelText('');
-                              }
-                            }}
-                            className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-750 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 appearance-none cursor-pointer text-left"
-                          >
-                            {(PROVIDER_MODELS[provider] || []).map(m => (
-                              <option key={m.value} value={m.value}>{m.label}</option>
-                            ))}
-                          </select>
-                          <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
-                            <ChevronDown size={12} />
-                          </div>
-                        </div>
+                        <AnimatePresence>
+                          {isModelMenuOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                              transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+                              className="absolute left-0 right-0 mt-1 w-full bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden"
+                            >
+                              <div className="px-3 pt-3 pb-1 shrink-0">
+                                <div className="relative group">
+                                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
+                                  <input
+                                    type="text"
+                                    placeholder="Search models..."
+                                    value={modelSearchQuery}
+                                    onChange={(e) => setModelSearchQuery(e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-full h-8 pl-8 pr-3 bg-zinc-800 border border-zinc-700/60 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/15 rounded-xl text-[11px] outline-none text-zinc-200 placeholder-zinc-500 font-medium transition-all"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="max-h-[230px] overflow-y-auto p-1.5 space-y-1 shrink-0 border-t border-zinc-800 mt-1 custom-scrollbar">
+                                {filteredModelEntries.length > 0 ? (
+                                  filteredModelEntries.map((item) => {
+                                    const isSelected = provider === item.provider && model === item.value;
+                                    return (
+                                      <button
+                                        key={`${item.provider}-${item.value}`}
+                                        type="button"
+                                        onClick={() => handleModelSelect(item.provider, item.value)}
+                                        className={`w-full min-h-[36px] flex items-center gap-2 px-2 py-1.5 rounded-xl text-[11px] font-semibold transition-all border-l-[3px] cursor-pointer ${
+                                          isSelected
+                                            ? 'bg-zinc-800 text-white border-blue-500 shadow-sm'
+                                            : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 border-transparent'
+                                        }`}
+                                      >
+                                        <span className="flex-1 text-left min-w-0">
+                                          <span className="block truncate">{item.label}</span>
+                                          <span className="block text-[8px] font-mono text-zinc-500 truncate uppercase tracking-tight">{item.providerLabel}</span>
+                                        </span>
+                                        {isSelected && (
+                                          <Check size={11} className="text-blue-500 shrink-0" strokeWidth={3} />
+                                        )}
+                                      </button>
+                                    );
+                                  })
+                                ) : (
+                                  <div className="py-8 text-center text-[11px] text-zinc-500">No models match</div>
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
 

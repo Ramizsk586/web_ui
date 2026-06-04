@@ -12,7 +12,6 @@ import {
   Box, 
   CloudMoon 
 } from 'lucide-react';
-import { LuminaToolCallingAnimation } from '../components/ui/Animations';
 import { computeLineDiff } from '../components/NodeGraph/FileDiffNode';
 import { parseThinkTags, turboQuantCompress } from '../utils/textUtils';
 import { extractArtifacts } from '../utils/artifactUtils';
@@ -182,7 +181,7 @@ const mapSpawnEventsToSubNodes = (toolCallId: string, events: any[] = []): ToolC
       evt.name === 'write_file' ? 'write' :
       evt.name === 'edit_file' ? 'edit' :
       evt.name === 'run_command' ? 'terminal' :
-      evt.name === 'search_code' ? 'search' :
+      evt.name === 'glob_tool' || evt.name === 'grep_tool' ? 'search' :
       'sparkles',
   }));
 };
@@ -1057,16 +1056,31 @@ export function useAppHandlers(params: UseAppHandlersParams) {
           {
             type: 'function',
             function: {
-              name: 'search_code',
-              description: 'Search files by regex or list files by glob pattern.',
+              name: 'glob_tool',
+              description: 'Finds files by matching patterns against their file names or directory paths.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  fileGlob: { type: 'string', description: 'File filter pattern like "**/*.tsx" or "*.css".' },
+                  maxResults: { type: 'number', description: 'Max results (default 30).' }
+                },
+                required: ['fileGlob']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'grep_tool',
+              description: 'Finds text lines inside files by matching regular expressions against the file contents.',
               parameters: {
                 type: 'object',
                 properties: {
                   query: { type: 'string', description: 'Regex/text to search for.' },
-                  fileGlob: { type: 'string', description: 'File filter like "*.tsx".' },
+                  fileGlob: { type: 'string', description: 'Optional file filter like "*.tsx".' },
                   maxResults: { type: 'number', description: 'Max results (default 30).' }
                 },
-                required: []
+                required: ['query']
               }
             }
           },
@@ -1333,7 +1347,7 @@ ${skillMd.content}
 You are a software engineering agent. When asked to build/modify code:
 1. Use tools to make real file system changes. Always 'read_file' before editing.
 2. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
-3. Use 'search_code' to find symbols/errors. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
+3. Use 'glob_tool' to find files by name patterns. Use 'grep_tool' to search text inside files. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
 4. Work in tool-call cycles until the task is complete. Give a summary when done.
 
 [SUBAGENTS DELEGATION SYSTEM]
@@ -1347,7 +1361,7 @@ Spawn specialized subagents for engineering tasks using their dedicated tools:
 Provide specific and detailed task strings so they know exactly what to build.
 
 [ASK USER TOOL INSTRUCTIONS]
-- Do NOT call 'ask_user' to ask trivial or basic questions (e.g. asking for file paths, project names, or generic things you can check yourself using tools like 'search_code', 'read_file', or by running commands).
+- Do NOT call 'ask_user' to ask trivial or basic questions (e.g. asking for file paths, project names, or generic things you can check yourself using tools like 'glob_tool', 'grep_tool', 'read_file', or by running commands).
 - Only ask clarifying questions if there is a critical ambiguity in the requirements that prevents you from proceeding.
 - When calling 'ask_user', prefer using 'single_choice', 'multi_choice', or 'confirm' types and provide clear, actionable selectable options (e.g., in the 'options' field) rather than open-ended 'text_input'. This provides a premium, interactive experience.`;
 
@@ -1524,7 +1538,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
           }
           
           const activeToolNames = choice.tool_calls.map((t: any) => t.function?.name || '');
-          if (activeToolNames.some((n: string) => n === 'read_file' || n === 'search_code' || n === 'analyze_file')) {
+          if (activeToolNames.some((n: string) => n === 'read_file' || n === 'glob_tool' || n === 'grep_tool' || n === 'analyze_file')) {
             setCoderTodos(prev => {
               if (prev.length > 0) {
                 return prev.map((item, idx) => {
@@ -1580,7 +1594,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
               argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
               icon: isScrape ? 'globe' :
                     name === 'web_search' ? 'search' :
-                    name === 'search_code' ? 'search' :
+                    name === 'glob_tool' || name === 'grep_tool' ? 'search' :
                     name === 'read_file' ? 'file' :
                     name === 'write_file' ? 'write' :
                     name === 'edit_file' ? 'edit' :
@@ -1645,7 +1659,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   cachedNode.resultSummary = 'Reused previously collected result in this turn';
                 }
                 showToast(`Reused cached result for ${name}`);
-              } else if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'search_code', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
+              } else if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'glob_tool', 'grep_tool', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               } else {
                 const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
@@ -1816,7 +1830,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 const range = args.offset ? ` [offset=${args.offset}${args.limit ? `, limit=${args.limit}` : ''}]` : '';
                 showToast(`Read ${cleanedPath}${range}`);
                 }
-              } else if (name === 'search_code') {
+              } else if (name === 'glob_tool') {
                 const maxResults = Math.max(1, Math.min(Number(args.maxResults || 30), 80));
                 const listRes = await fetch('/api/fs/list', {
                   method: 'POST',
@@ -1836,40 +1850,59 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   });
                 }
 
-                const query = String(args.query || '').trim();
-                if (!query) {
-                  resultValue = { query: '', count: files.length, files: files.slice(0, maxResults).map((f: any) => ({ filePath: f.relativePath || f.path, isDirectory: f.isDirectory })) };
-                } else {
+                resultValue = { fileGlob, count: files.length, files: files.slice(0, maxResults).map((f: any) => ({ filePath: f.relativePath || f.path, isDirectory: f.isDirectory })) };
+                showToast(`Glob matched ${files.length} file${files.length === 1 ? '' : 's'}`);
+              } else if (name === 'grep_tool') {
+                const maxResults = Math.max(1, Math.min(Number(args.maxResults || 30), 80));
+                const listRes = await fetch('/api/fs/list', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ folderPath: coderWorkspacePath || '.', ...workspaceArg }),
+                  signal
+                });
+                const listData = await listRes.json();
+                let files = listData.files || [];
+
+                const fileGlob = String(args.fileGlob || '').toLowerCase();
+                if (fileGlob) {
                   files = files.filter((f: any) => {
                     if (f.isDirectory) return false;
                     const rel = String(f.relativePath || f.path || '').toLowerCase();
-                    return /\.(html?|css|scss|js|jsx|ts|tsx|json|md|vue|svelte|py|rs|go|php|rb|java|kt|swift)$/i.test(rel);
+                    return rel.includes(fileGlob) || rel.endsWith(fileGlob);
                   });
-                  let regex: RegExp;
-                  try { regex = new RegExp(query, 'ig'); } catch { regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'); }
-                  const matches: any[] = [];
-                  for (const file of files) {
-                    if (matches.length >= maxResults) break;
-                    const readRes = await fetch('/api/fs/read', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ filePath: file.relativePath || file.path, ...workspaceArg }),
-                      signal
-                    });
-                    if (!readRes.ok) continue;
-                    const readData = await readRes.json();
-                    const lines = String(readData.content || '').split('\n');
-                    lines.forEach((line, idx) => {
-                      if (matches.length >= maxResults) return;
-                      regex.lastIndex = 0;
-                      if (regex.test(line)) {
-                        matches.push({ filePath: file.relativePath || file.path, line: idx + 1, text: line.trim().slice(0, 240) });
-                      }
-                    });
-                  }
-                  resultValue = { query, count: matches.length, matches };
-                  showToast(`Found ${matches.length} match${matches.length === 1 ? '' : 'es'}`);
                 }
+
+                files = files.filter((f: any) => {
+                  if (f.isDirectory) return false;
+                  const rel = String(f.relativePath || f.path || '').toLowerCase();
+                  return /\.(html?|css|scss|js|jsx|ts|tsx|json|md|vue|svelte|py|rs|go|php|rb|java|kt|swift)$/i.test(rel);
+                });
+
+                const query = String(args.query || '').trim();
+                let regex: RegExp;
+                try { regex = new RegExp(query, 'ig'); } catch { regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'); }
+                const matches: any[] = [];
+                for (const file of files) {
+                  if (matches.length >= maxResults) break;
+                  const readRes = await fetch('/api/fs/read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filePath: file.relativePath || file.path, ...workspaceArg }),
+                    signal
+                  });
+                  if (!readRes.ok) continue;
+                  const readData = await readRes.json();
+                  const lines = String(readData.content || '').split('\n');
+                  lines.forEach((line, idx) => {
+                    if (matches.length >= maxResults) return;
+                    regex.lastIndex = 0;
+                    if (regex.test(line)) {
+                      matches.push({ filePath: file.relativePath || file.path, line: idx + 1, text: line.trim().slice(0, 240) });
+                    }
+                  });
+                }
+                resultValue = { query, count: matches.length, matches };
+                showToast(`Grep found ${matches.length} match${matches.length === 1 ? '' : 'es'}`);
               } else if (name === 'analyze_file') {
                 const cleanedPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
                 if (!cleanedPath) throw new Error("LSP_Experimental requires filePath");
