@@ -20,7 +20,11 @@ import {
   Battery,
   Bot,
   GitBranch,
-  Terminal
+  Terminal,
+  Search,
+  AlertCircle,
+  Settings,
+  Activity
 } from 'lucide-react';
 import { getTerminalSessionId } from '../utils/terminalService';
 
@@ -991,7 +995,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                   return (
                     <div 
                       key={agent.id || idx}
-                      className={`flex flex-col p-3 rounded-xl border border-zinc-850 bg-[#141211] transition-all`}
+                      className="flex flex-col p-3 rounded-xl border border-zinc-850 bg-[#141211] transition-all"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -1002,9 +1006,97 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                           {agent.status}
                         </span>
                       </div>
+
+                      {agent.error && (
+                        <div className="mt-2 text-[10px] text-rose-400 bg-rose-950/20 border border-rose-900/30 rounded p-1.5 flex items-start gap-1.5 font-mono">
+                          <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                          <span className="break-all">{agent.error}</span>
+                        </div>
+                      )}
+
+                      {agent.events && agent.events.length > 0 && (
+                        <div className="mt-3 space-y-2 border-t border-zinc-800/40 pt-3">
+                          <div className="text-[9px] text-zinc-500 uppercase tracking-wider font-mono select-none">Execution Steps:</div>
+                          <div className="relative pl-4 space-y-3.5 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-zinc-800">
+                            {agent.events.map((evt: any, evtIdx: number) => {
+                              const isCompleted = evt.status === 'complete';
+                              const isFailed = evt.status === 'failed';
+                              const isActive = evt.status === 'active' || evt.status === 'running';
+                              
+                              let iconEl = <Activity size={10} />;
+                              if (evt.name?.includes('file') || evt.name?.includes('code')) {
+                                iconEl = <FileText size={10} />;
+                              } else if (evt.name?.includes('command')) {
+                                iconEl = <Terminal size={10} />;
+                              } else if (evt.name?.includes('search')) {
+                                iconEl = <Search size={10} />;
+                              }
+                              
+                              let statusIconColor = 'text-zinc-500 bg-zinc-900 border-zinc-800';
+                              if (isCompleted) {
+                                statusIconColor = 'text-emerald-400 bg-emerald-950/30 border-emerald-800/50';
+                              } else if (isFailed) {
+                                statusIconColor = 'text-rose-400 bg-rose-950/30 border-rose-800/50';
+                              } else if (isActive) {
+                                statusIconColor = 'text-amber-400 bg-amber-950/30 border-amber-800/50 animate-pulse';
+                              }
+
+                              const getToolDesc = (name: string, input: any) => {
+                                if (!input) return '';
+                                switch (name) {
+                                  case 'read_file':
+                                  case 'write_file':
+                                  case 'edit_file':
+                                  case 'create_file':
+                                  case 'delete_file':
+                                    return input.filePath ? input.filePath.split('/').pop() : '';
+                                  case 'rename_file':
+                                    return `${input.filePath?.split('/').pop()} → ${input.newPath?.split('/').pop()}`;
+                                  case 'run_command':
+                                    return input.command || '';
+                                  case 'search_code':
+                                    return `"${input.query}"`;
+                                  default:
+                                    return JSON.stringify(input);
+                                }
+                              };
+
+                              const toolDesc = getToolDesc(evt.name, evt.input);
+
+                              return (
+                                <div key={evt.id || evtIdx} className="relative flex items-start gap-2.5">
+                                  {/* Connector bullet */}
+                                  <div className={`absolute -left-[14px] top-1 w-2.5 h-2.5 rounded-full flex items-center justify-center border ${statusIconColor} z-10 text-[7px]`}>
+                                    {isActive && <Loader2 size={6} className="animate-spin" />}
+                                    {isCompleted && <Check size={6} />}
+                                    {isFailed && <span className="font-bold text-[7px] leading-[8px]">×</span>}
+                                  </div>
+                                  
+                                  <div className="flex-1 min-w-0 flex flex-col">
+                                    <div className="flex items-center gap-1.5 justify-between">
+                                      <span className="text-[10px] font-semibold text-zinc-300 font-mono flex items-center gap-1">
+                                        {iconEl}
+                                        {evt.name}
+                                      </span>
+                                      <span className={`text-[8px] font-mono capitalize ${isCompleted ? 'text-emerald-500/80' : isFailed ? 'text-rose-500/80' : isActive ? 'text-amber-500/80 animate-pulse' : 'text-zinc-500'}`}>
+                                        {evt.status}
+                                      </span>
+                                    </div>
+                                    {toolDesc && (
+                                      <span className="text-[9px] text-zinc-400 font-mono mt-0.5 break-all line-clamp-2" title={toolDesc}>
+                                        {toolDesc}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                       
                       {agent.filesCreated && agent.filesCreated.length > 0 && (
-                        <div className="mt-2 pl-4 border-l border-zinc-800 space-y-1">
+                        <div className="mt-3 pl-4 border-l border-zinc-800 space-y-1">
                           <div className="text-[9px] text-zinc-500 uppercase tracking-wider font-mono">Files:</div>
                           {agent.filesCreated.map((f: string, fIdx: number) => (
                             <div 

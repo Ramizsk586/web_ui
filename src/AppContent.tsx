@@ -2652,6 +2652,7 @@ const startCoderPreview = useCallback(async () => {
                   setUseLocalModelsOnly={setUseLocalModelsOnly}
                   activeSettingsTab={activeSettingsTab}
                   setActiveSettingsTab={setActiveSettingsTab}
+                  availableModels={availableModels}
                   useBubbles={useBubbles}
                   setUseBubbles={setUseBubbles}
                   isCompactSidebar={isCompactSidebar}

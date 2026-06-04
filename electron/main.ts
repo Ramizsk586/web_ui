@@ -262,9 +262,39 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter')submit();if(e.ke
       { role: 'reload' },
       { role: 'forceReload' },
       { type: 'separator' },
-      { label: 'Inspect', accelerator: 'F12', click: () => mainWindow?.webContents.toggleDevTools() },
+      { label: 'Inspect Panel', accelerator: 'CmdOrCtrl+Shift+I', click: () => mainWindow?.webContents.send('open:inspect-panel') },
+      { label: 'DevTools', accelerator: 'F12', click: () => mainWindow?.webContents.toggleDevTools() },
     ];
     Menu.buildFromTemplate(template).popup({ window: mainWindow });
+  });
+
+  let inspectWindow: BrowserWindow | null = null;
+
+  ipcMain.on('open:inspect-panel', () => {
+    if (inspectWindow && !inspectWindow.isDestroyed()) {
+      inspectWindow.focus();
+      return;
+    }
+    const appUrl = `http://localhost:${SERVER_PORT}`;
+    inspectWindow = new BrowserWindow({
+      width: 1100,
+      height: 700,
+      title: 'Lumina Inspect Panel',
+      backgroundColor: '#09090b',
+      icon: isDev
+        ? path.join(__dirname, '..', 'assets', 'sparkles.png')
+        : path.join(process.resourcesPath, 'assets', 'sparkles.png'),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        nodeIntegration: false,
+        contextIsolation: true,
+        backgroundThrottling: false,
+        enableWebSQL: false,
+      },
+    });
+
+    inspectWindow.loadURL(`${appUrl}/?inspect=1`);
+    inspectWindow.on('closed', () => { inspectWindow = null; });
   });
 
   mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximized', true));

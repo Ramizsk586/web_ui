@@ -987,7 +987,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
                 properties: {
                   agentName: {
                     type: 'string',
-                    description: 'The name of the subagent to spawn. Available subagents: scaffold-agent, config-agent, backend-agent, frontend-agent, database-agent, auth-agent, integration-agent, test-agent, docs-agent, deploy-agent.'
+                    description: 'The name of the subagent to spawn. Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-agent, reviewer-agent.'
                   },
                   task: {
                     type: 'string',
@@ -1312,18 +1312,14 @@ You are a software engineering agent. When asked to build/modify code:
 4. Work in tool-call cycles until the task is complete. Give a summary when done.
 
 [SUBAGENTS DELEGATION SYSTEM]
-When asked to build a full project, scaffold a new application, or implement a large feature, you should spawn specialized subagents to perform targeted tasks using the 'spawn_subagent' tool:
-- 'scaffold-agent': To set up folders, project structure, and empty stub files.
-- 'config-agent': To configure dependencies, install packages, and manage package.json/webpack/vite configs.
-- 'database-agent': To configure databases, schemas, migrations, or database connection scripts.
-- 'backend-agent': To implement server-side APIs, routes, controllers, and services.
-- 'frontend-agent': To build UI components, hooks, pages, styles, and web views.
-- 'auth-agent': To set up login, authentication routes, session management, or tokens.
-- 'test-agent': To write and execute unit tests, integration tests, or end-to-end tests.
-- 'docs-agent': To write README, API documentations, or comment structures.
-- 'deploy-agent': To configure CI/CD pipelines, Dockerfiles, or cloud deployment configs.
+Spawn specialized subagents for engineering tasks using the 'spawn_subagent' tool:
+- 'orchestrator-agent': Coordinates execution, plans subtasks, and assigns work.
+- 'analyzer-agent': Researches codebase, traces dependencies, and locates functions.
+- 'coder-agent': Implements features, refactors, and edits workspace files.
+- 'debugger-agent': Diagnoses failures, runs compiler checks, and verifies fixes.
+- 'reviewer-agent': Performs static analysis, reviews code, and checks styles.
 
-Sequential Work: Spawn them one by one (e.g. scaffold first, then config, then database, then backend, frontend) to avoid conflicts. Provide specific and detailed task strings so they know exactly what to build. Re-check the files they created and write the final integration yourself.
+Provide specific and detailed task strings so they know exactly what to build.
 
 [ASK USER TOOL INSTRUCTIONS]
 - Do NOT call 'ask_user' to ask trivial or basic questions (e.g. asking for file paths, project names, or generic things you can check yourself using tools like 'search_code', 'read_file', or by running commands).
@@ -1388,11 +1384,7 @@ When the user asks to build a full project, FIRST output a PROJECT ANALYSIS BLOC
 Then output a SUBAGENT TASK DECOMPOSITION PLAN with phases.
 Then ask the user for confirmation before beginning.
 
-Available subagents: scaffold-agent, config-agent, backend-agent, frontend-agent,
-database-agent, auth-agent, integration-agent, test-agent, docs-agent, deploy-agent.
-
-Store subagent .prompt files at .lumina/subagents/ in the workspace.
-Store contract files at .lumina/contracts/ in the workspace.`;
+Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-agent, reviewer-agent.`;
       }
 
       // Inject search context into systemPrompt BEFORE building apiMessages
@@ -2086,39 +2078,69 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                 if (!agentName || !taskText) throw new Error("spawn_subagent requires agentName and task");
                 showToast(`Spawning subagent: ${agentName}...`);
 
-                setOrchestrationState((prev: any) => {
-                  const cleanName = agentName.replace('-agent', '').toUpperCase();
-                  const existingIdx = prev.agents.findIndex((a: any) => a.id === agentName);
-                  let nextAgents = [...prev.agents];
-                  if (existingIdx !== -1) {
-                    nextAgents[existingIdx] = {
-                      ...nextAgents[existingIdx],
-                      status: 'running',
-                      startedAt: Date.now()
-                    };
-                  } else {
-                    nextAgents.push({
-                      id: agentName,
-                      name: `${cleanName} Agent`,
-                      phase: prev.currentPhase || 1,
-                      status: 'running',
-                      filesCreated: [],
-                      startedAt: Date.now()
-                    });
-                  }
-                  return {
-                    ...prev,
-                    isActive: true,
-                    agents: nextAgents
-                  };
-                });
+                let localAgentId = `agent_temp_${Date.now()}`;
+                
+                try {
+                  let targetModel = activeModelId;
+                  let targetBaseUrl = serverUrl?.replace(/\/+$/, '') || '';
+                  let targetKey = apiKey || '';
+                  let targetProvider = selectedProvider || 'openai-compatible';
 
-                 try {
+                  let customPrompt = '';
+                  let customTools: string[] = [];
+
+                  try {
+                    const savedConfigsStr = localStorage.getItem('lumina_subagent_configs');
+                    if (savedConfigsStr) {
+                      const configs = JSON.parse(savedConfigsStr);
+                      let mappedAgentId = '';
+                      const lowerName = agentName.toLowerCase();
+                      if (lowerName.includes('orchestrator') || lowerName.includes('dispatcher')) {
+                        mappedAgentId = 'orchestrator';
+                      } else if (lowerName.includes('analyzer') || lowerName.includes('research') || lowerName.includes('scaffold') || lowerName.includes('docs') || lowerName.includes('project-analyzer')) {
+                        mappedAgentId = 'analyzer';
+                      } else if (lowerName.includes('coder') || lowerName.includes('backend') || lowerName.includes('frontend') || lowerName.includes('config') || lowerName.includes('database') || lowerName.includes('auth') || lowerName.includes('deploy')) {
+                        mappedAgentId = 'coder';
+                      } else if (lowerName.includes('debug') || lowerName.includes('test') || lowerName.includes('fix')) {
+                        mappedAgentId = 'debugger';
+                      } else if (lowerName.includes('reviewer') || lowerName.includes('review') || lowerName.includes('audit')) {
+                        mappedAgentId = 'reviewer';
+                      }
+
+                      if (mappedAgentId && configs[mappedAgentId]) {
+                        const agentCfg = configs[mappedAgentId];
+                        const modelId = agentCfg.modelId;
+                        if (agentCfg.systemPrompt) {
+                          customPrompt = agentCfg.systemPrompt;
+                        }
+                        if (Array.isArray(agentCfg.tools) && agentCfg.tools.length > 0) {
+                          customTools = agentCfg.tools;
+                        }
+                        if (modelId && modelId !== 'openprovider/auto-free') {
+                          const profilesStr = localStorage.getItem('lumina_ai_provider_profiles');
+                          if (profilesStr) {
+                            const profiles = JSON.parse(profilesStr);
+                            const matchingProfile = profiles.find((p: any) => p.id === agentCfg.providerProfileId || p.models.some((m: any) => m.id === modelId));
+                            if (matchingProfile) {
+                              targetModel = modelId;
+                              targetBaseUrl = matchingProfile.endpoint?.replace(/\/+$/, '') || '';
+                              targetKey = matchingProfile.apiKey || '';
+                              targetProvider = matchingProfile.provider || 'openai-compatible';
+                              console.log(`[LUMINA] Mapped subagent ${agentName} to ${mappedAgentId} configuration using model ${modelId} from profile ${matchingProfile.name}`);
+                            }
+                          }
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    console.error("[LUMINA] Failed to map subagent settings:", e);
+                  }
+
                   const useBridge = useBridgeTools && llamaBridgeUrl;
-                  const activeBaseUrl = useBridge ? llamaBridgeUrl.replace(/\/+$/, '') : serverUrl?.replace(/\/+$/, '') || '';
-                  const activeKey = useBridge ? llamaBridgeApiKey : apiKey || '';
-                  const activeProvider = useBridge ? 'llama-bridge' : selectedProvider || 'openai-compatible';
-                  const activeModel = useBridge ? selectedLlamaModel : activeModelId;
+                  const activeBaseUrl = useBridge ? llamaBridgeUrl.replace(/\/+$/, '') : targetBaseUrl;
+                  const activeKey = useBridge ? llamaBridgeApiKey : targetKey;
+                  const activeProvider = useBridge ? 'llama-bridge' : targetProvider;
+                  const activeModel = useBridge ? selectedLlamaModel : targetModel;
 
                   const spawnRes = await fetch('/api/agents/spawn', {
                     method: 'POST',
@@ -2134,35 +2156,137 @@ Store contract files at .lumina/contracts/ in the workspace.`;
                           baseUrl: activeBaseUrl,
                           apiKey: activeKey
                         }
-                      }
+                      },
+                      ...(customPrompt ? { customPrompt } : {}),
+                      ...(customTools.length > 0 ? { customTools } : {})
                     }),
                     signal
                   });
                   const spawnData = await spawnRes.json();
                   if (!spawnRes.ok || spawnData.error) {
-                    throw new Error(spawnData.error || 'Subagent execution failed');
+                    throw new Error(spawnData.error || 'Subagent execution failed to start');
                   }
 
-                  setOrchestrationState((prev: any) => ({
-                    ...prev,
-                    agents: prev.agents.map((a: any) => a.id === agentName ? { ...a, status: 'done', completedAt: Date.now() } : a)
-                  }));
+                  const agentId = spawnData.agentId;
+                  localAgentId = agentId;
+
+                  setOrchestrationState((prev: any) => {
+                    const cleanName = agentName.replace('-agent', '').toUpperCase();
+                    const existingIdx = prev.agents.findIndex((a: any) => a.id === agentId);
+                    let nextAgents = [...prev.agents];
+                    if (existingIdx !== -1) {
+                      nextAgents[existingIdx] = {
+                        ...nextAgents[existingIdx],
+                        status: 'running',
+                        startedAt: Date.now(),
+                        events: []
+                      };
+                    } else {
+                      nextAgents.push({
+                        id: agentId,
+                        name: `${cleanName} Agent`,
+                        phase: prev.currentPhase || 1,
+                        status: 'running',
+                        filesCreated: [],
+                        startedAt: Date.now(),
+                        events: []
+                      });
+                    }
+                    return {
+                      ...prev,
+                      isActive: true,
+                      agents: nextAgents
+                    };
+                  });
+
+                  // Start polling loop
+                  let isDone = false;
+                  let pollCount = 0;
+                  let finalAgentData = null;
+
+                  while (!isDone && pollCount < 600) { // Max 10 minutes
+                    await new Promise((resolve, reject) => {
+                      const timer = setTimeout(resolve, 1000);
+                      if (signal) {
+                        signal.addEventListener('abort', () => {
+                          clearTimeout(timer);
+                          reject(new Error('Aborted'));
+                        });
+                      }
+                    });
+                    pollCount++;
+
+                    const statusRes = await fetch(`/api/agents/status?agentId=${agentId}`, { signal });
+                    if (!statusRes.ok) {
+                      throw new Error(`Failed to fetch status: ${statusRes.statusText}`);
+                    }
+                    const statusData = await statusRes.json();
+                    finalAgentData = statusData;
+
+                    setOrchestrationState((prev: any) => ({
+                      ...prev,
+                      agents: prev.agents.map((a: any) => {
+                        if (a.id === agentId) {
+                          return {
+                            ...a,
+                            status: statusData.status,
+                            events: statusData.events || [],
+                            filesCreated: statusData.filesCreated || [],
+                            completedAt: statusData.completedAt,
+                            error: statusData.error
+                          };
+                        }
+                        return a;
+                      })
+                    }));
+
+                    if (statusData.status === 'done' || statusData.status === 'failed') {
+                      isDone = true;
+                    }
+                  }
+
+                  if (finalAgentData?.status === 'failed') {
+                    throw new Error(finalAgentData.error || 'Subagent execution failed');
+                  }
 
                   resultValue = {
                     success: true,
                     agentName,
                     task: taskText,
-                    summary: spawnData.summary,
-                    events: spawnData.events
+                    summary: finalAgentData?.summary || '',
+                    events: finalAgentData?.events || []
                   };
                   showToast(`Subagent ${agentName} complete!`);
                   triggerWorkspaceRefresh();
                 } catch (subErr: any) {
                   const errMsg = subErr.message || 'Subagent failed';
-                  setOrchestrationState((prev: any) => ({
-                    ...prev,
-                    agents: prev.agents.map((a: any) => a.id === agentName ? { ...a, status: 'failed', error: errMsg } : a)
-                  }));
+                  setOrchestrationState((prev: any) => {
+                    const existingIdx = prev.agents.findIndex((a: any) => a.id === localAgentId);
+                    let nextAgents = [...prev.agents];
+                    if (existingIdx !== -1) {
+                      nextAgents[existingIdx] = {
+                        ...nextAgents[existingIdx],
+                        status: 'failed',
+                        error: errMsg
+                      };
+                    } else {
+                      const cleanName = agentName.replace('-agent', '').toUpperCase();
+                      nextAgents.push({
+                        id: localAgentId,
+                        name: `${cleanName} Agent`,
+                        phase: prev.currentPhase || 1,
+                        status: 'failed',
+                        filesCreated: [],
+                        startedAt: Date.now(),
+                        error: errMsg,
+                        events: []
+                      });
+                    }
+                    return {
+                      ...prev,
+                      agents: nextAgents
+                    };
+                  });
                   resultValue = {
                     success: false,
                     agentName,

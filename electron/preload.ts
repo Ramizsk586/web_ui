@@ -50,5 +50,9 @@ contextBridge.exposeInMainWorld('__electronAPI', {
   zoomIn: () => ipcRenderer.invoke('zoom:in'),
   zoomOut: () => ipcRenderer.invoke('zoom:out'),
   zoomReset: () => ipcRenderer.invoke('zoom:reset'),
+  openInspectPanel: () => ipcRenderer.send('open:inspect-panel'),
+  onOpenInspectPanel: (callback: () => void) => {
+    ipcRenderer.on('open:inspect-panel', () => callback());
+  },
 
 });

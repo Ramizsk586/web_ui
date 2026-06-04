@@ -35,7 +35,12 @@ import {
   Laptop,
   MoreHorizontal,
   Trash2,
-  Database
+  Database,
+  Bot,
+  Edit3,
+  Save,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
 import { SkillsPanel } from './SkillsPanel';
@@ -58,8 +63,9 @@ interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
   setUseLocalModelsOnly?: (val: boolean) => void;
-  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills';
-  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills') => void;
+  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents';
+  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents') => void;
+  availableModels: any[];
   useBubbles: boolean;
   setUseBubbles: (val: boolean) => void;
   isCompactSidebar: boolean;
@@ -412,7 +418,8 @@ export function SettingsModal({
   onOpenLocalModelConfig,
   activeModelId,
   setActiveModelId,
-  onLocalModelsChange
+  onLocalModelsChange,
+  availableModels
 }: SettingsModalProps) {
   // Rich Profile State
   const [timezone, setTimezone] = React.useState(() => localStorage.getItem('lumina_profile_timezone') || 'GMT+05:30');
@@ -425,6 +432,158 @@ export function SettingsModal({
   });
   const [customInstructions, setCustomInstructions] = React.useState(() => localStorage.getItem('lumina_profile_instructions') || '');
   const [profileNameDrafts, setProfileNameDrafts] = React.useState<Record<string, string>>({});
+  type SubagentConfig = {
+    modelId: string;
+    providerProfileId?: string;
+    systemPrompt: string;
+    tools: string[];
+  };
+
+  const DEFAULT_AGENTS: { id: string; name: string; role: string; tools: string[]; prompt: string }[] = [
+    {
+      id: 'orchestrator',
+      name: 'Orchestrator Agent',
+      role: 'Coordinates execution, plans subtasks, and assigns work.',
+      tools: ['read_file', 'search_code', 'run_command'],
+      prompt: 'You are the Orchestrator subagent. Your role is to analyze the high-level request, check the codebase state, plan the subtasks, and coordinate execution. Break down complex tasks into subtasks for specialized subagents.'
+    },
+    {
+      id: 'analyzer',
+      name: 'Analyzer Agent',
+      role: 'Researches codebase, traces dependencies, and locates functions.',
+      tools: ['read_file', 'search_code'],
+      prompt: 'You are the Analyzer subagent. Your role is to explore the codebase, research files, locate functions and types, trace dependencies, and summarize architecture or bugs. You do not write or modify code.'
+    },
+    {
+      id: 'coder',
+      name: 'Coder Agent',
+      role: 'Implements features, refactors, and edits workspace files.',
+      tools: ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'search_code'],
+      prompt: 'You are the Coder subagent. Your role is to write clean, maintainable, and correct code in the workspace. Read the necessary files first, implement requested features or refactors, and ensure file paths are resolved properly.'
+    },
+    {
+      id: 'debugger',
+      name: 'Debugger Agent',
+      role: 'Diagnoses failures, runs compiler checks, and verifies fixes.',
+      tools: ['read_file', 'write_file', 'edit_file', 'run_command', 'search_code'],
+      prompt: 'You are the Debugger subagent. Your role is to diagnose bugs, run test suites, analyze compiler or runtime errors, and modify code to fix failures. Run relevant commands to verify your fixes.'
+    },
+    {
+      id: 'reviewer',
+      name: 'Reviewer Agent',
+      role: 'Performs static analysis, reviews code, and checks styles.',
+      tools: ['read_file', 'search_code'],
+      prompt: 'You are the Reviewer subagent. Your role is to perform static code analysis, code review, check for style compliance, find potential logic errors, security vulnerabilities, or performance bottlenecks, and provide recommendations.'
+    }
+  ];
+
+  const ALL_AVAILABLE_TOOLS = [
+    'read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file',
+    'search_code', 'analyze_file', 'run_command', 'execute_code', 'ask_user', 'fetch_url', 'web_search'
+  ];
+
+  const [subagentConfigs, setSubagentConfigs] = React.useState<Record<string, SubagentConfig>>(() => {
+    try {
+      const saved = localStorage.getItem('lumina_subagent_configs');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Merge saved configs with defaults for any missing fields (backwards compat)
+        const merged: Record<string, SubagentConfig> = {};
+        for (const agent of DEFAULT_AGENTS) {
+          const existing = parsed[agent.id];
+          merged[agent.id] = {
+            modelId: existing?.modelId || 'openprovider/auto-free',
+            providerProfileId: existing?.providerProfileId || undefined,
+            systemPrompt: existing?.systemPrompt || agent.prompt,
+            tools: existing?.tools || [...agent.tools]
+          };
+        }
+        return merged;
+      }
+    } catch (e) {}
+    const defaults: Record<string, SubagentConfig> = {};
+    for (const agent of DEFAULT_AGENTS) {
+      defaults[agent.id] = {
+        modelId: 'openprovider/auto-free',
+        systemPrompt: agent.prompt,
+        tools: [...agent.tools]
+      };
+    }
+    return defaults;
+  });
+
+  const persistSubagentConfigs = (next: Record<string, SubagentConfig>) => {
+    setSubagentConfigs(next);
+    localStorage.setItem('lumina_subagent_configs', JSON.stringify(next));
+  };
+
+  const handleAgentModelChange = (agentId: string, modelId: string, providerProfileId?: string) => {
+    const next = {
+      ...subagentConfigs,
+      [agentId]: { ...subagentConfigs[agentId], modelId, providerProfileId }
+    };
+    persistSubagentConfigs(next);
+    showToast(`Updated model for ${agentId.charAt(0).toUpperCase() + agentId.slice(1)} Agent`);
+  };
+
+  const handleAgentProviderChange = (agentId: string, providerProfileId: string | null) => {
+    const cfg = subagentConfigs[agentId];
+    if (!providerProfileId) {
+      // Default / no profile
+      const next = {
+        ...subagentConfigs,
+        [agentId]: { ...cfg, providerProfileId: undefined, modelId: 'openprovider/auto-free' }
+      };
+      persistSubagentConfigs(next);
+      return;
+    }
+    const profile = aiProviderProfiles.find(p => p.id === providerProfileId);
+    if (!profile) return;
+    const activeModels = profile.models.filter(m => profile.selectedModelIds.includes(m.id));
+    const firstModel = activeModels[0]?.id || profile.models[0]?.id || 'openprovider/auto-free';
+    const next = {
+      ...subagentConfigs,
+      [agentId]: { ...cfg, providerProfileId, modelId: firstModel }
+    };
+    persistSubagentConfigs(next);
+    showToast(`Updated provider for ${agentId.charAt(0).toUpperCase() + agentId.slice(1)} Agent`);
+  };
+
+  const [editingPromptAgent, setEditingPromptAgent] = React.useState<string | null>(null);
+  const [promptDraft, setPromptDraft] = React.useState('');
+
+  const handleStartEditPrompt = (agentId: string, currentPrompt: string) => {
+    setEditingPromptAgent(agentId);
+    setPromptDraft(currentPrompt);
+  };
+
+  const handleSavePrompt = (agentId: string) => {
+    const next = {
+      ...subagentConfigs,
+      [agentId]: { ...subagentConfigs[agentId], systemPrompt: promptDraft }
+    };
+    persistSubagentConfigs(next);
+    setEditingPromptAgent(null);
+    showToast(`Updated system prompt for ${agentId.charAt(0).toUpperCase() + agentId.slice(1)} Agent`);
+  };
+
+  const handleCancelEditPrompt = () => {
+    setEditingPromptAgent(null);
+    setPromptDraft('');
+  };
+
+  const handleAgentToolToggle = (agentId: string, tool: string) => {
+    const current = subagentConfigs[agentId];
+    const tools = current.tools.includes(tool)
+      ? current.tools.filter(t => t !== tool)
+      : [...current.tools, tool];
+    const next = {
+      ...subagentConfigs,
+      [agentId]: { ...current, tools }
+    };
+    persistSubagentConfigs(next);
+  };
+
   const editingAiProfile = React.useMemo(
     () => aiProviderProfiles.find(profile => profile.id === editingAiProfileId) || null,
     [aiProviderProfiles, editingAiProfileId]
@@ -1758,6 +1917,7 @@ export function SettingsModal({
               { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
               { id: 'search', label: 'Search', icon: <Search size={16} /> },
               { id: 'persona', label: 'Persona', icon: <User size={16} /> },
+              { id: 'agents', label: 'Agents', icon: <Bot size={16} /> },
               { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
               { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
               { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
@@ -4042,6 +4202,163 @@ export function SettingsModal({
                       </div>
                     </div>
 
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeSettingsTab === 'agents' && (
+              <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 text-left font-sans">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Configure Subagents</h3>
+                  <p className="text-xs text-gray-500 mb-6">
+                    Configure system prompts, tools, and LLM models for specialized agents spawned during workspace orchestration.
+                  </p>
+
+                  <div className="space-y-4">
+                    {DEFAULT_AGENTS.map((agent) => {
+                      const cfg = subagentConfigs[agent.id] || { modelId: 'openprovider/auto-free', systemPrompt: agent.prompt, tools: [...agent.tools] };
+                      const isEditing = editingPromptAgent === agent.id;
+                      return (
+                        <div 
+                          key={agent.id}
+                          className="p-4 rounded-xl border transition-all bg-gray-50/50 dark:bg-zinc-950/20 border-gray-200 dark:border-white/5 flex flex-col gap-4"
+                        >
+                          <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                            <div className="flex-1 space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <Bot size={14} className="text-[#D97756]" />
+                                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">{agent.name}</span>
+                              </div>
+                              <p className="text-[11px] text-zinc-500 max-w-lg leading-relaxed">
+                                {agent.role}
+                              </p>
+                            </div>
+                            <div className="shrink-0 flex flex-col gap-2 min-w-[220px]">
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Provider</label>
+                                <select
+                                  value={cfg.providerProfileId || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    handleAgentProviderChange(agent.id, val || null);
+                                  }}
+                                  className="h-8 px-3 text-[11px] bg-gray-50 dark:bg-zinc-950 border border-gray-150 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 w-full text-zinc-300 font-medium"
+                                >
+                                  <option value="">Default (Auto Free)</option>
+                                  {(aiProviderProfiles || []).filter(p => p.active).map(p => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Model</label>
+                                <select
+                                  value={cfg.modelId}
+                                  onChange={(e) => {
+                                    const selectedId = e.target.value;
+                                    const modelObj = (availableModels || []).find((m: any) => m.id === selectedId);
+                                    handleAgentModelChange(agent.id, selectedId, modelObj?.providerProfileId);
+                                  }}
+                                  className="h-8 px-3 text-[11px] bg-gray-50 dark:bg-zinc-950 border border-gray-150 dark:border-white/5 rounded-xl outline-none focus:ring-1 focus:ring-blue-500 w-full text-zinc-300 font-medium"
+                                >
+                                  {cfg.providerProfileId ? (
+                                    (() => {
+                                      const profile = aiProviderProfiles.find(p => p.id === cfg.providerProfileId);
+                                      const models = profile ? profile.models.filter(m => profile.selectedModelIds.includes(m.id)) : [];
+                                      return models.length > 0 ? (
+                                        models.map(m => (
+                                          <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                                        ))
+                                      ) : (
+                                        <option value={cfg.modelId}>{cfg.modelId}</option>
+                                      );
+                                    })()
+                                  ) : (
+                                    <>
+                                      <option value="openprovider/auto-free">OpenProvider Auto Free</option>
+                                      {(availableModels || []).filter((m: any) => m.id !== 'openprovider/auto-free').map((m: any) => (
+                                        <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                                      ))}
+                                    </>
+                                  )}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Tools */}
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Tools</label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {ALL_AVAILABLE_TOOLS.map((t) => {
+                                const isActive = cfg.tools.includes(t);
+                                return (
+                                  <button
+                                    key={t}
+                                    onClick={() => handleAgentToolToggle(agent.id, t)}
+                                    className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono select-none transition-all cursor-pointer ${
+                                      isActive
+                                        ? 'bg-zinc-800 text-zinc-200 border border-zinc-600/50'
+                                        : 'bg-zinc-900/40 text-zinc-500 border border-zinc-800/30 hover:text-zinc-400 hover:border-zinc-700/50'
+                                    }`}
+                                  >
+                                    {isActive ? <ToggleRight size={10} className="inline mr-0.5 text-emerald-400" /> : <ToggleLeft size={10} className="inline mr-0.5" />}
+                                    {t}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* System Prompt */}
+                          <div className="text-[10px]">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-bold text-gray-500 uppercase tracking-widest">System Prompt</span>
+                              {!isEditing && (
+                                <button
+                                  onClick={() => handleStartEditPrompt(agent.id, cfg.systemPrompt)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800/60 border border-zinc-700/30 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/60 transition-all cursor-pointer"
+                                >
+                                  <Edit3 size={10} />
+                                  <span>Edit</span>
+                                </button>
+                              )}
+                            </div>
+                            {isEditing ? (
+                              <div className="space-y-2">
+                                <textarea
+                                  value={promptDraft}
+                                  onChange={(e) => setPromptDraft(e.target.value)}
+                                  className="w-full h-28 p-2.5 rounded-lg bg-zinc-950/45 border border-zinc-700/50 font-mono text-[10px] leading-relaxed text-zinc-300 outline-none focus:ring-1 focus:ring-blue-500 resize-y"
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleSavePrompt(agent.id)}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600/80 hover:bg-emerald-600 text-white text-[10px] transition-all cursor-pointer"
+                                  >
+                                    <Save size={10} />
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={handleCancelEditPrompt}
+                                    className="px-2.5 py-1 rounded-md bg-zinc-800/60 hover:bg-zinc-700/60 text-zinc-400 text-[10px] transition-all cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-2.5 rounded-lg bg-zinc-950/45 border border-zinc-800/50 font-mono text-[9px] leading-relaxed select-text whitespace-pre-wrap text-zinc-400 max-h-20 overflow-y-auto">
+                                {cfg.systemPrompt}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </motion.div>

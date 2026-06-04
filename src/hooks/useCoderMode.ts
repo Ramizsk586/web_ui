@@ -10,6 +10,7 @@ export interface SubAgent {
   startedAt?: number;
   completedAt?: number;
   error?: string;
+  events?: any[];
 }
 
 export interface OrchestrationConflict {
