@@ -497,8 +497,10 @@ export const NodeGraph = React.memo(({
     return nodes;
   }, [nodes, hasThoughts]);
 
-  // Auto-expand active nodes & auto-collapse completed ones
+  // Auto-expand active nodes & auto-collapse completed ones.
+  // Skip when final answer is streaming so user's collapse state isn't overridden.
   useEffect(() => {
+    if (isStreaming) return;
     nodes.forEach(node => {
       if (node.status === 'active') {
         setCollapsedToolNodes(prev => {
@@ -512,7 +514,7 @@ export const NodeGraph = React.memo(({
         });
       }
     });
-  }, [nodes]);
+  }, [nodes, isStreaming]);
 
   const pipelineItems = useMemo(() => {
     const items: PipelineItem[] = [];
@@ -827,6 +829,36 @@ export const NodeGraph = React.memo(({
                                   ) : (
                                     <WikiToolCallIndicator node={item.node} />
                                   )
+                                ) : item.node.subNodes && item.node.subNodes.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {item.node.subNodes.map((sub, si) => (
+                                      <div key={sub.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[#0c0c0e]/85 border border-zinc-900">
+                                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0
+                                          ${sub.status === 'active' ? 'border-blue-500/50 bg-[#1e1e1e]' :
+                                            sub.status === 'complete' ? 'border-emerald-500/25 bg-[#141d18]' :
+                                            sub.status === 'failed' ? 'border-red-500/30 bg-[#241717]' :
+                                            'border-zinc-800 bg-[#121212]'
+                                          }
+                                        `}>
+                                          {sub.status === 'active' ? (
+                                            <Loader2 size={9} className="animate-spin text-blue-500" />
+                                          ) : sub.status === 'complete' ? (
+                                            <Check size={8} className="text-emerald-400" strokeWidth={3} />
+                                          ) : sub.status === 'failed' ? (
+                                            <X size={8} className="text-red-400" strokeWidth={3} />
+                                          ) : (
+                                            <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                                          )}
+                                        </div>
+                                        <span className="flex-1 text-[11px] text-zinc-400 font-mono truncate">{sub.label}</span>
+                                        {sub.resultSummary && (
+                                          <span className="text-[9px] text-zinc-600 font-mono truncate max-w-[120px]" title={sub.resultSummary}>
+                                            {sub.resultSummary.slice(0, 60)}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
                                 ) : item.node.result ? (
                                   renderPlainToolResult(item.node)
                                 ) : (
@@ -891,6 +923,7 @@ export const InlineToolCallCard = React.memo(({
 
   const isEditNode = node.toolName === 'write_file' || node.toolName === 'edit_file' || node.toolName === 'create_file';
   const isScriptNode = node.toolName === 'verify_changes' || node.toolName === 'run_command' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
+  const hasSubPipeline = Array.isArray(node.subNodes) && node.subNodes.length > 0;
 
   return (
     <motion.div
@@ -1008,6 +1041,73 @@ export const InlineToolCallCard = React.memo(({
                 ) : (
                   <WikiToolCallIndicator node={node} />
                 )
+              ) : hasSubPipeline ? (
+                <div className="rounded-xl border border-zinc-900 bg-[#0c0c0e]/85 px-3 py-3 shadow-inner">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                      Execution Steps
+                    </span>
+                    <span className={`text-[9px] font-bold uppercase tracking-[0.18em] ${
+                      node.status === 'failed'
+                        ? 'text-rose-400'
+                        : node.status === 'complete'
+                          ? 'text-emerald-400'
+                          : 'text-blue-400'
+                    }`}>
+                      {node.status === 'failed' ? 'Failed' : node.status === 'complete' ? 'Done' : 'Running'}
+                    </span>
+                  </div>
+                  <div className="space-y-0.5">
+                    {node.subNodes!.map((sub, idx) => {
+                      const isLast = idx === node.subNodes!.length - 1;
+                      const subIcon = sub.status === 'active'
+                        ? <Loader2 size={9} className="animate-spin text-blue-500" />
+                        : sub.status === 'complete'
+                          ? <Check size={8} className="text-emerald-400" strokeWidth={3} />
+                          : sub.status === 'failed'
+                            ? <X size={8} className="text-rose-400" strokeWidth={3} />
+                            : renderNodeIcon(sub.icon);
+
+                      return (
+                        <div key={sub.id} className="relative flex gap-2.5 pl-0.5">
+                          <div className="flex flex-col items-center shrink-0">
+                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center
+                              ${sub.status === 'active' ? 'border-blue-500/45 bg-[#16181d]' :
+                                sub.status === 'complete' ? 'border-emerald-500/25 bg-[#141d18]' :
+                                sub.status === 'failed' ? 'border-rose-500/30 bg-[#241717]' :
+                                'border-zinc-800 bg-[#121212]'
+                              }`}
+                            >
+                              {subIcon}
+                            </div>
+                            {!isLast && (
+                              <div className={`w-px flex-1 my-1 min-h-[14px] ${
+                                sub.status === 'complete'
+                                  ? 'bg-gradient-to-b from-emerald-500/25 to-zinc-800/40'
+                                  : 'bg-zinc-800/70'
+                              }`} />
+                            )}
+                          </div>
+                          <div className="flex-1 pb-3 min-w-0 text-left">
+                            <div className="text-[11px] font-semibold text-zinc-300 font-mono truncate">
+                              {humanizeToolName(sub.toolName, sub.label)}
+                            </div>
+                            {sub.filePath && (
+                              <div className="mt-1 text-[10px] text-zinc-500 font-mono truncate">
+                                {sub.filePath}
+                              </div>
+                            )}
+                            {sub.resultSummary && (
+                              <div className="mt-1 text-[10px] text-zinc-500 font-mono leading-relaxed line-clamp-2">
+                                {sub.resultSummary}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               ) : node.result ? (
                 renderPlainToolResult(node)
               ) : node.filePath ? (

@@ -164,6 +164,29 @@ const createStableTurnId = (prefix: string, ...parts: Array<string | number | un
   return `${prefix}-${Date.now().toString(36)}-${suffix || 'item'}-${Math.random().toString(36).slice(2, 8)}`;
 };
 
+const mapSpawnEventsToSubNodes = (toolCallId: string, events: any[] = []): ToolCallNode[] => {
+  return events.map((evt: any, ei: number) => ({
+    id: `spawn-sub-${toolCallId}-${ei}`,
+    type: (evt.type === 'spawn' ? 'ai' : evt.type === 'text' ? 'result' : 'tool') as ToolCallNode['type'],
+    label: evt.type === 'spawn'
+      ? `Spawning: ${evt.name}`
+      : evt.type === 'text'
+        ? (evt.text || '').slice(0, 60)
+        : evt.name,
+    status: (evt.status === 'complete' ? 'complete' : evt.status === 'failed' ? 'failed' : 'active') as ToolCallNode['status'],
+    toolName: evt.type === 'tool' ? evt.name : undefined,
+    filePath: evt.input?.filePath || evt.input?.path || '',
+    resultSummary: evt.output || evt.result || '',
+    icon: evt.type === 'spawn' ? 'sparkles' :
+      evt.name === 'read_file' ? 'file' :
+      evt.name === 'write_file' ? 'write' :
+      evt.name === 'edit_file' ? 'edit' :
+      evt.name === 'run_command' ? 'terminal' :
+      evt.name === 'search_code' ? 'search' :
+      'sparkles',
+  }));
+};
+
 export interface UseAppHandlersParams {
   input: string;
   setInput: (v: string) => void;
@@ -977,27 +1000,29 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       }
       if (isCoderMode) {
         activeTools.push(
-          {
-            type: 'function',
+          ...[
+            { name: 'spawn_orchestrator', desc: 'Spawn the Orchestrator agent to coordinate execution, plan subtasks, and assign work for a project.' },
+            { name: 'spawn_analyzer', desc: 'Spawn the Analyzer agent to research codebase, trace dependencies, and locate functions. Does not write code.' },
+            { name: 'spawn_coder', desc: 'Spawn the Coder agent to implement features, refactor, and edit workspace files.' },
+            { name: 'spawn_debugger', desc: 'Spawn the Debugger agent to diagnose failures, run compiler checks, and verify fixes.' },
+            { name: 'spawn_reviewer', desc: 'Spawn the Reviewer agent to perform static analysis, review code, and check styles.' },
+          ].map(agent => ({
+            type: 'function' as const,
             function: {
-              name: 'spawn_subagent',
-              description: 'Spawn a focused engineering subagent to perform a specific engineering task (e.g. scaffolding, backend coding, frontend coding, writing tests, writing documentation) in the workspace.',
+              name: agent.name,
+              description: agent.desc,
               parameters: {
                 type: 'object',
                 properties: {
-                  agentName: {
-                    type: 'string',
-                    description: 'The name of the subagent to spawn. Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-agent, reviewer-agent.'
-                  },
                   task: {
                     type: 'string',
-                    description: 'The specific task instruction for the subagent. Be very precise, detailed, and clear about the context.'
+                    description: 'The specific task instruction for the agent. Be very precise, detailed, and clear about the context.'
                   }
                 },
-                required: ['agentName', 'task']
+                required: ['task']
               }
             }
-          },
+          })),
           {
             type: 'function',
             function: {
@@ -1312,12 +1337,12 @@ You are a software engineering agent. When asked to build/modify code:
 4. Work in tool-call cycles until the task is complete. Give a summary when done.
 
 [SUBAGENTS DELEGATION SYSTEM]
-Spawn specialized subagents for engineering tasks using the 'spawn_subagent' tool:
-- 'orchestrator-agent': Coordinates execution, plans subtasks, and assigns work.
-- 'analyzer-agent': Researches codebase, traces dependencies, and locates functions.
-- 'coder-agent': Implements features, refactors, and edits workspace files.
-- 'debugger-agent': Diagnoses failures, runs compiler checks, and verifies fixes.
-- 'reviewer-agent': Performs static analysis, reviews code, and checks styles.
+Spawn specialized subagents for engineering tasks using their dedicated tools:
+- 'spawn_orchestrator': Sends a task to the Orchestrator agent (coordinates, plans, assigns work).
+- 'spawn_analyzer': Sends a task to the Analyzer agent (researches, traces, locates — no code writes).
+- 'spawn_coder': Sends a task to the Coder agent (implements features, refactors, edits files).
+- 'spawn_debugger': Sends a task to the Debugger agent (diagnoses, runs checks, verifies fixes).
+- 'spawn_reviewer': Sends a task to the Reviewer agent (static analysis, code review, style checks).
 
 Provide specific and detailed task strings so they know exactly what to build.
 
@@ -1384,7 +1409,7 @@ When the user asks to build a full project, FIRST output a PROJECT ANALYSIS BLOC
 Then output a SUBAGENT TASK DECOMPOSITION PLAN with phases.
 Then ask the user for confirmation before beginning.
 
-Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-agent, reviewer-agent.`;
+Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger, spawn_reviewer.`;
       }
 
       // Inject search context into systemPrompt BEFORE building apiMessages
@@ -2072,11 +2097,11 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                     { title: `${searchQueryVal} Synthesis Report`, url: `https://intel.local/report`, snippet: `Synthesized findings on ${searchQueryVal}. Agents Alpha, Beta, and Gamma processed parameters recursively.` }
                   ]
                 };
-              } else if (name === 'spawn_subagent') {
-                const agentName = String(args.agentName || '');
+              } else if (name.startsWith('spawn_')) {
+                const agentToolName = name.replace('spawn_', '') + '-agent';
                 const taskText = String(args.task || '');
-                if (!agentName || !taskText) throw new Error("spawn_subagent requires agentName and task");
-                showToast(`Spawning subagent: ${agentName}...`);
+                if (!taskText) throw new Error(`${name} requires a task parameter`);
+                showToast(`Spawning ${agentToolName}...`);
 
                 let localAgentId = `agent_temp_${Date.now()}`;
                 
@@ -2094,7 +2119,7 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                     if (savedConfigsStr) {
                       const configs = JSON.parse(savedConfigsStr);
                       let mappedAgentId = '';
-                      const lowerName = agentName.toLowerCase();
+                      const lowerName = agentToolName.toLowerCase();
                       if (lowerName.includes('orchestrator') || lowerName.includes('dispatcher')) {
                         mappedAgentId = 'orchestrator';
                       } else if (lowerName.includes('analyzer') || lowerName.includes('research') || lowerName.includes('scaffold') || lowerName.includes('docs') || lowerName.includes('project-analyzer')) {
@@ -2126,7 +2151,7 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                               targetBaseUrl = matchingProfile.endpoint?.replace(/\/+$/, '') || '';
                               targetKey = matchingProfile.apiKey || '';
                               targetProvider = matchingProfile.provider || 'openai-compatible';
-                              console.log(`[LUMINA] Mapped subagent ${agentName} to ${mappedAgentId} configuration using model ${modelId} from profile ${matchingProfile.name}`);
+                              console.log(`[LUMINA] Mapped subagent ${agentToolName} to ${mappedAgentId} configuration using model ${modelId} from profile ${matchingProfile.name}`);
                             }
                           }
                         }
@@ -2146,7 +2171,7 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      agentName,
+                      agentName: agentToolName,
                       task: taskText,
                       workspaceRoot: coderWorkspacePath,
                       modelConfig: {
@@ -2171,7 +2196,7 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                   localAgentId = agentId;
 
                   setOrchestrationState((prev: any) => {
-                    const cleanName = agentName.replace('-agent', '').toUpperCase();
+                    const cleanName = agentToolName.replace('-agent', '').toUpperCase();
                     const existingIdx = prev.agents.findIndex((a: any) => a.id === agentId);
                     let nextAgents = [...prev.agents];
                     if (existingIdx !== -1) {
@@ -2223,6 +2248,32 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                     const statusData = await statusRes.json();
                     finalAgentData = statusData;
 
+                    const liveSubNodes = mapSpawnEventsToSubNodes(tc.id, statusData.events || []);
+                    const liveSpawnStatus = statusData.status === 'failed'
+                      ? 'failed'
+                      : statusData.status === 'done'
+                        ? 'complete'
+                        : 'active';
+
+                    const spawnNode = toolCallNodes.find(n => n.id === tc.id);
+                    if (spawnNode) {
+                      spawnNode.subNodes = liveSubNodes;
+                      spawnNode.label = `Subagent: ${agentToolName}`;
+                      spawnNode.status = liveSpawnStatus;
+                      spawnNode.resultSummary = statusData.summary || `${liveSubNodes.length} step${liveSubNodes.length === 1 ? '' : 's'} tracked`;
+                    }
+
+                    setChats(prev => prev.map(chat => {
+                      if (chat.id !== chatId) return chat;
+                      return {
+                        ...chat,
+                        messages: chat.messages.map(m => m.id === thinkingId ? {
+                          ...m,
+                          toolCalls: [...toolCallNodes]
+                        } : m)
+                      };
+                    }));
+
                     setOrchestrationState((prev: any) => ({
                       ...prev,
                       agents: prev.agents.map((a: any) => {
@@ -2251,12 +2302,24 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
 
                   resultValue = {
                     success: true,
-                    agentName,
+                    agentToolName,
                     task: taskText,
                     summary: finalAgentData?.summary || '',
                     events: finalAgentData?.events || []
                   };
-                  showToast(`Subagent ${agentName} complete!`);
+
+                  // Build sub-nodes from spawn events for pipeline display in chat
+                  const spawnEvents = finalAgentData?.events || [];
+                  if (spawnEvents.length > 0) {
+                    const spawnNode = toolCallNodes.find(n => n.id === tc.id);
+                    if (spawnNode) {
+                      spawnNode.subNodes = mapSpawnEventsToSubNodes(tc.id, spawnEvents);
+                      // Update the label to show agent name
+                      spawnNode.label = `Subagent: ${agentToolName}`;
+                    }
+                  }
+
+                  showToast(`Subagent ${agentToolName} complete!`);
                   triggerWorkspaceRefresh();
                 } catch (subErr: any) {
                   const errMsg = subErr.message || 'Subagent failed';
@@ -2270,7 +2333,7 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                         error: errMsg
                       };
                     } else {
-                      const cleanName = agentName.replace('-agent', '').toUpperCase();
+                      const cleanName = agentToolName.replace('-agent', '').toUpperCase();
                       nextAgents.push({
                         id: localAgentId,
                         name: `${cleanName} Agent`,
@@ -2289,10 +2352,24 @@ Available subagents: orchestrator-agent, analyzer-agent, coder-agent, debugger-a
                   });
                   resultValue = {
                     success: false,
-                    agentName,
+                    agentToolName,
                     error: errMsg
                   };
-                  showToast(`Subagent ${agentName} failed!`);
+
+                  const failNode = toolCallNodes.find(n => n.id === tc.id);
+                  if (failNode) {
+                    failNode.label = `Subagent: ${agentToolName} (failed)`;
+                    failNode.subNodes = [{
+                      id: `spawn-sub-fail-${tc.id}`,
+                      type: 'error',
+                      label: `Failed: ${errMsg}`,
+                      status: 'failed',
+                      resultSummary: errMsg,
+                      icon: 'terminal',
+                    }];
+                  }
+
+                  showToast(`Subagent ${agentToolName} failed!`);
                 }
               } else if (name === 'run_command') {
                 const commandText = args.command;
