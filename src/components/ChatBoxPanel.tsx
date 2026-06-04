@@ -37,7 +37,8 @@ import {
   Database,
   LayoutGrid,
   Settings,
-  BookOpen
+  BookOpen,
+  Puzzle
 } from "lucide-react";
 import { DocumentSelector } from "./DocumentSelectorModal";
 import { WRITING_STYLES, SKILLS, SUPPORTED_VOICE_LANGUAGES } from "../constants";
@@ -68,6 +69,13 @@ export interface ChatBoxPanelProps {
   setLuminaTools: React.Dispatch<React.SetStateAction<any[]>>;
   bridgeTools: any[];
   setBridgeTools: React.Dispatch<React.SetStateAction<any[]>>;
+  composioTools: any[];
+  setComposioTools: React.Dispatch<React.SetStateAction<any[]>>;
+  composioConnections: any[];
+  composioEnabled: boolean;
+  fetchComposioStatus: () => Promise<void>;
+  toggleComposioTool: (toolId: string) => void;
+  toggleAllToolsForToolkit: (slug: string, enabled: boolean) => void;
   showTodoPanel: boolean;
   setShowTodoPanel: (show: boolean) => void;
   coderTodos: any[];
@@ -206,6 +214,13 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   setLuminaTools,
   bridgeTools,
   setBridgeTools,
+  composioTools,
+  setComposioTools,
+  composioConnections,
+  composioEnabled,
+  fetchComposioStatus,
+  toggleComposioTool,
+  toggleAllToolsForToolkit,
   showTodoPanel,
   setShowTodoPanel,
   coderTodos,
@@ -345,7 +360,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   const permissionDropdownRef = React.useRef<HTMLDivElement | null>(null);
 
   const [isGridMenuOpen, setIsGridMenuOpen] = React.useState(false);
-  const [activeGridSubMenu, setActiveGridSubMenu] = React.useState<"main" | "skills" | "style" | "lumina_tools" | "tools">("main");
+  const [activeGridSubMenu, setActiveGridSubMenu] = React.useState<"main" | "skills" | "style" | "lumina_tools" | "tools" | "composio">("main");
   const gridMenuButtonRef = React.useRef<HTMLDivElement | null>(null);
   const gridMenuContentRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -1666,6 +1681,98 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                           ))}
                         </div>
                       </div>
+                    ) : activePlusSubMenu === "composio" ? (
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
+                          <button
+                            onClick={() => setActivePlusSubMenu("main")}
+                            className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest">
+                            Composio
+                          </span>
+                          {!composioEnabled && (
+                            <span className="text-[9px] text-zinc-500 ml-auto">Configure in Settings</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
+                          {composioEnabled ? (
+                            <div className="space-y-2">
+                              {Array.from(new Set(composioTools.map((t: any) => t.toolkit))).map((slug) => {
+                                const toolkitTools = composioTools.filter((t: any) => t.toolkit === slug);
+                                const toolkitDisplay = toolkitTools[0]?.toolkitDisplayName || slug;
+                                const anyEnabled = toolkitTools.some((t: any) => t.enabled);
+                                const conn = composioConnections.find((c: any) => c.slug === slug);
+                                return (
+                                  <div key={slug} className="border border-[var(--theme-border)] rounded-xl overflow-hidden">
+                                    <button
+                                      onClick={() => toggleAllToolsForToolkit(slug, !anyEnabled)}
+                                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <div
+                                          className={`p-1.5 rounded-lg transition-colors ${anyEnabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                        >
+                                          <Puzzle size={14} />
+                                        </div>
+                                        <div className="text-left">
+                                          <div className={`transition-colors ${anyEnabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}>
+                                            {toolkitDisplay}
+                                          </div>
+                                          <div className="text-[10px] text-[var(--theme-muted)]">
+                                            {conn?.connected ? "Connected" : "Not connected"} · {toolkitTools.length} tools
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div
+                                        className={`w-8 h-4 rounded-full transition-colors relative ${anyEnabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                      >
+                                        <div
+                                          className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${anyEnabled ? "right-0.5" : "left-0.5"}`}
+                                        />
+                                      </div>
+                                    </button>
+                                    {anyEnabled && (
+                                      <div className="px-3 pb-2 space-y-1">
+                                        {toolkitTools.map((tool: any) => (
+                                          <button
+                                            key={tool.id}
+                                            onClick={() => toggleComposioTool(tool.id)}
+                                            className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                                          >
+                                            <div className="flex items-center gap-2 truncate">
+                                              <div
+                                                className={`w-1.5 h-1.5 rounded-full transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-muted)]"}`}
+                                              />
+                                              <span className="truncate">{tool.name}</span>
+                                            </div>
+                                            <div
+                                              className={`w-6 h-3 rounded-full transition-colors relative flex-shrink-0 ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                            >
+                                              <div
+                                                className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
+                                              />
+                                            </div>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+                              <Puzzle size={32} className="text-[var(--theme-muted)] mb-3" />
+                              <p className="text-xs text-[var(--theme-muted)]">
+                                Connect your accounts in Settings → Composio to enable tools.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     ) : activePlusSubMenu === "skills" ? (
                       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                         <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
@@ -1839,6 +1946,13 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             hasArrow: true,
                           },
                           {
+                            id: "composio",
+                            label: "Composio",
+                            icon: <Puzzle size={16} />,
+                            hasArrow: true,
+                            isSelected: composioEnabled && composioTools.some((t: any) => t.enabled),
+                          },
+                          {
                             id: "search",
                             label: "Web search",
                             icon: <Globe size={16} />,
@@ -1881,6 +1995,10 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                     break;
                                   case "tools":
                                     setActiveGridSubMenu("tools");
+                                    break;
+                                  case "composio":
+                                    setActiveGridSubMenu("composio" as any);
+                                    fetchComposioStatus();
                                     break;
                                 }
                               }}
@@ -2091,6 +2209,95 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                               </div>
                             </button>
                           ))}
+                        </div>
+                      </div>
+                    ) : activeGridSubMenu === "composio" ? (
+                      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--theme-border)] mb-1 shrink-0">
+                          <button
+                            onClick={() => setActiveGridSubMenu("main")}
+                            className="p-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-bold text-[var(--theme-secondary)] uppercase tracking-widest font-mono">
+                            Composio
+                          </span>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
+                          {composioEnabled ? (
+                            <div className="space-y-2">
+                              {Array.from(new Set(composioTools.map((t: any) => t.toolkit))).map((slug) => {
+                                const toolkitTools = composioTools.filter((t: any) => t.toolkit === slug);
+                                const toolkitDisplay = toolkitTools[0]?.toolkitDisplayName || slug;
+                                const anyEnabled = toolkitTools.some((t: any) => t.enabled);
+                                const conn = composioConnections.find((c: any) => c.slug === slug);
+                                return (
+                                  <div key={slug} className="border border-[var(--theme-border)] rounded-xl overflow-hidden">
+                                    <button
+                                      onClick={() => toggleAllToolsForToolkit(slug, !anyEnabled)}
+                                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <div
+                                          className={`p-1.5 rounded-lg transition-colors ${anyEnabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
+                                        >
+                                          <Puzzle size={14} />
+                                        </div>
+                                        <div className="text-left">
+                                          <div className={`transition-colors ${anyEnabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}>
+                                            {toolkitDisplay}
+                                          </div>
+                                          <div className="text-[10px] text-[var(--theme-muted)]">
+                                            {conn?.connected ? "Connected" : "Not connected"} · {toolkitTools.length} tools
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div
+                                        className={`w-8 h-4 rounded-full transition-colors relative ${anyEnabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                      >
+                                        <div
+                                          className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${anyEnabled ? "right-0.5" : "left-0.5"}`}
+                                        />
+                                      </div>
+                                    </button>
+                                    {anyEnabled && (
+                                      <div className="px-3 pb-2 space-y-1">
+                                        {toolkitTools.map((tool: any) => (
+                                          <button
+                                            key={tool.id}
+                                            onClick={() => toggleComposioTool(tool.id)}
+                                            className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                                          >
+                                            <div className="flex items-center gap-2 truncate">
+                                              <div
+                                                className={`w-1.5 h-1.5 rounded-full transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-muted)]"}`}
+                                              />
+                                              <span className="truncate">{tool.name}</span>
+                                            </div>
+                                            <div
+                                              className={`w-6 h-3 rounded-full transition-colors relative flex-shrink-0 ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                            >
+                                              <div
+                                                className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
+                                              />
+                                            </div>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+                              <Puzzle size={32} className="text-[var(--theme-muted)] mb-3" />
+                              <p className="text-xs text-[var(--theme-muted)]">
+                                Connect your accounts in Settings → Composio to enable tools.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : activeGridSubMenu === "skills" ? (

@@ -8,13 +8,15 @@ import {
   useAgents,
   useSidebar,
   useLuminaTools,
+  useComposioTools,
   useInputState,
   useWorkspace,
   useUIState,
   useCoderMode,
   useResearchMode,
   useAskAi,
-  useRightPanel
+  useRightPanel,
+  useLuminaConvex
 } from './hooks';
 
 export default function App() {
@@ -102,6 +104,12 @@ export default function App() {
 
   // 7. Lumina Tools Hook
   const luminaTools = useLuminaTools();
+
+  // 7b. Composio Tools Hook
+  const composioToolsData = useComposioTools();
+
+  // 7c. Lumina Convex Hook (agents, memory, automations, events)
+  const luminaConvex = useLuminaConvex();
 
   // 8. Workspace Hook
   const workspace = useWorkspace({
@@ -202,6 +210,7 @@ export default function App() {
       agents={agents}
       sidebar={sidebarWithModifiedToggle}
       luminaTools={luminaTools}
+      composioTools={composioToolsData}
       inputState={inputState}
       workspace={workspace}
       uiState={{
@@ -222,6 +231,7 @@ export default function App() {
       setSelectedModel={setSelectedModel}
       activeModelId={activeModelId}
       sendMessageRef={sendMessageRef}
+      luminaConvex={luminaConvex}
     />
   );
 }

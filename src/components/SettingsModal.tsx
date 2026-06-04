@@ -63,8 +63,8 @@ interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
   setUseLocalModelsOnly?: (val: boolean) => void;
-  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents';
-  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents') => void;
+  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio';
+  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio') => void;
   availableModels: any[];
   useBubbles: boolean;
   setUseBubbles: (val: boolean) => void;
@@ -1924,6 +1924,8 @@ export function SettingsModal({
               { id: 'skills', label: 'Skill', icon: <BookOpen size={16} /> },
               { id: 'llama_cpp', label: 'llama.cpp', icon: <Box size={16} /> },
               { id: 'models', label: 'Models', icon: <Brain size={16} /> },
+              { id: 'convex', label: 'Convex', icon: <Database size={16} /> },
+              { id: 'composio', label: 'Composio', icon: <Server size={16} /> },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -4207,6 +4209,61 @@ export function SettingsModal({
               </motion.div>
             )}
 
+            {activeSettingsTab === 'convex' && (
+              <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 text-left font-sans">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Convex Database Setup</h3>
+                  <p className="text-xs text-gray-500 mb-6">Convex provides a reactive serverless database for persistent storage, vector search, and real-time sync.</p>
+
+                  <div className="border border-zinc-800 bg-zinc-900/20 rounded-xl p-5 space-y-5">
+                    <div className="flex items-center gap-2 border-b border-zinc-800 pb-3">
+                      <Database size={16} className="text-blue-500" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-white">Configuration</span>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">CONVEX_DEPLOYMENT</label>
+                        <input
+                          type="text"
+                          defaultValue={localStorage.getItem('CONVEX_DEPLOYMENT') || ''}
+                          onChange={(e) => localStorage.setItem('CONVEX_DEPLOYMENT', e.target.value)}
+                          placeholder="e.g. my-project-abc123"
+                          className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 placeholder-zinc-600"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">VITE_CONVEX_URL</label>
+                        <input
+                          type="text"
+                          defaultValue={localStorage.getItem('VITE_CONVEX_URL') || ''}
+                          onChange={(e) => localStorage.setItem('VITE_CONVEX_URL', e.target.value)}
+                          placeholder="e.g. https://my-project.convex.cloud"
+                          className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 placeholder-zinc-600"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="border-t border-zinc-800 pt-4 space-y-3">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Setup Guide</span>
+                      <div className="space-y-2 text-xs text-zinc-400">
+                        <div className="flex items-start gap-2">
+                          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                          <span>Run <code className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-200">npx convex dev</code> in your project root</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                          <span>Copy the <code className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-200">CONVEX_DEPLOYMENT</code> and <code className="px-1 py-0.5 bg-zinc-800 rounded text-zinc-200">VITE_CONVEX_URL</code> values into the fields above</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeSettingsTab === 'composio' && <ComposioPanel />}
+
             {activeSettingsTab === 'agents' && (
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 text-left font-sans">
                 <div>
@@ -4367,5 +4424,236 @@ export function SettingsModal({
         </div>
       </motion.div>
     </div>
+  );
+}
+
+function ComposioPanel() {
+  const [apiKey, setApiKey] = React.useState(() => localStorage.getItem('COMPOSIO_API_KEY') || '');
+  const [isVerifying, setIsVerifying] = React.useState(false);
+  const [isEnabled, setIsEnabled] = React.useState(false);
+  const [toolkits, setToolkits] = React.useState<any[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [busy, setBusy] = React.useState<string | null>(null);
+  const [verifyError, setVerifyError] = React.useState<string | null>(null);
+  const authPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  React.useEffect(() => () => { if (authPollRef.current) clearInterval(authPollRef.current); }, []);
+
+  const saveKey = (val: string) => {
+    setApiKey(val);
+    setVerifyError(null);
+    localStorage.setItem('COMPOSIO_API_KEY', val);
+  };
+
+  const verifyKey = async () => {
+    if (!apiKey) return;
+    setIsVerifying(true);
+    setVerifyError(null);
+    try {
+      const r = await fetch('/api/composio/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = await r.json();
+      if (data.enabled) {
+        setIsEnabled(true);
+        fetchToolkits();
+      } else {
+        setIsEnabled(false);
+        setVerifyError(data.error || 'Invalid API key');
+      }
+    } catch (err) {
+      setVerifyError('Failed to connect to server');
+      setIsEnabled(false);
+    }
+    setIsVerifying(false);
+  };
+
+  const fetchToolkits = React.useCallback(async () => {
+    try {
+      const r = await fetch('/api/composio/toolkits');
+      const data = await r.json();
+      setToolkits(data.toolkits || []);
+    } catch {}
+    setLoaded(true);
+  }, []);
+
+  const connect = async (slug: string) => {
+    setBusy(slug);
+    try {
+      const r = await fetch(`/api/composio/toolkits/${slug}/authorize`, { method: 'POST' });
+      if (!r.ok) { setBusy(null); return; }
+      const { redirectUrl } = await r.json();
+      if (!redirectUrl) { setBusy(null); return; }
+      const w = 600, h = 700;
+      const left = window.screenX + (window.outerWidth - w) / 2;
+      const top = window.screenY + (window.outerHeight - h) / 2;
+      const popup = window.open(redirectUrl, 'composio-auth', `width=${w},height=${h},left=${left},top=${top}`);
+      if (authPollRef.current) clearInterval(authPollRef.current);
+      authPollRef.current = setInterval(async () => {
+        if (!popup || popup.closed) {
+          if (authPollRef.current) { clearInterval(authPollRef.current); authPollRef.current = null; }
+          await fetch('/api/composio/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey }),
+          });
+          await fetchToolkits();
+          setBusy(null);
+        }
+      }, 800);
+    } catch { setBusy(null); }
+  };
+
+  const disconnect = async (slug: string, connectionId: string) => {
+    setBusy(`${slug}:${connectionId}`);
+    try {
+      await fetch(`/api/composio/toolkits/${slug}/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId }),
+      });
+      await fetchToolkits();
+    } catch {}
+    setBusy(null);
+  };
+
+  const statusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      ACTIVE: 'bg-emerald-500',
+      INITIATED: 'bg-amber-500',
+      INITIALIZING: 'bg-amber-500',
+      EXPIRED: 'bg-rose-500',
+      FAILED: 'bg-rose-500',
+    };
+    return colors[status] || 'bg-zinc-500';
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 text-left font-sans">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Composio Integrations</h3>
+        <p className="text-xs text-gray-500 mb-6">Connect your accounts to give the agent access to Gmail, Slack, GitHub, Notion, and hundreds of other services.</p>
+
+        <div className="border border-zinc-800 bg-zinc-900/20 rounded-xl p-5 space-y-5">
+          <div className="flex items-center gap-2 border-b border-zinc-800 pb-3">
+            <Server size={16} className="text-emerald-500" />
+            <span className="text-xs font-bold uppercase tracking-wider text-white">API Key</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">COMPOSIO_API_KEY</label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => saveKey(e.target.value)}
+                placeholder="Get a key at app.composio.dev/developers"
+                className="flex-1 bg-zinc-900 border border-zinc-800 focus:border-zinc-600 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 placeholder-zinc-600 font-mono"
+              />
+              <button
+                onClick={verifyKey}
+                disabled={isVerifying || !apiKey}
+                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 text-white text-xs font-semibold rounded-xl transition-colors"
+              >
+                {isVerifying ? 'Verifying...' : 'Verify'}
+              </button>
+            </div>
+            <span className="text-[10px] text-zinc-500">Get your API key at <a href="https://app.composio.dev/developers" target="_blank" rel="noreferrer" className="text-blue-400 underline">app.composio.dev/developers</a></span>
+            {verifyError && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                <span className="text-xs text-rose-400">{verifyError}</span>
+              </div>
+            )}
+            {isEnabled && !verifyError && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                <span className="text-xs text-emerald-400">API key verified successfully</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {isEnabled && (
+          <div className="border border-zinc-800 bg-zinc-900/20 rounded-xl p-5 space-y-4 mt-5">
+            <div className="flex items-center gap-2 border-b border-zinc-800 pb-3">
+              <Server size={16} className="text-emerald-500" />
+              <span className="text-xs font-bold uppercase tracking-wider text-white">Connected Toolkits</span>
+              {toolkits.length > 0 && (
+                <span className="text-[10px] text-zinc-500 font-mono">{toolkits.filter(t => t.connections.some((c: any) => c.status === 'ACTIVE')).length} active</span>
+              )}
+            </div>
+
+            {!loaded ? (
+              <div className="space-y-3">
+                {[1,2,3].map(i => <div key={i} className="h-16 rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse" />)}
+              </div>
+            ) : toolkits.length > 0 ? (
+              <div className="grid gap-3">
+                {toolkits.map((t: any) => {
+                  const hasActive = t.connections.some((c: any) => c.status === 'ACTIVE');
+                  return (
+                    <div key={t.slug} className="border border-zinc-800 bg-zinc-900/40 rounded-xl px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-zinc-200">{t.displayName}</span>
+                            <span className="text-[10px] text-zinc-500 font-mono">{t.slug}</span>
+                          </div>
+                        </div>
+                        {!hasActive && (
+                          <button
+                            onClick={() => connect(t.slug)}
+                            disabled={busy === t.slug}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 text-white font-medium transition-colors"
+                          >
+                            {busy === t.slug ? 'Connecting...' : 'Connect'}
+                          </button>
+                        )}
+                      </div>
+
+                      {t.connections.length > 0 && (
+                        <div className="mt-3 space-y-1.5">
+                          {t.connections.map((c: any) => (
+                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800/80">
+                              <span className={`w-1.5 h-1.5 rounded-full ${statusColor(c.status)}`} />
+                              <span className="text-xs text-zinc-300 font-medium truncate max-w-[12rem]">{c.alias || c.accountLabel || c.accountEmail || `Account`}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                c.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400' :
+                                c.status === 'EXPIRED' || c.status === 'FAILED' ? 'bg-rose-500/10 text-rose-400' :
+                                'bg-amber-500/10 text-amber-400'
+                              }`}>
+                                {c.status}
+                              </span>
+                              <div className="flex-1" />
+                              <button
+                                onClick={() => disconnect(t.slug, c.id)}
+                                disabled={busy === `${t.slug}:${c.id}`}
+                                className="text-[11px] text-zinc-500 hover:text-rose-400 transition-colors"
+                              >
+                                {busy === `${t.slug}:${c.id}` ? '...' : 'Disconnect'}
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            onClick={() => connect(t.slug)}
+                            disabled={busy === t.slug}
+                            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                          >
+                            + Add another account
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-500">No toolkits found. Make sure COMPOSIO_API_KEY is set in the server environment.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
   );
 }

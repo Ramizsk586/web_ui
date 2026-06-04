@@ -642,7 +642,7 @@ export const MessageItem = React.memo(({
           )}
           <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined, paddingLeft: '-1px' }}>
             {message.content ? (
-              renderInlineContent(message.content, message.isStreaming)
+              renderInlineContent(message.content, message.isStreaming ?? false)
             ) : message.isStreaming ? (
               <span className="text-zinc-400 animate-pulse text-left block">Generating...</span>
             ) : null}

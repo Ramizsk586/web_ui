@@ -547,7 +547,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
     // 5. Build Layer Memory Map
     const embedProjGb = Math.min(weightsGb * 0.18, (activeArch.hiddenDim * activeArch.vocabSize * (quantType === 'FP16' ? 2 : quantType === 'Q8_0' ? 1.0 : 0.5)) / (1024 * 1024 * 1024));
     const baseLayerGb = (weightsGb - embedProjGb) / customTotalLayers;
-    const layerMemoryMap = [];
+    const layerMemoryMap: { index: number; sizeMb: number }[] = [];
     for (let i = 0; i < customTotalLayers; i++) {
       let mult = 1.0;
       if (i === 0) mult = 1.15;

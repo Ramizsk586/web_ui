@@ -203,6 +203,7 @@ import { extractYouTubeId, fetchYouTubeTranscript } from './utils/youtubeUtils';
 import { OnboardingModal } from './components/OnboardingModal';
 import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
 import { SettingsModal } from './components/SettingsModal';
+import { LuminaAgentPanel } from './components/LuminaAgentPanel';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
@@ -227,6 +228,7 @@ interface AppContentProps {
   agents: any;
   sidebar: any;
   luminaTools: any;
+  composioTools: any;
   inputState: any;
   workspace: any;
   uiState: any;
@@ -241,6 +243,7 @@ interface AppContentProps {
   selectedModel: string;
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>;
   activeModelId: string;
+  luminaConvex?: any;
 }
 
 export default function AppContent({
@@ -252,6 +255,7 @@ export default function AppContent({
   agents: agentsData,
   sidebar,
   luminaTools: luminaToolsData,
+  composioTools: composioToolsData,
   inputState,
   workspace,
   uiState,
@@ -265,7 +269,8 @@ export default function AppContent({
   setAvailableModels,
   selectedModel,
   setSelectedModel,
-  activeModelId
+  activeModelId,
+  luminaConvex
 }: AppContentProps) {
   const {
     userProfile, setUserProfile,
@@ -366,6 +371,13 @@ export default function AppContent({
   } = luminaToolsData;
 
   const {
+    composioTools, setComposioTools,
+    composioConnections, setComposioConnections,
+    composioEnabled, setComposioEnabled,
+    fetchComposioStatus, toggleComposioTool, toggleAllToolsForToolkit
+  } = composioToolsData;
+
+  const {
     input, setInput,
     selectedCommandIndex, setSelectedCommandIndex,
     showsSlashCommands,
@@ -451,6 +463,7 @@ export default function AppContent({
 
   const [showProjectsPage, setShowProjectsPage] = useState(false);
   const [showAgentsPage, setShowAgentsPage] = useState(false);
+  const [isLuminaAgentOpen, setIsLuminaAgentOpen] = useState(false);
 
   const [selectedProjectForChats, setSelectedProjectForChats] = useState<any | null>(null);
   const [selectedAgentForChats, setSelectedAgentForChats] = useState<any | null>(null);
@@ -607,7 +620,7 @@ export default function AppContent({
 
   // Handle auto-speak completed assistant messages
   useEffect(() => {
-    const activeMessages = chats.find(c => c.id === currentChatId)?.messages || [];
+    const activeMessages = chats.find((c: Chat) => c.id === currentChatId)?.messages || [];
     
     if (activeMessages.length === 0) {
       lastSpokenMessageIdRef.current = null;
@@ -784,7 +797,7 @@ export default function AppContent({
 
   // Computed variables
   const messages = useMemo(() => {
-    const activeChat = chats.find(c => c.id === currentChatId);
+    const activeChat = chats.find((c: Chat) => c.id === currentChatId);
     return activeChat ? activeChat.messages : [];
   }, [chats, currentChatId]);
 
@@ -981,7 +994,7 @@ export default function AppContent({
   }, [addDevLog]);
 
   const insertAttachedContent = (content: string) => {
-    setInput(prev => prev ? prev + '\n' + content : content);
+    setInput((prev: string) => prev ? prev + '\n' + content : content);
     showToast("Attachment content inserted to compose box!");
   };
 
@@ -999,11 +1012,11 @@ export default function AppContent({
   };
 
   const handleUpdateMessage = (messageId: string, updatedFields: Partial<Message>) => {
-    setChats(prev => prev.map(chat => {
+    setChats((prev: Chat[]) => prev.map((chat: Chat) => {
       if (chat.id === currentChatId) {
         return {
           ...chat,
-          messages: chat.messages.map(m => {
+          messages: chat.messages.map((m: Message) => {
             if (m.id === messageId) {
               return {
                 ...m,
@@ -1019,11 +1032,11 @@ export default function AppContent({
   };
 
   const handleUpdateTodoPlan = (messageId: string, updatedPlan: any) => {
-    setChats(prev => prev.map(chat => {
+    setChats((prev: Chat[]) => prev.map((chat: Chat) => {
       if (chat.id === currentChatId) {
         return {
           ...chat,
-          messages: chat.messages.map(m => {
+          messages: chat.messages.map((m: Message) => {
             if (m.id === messageId) {
               return {
                 ...m,
@@ -1042,11 +1055,11 @@ export default function AppContent({
     setActiveCommandType("coder");
     setCoderTodos(todos.map((t, idx) => ({ id: String(idx + 1), content: t.text || t.content, status: idx === 0 ? 'in_progress' : 'pending' })));
     setShowTodoPanel(true);
-    setChats(prev => prev.map(c => {
+    setChats((prev: Chat[]) => prev.map((c: Chat) => {
       if (c.id === chatId) {
         return {
           ...c,
-          messages: c.messages.map(m => m.id === messageId ? {
+          messages: c.messages.map((m: Message) => m.id === messageId ? {
             ...m,
             todoPlan: {
               ...m.todoPlan!,
@@ -1062,8 +1075,8 @@ export default function AppContent({
 
   const handleStartBuildingBtn = (messageId: string) => {
     if (currentChatId) {
-      const activeChat = chats.find(c => c.id === currentChatId);
-      const activeMsg = activeChat?.messages.find(m => m.id === messageId);
+      const activeChat = chats.find((c: Chat) => c.id === currentChatId);
+      const activeMsg = activeChat?.messages.find((m: Message) => m.id === messageId);
       if (activeMsg && activeMsg.todoPlan) {
         handleStartBuilding(currentChatId, messageId, activeMsg.todoPlan.todos);
       }
@@ -1072,7 +1085,7 @@ export default function AppContent({
 
   const buildActiveTools = useCallback(() => {
     const active: any[] = [];
-    luminaTools.forEach(tool => {
+    luminaTools.forEach((tool: Tool) => {
       if (tool.enabled) {
         active.push({
           type: 'function',
@@ -1085,8 +1098,21 @@ export default function AppContent({
       }
     });
 
+    composioTools.forEach((tool: any) => {
+      if (tool.enabled) {
+        active.push({
+          type: 'function',
+          function: {
+            name: tool.id,
+            description: tool.description,
+            parameters: { type: 'object', properties: {}, required: [] }
+          }
+        });
+      }
+    });
+
     if (useBridgeTools) {
-      bridgeTools.forEach(tool => {
+      bridgeTools.forEach((tool: Tool) => {
         if (tool.enabled) {
           active.push({
             type: 'function',
@@ -1101,7 +1127,7 @@ export default function AppContent({
     }
 
     return active;
-  }, [luminaTools, useBridgeTools, bridgeTools]);
+  }, [luminaTools, composioTools, useBridgeTools, bridgeTools]);
 
   const renderActiveQuestionContent = () => {
     const activeQuestion = askAiQuestions[currentQuestionIndex];
@@ -1143,7 +1169,7 @@ export default function AppContent({
               onChange={(e) => {
                 setTextInputAnswer(e.target.value);
                 if (e.target.value.trim()) {
-                  setAskAiAnswers(prev => ({ ...prev, [qId]: e.target.value.trim() }));
+                  setAskAiAnswers((prev: Record<string, any>) => ({ ...prev, [qId]: e.target.value.trim() }));
                 }
               }}
               onKeyDown={(e) => {
@@ -1302,7 +1328,7 @@ const startCoderPreview = useCallback(async () => {
 
       if (data.frameUrl) {
         setDevServerUrl(data.frameUrl);
-        setIframeKey(prev => prev + 1);
+        setIframeKey((prev: number) => prev + 1);
         setIsRightPreviewStarting(false);
         return;
       }
@@ -1314,7 +1340,7 @@ const startCoderPreview = useCallback(async () => {
           setRightPreviewLogs(status.logs || []);
           if (status.frameUrl) {
             setDevServerUrl(status.frameUrl);
-            setIframeKey(prev => prev + 1);
+            setIframeKey((prev: number) => prev + 1);
             setIsRightPreviewStarting(false);
             if (rightPreviewPollRef.current) {
               clearInterval(rightPreviewPollRef.current);
@@ -1657,6 +1683,13 @@ const startCoderPreview = useCallback(async () => {
         setLuminaTools={setLuminaTools}
         bridgeTools={bridgeTools}
         setBridgeTools={setBridgeTools}
+        composioTools={composioTools}
+        setComposioTools={setComposioTools}
+        composioConnections={composioConnections}
+        composioEnabled={composioEnabled}
+        fetchComposioStatus={fetchComposioStatus}
+        toggleComposioTool={toggleComposioTool}
+        toggleAllToolsForToolkit={toggleAllToolsForToolkit}
         showTodoPanel={showTodoPanel}
         setShowTodoPanel={setShowTodoPanel}
         coderTodos={coderTodos}
@@ -1891,7 +1924,7 @@ const startCoderPreview = useCallback(async () => {
                   });
                 }}
                 onOpenSettings={(tab?: any) => { if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any);
-                  setIsSettingsOpen(prev => {
+                  setIsSettingsOpen((prev: boolean) => {
                     const nextVal = !prev;
                     if (nextVal) {
                       setShowAgentsPage(false);
@@ -1974,7 +2007,7 @@ const startCoderPreview = useCallback(async () => {
             }}
             onOpenSettings={(tab?: any) => { 
               if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any); 
-              setIsSettingsOpen(prev => {
+              setIsSettingsOpen((prev: boolean) => {
                 const nextVal = !prev;
                 if (nextVal) {
                   setShowAgentsPage(false);
@@ -2311,7 +2344,7 @@ const startCoderPreview = useCallback(async () => {
                           }
                           createNewChat(null, nextState);
                           if (false) {
-                            setChats(prev => prev.map(chat => {
+                            setChats((prev: Chat[]) => prev.map((chat: Chat) => {
                               if (chat.id === currentChatId) {
                                 return {
                                   ...chat,
@@ -2325,9 +2358,10 @@ const startCoderPreview = useCallback(async () => {
                           setIsHeaderMenuOpen(false);
                         } },
                         { id: 'research_mode', label: isResearchMode ? 'Turn off Research Mode' : 'Turn on Deep Research', icon: <Bot size={16} className={isResearchMode ? 'text-teal-500' : ''} />, onClick: () => { const nextState = !isResearchMode; setIsResearchMode(nextState); setIsResearchWorkspaceOpen(nextState); if (nextState) { setIsCoderMode(false); setIsSidebarOpen(false); } createNewChat(null, false, nextState); setIsHeaderMenuOpen(false); } },
-                        { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen(prev => !prev); setIsHeaderMenuOpen(false); } },
+                        { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen((prev: boolean) => !prev); setIsHeaderMenuOpen(false); } },
                         { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
+                        { id: 'lumina_agent', label: 'Lumina Agent', icon: <Bot size={16} className="text-emerald-500" />, onClick: () => { setIsLuminaAgentOpen(true); setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -2414,7 +2448,7 @@ const startCoderPreview = useCallback(async () => {
             handleSetActiveArtifact={handleSetActiveArtifact}
             handleSetCanvasView={handleSetCanvasView}
             handleUpdateTodoPlan={handleUpdateTodoPlan}
-            handleStartBuildingBtn={(messageId) => handleStartBuilding(currentChatId || '', messageId, undefined)}
+            handleStartBuildingBtn={(messageId) => handleStartBuilding(currentChatId || '', messageId, [])}
             scrapingResults={scrapingResults}
             wikiResults={wikiResults}
             handleSend={handleSend}
@@ -2617,6 +2651,25 @@ const startCoderPreview = useCallback(async () => {
                   onClose={() => setIsRagPanelOpen(false)}
                 />
               </motion.div>
+            ) : isLuminaAgentOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-zinc-950"
+              >
+                <LuminaAgentPanel
+                  onClose={() => setIsLuminaAgentOpen(false)}
+                  agents={agents}
+                  orchestrationState={orchestrationState}
+                  onOpenAgentsPage={() => {
+                    setIsLuminaAgentOpen(false);
+                    setShowAgentsPage(true);
+                  }}
+                  convex={luminaConvex}
+                />
+              </motion.div>
             ) : false ? (
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
@@ -2656,12 +2709,12 @@ const startCoderPreview = useCallback(async () => {
                         animate={{ opacity: 1, y: 0 }}
                         className="min-h-[60vh] flex flex-col items-center justify-center text-center px-4 relative w-full"
                       >
-                        {activeProjectId && projectFolders.find(p => p.id === activeProjectId) ? (
+                        {activeProjectId && projectFolders.find((p: any) => p.id === activeProjectId) ? (
                           <>
                             <div className="flex items-center gap-3.5 justify-center mb-10 select-none">
                               <Folder className="text-zinc-200 shrink-0" size={36} />
                               <span className="text-3xl font-medium text-zinc-150 tracking-tight font-sans">
-                                {projectFolders.find(p => p.id === activeProjectId)?.name}
+                                {projectFolders.find((p: any) => p.id === activeProjectId)?.name}
                               </span>
                             </div>
                           </>
@@ -2683,7 +2736,7 @@ const startCoderPreview = useCallback(async () => {
                               {userProfile.avatar ? (
                                 <img src={userProfile.avatar} alt={userProfile.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                               ) : (
-                                <span className="font-bold text-lg font-display">{userProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}</span>
+                                <span className="font-bold text-lg font-display">{userProfile.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}</span>
                               )}
                             </motion.div>
                             <h1 className="text-4xl font-display font-medium text-gray-900 dark:text-white mb-3 tracking-tight">
@@ -2705,7 +2758,7 @@ const startCoderPreview = useCallback(async () => {
                         )}
                       </motion.div>
                     ) : (
-                      messages.map((message) => (
+                      messages.map((message: Message) => (
                         <MessageItem
                           key={message.id}
                           message={message}
@@ -2817,7 +2870,7 @@ const startCoderPreview = useCallback(async () => {
                   onClose={() => setIsCanvasOpen(false)} 
                   view={canvasView}
                   onSetView={setCanvasView}
-                  allArtifacts={chats.find(c => c.id === currentChatId)?.messages.flatMap(m => m.artifacts || []) || []}
+                  allArtifacts={chats.find((c: Chat) => c.id === currentChatId)?.messages.flatMap((m: Message) => m.artifacts || []) || []}
                 />
               </div>
             )}
@@ -3055,12 +3108,13 @@ const startCoderPreview = useCallback(async () => {
             handleLoadBridgeTools={handleLoadBridgeTools}
           />
         )}
+
       </AnimatePresence>
 
 
       <div className="fixed top-20 right-6 flex flex-col gap-1.5 items-end z-[9999] pointer-events-none">
         <AnimatePresence>
-          {toasts.map(toast => (
+          {toasts.map((toast: any) => (
             <motion.div
               key={toast.id}
               initial={{ opacity: 0, x: 24, scale: 0.95 }}
@@ -3081,7 +3135,7 @@ const startCoderPreview = useCallback(async () => {
         onClose={() => setIsCanvasOpen(false)} 
         view={canvasView}
         onSetView={setCanvasView}
-        allArtifacts={chats.find(c => c.id === currentChatId)?.messages.flatMap(m => m.artifacts || []) || []}
+        allArtifacts={chats.find((c: Chat) => c.id === currentChatId)?.messages.flatMap((m: Message) => m.artifacts || []) || []}
       />
 
 
@@ -3155,7 +3209,7 @@ const startCoderPreview = useCallback(async () => {
         onClose={() => setSelectedProjectForChats(null)}
         title="Project Chats"
         contextName={selectedProjectForChats?.name || ''}
-        chats={chats.filter(c => c.projectId === selectedProjectForChats?.id)}
+        chats={chats.filter((c: Chat) => c.projectId === selectedProjectForChats?.id)}
         currentChatId={currentChatId}
         onSelectChat={(chatId) => {
           setCurrentChatId(chatId);
@@ -3170,7 +3224,7 @@ const startCoderPreview = useCallback(async () => {
           showToast(`Opened project chat session.`);
         }}
         onDeleteChat={(chatId) => {
-          setChats(prev => prev.filter(c => c.id !== chatId));
+          setChats((prev: Chat[]) => prev.filter((c: Chat) => c.id !== chatId));
           if (currentChatId === chatId) {
             setCurrentChatId(null);
           }
@@ -3196,7 +3250,7 @@ const startCoderPreview = useCallback(async () => {
         onClose={() => setSelectedAgentForChats(null)}
         title="Assistant Chats"
         contextName={selectedAgentForChats?.name || ''}
-        chats={chats.filter(c => c.agentId === selectedAgentForChats?.id)}
+        chats={chats.filter((c: Chat) => c.agentId === selectedAgentForChats?.id)}
         currentChatId={currentChatId}
         onSelectChat={(chatId) => {
           setCurrentChatId(chatId);
@@ -3211,7 +3265,7 @@ const startCoderPreview = useCallback(async () => {
           showToast(`Opened "${selectedAgentForChats.name}" session.`);
         }}
         onDeleteChat={(chatId) => {
-          setChats(prev => prev.filter(c => c.id !== chatId));
+          setChats((prev: Chat[]) => prev.filter((c: Chat) => c.id !== chatId));
           if (currentChatId === chatId) {
             setCurrentChatId(null);
           }
@@ -3286,7 +3340,7 @@ const startCoderPreview = useCallback(async () => {
           <button
             onClick={() => {
               if (attachmentContextMenu.index !== -1) {
-                setLocalElementAttachments(prev => prev.filter((_, i) => i !== attachmentContextMenu.index));
+                setLocalElementAttachments((prev: any[]) => prev.filter((_: any, i: number) => i !== attachmentContextMenu.index));
               }
               setAttachmentContextMenu({ visible: false, x: 0, y: 0, attachment: null, index: -1 });
             }}
@@ -3373,7 +3427,7 @@ const startCoderPreview = useCallback(async () => {
               <div className="flex-1 min-h-0 bg-[#141211]">
                 <Whiteboard 
                   onAttachToChat={(file) => {
-                    setAttachedFiles(prev => [...prev, file]);
+                    setAttachedFiles((prev: any[]) => [...prev, file]);
                     showToast('Sketch attached successfully to your message compose box!');
                   }}
                   onClose={() => setIsWhiteboardOpen(false)}

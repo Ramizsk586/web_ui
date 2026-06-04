@@ -8,6 +8,8 @@ export * from './useLlamaBridge';
 export * from './useAgents';
 export * from './useSidebar';
 export * from './useLuminaTools';
+export * from './useComposioTools';
 export * from './useInputState';
 export * from './useWorkspace';
 export * from './useUIState';
+export * from './useLuminaConvex';

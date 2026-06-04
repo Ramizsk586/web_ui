@@ -289,7 +289,7 @@ export interface UseAppHandlersParams {
   localElementAttachments: any[];
   setLocalElementAttachments: React.Dispatch<React.SetStateAction<any[]>>;
 
-  inputRef: React.RefObject<HTMLTextAreaElement>;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
   abortControllerRef: React.RefObject<AbortController | null>;
 
   setAskAiQuestions: (v: any[]) => void;
@@ -1510,7 +1510,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
 
       const hasWebScrapeCall = toolCallsRaw && toolCallsRaw.some((tc: any) => {
         const name = tc.function?.name || '';
-        return name === 'web_scrape' || name === 'search' || name === 'visit' || name === 'google_scholar' || name.startsWith('wiki_');
+        return name === 'web_scrape' || name === 'search' || name === 'visit' || name === 'google_scholar' || name.startsWith('wiki_') || name.startsWith('composio_');
       });
       if (isCoderMode || hasWebScrapeCall) {
         let successfulScrapesCount = 0;
@@ -1588,7 +1588,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             const node: ToolCallNode = {
               id: tc.id || createStableTurnId('tc', loopCount, idx, name),
               type: 'tool',
-              label: isScrape ? `Web Scraper (${args.url})` : name === 'run_command' ? `Terminal command (${args.command})` : `${name} ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}`,
+              label: isScrape ? `Web Scraper (${args.url})` : name === 'run_command' ? `Terminal command (${args.command})` : name.startsWith('composio_') ? `Composio: ${name.replace('composio_', '').replace(/_/g, ' ')}` : `${name} ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}`,
               status: 'active',
               toolName: name,
               argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
@@ -1606,6 +1606,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     name === 'delete_file' ? 'terminal' :
                     name === 'rename_file' ? 'edit' :
                     name === 'run_command' ? 'terminal' :
+                    name.startsWith('composio_') ? 'puzzle' :
                     name.includes('grep') || name.includes('search') || name.includes('subtask') ? 'search' :
                     name.includes('read') || name.includes('file') ? 'file' :
                     name.includes('edit') || name.includes('create') ? 'edit' :
@@ -2819,6 +2820,28 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 if (currentN) {
                   currentN.resultSummary = `Trajectory logged: ${relatedList.length} related pages found`;
                 }
+                } else if (name.startsWith('composio_')) {
+                  showToast(`Executing Composio tool: ${name}`);
+                  try {
+                    const execRes = await fetch('/api/composio/execute', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ toolSlug: name.replace('composio_', '').toUpperCase().replace(/ /g, '_'), args }),
+                      signal
+                    });
+                    const execData = await execRes.json();
+                    if (execRes.ok) {
+                      resultValue = execData.result || execData;
+                    } else {
+                      resultValue = { error: execData.error || 'Composio tool execution failed' };
+                    }
+                  } catch (execErr: any) {
+                    resultValue = { error: execErr.message || 'Composio tool execution failed' };
+                  }
+                  const currentN = toolCallNodes.find(n => n.id === tc.id);
+                  if (currentN) {
+                    currentN.resultSummary = resultValue?.error ? `Composio tool failed: ${resultValue.error}` : `Composio tool ${name} executed`;
+                  }
                 } else {
                   resultValue = { error: `Unsupported coder tool: ${name}` };
                 }

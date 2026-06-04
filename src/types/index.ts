@@ -75,6 +75,8 @@ export interface Tool {
   enabled: boolean;
   icon?: React.ReactNode;
   parameters?: any;
+  toolkit?: string;
+  toolkitDisplayName?: string;
 }
 
 export interface ToolDefinition {

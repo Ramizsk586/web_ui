@@ -16,7 +16,8 @@ import {
   Sparkles,
   Wrench,
   GitBranch,
-  Code
+  Code,
+  Puzzle
 } from 'lucide-react';
 import { ToolCallNode } from '../../types';
 import { ScrapeResult } from '../../services/scrapingService';
@@ -63,6 +64,7 @@ const renderNodeIcon = (icon: any) => {
     if (name.includes('sparkles') || name.includes('ai')) return React.createElement(Sparkles, { size: 14 });
     if (name.includes('check') || name.includes('success')) return React.createElement(Check, { size: 14 });
     if (name.includes('manage_todos') || name.includes('wrench')) return React.createElement(Wrench, { size: 14 });
+    if (name.includes('puzzle') || name.includes('composio')) return React.createElement(Puzzle, { size: 14 });
     if (name.includes('git-branch') || name.includes('git')) return React.createElement(GitBranch, { size: 14 });
     if (name.includes('code')) return React.createElement(Code, { size: 14 });
     return React.createElement(FileText, { size: 14 });
@@ -91,6 +93,7 @@ const renderNodeIcon = (icon: any) => {
     if (name.includes('sparkles') || name.includes('ai')) return React.createElement(Sparkles, { size: 14 });
     if (name.includes('check') || name.includes('success')) return React.createElement(Check, { size: 14 });
     if (name.includes('manage_todos') || name.includes('wrench')) return React.createElement(Wrench, { size: 14 });
+    if (name.includes('puzzle') || name.includes('composio')) return React.createElement(Puzzle, { size: 14 });
     if (name.includes('git-branch') || name.includes('git')) return React.createElement(GitBranch, { size: 14 });
     if (name.includes('code')) return React.createElement(Code, { size: 14 });
     
@@ -119,6 +122,10 @@ const humanizeToolName = (toolName?: string, rawLabel?: string) => {
   if (lower === 'run_skill') return 'Run skill';
   if (lower === 'list_coder_files') return 'Query and analyze codebase project file tree';
   if (lower === 'verify_changes') return 'Verify target changes';
+  if (lower.startsWith('composio_')) {
+    const action = lower.replace('composio_', '').replace(/_/g, ' ');
+    return `Composio: ${action.charAt(0).toUpperCase() + action.slice(1)}`;
+  }
   return rawLabel || toolName;
 };
 

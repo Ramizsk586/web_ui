@@ -6004,6 +6004,143 @@ ${contextStr}`;
     res.json({ success: true, models: results });
   });
 
+  // ---- Composio Integration Routes ----
+  const { getComposio, CURATED_TOOLKITS, listConnectedToolkits, authorizeToolkit, disconnectToolkit, renameConnection, resetComposio, setApiKey, verifyApiKey, listToolkitTools, executeComposioTool } = await import('./server/composio.js');
+
+  app.get("/api/composio/status", (_req, res) => {
+    res.json({ enabled: Boolean(getComposio()) });
+  });
+
+  app.post("/api/composio/refresh", async (req, res) => {
+    const apiKey = req.body?.apiKey as string | undefined;
+    resetComposio();
+    if (apiKey) {
+      setApiKey(apiKey);
+    }
+    res.json({ ok: true });
+  });
+
+  app.post("/api/composio/verify", async (req, res) => {
+    const apiKey = req.body?.apiKey as string | undefined;
+    if (!apiKey) {
+      res.status(400).json({ valid: false, error: "apiKey required" });
+      return;
+    }
+    try {
+      resetComposio();
+      setApiKey(apiKey);
+      const result = await verifyApiKey(apiKey);
+      if (result.valid) {
+        res.json({ enabled: true });
+      } else {
+        res.json({ enabled: false, error: result.error });
+      }
+    } catch (err) {
+      res.json({ enabled: false, error: String(err) });
+    }
+  });
+
+  app.get("/api/composio/toolkit-tools/:slug", async (req, res) => {
+    const slug = req.params.slug;
+    try {
+      const tools = await listToolkitTools(slug);
+      res.json({ tools });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.post("/api/composio/execute", async (req, res) => {
+    const { toolSlug, args, connectedAccountId } = req.body || {};
+    if (!toolSlug) {
+      res.status(400).json({ error: "toolSlug required" });
+      return;
+    }
+    try {
+      const result = await executeComposioTool(toolSlug, args || {}, connectedAccountId);
+      res.json({ result });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.get("/api/composio/toolkits", async (_req, res) => {
+    try {
+      const connected = await listConnectedToolkits();
+      const connectionsBySlug = new Map<string, typeof connected>();
+      for (const c of connected) {
+        const arr = connectionsBySlug.get(c.slug) ?? [];
+        arr.push(c);
+        connectionsBySlug.set(c.slug, arr);
+      }
+      const toolkits = CURATED_TOOLKITS.map((t) => {
+        const conns = connectionsBySlug.get(t.slug) ?? [];
+        return {
+          slug: t.slug,
+          displayName: t.displayName,
+          authMode: t.authMode,
+          connections: conns.map((c) => ({
+            id: c.connectionId,
+            status: c.status,
+            alias: c.alias ?? null,
+            accountLabel: c.accountLabel ?? null,
+            accountEmail: c.accountEmail ?? null,
+            accountName: c.accountName ?? null,
+            accountAvatarUrl: c.accountAvatarUrl ?? null,
+            createdAt: c.createdAt ?? null,
+          })),
+        };
+      });
+      res.json({ enabled: Boolean(getComposio()), toolkits });
+    } catch (err) {
+      console.error("[composio] list toolkits failed", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.post("/api/composio/toolkits/:slug/authorize", async (req, res) => {
+    const slug = req.params.slug;
+    const alias = typeof req.body?.alias === "string" ? req.body.alias : undefined;
+    try {
+      const result = await authorizeToolkit(slug, alias ? { alias } : undefined);
+      res.json(result);
+    } catch (err) {
+      console.error(`[composio] authorize ${slug} failed`, err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.post("/api/composio/toolkits/:slug/disconnect", async (req, res) => {
+    const connectionId = req.body?.connectionId as string | undefined;
+    if (!connectionId) {
+      res.status(400).json({ error: "connectionId required in body" });
+      return;
+    }
+    try {
+      await disconnectToolkit(connectionId);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(`[composio] disconnect failed`, err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.post("/api/composio/connections/:id/rename", async (req, res) => {
+    const id = req.params.id;
+    const alias = typeof req.body?.alias === "string" ? req.body.alias.trim() : "";
+    if (!alias) {
+      res.status(400).json({ error: "alias required in body" });
+      return;
+    }
+    try {
+      await renameConnection(id, alias);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(`[composio] rename ${id} failed`, err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   // Vite middleware for development
   if (isDev) {
     try {
