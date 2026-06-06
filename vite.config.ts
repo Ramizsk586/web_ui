@@ -49,26 +49,26 @@ export default defineConfig(({mode}) => {
       target: 'es2020',
       rollupOptions: {
         output: {
-          // Aggressive chunk splitting
           manualChunks(id) {
             if (id.includes('node_modules')) {
-              if (id.includes('react') || id.includes('react-dom') || id.includes('motion')) {
-                return 'react-core';
-              }
-              if (id.includes('lucide-react')) {
-                return 'lucide-icons';
-              }
               if (id.includes('@monaco-editor') || id.includes('monaco-editor')) {
                 return 'monaco-suite';
               }
               if (id.includes('react-syntax-highlighter') || id.includes('prismjs')) {
                 return 'syntax-highlighter-pkg';
               }
-              if (id.includes('react-markdown') || id.includes('remark-') || id.includes('turndown') || id.includes('cheerio')) {
+              if (id.includes('axios')) {
+                return 'network-libs';
+              }
+              if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler') || id.includes('motion')) {
+                return 'react-core';
+              }
+              if (id.includes('lucide-react')) {
+                return 'lucide-icons';
+              }
+              if (id.includes('react-markdown') || id.includes('remark-') || id.includes('turndown')) {
                 return 'content-parsers-suite';
               }
-              // Split large vendors further
-              if (id.includes('axios') || id.includes('cheerio')) return 'network-libs';
               return 'vendor-libs';
             }
           },
