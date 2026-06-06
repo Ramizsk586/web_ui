@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useTheme } from './themes';
 import AppContent from './AppContent';
-import { InspectStandalone } from './components/InspectStandalone';
 import {
   useAppSettings,
   useLlamaBridge,
@@ -20,10 +19,6 @@ import {
 } from './hooks';
 
 export default function App() {
-  const isInspectMode = typeof window !== 'undefined' && window.location.search.includes('inspect=1');
-  if (isInspectMode) {
-    return <InspectStandalone />;
-  }
   const { isDark: isDarkMode, theme, setTheme } = useTheme();
 
   // Shared declarations referenced across hooks

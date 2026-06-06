@@ -2669,7 +2669,6 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
           name === '.git' || 
           name === 'dist' || 
           name === '.next' || 
-          name === 'dist-electron' ||
           name === '.svelte-kit' ||
           name === '.github' ||
           name === 'package-lock.json' ||

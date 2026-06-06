@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "Lumina AI Chat",
+  "version": "1.0.0",
+  "identifier": "com.lumina.aichat",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Lumina AI Chat",
+        "width": 938,
+        "height": 625,
+        "minWidth": 625,
+        "minHeight": 469,
+        "decorations": false,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "../dist/server.mjs"
+    ]
+  }
+}

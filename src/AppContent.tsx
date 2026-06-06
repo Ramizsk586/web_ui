@@ -200,6 +200,7 @@ import { parseThinkTags, turboQuantCompress } from './utils/textUtils';
 import { safeGetItem } from './utils/storageUtils';
 import { extractArtifacts } from './utils/artifactUtils';
 import { extractYouTubeId, fetchYouTubeTranscript } from './utils/youtubeUtils';
+import { invokeTauri, isTauriDesktop, listenTauriEvent } from './utils/tauriDesktop';
 import { OnboardingModal } from './components/OnboardingModal';
 import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
 import { SettingsModal } from './components/SettingsModal';
@@ -208,7 +209,6 @@ import { ProjectsPage } from './components/ProjectsPage';
 import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 import { LivePreviewPanel } from './components/LivePreviewPanel';
-import { DevToolsPanel } from './components/DevToolsPanel';
 import { ThemeCustomizerPanel } from './components/ThemeCustomizerPanel';
 
 import { RAGPanel } from './components/RAGPanel';
@@ -743,13 +743,7 @@ export default function AppContent({
   const [pendingCommandPermission, setPendingCommandPermission] = useState<PendingCommandPermission | null>(null);
   const [permissionAuditLog, setPermissionAuditLog] = useState<any[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [retroFilter, setRetroFilter] = useState(false);
-  const [verboseDebug, setVerboseDebug] = useState(false);
-  const [isDevToolsOpen, setIsDevToolsOpen] = useState(false);
   const [isRagPanelOpen, setIsRagPanelOpen] = useState(false);
-  const [simLatency, setSimLatency] = useState(120);
-  const [activeDevTab, setActiveDevTab] = useState<'status' | 'console' | 'perf' | 'storage' | 'flags'>('status');
-  const [devLogs, setDevLogs] = useState<any[]>([]);
   const [isModelDrawerOpen, setIsModelDrawerOpen] = useState(false);
 
   // Local model manual config state
@@ -972,28 +966,9 @@ export default function AppContent({
   });
 
   // UI Handlers & Helper functions
-  const addDevLog = useCallback((message: string, type: 'info' | 'warn' | 'error' | 'success' = 'info') => {
-    setDevLogs(prev => [...prev, { id: Date.now().toString(), text: message, type, time: new Date().toLocaleTimeString() }]);
+  const addDevLog = useCallback((_message: string, _type: 'info' | 'warn' | 'error' | 'success' = 'info') => {
+    // DevTools panel removed; keep as a no-op for existing llama/server diagnostics.
   }, []);
-
-  const handleExecMockCommand = useCallback((cmd: string) => {
-    if (!cmd) return;
-    addDevLog(`$ ${cmd}`, 'info');
-    const lower = cmd.toLowerCase();
-    if (lower === 'clear') {
-      setDevLogs([]);
-    } else if (lower === 'help') {
-      addDevLog('Available commands: help, clear, ping, system, perf', 'info');
-    } else if (lower === 'ping') {
-      addDevLog('pong! 64 bytes from local: icmp_seq=1 ttl=64 time=0.21ms', 'info');
-    } else if (lower === 'system') {
-      addDevLog('System: Node.js Dev Server | Platform: Cloud Run Sandboxed', 'info');
-    } else if (lower === 'perf') {
-      addDevLog('Heap size: 42.1MB | Active Nodes: 1243 | FPS: 60', 'info');
-    } else {
-      addDevLog(`Command not found: ${cmd}`, 'error');
-    }
-  }, [addDevLog]);
 
   const insertAttachedContent = (content: string) => {
     setInput((prev: string) => prev ? prev + '\n' + content : content);
@@ -1558,20 +1533,81 @@ const startCoderPreview = useCallback(async () => {
   const markdownComponents = useMarkdownComponents();
 
   const [isMaximized, setIsMaximized] = useState(false);
-  const isElectron = typeof window !== 'undefined' && (window as any).__electronAPI;
+  const [desktopContextMenu, setDesktopContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+  }>({ visible: false, x: 0, y: 0 });
+  const isDesktopShell = isTauriDesktop();
 
   useEffect(() => {
-    const api = (window as any).__electronAPI;
-    if (!api) return;
-    api.onMaximized((maximized: boolean) => setIsMaximized(maximized));
-    api.isMaximized().then((maximized: boolean) => setIsMaximized(maximized));
+    if (!isDesktopShell) return;
+
+    let unlisten: (() => void) | undefined;
+
+    invokeTauri<boolean>('is_window_maximized')
+      .then((maximized) => setIsMaximized(Boolean(maximized)))
+      .catch(() => {});
+
+    listenTauriEvent<boolean>('window:maximized', (maximized) => {
+      setIsMaximized(Boolean(maximized));
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+
     const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) {
+        return;
+      }
       e.preventDefault();
-      api.showContextMenu();
+      setDesktopContextMenu({
+        visible: true,
+        x: e.clientX,
+        y: e.clientY,
+      });
     };
+
+    const dismissMenu = () => {
+      setDesktopContextMenu((prev) => (prev.visible ? { visible: false, x: 0, y: 0 } : prev));
+    };
+
     window.addEventListener('contextmenu', handleContextMenu);
-    return () => window.removeEventListener('contextmenu', handleContextMenu);
-  }, []);
+    window.addEventListener('click', dismissMenu);
+    window.addEventListener('blur', dismissMenu);
+    window.addEventListener('resize', dismissMenu);
+
+    return () => {
+      unlisten?.();
+      window.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('click', dismissMenu);
+      window.removeEventListener('blur', dismissMenu);
+      window.removeEventListener('resize', dismissMenu);
+    };
+  }, [isDesktopShell]);
+
+  const handleDesktopWindowAction = useCallback(async (action: 'close_window' | 'minimize_window' | 'maximize_window') => {
+    if (!isDesktopShell) return;
+    try {
+      await invokeTauri(action);
+      if (action === 'maximize_window') {
+        const maximized = await invokeTauri<boolean>('is_window_maximized');
+        setIsMaximized(Boolean(maximized));
+      }
+    } catch (error) {
+      console.error(`Desktop action failed: ${action}`, error);
+    }
+  }, [isDesktopShell]);
+
+  const handleDesktopContextAction = useCallback(async (action: 'zoom_in' | 'zoom_out' | 'zoom_reset' | 'inspect' | 'reload') => {
+    setDesktopContextMenu({ visible: false, x: 0, y: 0 });
+    if (!isDesktopShell) return;
+    try {
+      await invokeTauri(action);
+    } catch (error) {
+      console.error(`Desktop context action failed: ${action}`, error);
+    }
+  }, [isDesktopShell]);
 
   // Scan models directory on startup to discover downloaded models
   useEffect(() => {
@@ -1862,11 +1898,11 @@ const startCoderPreview = useCallback(async () => {
   return (
     <div className="flex flex-col h-screen w-full bg-[var(--theme-bg)] text-[var(--theme-primary)] overflow-hidden relative">
 
-      {isElectron && (
+      {isDesktopShell && (
         <div className="h-9 shrink-0 flex items-center px-4 relative z-50" style={{ WebkitAppRegion: 'drag' } as any}>
           <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as any}>
             <button
-              onClick={() => (window as any).__electronAPI.close()}
+              onClick={() => handleDesktopWindowAction('close_window')}
               className="w-3 h-3 rounded-full bg-red-500 hover:brightness-110 transition-all flex items-center justify-center group"
               title="Close"
             >
@@ -1875,7 +1911,7 @@ const startCoderPreview = useCallback(async () => {
               </svg>
             </button>
             <button
-              onClick={() => (window as any).__electronAPI.minimize()}
+              onClick={() => handleDesktopWindowAction('minimize_window')}
               className="w-3 h-3 rounded-full bg-yellow-500 hover:brightness-110 transition-all flex items-center justify-center group"
               title="Minimize"
             >
@@ -1884,7 +1920,7 @@ const startCoderPreview = useCallback(async () => {
               </svg>
             </button>
             <button
-              onClick={() => (window as any).__electronAPI.maximize()}
+              onClick={() => handleDesktopWindowAction('maximize_window')}
               className="w-3 h-3 rounded-full bg-green-500 hover:brightness-110 transition-all flex items-center justify-center group"
               title={isMaximized ? 'Restore' : 'Maximize'}
             >
@@ -1899,6 +1935,11 @@ const startCoderPreview = useCallback(async () => {
                 </svg>
               )}
             </button>
+          </div>
+          <div className="absolute inset-x-0 flex justify-center pointer-events-none">
+            <span className="text-[11px] font-medium tracking-[0.2em] uppercase text-[var(--theme-muted)] mt-[2px]">
+              Lumina
+            </span>
           </div>
         </div>
       )}
@@ -3211,50 +3252,6 @@ const startCoderPreview = useCallback(async () => {
 
 
 
-      {/* Retro Cyberpunk CRT Grid Scanlines visual overlay */}
-      {retroFilter && (
-        <div 
-          className="pointer-events-none fixed inset-0 z-[1000] opacity-[0.05]" 
-          style={{
-            background: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.05), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.05))',
-            backgroundSize: '100% 4px, 6px 100%'
-          }} 
-        />
-      )}
-
-      {/* Lumina Developer Tools Dialog Panel */}
-      <DevToolsPanel
-        isDevToolsOpen={isDevToolsOpen}
-        setIsDevToolsOpen={setIsDevToolsOpen}
-        activeDevTab={activeDevTab}
-        setActiveDevTab={setActiveDevTab}
-        simLatency={simLatency}
-        setSimLatency={setSimLatency}
-        devLogs={devLogs}
-        setDevLogs={setDevLogs}
-        chats={chats}
-        selectedProvider={selectedProvider}
-        serverUrl={serverUrl}
-        isCoderMode={isCoderMode}
-        isCoderLeftPanelOpen={isCoderLeftPanelOpen}
-        isCoderRightPanelOpen={isCoderRightPanelOpen}
-        isMcpConnected={isMcpConnected}
-        workspaceRefreshKey={workspaceRefreshKey}
-        handleExecMockCommand={handleExecMockCommand}
-        addDevLog={addDevLog}
-        showToast={showToast}
-        retroFilter={retroFilter}
-        setRetroFilter={setRetroFilter}
-        verboseDebug={verboseDebug}
-        setVerboseDebug={setVerboseDebug}
-        setIsCompactSidebar={setIsCompactSidebar}
-        isCompactSidebar={isCompactSidebar}
-        setUseBubbles={setUseBubbles}
-        useBubbles={useBubbles}
-        setAutoHideTopBar={setAutoHideTopBar}
-        autoHideTopBar={autoHideTopBar}
-      />
-
       {/* Scanned Layout Element Report Modal */}
       <ElementAnalysisModal
         attachment={selectedModalAttachment}
@@ -3419,6 +3416,46 @@ const startCoderPreview = useCallback(async () => {
           >
             <X size={13} />
             <span>Remove Attachment</span>
+          </button>
+        </div>
+      )}
+
+      {desktopContextMenu.visible && (
+        <div
+          className="fixed bg-[#161312]/97 border border-[#2A221E] rounded-xl shadow-[0_18px_40px_rgba(0,0,0,0.42)] p-1 z-[320] w-[148px] backdrop-blur-xl"
+          style={{ top: desktopContextMenu.y, left: desktopContextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => handleDesktopContextAction('zoom_in')}
+            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
+          >
+            Zoom In
+          </button>
+          <button
+            onClick={() => handleDesktopContextAction('zoom_out')}
+            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
+          >
+            Zoom Out
+          </button>
+          <button
+            onClick={() => handleDesktopContextAction('zoom_reset')}
+            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
+          >
+            Reset Zoom
+          </button>
+          <button
+            onClick={() => handleDesktopContextAction('reload')}
+            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
+          >
+            Reload
+          </button>
+          <div className="my-1 h-px bg-white/6" />
+          <button
+            onClick={() => handleDesktopContextAction('inspect')}
+            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
+          >
+            Inspect
           </button>
         </div>
       )}
