@@ -1,17 +1,74 @@
 import type { ToolDefinition } from '../types';
 
+export type DeepResearchPreset = 'standard' | 'extreme';
+
 export const DEEP_RESEARCH_SYSTEM_PROMPT = `You are a deep research assistant. Your core function is to conduct thorough, multi-source investigations into any topic. Handle broad open-domain questions and specialized academic questions. Synthesize credible, diverse sources into comprehensive, accurate, objective answers.
 
 [DEEP RESEARCH LOOP]
-1. Think through the research objective and split it into complementary search angles.
-2. Use batched search calls when you need discovery. Include multiple complementary queries in one call.
-3. Use visit for high-value URLs. Always include a specific goal so the extraction is relevant.
-4. Use google_scholar for academic or publication-heavy questions.
-5. Iterate through search, visit, compare, and synthesize until you have enough evidence.
-6. Cite sources with source titles/URLs when available. Flag uncertainty and conflicting evidence.
-7. When finished, provide the final answer directly in Markdown.`;
+1. Your first tool call must be current_time so you anchor the research to the real current date and time.
+2. Immediately after the time tool, write a concise research plan in your reasoning and then execute it step by step.
+3. Split the objective into complementary search angles and track which angle each tool call supports.
+4. Start with normal web discovery using search when you need current sources, news, product pages, company pages, blogs, or documentation.
+5. Use visit for high-value URLs. Always include a specific goal so the extraction is relevant.
+6. Use web_scrape when you need a fuller page extraction from an important result.
+7. Use wiki_search, wiki_get_summary, wiki_get_page, and wiki_get_related for background knowledge, entity grounding, timelines, terminology, and adjacent topics.
+8. Use google_scholar for academic or publication-heavy questions.
+9. Every deep research run must include at least 3 successful wiki_search calls and at least 3 successful web_scrape calls before you finalize.
+10. Blend evidence from search results, scraped pages, and Wikipedia instead of relying on a single source type.
+11. Iterate through search, visit, scrape, compare, and synthesize until you have enough evidence.
+12. Cite sources with source titles/URLs when available. Flag uncertainty and conflicting evidence.
+13. Do not finalize early. If the minimum required wiki searches or web scrapes are not complete yet, continue researching.
+14. When finished, provide the final answer directly in Markdown with a brief source-grounded structure.`;
+
+export const getDeepResearchPresetPrompt = (preset: DeepResearchPreset) => {
+  if (preset === 'extreme') {
+    return `\n[ADVANCED DEEP RESEARCH MODE]
+- Run a more thorough pipeline with wider query coverage and stronger source triangulation.
+- Build a multi-phase plan: discovery, background grounding, source expansion, deep extraction, verification, and synthesis.
+- Use more complementary search angles before converging on conclusions.
+- Prefer additional visit and comparison passes before finalizing.
+- Use Wikipedia not only for definitions, but also for timeline checks, related entities, and disambiguation.
+- Scrape multiple high-value pages across different source types whenever possible.
+- Explicitly compare source agreement, conflicts, recency, and evidence quality before writing the final answer.
+- The final answer should be more complete, structured, and source-dense than normal mode.`;
+  }
+
+  return `\n[NORMAL DEEP RESEARCH MODE]
+- Keep the pipeline efficient and reliable.
+- Make a concise plan, gather enough evidence to answer well, verify key facts, then synthesize clearly.
+- Stay thorough, but prefer shorter research loops when the answer is already well supported.`;
+};
+
+export const getDeepResearchMinimums = (preset: DeepResearchPreset) => {
+  if (preset === 'extreme') {
+    return {
+      minWikiSearches: 5,
+      minWebScrapes: 5,
+      minVisits: 3,
+      minSearchCalls: 3
+    };
+  }
+
+  return {
+    minWikiSearches: 3,
+    minWebScrapes: 3,
+    minVisits: 1,
+    minSearchCalls: 1
+  };
+};
 
 export const deepResearchTools: ToolDefinition[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'current_time',
+      description: 'Get the current local date, time, timezone, timestamp, and ISO datetime before beginning research.',
+      parameters: {
+        type: 'object',
+        properties: {}
+      }
+    }
+  },
   {
     type: 'function',
     function: {
@@ -50,6 +107,128 @@ export const deepResearchTools: ToolDefinition[] = [
           }
         },
         required: ['url', 'goal']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_scrape',
+      description: 'Deeply scrape a specific webpage when it looks highly relevant and you need fuller text than a standard visit summary.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'The webpage URL to scrape.'
+          },
+          outputFormat: {
+            type: 'string',
+            enum: ['markdown', 'json', 'html'],
+            description: 'Preferred output format for extracted content.'
+          },
+          extractLinks: {
+            type: 'boolean',
+            description: 'Whether to include discovered outbound links.'
+          },
+          extractTables: {
+            type: 'boolean',
+            description: 'Whether to attempt table extraction.'
+          }
+        },
+        required: ['url']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'wiki_search',
+      description: 'Search Wikipedia for background context, entities, timelines, definitions, and related topic hubs.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The Wikipedia search query.'
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of results to return.'
+          },
+          language: {
+            type: 'string',
+            description: 'Wikipedia language code, usually en.'
+          }
+        },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'wiki_get_summary',
+      description: 'Fetch a concise Wikipedia summary for a known page or entity.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pageId: {
+            type: 'number',
+            description: 'Wikipedia page ID returned by wiki_search.'
+          },
+          language: {
+            type: 'string',
+            description: 'Wikipedia language code, usually en.'
+          }
+        },
+        required: ['pageId']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'wiki_get_page',
+      description: 'Fetch the richer Wikipedia article structure, sections, and metadata for an important page.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pageId: {
+            type: 'number',
+            description: 'Wikipedia page ID returned by wiki_search.'
+          },
+          language: {
+            type: 'string',
+            description: 'Wikipedia language code, usually en.'
+          }
+        },
+        required: ['pageId']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'wiki_get_related',
+      description: 'Expand research by finding related Wikipedia pages around a confirmed article.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pageId: {
+            type: 'number',
+            description: 'Wikipedia page ID returned by wiki_search.'
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of related pages to return.'
+          },
+          language: {
+            type: 'string',
+            description: 'Wikipedia language code, usually en.'
+          }
+        },
+        required: ['pageId']
       }
     }
   },

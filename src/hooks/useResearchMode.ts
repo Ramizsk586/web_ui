@@ -13,7 +13,7 @@ export interface ResearchAgent {
 
 export interface ToolChainNode {
   id: string;
-  type: 'query' | 'search' | 'scrape' | 'correlate' | 'synthesize';
+  type: 'time' | 'query' | 'search' | 'wiki' | 'scrape' | 'correlate' | 'synthesize';
   title: string;
   description: string;
   status: 'idle' | 'active' | 'complete' | 'failed';
@@ -52,11 +52,13 @@ export function useResearchMode({
   ]);
 
   const [toolChain, setToolChain] = useState<ToolChainNode[]>([
-    { id: '1', type: 'query', title: 'Objective Planning', description: 'Decomposes the question into complementary query angles', status: 'idle' },
-    { id: '2', type: 'search', title: 'Batched Search', description: 'Calls search/google_scholar with multiple query branches', status: 'idle' },
-    { id: '3', type: 'scrape', title: 'Targeted Visit', description: 'Visits high-value URLs with explicit extraction goals', status: 'idle' },
-    { id: '4', type: 'correlate', title: 'Evidence Validation', description: 'Cross-checks claims, dates, and source agreement', status: 'idle' },
-    { id: '5', type: 'synthesize', title: 'Final Answer', description: 'Writes the cited Markdown synthesis once evidence is sufficient', status: 'idle' },
+    { id: '1', type: 'time', title: 'Time Anchor', description: 'Reads the live date and time before starting research', status: 'idle' },
+    { id: '2', type: 'query', title: 'Objective Planning', description: 'Decomposes the question into complementary query angles', status: 'idle' },
+    { id: '3', type: 'search', title: 'Web Discovery', description: 'Runs normal web and scholar searches to map the source landscape', status: 'idle' },
+    { id: '4', type: 'wiki', title: 'Wikipedia Grounding', description: 'Builds background context, timelines, and related entity grounding', status: 'idle' },
+    { id: '5', type: 'scrape', title: 'Deep Extraction', description: 'Visits and scrapes high-value sources for fuller evidence', status: 'idle' },
+    { id: '6', type: 'correlate', title: 'Evidence Validation', description: 'Cross-checks claims, dates, conflicts, and source agreement', status: 'idle' },
+    { id: '7', type: 'synthesize', title: 'Final Answer', description: 'Writes the cited Markdown synthesis once evidence is sufficient', status: 'idle' },
   ]);
 
   const [researchLogs, setResearchLogs] = useState<string[]>([
@@ -100,28 +102,34 @@ export function useResearchMode({
         const logs = [...prev];
 
         if (step === 0) {
-          logs.push(`[${timestamp}] [Orchestrator] Starting bounded ReAct research loop for objective: "${customQueries}"`);
-          setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'active', details: 'Building complementary query branches.' } : n));
-          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'searching', currentTask: 'Planning search angles...', progress: 20 } : a));
+          logs.push(`[${timestamp}] [Orchestrator] Starting ${depthPreset === 'extreme' ? 'advanced' : 'normal'} deep research loop for objective: "${customQueries}"`);
+          setToolChain(tc => tc.map(n => n.type === 'time' ? { ...n, status: 'active', details: 'Reading live date, time, and timezone.' } : n));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'searching', currentTask: 'Anchoring current time and preparing research plan...', progress: 12 } : a));
         } else if (step === 1) {
-          logs.push(`[${timestamp}] [Searcher] Emitting batched <tool_call> search/google_scholar queries: [${customQueries}]`);
-          setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'complete' } : n.type === 'search' ? { ...n, status: 'active', details: 'Calling search tools and ranking URLs.' } : n));
-          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, progress: 40, resultsFound: 8 + i * 3 } : a));
+          logs.push(`[${timestamp}] [Planner] Time anchored. Creating ${depthPreset === 'extreme' ? 'multi-phase' : 'concise'} research plan.`);
+          setToolChain(tc => tc.map(n => n.type === 'time' ? { ...n, status: 'complete' } : n.type === 'query' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Building discovery, grounding, extraction, and verification stages.' : 'Building complementary query branches.' } : n));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, progress: 24, currentTask: 'Planning search angles and evidence stages...' } : a));
         } else if (step === 2) {
-          logs.push(`[${timestamp}] [Searcher] Search responses appended as <tool_response> context.`);
-          logs.push(`[${timestamp}] [Reader] Visiting top high-relevance URLs with targeted extraction goals...`);
-          setToolChain(tc => tc.map(n => n.type === 'search' ? { ...n, status: 'complete' } : n.type === 'scrape' ? { ...n, status: 'active', details: 'Extracting evidence and page summaries.' } : n));
-          setAgents(agts => agts.map((a, i) => i === 2 ? { ...a, status: 'reading', currentTask: 'Reading selected sources...', progress: 65 } : a));
+          logs.push(`[${timestamp}] [Searcher] ${depthPreset === 'extreme' ? 'Running wider discovery across multiple search angles.' : 'Running core discovery queries.'}`);
+          setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'complete' } : n.type === 'search' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Expanding search coverage, ranking URLs, and comparing query branches.' : 'Calling search tools and ranking URLs.' } : n));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, progress: 42, resultsFound: depthPreset === 'extreme' ? 14 + i * 4 : 8 + i * 3 } : a));
         } else if (step === 3) {
-          logs.push(`[${timestamp}] [Reader] Visit responses returned evidence and summaries for source comparison.`);
-          logs.push(`[${timestamp}] [Verifier] Triggering comparative claim alignment...`);
-          setToolChain(tc => tc.map(n => n.type === 'scrape' ? { ...n, status: 'complete' } : n.type === 'correlate' ? { ...n, status: 'active', details: 'Cross-referencing claims and conflicts.' } : n));
-          setAgents(agts => agts.map((a, i) => i === 3 ? { ...a, status: 'analyzing', currentTask: 'Cross-checking evidence...', progress: 80 } : a));
+          logs.push(`[${timestamp}] [Grounder] Using Wikipedia for definitions, timelines, and related entities.`);
+          setToolChain(tc => tc.map(n => n.type === 'search' ? { ...n, status: 'complete' } : n.type === 'wiki' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Running repeated wiki passes for timeline, entity, and related-topic grounding.' : 'Gathering background context and entity grounding.' } : n));
+          setAgents(agts => agts.map((a, i) => i === 1 ? { ...a, status: 'reading', currentTask: 'Grounding findings with Wikipedia context...', progress: 58 } : a));
         } else if (step === 4) {
-          logs.push(`[${timestamp}] [Synthesizer] Evidence is sufficient; compiling final cited Markdown answer.`);
-          setToolChain(tc => tc.map(n => n.type === 'correlate' ? { ...n, status: 'complete' } : n.type === 'synthesize' ? { ...n, status: 'active', details: 'Rendering Markdown Report...' } : n));
-          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'done', progress: 100 } : a));
+          logs.push(`[${timestamp}] [Reader] Visiting and scraping high-value sources for fuller evidence extraction.`);
+          setToolChain(tc => tc.map(n => n.type === 'wiki' ? { ...n, status: 'complete' } : n.type === 'scrape' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Scraping multiple source types and expanding extraction depth.' : 'Extracting evidence and page summaries.' } : n));
+          setAgents(agts => agts.map((a, i) => i === 2 ? { ...a, status: 'reading', currentTask: 'Reading selected sources and scraping key pages...', progress: 74 } : a));
         } else if (step === 5) {
+          logs.push(`[${timestamp}] [Verifier] ${depthPreset === 'extreme' ? 'Running stronger cross-source validation and conflict checks.' : 'Cross-checking key claims and dates.'}`);
+          setToolChain(tc => tc.map(n => n.type === 'scrape' ? { ...n, status: 'complete' } : n.type === 'correlate' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Comparing source agreement, recency, contradictions, and evidence quality.' : 'Cross-referencing claims and conflicts.' } : n));
+          setAgents(agts => agts.map((a, i) => i === 3 ? { ...a, status: 'analyzing', currentTask: 'Cross-checking evidence...', progress: 88 } : a));
+        } else if (step === 6) {
+          logs.push(`[${timestamp}] [Synthesizer] Evidence is sufficient; compiling ${depthPreset === 'extreme' ? 'expanded' : 'final'} cited Markdown answer.`);
+          setToolChain(tc => tc.map(n => n.type === 'correlate' ? { ...n, status: 'complete' } : n.type === 'synthesize' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Rendering expanded Markdown report with denser sourcing...' : 'Rendering Markdown Report...' } : n));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'done', progress: 100 } : a));
+        } else if (step === 7) {
           logs.push(`[${timestamp}] [Orchestrator] Deep Research ReAct loop complete or awaiting model final answer.`);
           setToolChain(tc => tc.map(n => n.type === 'synthesize' ? { ...n, status: 'complete' } : n));
           setIsResearchActive(false);

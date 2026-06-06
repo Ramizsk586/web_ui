@@ -22,6 +22,8 @@ import {
   deepResearchTools,
   formatDeepResearchSearchResults,
   formatDeepResearchVisitResult,
+  getDeepResearchMinimums,
+  getDeepResearchPresetPrompt,
   sanitizeDeepResearchReport
 } from '../utils/deepResearchWorkflow';
 import { SKILLS } from '../constants';
@@ -341,6 +343,8 @@ const shouldActivateOrchestration = (msg: string): boolean => {
 
 const dummysum = () => {
 };
+
+const DDG_SEQUENTIAL_DELAY_MS = 5000;
 
 export function useAppHandlers(params: UseAppHandlersParams) {
   const {
@@ -1666,8 +1670,10 @@ ${skillMd.content}
         systemPrompt += `\n[TOOLS] Active: ${activeTools.map(t => t.function.name).join(', ')}. Use relevant tools proactively.`;
       }
 
+      const deepResearchPreset = (researchMode?.depthPreset || 'standard') as 'standard' | 'extreme';
+      const deepResearchMinimums = getDeepResearchMinimums(deepResearchPreset);
       if (isDeepSearchEnabled && !isCoderMode) {
-        systemPrompt += `\n\n${DEEP_RESEARCH_SYSTEM_PROMPT}\nCurrent date: ${new Date().toISOString().slice(0, 10)}`;
+        systemPrompt += `\n\n${DEEP_RESEARCH_SYSTEM_PROMPT}${getDeepResearchPresetPrompt(deepResearchPreset)}\nCurrent date: ${new Date().toISOString().slice(0, 10)}\nDeep research preset: ${deepResearchPreset === 'extreme' ? 'Advanced' : 'Normal'}\nMinimum wiki searches: ${deepResearchMinimums.minWikiSearches}\nMinimum web scrapes: ${deepResearchMinimums.minWebScrapes}\nMinimum visit calls: ${deepResearchMinimums.minVisits}\nMinimum search calls: ${deepResearchMinimums.minSearchCalls}`;
       }
 
       if (isCoderMode) {
@@ -1910,12 +1916,16 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
 
       const hasWebScrapeCall = toolCallsRaw && toolCallsRaw.some((tc: any) => {
         const name = tc.function?.name || '';
-        return name === 'web_scrape' || name === 'search' || name === 'visit' || name === 'google_scholar' || name.startsWith('wiki_') || name.startsWith('composio_');
+        return name === 'current_time' || name === 'web_scrape' || name === 'search' || name === 'visit' || name === 'google_scholar' || name.startsWith('wiki_') || name.startsWith('composio_');
       });
       if (isCoderMode || hasWebScrapeCall) {
         let successfulScrapesCount = 0;
-      let loopCount = 0;
-      const turnToolResultCache = new Map<string, any>();
+        let successfulWikiSearchCount = 0;
+        let successfulVisitCount = 0;
+        let successfulSearchCallCount = 0;
+        let hasDeepResearchTimeToolRun = false;
+        let loopCount = 0;
+        const turnToolResultCache = new Map<string, any>();
         const maxLoops = 20;
         while (choice?.tool_calls && choice.tool_calls.length > 0 && loopCount < maxLoops) {
           loopCount++;
@@ -2064,7 +2074,28 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               } else {
                 const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
-                if (name === 'create_file') {
+                if (isDeepSearchEnabled && !isCoderMode && loopCount === 1 && !hasDeepResearchTimeToolRun && name !== 'current_time') {
+                  resultValue = {
+                    error: 'Deep research must start with current_time as the first tool call. Call current_time first, then create a brief research plan, then continue.'
+                  };
+                } else if (name === 'current_time') {
+                  const now = new Date();
+                  resultValue = {
+                    iso: now.toISOString(),
+                    timestamp: now.getTime(),
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                    locale: Intl.DateTimeFormat().resolvedOptions().locale || 'en-US',
+                    date: now.toLocaleDateString(),
+                    time: now.toLocaleTimeString(),
+                    utcOffsetMinutes: -now.getTimezoneOffset(),
+                    dayOfWeek: now.toLocaleDateString(undefined, { weekday: 'long' })
+                  };
+                  hasDeepResearchTimeToolRun = true;
+                  const currentN = toolCallNodes.find(n => n.id === tc.id);
+                  if (currentN) {
+                    currentN.resultSummary = `Current time loaded: ${resultValue.iso}`;
+                  }
+                } else if (name === 'create_file') {
                 const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
                 const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
                 if (cleanedPath.includes('/') && !args.isDirectory) {
@@ -2893,10 +2924,39 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
 
                 const batchedResults: string[] = [];
                 const collectedResults: any[] = [];
-                for (const query of queries) {
+                const isDuckDuckGoProvider = !searchProvider || searchProvider === 'duckduckgo' || searchProvider === 'ddg';
+
+                for (const [queryIndex, query] of queries.entries()) {
                   const effectiveQuery = name === 'google_scholar'
                     ? `${query} scholarly article OR paper OR publication`
                     : query;
+
+                  if (isDuckDuckGoProvider && queryIndex > 0) {
+                    showToast(`Waiting 5 seconds before next DuckDuckGo search...`);
+                    await new Promise((resolve, reject) => {
+                      const timer = setTimeout(resolve, DDG_SEQUENTIAL_DELAY_MS);
+                      if (signal) {
+                        signal.addEventListener('abort', () => {
+                          clearTimeout(timer);
+                          reject(new Error('Aborted'));
+                        }, { once: true });
+                      }
+                    });
+                  }
+
+                  if (isDuckDuckGoProvider) {
+                    setChats(prev => prev.map(chat => {
+                      if (chat.id !== chatId) return chat;
+                      return {
+                        ...chat,
+                        messages: chat.messages.map(m => m.id === thinkingId ? {
+                          ...m,
+                          thinking: `Running DuckDuckGo search ${queryIndex + 1} of ${queries.length}: ${effectiveQuery}`
+                        } : m)
+                      };
+                    }));
+                  }
+
                   const searchResp = await fetch(`/api/search`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2939,9 +2999,12 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 }
 
                 resultValue = batchedResults.join('\n=======\n');
+                if (collectedResults.length > 0) {
+                  successfulSearchCallCount++;
+                }
                 const currentN = toolCallNodes.find(n => n.id === tc.id);
                 if (currentN) {
-                  currentN.resultSummary = `${queries.length} quer${queries.length === 1 ? 'y' : 'ies'} searched, ${collectedResults.length} result candidates`;
+                  currentN.resultSummary = `${queries.length} quer${queries.length === 1 ? 'y' : 'ies'} searched${isDuckDuckGoProvider ? ' sequentially' : ''}, ${collectedResults.length} result candidates`;
                 }
               } else if (name === 'visit') {
                 const rawUrls = Array.isArray(args.url) ? args.url : [args.url].filter(Boolean);
@@ -2963,15 +3026,14 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 }
 
                 resultValue = visitOutputs.join('\n=======\n');
+                if (visitOutputs.length > 0) {
+                  successfulVisitCount++;
+                }
                 const currentN = toolCallNodes.find(n => n.id === tc.id);
                 if (currentN) {
                   currentN.resultSummary = `${urls.slice(0, 5).length} page${urls.length === 1 ? '' : 's'} visited for targeted evidence`;
                 }
               } else if (name === 'web_scrape') {
-                if (successfulScrapesCount >= 3) {
-                  resultValue = { error: "Scraping limit of 3 successful pages reached. Further web scrapes are blocked in this turn." };
-                  showToast("Scrape limit reached (3 max)");
-                } else {
                 const targetUrl = args.url;
                 if (!targetUrl) {
                   throw new Error("Missing required 'url' parameter for web_scrape.");
@@ -3028,9 +3090,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     markdownExcerpt: processedMarkdown || 'No page text extracted.',
                     turboQuantApplied: useTurboQuant,
                   };
-                    successfulScrapesCount++;
-                    showToast(`Successfully scraped "${scrapeResult.title || 'Page'}"`);
-                }
+                  successfulScrapesCount++;
+                  showToast(`Successfully scraped "${scrapeResult.title || 'Page'}"`);
                 }
               } else if (name === 'wiki_search') {
                 const { query, limit = 10, language = 'en' } = args;
@@ -3049,6 +3110,9 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   resultsBrief: searchResultsVal.slice(0, 3).map((r: any) => ({ pageId: r.pageId, title: r.title, url: r.url })),
                   payload: searchResultsVal
                 };
+                if (Array.isArray(searchResultsVal) && searchResultsVal.length > 0) {
+                  successfulWikiSearchCount++;
+                }
                 
                 const currentN = toolCallNodes.find(n => n.id === tc.id);
                 if (currentN) {
@@ -3287,6 +3351,36 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
               }
               return chat;
             }));
+          }
+
+          if (isDeepSearchEnabled && !isCoderMode) {
+            const unmetRequirements: string[] = [];
+            if (!hasDeepResearchTimeToolRun) {
+              unmetRequirements.push('Call current_time first.');
+            }
+            if (successfulSearchCallCount < deepResearchMinimums.minSearchCalls) {
+              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minSearchCalls} successful search or scholar discovery calls. Current count: ${successfulSearchCallCount}.`);
+            }
+            if (successfulWikiSearchCount < deepResearchMinimums.minWikiSearches) {
+              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minWikiSearches} successful wiki_search calls. Current count: ${successfulWikiSearchCount}.`);
+            }
+            if (successfulVisitCount < deepResearchMinimums.minVisits) {
+              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minVisits} successful visit calls. Current count: ${successfulVisitCount}.`);
+            }
+            if (successfulScrapesCount < deepResearchMinimums.minWebScrapes) {
+              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minWebScrapes} successful web_scrape calls. Current count: ${successfulScrapesCount}.`);
+            }
+
+            if (unmetRequirements.length > 0) {
+              apiMessages.push({
+                role: 'system',
+                content: [
+                  'Deep research requirements are not satisfied yet.',
+                  ...unmetRequirements,
+                  'Do not finalize. Continue with planning or additional research tool calls until all requirements are satisfied.'
+                ].join('\n')
+              });
+            }
           }
 
           apiMessages.push(choice);
