@@ -204,7 +204,6 @@ import { invokeTauri, isTauriDesktop, listenTauriEvent } from './utils/tauriDesk
 import { OnboardingModal } from './components/OnboardingModal';
 import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
 import { SettingsModal } from './components/SettingsModal';
-import { LuminaAgentPanel } from './components/LuminaAgentPanel';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
@@ -3451,12 +3450,6 @@ const startCoderPreview = useCallback(async () => {
             Reload
           </button>
           <div className="my-1 h-px bg-white/6" />
-          <button
-            onClick={() => handleDesktopContextAction('inspect')}
-            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
-          >
-            Inspect
-          </button>
         </div>
       )}
 

@@ -136,13 +136,6 @@ fn zoom_reset(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn inspect(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        w.open_devtools();
-    }
-}
-
-#[tauri::command]
 fn reload(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.reload();
@@ -418,7 +411,6 @@ pub fn run() {
             zoom_in,
             zoom_out,
             zoom_reset,
-            inspect,
             reload,
             get_stored_state,
             set_stored_state,
