@@ -1990,26 +1990,25 @@ const startCoderPreview = useCallback(async () => {
                   });
                 }}
                 onOpenProjectsPage={() => {
-                  setShowProjectsPage(prev => {
-                    if (prev) return false;
+                  const nextShowProjects = !showProjectsPage;
+                  if (nextShowProjects) {
                     setShowAgentsPage(false);
                     setIsSettingsOpen(false);
                     setIsRagPanelOpen(false);
                     setShowAgentCreation(false);
                     setIsResearchMode(false);
-                    setIsMobileMenuOpen(false);
-                    return true;
-                  });
+                  }
+                  setShowProjectsPage(nextShowProjects);
+                  setIsMobileMenuOpen(false);
                 }}
-                onOpenSettings={(tab?: any) => { if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any);
-                  setIsSettingsOpen((prev: boolean) => {
-                    const nextVal = !prev;
-                    if (nextVal) {
-                      setShowAgentsPage(false);
-                      setShowProjectsPage(false);
-                    }
-                    return nextVal;
-                  });
+                onOpenSettings={(tab?: any) => {
+                  if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any);
+                  const nextSettingsOpen = !isSettingsOpen;
+                  if (nextSettingsOpen) {
+                    setShowAgentsPage(false);
+                    setShowProjectsPage(false);
+                  }
+                  setIsSettingsOpen(nextSettingsOpen);
                   setIsMobileMenuOpen(false);
                 }}
                 userProfile={userProfile}
@@ -2073,26 +2072,24 @@ const startCoderPreview = useCallback(async () => {
             }} 
             setChats={setChats}
             onOpenProjectsPage={() => {
-              setShowProjectsPage(prev => {
-                if (prev) return false;
+              const nextShowProjects = !showProjectsPage;
+              if (nextShowProjects) {
                 setShowAgentsPage(false);
                 setIsSettingsOpen(false);
                 setIsRagPanelOpen(false);
                 setShowAgentCreation(false);
                 setIsResearchMode(false);
-                return true;
-              });
+              }
+              setShowProjectsPage(nextShowProjects);
             }}
             onOpenSettings={(tab?: any) => { 
               if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any); 
-              setIsSettingsOpen((prev: boolean) => {
-                const nextVal = !prev;
-                if (nextVal) {
-                  setShowAgentsPage(false);
-                  setShowProjectsPage(false);
-                }
-                return nextVal;
-              }); 
+              const nextSettingsOpen = !isSettingsOpen;
+              if (nextSettingsOpen) {
+                setShowAgentsPage(false);
+                setShowProjectsPage(false);
+              }
+              setIsSettingsOpen(nextSettingsOpen); 
             }}
             agents={agents}
             activeAgentId={activeAgent?.id || null}

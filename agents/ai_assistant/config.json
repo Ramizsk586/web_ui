@@ -1,0 +1,16 @@
+{
+  "agent_name": "AI Assistant",
+  "role": "Digital Assistant",
+  "version": "1.0.0",
+  "created": "2026-06-06T14:19:11.608Z",
+  "docs": [
+    "soul.md",
+    "guidelines.md",
+    "prompt.md",
+    "knowledge.md",
+    "tools.md"
+  ],
+  "model": "gemini-3.5-flash",
+  "boot_sequence": true,
+  "scope": "Create a technical project manager who can help with agile methodology implementation, sprint planni"
+}

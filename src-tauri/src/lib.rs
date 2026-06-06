@@ -349,6 +349,16 @@ fn write_loading_page() -> Option<PathBuf> {
     Some(path)
 }
 
+fn navigate_to_loading(window: &tauri::WebviewWindow) {
+    if let Some(loading_path) = write_loading_page() {
+        let url = format!(
+            "file:///{}",
+            loading_path.display().to_string().replace('\\', "/")
+        );
+        let _ = window.navigate(url.parse().unwrap());
+    }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -360,44 +370,28 @@ pub fn run() {
         .setup(|app| {
             app.manage(WindowZoom(Mutex::new(0.7)));
 
-            // Apply default zoom (0.7 = two zoom-out steps)
             if let Some(window) = app.get_webview_window("main") {
+                navigate_to_loading(&window);
                 set_window_zoom(&window, 0.7);
             }
 
-            // In production, handle server startup with loading screen
-            if cfg!(not(debug_assertions)) {
-                let handle = app.handle().clone();
+            let handle = app.handle().clone();
 
-                // Navigate to embedded loading page
-                if let Some(loading_path) = write_loading_page() {
-                    let url = format!(
-                        "file:///{}",
-                        loading_path.display().to_string().replace('\\', "/")
-                    );
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.navigate(url.parse().unwrap());
-                    }
-                }
-
-                // Spawn async task for server startup
-                tauri::async_runtime::spawn(async move {
-                    // Start the Express server
+            tauri::async_runtime::spawn(async move {
+                if cfg!(not(debug_assertions)) {
                     if let Some(child) = start_server_process(&handle) {
                         handle.manage(ServerProcess(Mutex::new(Some(child))));
                     }
+                }
 
-                    // Wait for server to be ready
-                    let ready = tokio::task::spawn_blocking(|| wait_for_server(60)).await;
+                let ready = tokio::task::spawn_blocking(|| wait_for_server(60)).await;
 
-                    if let Ok(true) = ready {
-                        // Navigate to the running application
-                        if let Some(window) = handle.get_webview_window("main") {
-                            let _ = window.navigate("http://localhost:3000".parse().unwrap());
-                        }
+                if let Ok(true) = ready {
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.navigate("http://localhost:3000".parse().unwrap());
                     }
-                });
-            }
+                }
+            });
 
             Ok(())
         })

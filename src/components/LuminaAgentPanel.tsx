@@ -68,11 +68,17 @@ if (typeof window !== 'undefined' && !(window as any).__lumina_fetch_proxied__) 
       const customFetch = async function (this: any, input: any, init: any) {
         const start = performance.now();
         const url = typeof input === 'string' ? input : (input && (input as any).url) || '';
+        const normalizedUrl = String(url || '').toLowerCase();
+        const isInternalDesktopBridge =
+          normalizedUrl.startsWith('http://ipc.localhost/') ||
+          normalizedUrl.startsWith('https://ipc.localhost/') ||
+          normalizedUrl.startsWith('tauri://') ||
+          normalizedUrl.startsWith('asset://');
         
         // Monitor API traffic
         const isApi = url.includes('/api/');
         
-        if (!isApi) {
+        if (!isApi || isInternalDesktopBridge) {
           return originalFetch.apply(this, arguments as any);
         }
 

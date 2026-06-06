@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https:; media-src 'self' blob: data:; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* http://ipc.localhost https://ipc.localhost https:; media-src 'self' blob: data:; worker-src 'self' blob:; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';"
     />
     <title>Lumina AI Chat</title>
     <meta name="description" content="Modern intelligence, refined interface." />
@@ -22,6 +22,22 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;400;500;600&display=swap"
       rel="stylesheet"
     />
+    <style>
+      html, body, #root {
+        margin: 0;
+        min-height: 100%;
+        background: #09090b;
+        color: #fafafa;
+      }
+
+      body {
+        overflow: hidden;
+      }
+
+      #root {
+        isolation: isolate;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

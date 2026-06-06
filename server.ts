@@ -1004,7 +1004,19 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
   const getUpstreamErrorDetail = (e: any) => {
     const raw = e?.response?.data ?? e?.message ?? String(e);
-    return typeof raw === 'string' ? raw : JSON.stringify(raw);
+    if (typeof raw === 'string') return raw;
+    try {
+      const seen = new WeakSet();
+      return JSON.stringify(raw, (_key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) return '[Circular]';
+          seen.add(value);
+        }
+        return value;
+      });
+    } catch {
+      return e?.message || String(raw);
+    }
   };
 
   const getUpstreamErrorStatus = (e: any) => {
