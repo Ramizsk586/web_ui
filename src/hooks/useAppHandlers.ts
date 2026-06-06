@@ -344,6 +344,68 @@ const shouldActivateOrchestration = (msg: string): boolean => {
 const dummysum = () => {
 };
 
+const loadCustomSkillsFromStorage = () => {
+  try {
+    const saved = localStorage.getItem('lumina_custom_skills');
+    if (!saved) return [];
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error('Failed to parse custom skills from localStorage:', error);
+    return [];
+  }
+};
+
+const findSkillMarkdownNode = (skill: any) => {
+  if (!skill?.tree || !Array.isArray(skill.tree)) return null;
+  return skill.tree.find((node: any) => node?.type === 'file' && String(node.name || '').toLowerCase() === 'skill.md') || null;
+};
+
+const buildSkillExecutionPayload = (skill: any, inputVal: string) => {
+  const skillMd = findSkillMarkdownNode(skill);
+  const referencesFolder = Array.isArray(skill?.tree)
+    ? skill.tree.find((node: any) => node?.type === 'folder' && String(node.name || '').toLowerCase() === 'references')
+    : null;
+  const scriptsFolder = Array.isArray(skill?.tree)
+    ? skill.tree.find((node: any) => node?.type === 'folder' && String(node.name || '').toLowerCase() === 'scripts')
+    : null;
+
+  return {
+    skillId: skill.id,
+    skillLabel: skill.name || skill.id,
+    description: skill.description || '',
+    trigger: skill.trigger || '',
+    input: inputVal,
+    markdown: skillMd?.content || '',
+    files: Array.isArray(skill?.tree)
+      ? skill.tree.map((node: any) => ({
+          name: node?.name || '',
+          type: node?.type || 'file'
+        }))
+      : [],
+    references: Array.isArray(referencesFolder?.children)
+      ? referencesFolder.children.map((node: any) => node?.name || '').filter(Boolean)
+      : [],
+    scripts: Array.isArray(scriptsFolder?.children)
+      ? scriptsFolder.children.map((node: any) => node?.name || '').filter(Boolean)
+      : [],
+    instructions: [
+      `Use the SKILL.md content as the primary operating procedure for "${skill.name || skill.id}".`,
+      'Read any referenced files from the virtual .lumina/skills directory if the skill says they are needed.',
+      'Treat this as a reusable workflow, not as a single static prefix prompt.',
+      'Follow the procedure, constraints, and verification guidance described by the skill.'
+    ]
+  };
+};
+
+const isHeavySkillTask = (content: string) => {
+  const lower = String(content || '').toLowerCase();
+  return [
+    'build', 'implement', 'refactor', 'debug', 'research', 'architecture',
+    'complex', 'multi-file', 'large', 'deep', 'workflow', 'analyze', 'fix'
+  ].some((marker) => lower.includes(marker));
+};
+
 const DDG_SEQUENTIAL_DELAY_MS = 5000;
 
 export function useAppHandlers(params: UseAppHandlersParams) {
@@ -1589,17 +1651,12 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       }
 
       // Load custom skills from localStorage to connect AI directly with them
-      let customSkills: any[] = [];
-      try {
-        const saved = localStorage.getItem('lumina_custom_skills');
-        if (saved) {
-          customSkills = JSON.parse(saved);
-        }
-      } catch (e) {
-        console.error('Failed to parse custom skills for system prompt:', e);
-      }
+      const customSkills: any[] = loadCustomSkillsFromStorage();
 
       const enabledCustomSkills = customSkills.filter((s: any) => s.enabled);
+      const masterSkill = enabledCustomSkills.find((s: any) =>
+        s.id === 'master-orchestrator' || String(s.name || '').toLowerCase() === 'master-orchestrator'
+      );
       let activeCustomSkill: any = null;
       const firstWord = content.trim().split(/\s+/)[0]?.toLowerCase() || '';
 
@@ -1646,6 +1703,18 @@ You have direct, real-time access to the following custom workspace skills. You 
           systemPrompt += `\n- **${s.name}** (Trigger: ${s.trigger}) — ${s.description}`;
         });
         systemPrompt += `\n\nYou can access or customize their configuration files in your virtual directory at \".lumina/skills/{skill-name}/SKILL.md\". If helpful, you can read them with 'read_file' or improve them with 'write_file'/'edit_file'!`;
+      }
+
+      if (masterSkill && isHeavySkillTask(content)) {
+        const masterSkillMd = findSkillMarkdownNode(masterSkill);
+        if (masterSkillMd?.content) {
+          systemPrompt += `\n\n=== MASTER SKILL PRELUDE: ${masterSkill.name} ===
+This task looks heavy. Use the following master orchestration skill before major actions so you choose the right skill files, references, and workflow steps.
+
+${masterSkillMd.content}
+
+=== END MASTER SKILL PRELUDE ===`;
+        }
       }
 
       // If a specific skill is active, set it as the primary system prompt!
@@ -2449,11 +2518,39 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
               } else if (name === 'run_skill') {
                 const skillId = String(args.skillId || '');
                 const inputVal = String(args.input || '');
-                const skill = SKILLS.find((s: any) => s.id === skillId);
-                if (skill) {
-                  resultValue = { skillId, skillLabel: skill.label, prompt: skill.prompt, input: inputVal, result: `${skill.prompt}${inputVal}` };
+                const customSkills = loadCustomSkillsFromStorage();
+                const customSkill = customSkills.find((s: any) =>
+                  s?.id === skillId ||
+                  String(s?.name || '').toLowerCase() === skillId.toLowerCase()
+                );
+
+                if (customSkill) {
+                  const skillMd = findSkillMarkdownNode(customSkill);
+                  if (!skillMd?.content) {
+                    resultValue = {
+                      error: `Custom skill "${customSkill.name || skillId}" is missing SKILL.md content.`
+                    };
+                  } else {
+                    resultValue = buildSkillExecutionPayload(customSkill, inputVal);
+                  }
                 } else {
-                  resultValue = { error: `Unknown skill: ${skillId}. Available: ${SKILLS.map((s: any) => s.id).join(', ')}` };
+                  const skill = SKILLS.find((s: any) => s.id === skillId);
+                  if (skill) {
+                    resultValue = {
+                      skillId,
+                      skillLabel: skill.label,
+                      description: `Built-in quick skill: ${skill.label}`,
+                      input: inputVal,
+                      legacyPrompt: skill.prompt,
+                      result: `${skill.prompt}${inputVal}`,
+                      instructions: [
+                        'This is a legacy built-in quick skill.',
+                        'Prefer custom SKILL.md-based skills when available for richer workflows.'
+                      ]
+                    };
+                  } else {
+                    resultValue = { error: `Unknown skill: ${skillId}. Available built-ins: ${SKILLS.map((s: any) => s.id).join(', ')}` };
+                  }
                 }
                 showToast(`Applied skill: ${skillId}`);
               

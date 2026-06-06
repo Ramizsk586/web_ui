@@ -35,6 +35,71 @@ interface Skill {
   tree: FileNode[];
 }
 
+const MASTER_SKILL_MD = `---
+name: master-orchestrator
+description: Read this before heavy or multi-step tasks. It explains the Lumina skill layout, which files to inspect, and how to coordinate skills, references, and scripts for better execution.
+---
+
+# Master Orchestrator Skill
+
+Use this skill before heavy work such as coding, debugging, architecture changes, multi-file edits, or deep research.
+
+## Primary Role
+
+You are the orchestration layer for Lumina's skill system. Before acting on a heavy task, map the available files, decide which ones matter, and use them deliberately.
+
+## File Roles
+
+- \`SKILL.md\`: main operating instructions. Read this first.
+- \`references/\`: schemas, examples, domain rules, and edge cases.
+- \`scripts/\`: reusable automation helpers.
+- \`agents/\`: specialist review, grading, comparison, or analysis instructions.
+- \`assets/\`: templates, UI helpers, or export support files.
+
+## Workflow
+
+1. Decide whether the task is light or heavy.
+2. For heavy tasks, read the active \`SKILL.md\` before major actions.
+3. Pull in only the relevant supporting files.
+4. Make a short plan.
+5. Execute in phases.
+6. Verify before finalizing.
+
+## Coordination Rules
+
+- Do not read everything blindly. Read selectively.
+- Do not ignore \`references/\` when formats, schemas, or edge cases matter.
+- Do not improvise around an existing skill package if it already contains usable guidance.
+- If multiple skills apply, use this master skill to coordinate them.`;
+
+const EXECUTION_PLAYBOOK_MD = `---
+name: execution-playbook
+description: Advanced execution workflow for implementation, refactors, debugging, and complex engineering tasks.
+---
+
+# Execution Playbook
+
+## When To Use
+
+Use this skill for:
+
+- feature implementation
+- multi-file refactors
+- difficult debugging
+- risky behavior changes
+- tasks that need disciplined verification
+
+## Workflow
+
+1. Restate the goal clearly.
+2. Identify likely files and systems.
+3. Read before editing.
+4. Plan briefly.
+5. Execute in controlled steps.
+6. Verify outcome and likely regressions.
+7. Summarize what changed and any remaining risk.
+`;
+
 const DEFAULT_SKILL_MD = `# Lumina Skill Creator
 
 An executive, high-fidelity framework within Lumina Intelligence to bootstrap, benchmark, and iteratively refine custom modular agent skills in Coder Mode. Perfecting an agent skill relies on systematic, closed-loop evaluation rather than static prompts.
@@ -2025,10 +2090,66 @@ const INITIAL_TREE: FileNode[] = [
   }
 ];
 
+const MASTER_INITIAL_TREE: FileNode[] = [
+  { name: 'SKILL.md', type: 'file', content: MASTER_SKILL_MD },
+  {
+    name: 'references',
+    type: 'folder',
+    children: [
+      { name: 'skill-system-map.md', type: 'file', content: `# Skill System Map
+
+- \`SKILL.md\` is the main procedure file.
+- \`references/\` holds domain rules, schemas, examples, and edge cases.
+- \`scripts/\` holds reusable automation.
+- \`agents/\` holds review and analysis helpers.
+- \`assets/\` holds templates and support files.
+
+Recommended order for heavy tasks:
+1. Read \`SKILL.md\`
+2. Read relevant references
+3. Use scripts or agents only when needed` }
+    ]
+  }
+];
+
+const EXECUTION_PLAYBOOK_TREE: FileNode[] = [
+  { name: 'SKILL.md', type: 'file', content: EXECUTION_PLAYBOOK_MD },
+  {
+    name: 'references',
+    type: 'folder',
+    children: [
+      { name: 'checklist.md', type: 'file', content: `# Execution Checklist
+
+1. Understand the goal
+2. Read relevant files
+3. Plan
+4. Execute
+5. Verify
+6. Summarize` }
+    ]
+  }
+];
+
 
 export function SkillsPanel() {
   const SKILLS_ROOT = 'A:/web_ui/.lumina/skills';
   const DEFAULT_SKILL_METADATA: Record<string, Omit<Skill, 'tree'>> = {
+    'master-orchestrator': {
+      id: 'master-orchestrator',
+      name: 'master-orchestrator',
+      addedBy: 'Lumina',
+      trigger: 'Auto for heavy tasks',
+      description: 'Master skill that teaches the AI how Lumina skill files are organized, which files to inspect for which kind of work, and how to coordinate heavy tasks with better planning and verification.',
+      enabled: true
+    },
+    'execution-playbook': {
+      id: 'execution-playbook',
+      name: 'execution-playbook',
+      addedBy: 'Lumina',
+      trigger: 'Slash command + auto',
+      description: 'Advanced execution workflow for implementation, refactors, debugging, and other complex engineering tasks.',
+      enabled: true
+    },
     'skill-creator': {
       id: 'skill-creator',
       name: 'skill-creator',
@@ -2146,13 +2267,21 @@ export function SkillsPanel() {
       }
     };
 
-    await fetch('/api/fs/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filePath: `${SKILLS_ROOT}/skill-creator`, isDirectory: true })
-    });
+    const defaultSkillTrees = [
+      { id: 'master-orchestrator', tree: MASTER_INITIAL_TREE },
+      { id: 'execution-playbook', tree: EXECUTION_PLAYBOOK_TREE },
+      { id: 'skill-creator', tree: INITIAL_TREE }
+    ];
 
-    await writeTree(`${SKILLS_ROOT}/skill-creator`, INITIAL_TREE);
+    for (const skill of defaultSkillTrees) {
+      await fetch('/api/fs/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: `${SKILLS_ROOT}/${skill.id}`, isDirectory: true })
+      });
+
+      await writeTree(`${SKILLS_ROOT}/${skill.id}`, skill.tree);
+    }
   };
 
   const loadSkillsFromDisk = async () => {
@@ -2357,7 +2486,28 @@ export function SkillsPanel() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               filePath: `${SKILLS_ROOT}/${formattedId}/SKILL.md`,
-              content: `# ${newSkillName}\n\n${newSkillDesc || 'Overview of your custom skill.'}\n`
+              content: `---
+name: ${formattedId}
+description: ${newSkillDesc || `Use for ${newSkillName}.`}
+---
+
+# ${newSkillName}
+
+## Purpose
+
+${newSkillDesc || 'Explain what this skill is for and what outcome it should produce.'}
+
+## When To Use
+
+- Add the situations, user requests, and edge cases that should trigger this skill.
+
+## Workflow
+
+1. Inspect the task
+2. Read relevant references
+3. Execute the procedure
+4. Verify before finalizing
+`
             })
           }),
           fetch('/api/fs/create', {
@@ -2366,6 +2516,21 @@ export function SkillsPanel() {
             body: JSON.stringify({
               filePath: `${SKILLS_ROOT}/${formattedId}/LICENSE.txt`,
               content: 'Custom User License\n'
+            })
+          }),
+          fetch('/api/fs/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filePath: `${SKILLS_ROOT}/${formattedId}/references`, isDirectory: true })
+          }),
+          fetch('/api/fs/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filePath: `${SKILLS_ROOT}/${formattedId}/references/notes.md`,
+              content: `# ${newSkillName} Notes
+
+Use this file for examples, schemas, rules, edge cases, and supporting details for the main skill.`
             })
           })
         ]);
