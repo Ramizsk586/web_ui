@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useTheme } from './themes';
 import AppContent from './AppContent';
 import {
@@ -18,8 +18,153 @@ import {
   useLuminaConvex
 } from './hooks';
 
+function StartupSplash({ isVisible }: { isVisible: boolean }) {
+  return (
+    <div
+      aria-hidden={!isVisible}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background:
+          'radial-gradient(circle at top, rgba(125, 211, 252, 0.18), transparent 36%), linear-gradient(180deg, #050816 0%, #09090b 48%, #05070f 100%)',
+        opacity: isVisible ? 1 : 0,
+        visibility: isVisible ? 'visible' : 'hidden',
+        pointerEvents: 'none',
+        transition: 'opacity 320ms ease, visibility 320ms ease',
+        zIndex: 9999,
+      }}
+    >
+      <div
+        style={{
+          width: 'min(88vw, 420px)',
+          padding: '32px 28px',
+          borderRadius: 24,
+          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'rgba(8, 11, 21, 0.78)',
+          boxShadow: '0 24px 80px rgba(0, 0, 0, 0.45)',
+          backdropFilter: 'blur(22px)',
+          textAlign: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 72,
+            height: 72,
+            margin: '0 auto 18px',
+            borderRadius: 22,
+            background:
+              'linear-gradient(135deg, rgba(56, 189, 248, 0.95), rgba(14, 165, 233, 0.2))',
+            display: 'grid',
+            placeItems: 'center',
+            boxShadow: '0 10px 30px rgba(14, 165, 233, 0.28)',
+          }}
+        >
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 14,
+              border: '2px solid rgba(255,255,255,0.95)',
+              borderTopColor: 'transparent',
+              animation: 'lumina-spin 1s linear infinite',
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            fontSize: 30,
+            fontWeight: 600,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: '#f8fafc',
+          }}
+        >
+          Lumina
+        </div>
+
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: 14,
+            lineHeight: 1.6,
+            color: 'rgba(226, 232, 240, 0.76)',
+          }}
+        >
+          Loading your workspace and preparing the app...
+        </div>
+
+        <div
+          style={{
+            marginTop: 24,
+            height: 6,
+            width: '100%',
+            borderRadius: 999,
+            background: 'rgba(148, 163, 184, 0.14)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: '42%',
+              borderRadius: 'inherit',
+              background:
+                'linear-gradient(90deg, rgba(56,189,248,0.4), rgba(125,211,252,1), rgba(56,189,248,0.4))',
+              animation: 'lumina-loading-bar 1.5s ease-in-out infinite',
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 8,
+          }}
+        >
+          {[0, 1, 2].map(index => (
+            <span
+              key={index}
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: 'rgba(125, 211, 252, 0.95)',
+                animation: `lumina-pulse 1.2s ease-in-out ${index * 0.15}s infinite`,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes lumina-spin {
+          to { transform: rotate(360deg); }
+        }
+
+        @keyframes lumina-loading-bar {
+          0% { transform: translateX(-140%); }
+          100% { transform: translateX(320%); }
+        }
+
+        @keyframes lumina-pulse {
+          0%, 100% { opacity: 0.28; transform: translateY(0); }
+          50% { opacity: 1; transform: translateY(-3px); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function App() {
   const { isDark: isDarkMode, theme, setTheme } = useTheme();
+  const [isBooting, setIsBooting] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
 
   // Shared declarations referenced across hooks
   const [availableModels, setAvailableModels] = useState<any[]>([]);
@@ -149,6 +294,26 @@ export default function App() {
 
   const sendMessageRef = useRef<((content: string) => void) | undefined>(undefined);
 
+  useEffect(() => {
+    const bootTimer = window.setTimeout(() => {
+      setIsBooting(false);
+    }, 1350);
+
+    return () => window.clearTimeout(bootTimer);
+  }, []);
+
+  useEffect(() => {
+    if (isBooting) {
+      return;
+    }
+
+    const fadeTimer = window.setTimeout(() => {
+      setShowSplash(false);
+    }, 360);
+
+    return () => window.clearTimeout(fadeTimer);
+  }, [isBooting]);
+
   const askAi = useAskAi({
     input: inputState.input,
     messages: currentChatId ? (chats.find(c => c.id === currentChatId)?.messages || []) : [],
@@ -196,37 +361,48 @@ export default function App() {
   };
 
   return (
-    <AppContent
-      isDarkMode={isDarkMode}
-      theme={theme}
-      setTheme={setTheme}
-      appSettings={appSettings}
-      llamaBridge={llamaBridge}
-      agents={agents}
-      sidebar={sidebarWithModifiedToggle}
-      luminaTools={luminaTools}
-      composioTools={composioToolsData}
-      inputState={inputState}
-      workspace={workspace}
-      uiState={{
-        ...uiState,
-        toasts,
-        showToast,
-        setToasts
-      }}
-      coderMode={coderMode}
-      researchMode={researchMode}
-      askAi={askAi}
-      rightPanel={rightPanel}
-      smartPopup={smartPopup}
-      devTools={devTools}
-      availableModels={availableModels}
-      setAvailableModels={setAvailableModels}
-      selectedModel={selectedModel}
-      setSelectedModel={setSelectedModel}
-      activeModelId={activeModelId}
-      sendMessageRef={sendMessageRef}
-      luminaConvex={luminaConvex}
-    />
+    <>
+      <div
+        style={{
+          opacity: isBooting ? 0 : 1,
+          transition: 'opacity 280ms ease',
+          minHeight: '100vh',
+        }}
+      >
+        <AppContent
+          isDarkMode={isDarkMode}
+          theme={theme}
+          setTheme={setTheme}
+          appSettings={appSettings}
+          llamaBridge={llamaBridge}
+          agents={agents}
+          sidebar={sidebarWithModifiedToggle}
+          luminaTools={luminaTools}
+          composioTools={composioToolsData}
+          inputState={inputState}
+          workspace={workspace}
+          uiState={{
+            ...uiState,
+            toasts,
+            showToast,
+            setToasts
+          }}
+          coderMode={coderMode}
+          researchMode={researchMode}
+          askAi={askAi}
+          rightPanel={rightPanel}
+          smartPopup={smartPopup}
+          devTools={devTools}
+          availableModels={availableModels}
+          setAvailableModels={setAvailableModels}
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
+          activeModelId={activeModelId}
+          sendMessageRef={sendMessageRef}
+          luminaConvex={luminaConvex}
+        />
+      </div>
+      <StartupSplash isVisible={showSplash} />
+    </>
   );
 }

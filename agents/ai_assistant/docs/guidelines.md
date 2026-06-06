@@ -3,7 +3,7 @@ agent: "AI Assistant"
 file: "docs/guidelines.md"
 version: "1.0.0"
 generated_by: "Agent Forge Sub-Agent Pipeline"
-created: "2026-06-06T14:19:15.167Z"
+created: "2026-06-06T15:08:56.892Z"
 read_order: 2
 ---
 # guidelines.md

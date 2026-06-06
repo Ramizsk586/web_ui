@@ -205,6 +205,9 @@ interface LuminaAgentPanelProps {
   agents: Agent[];
   orchestrationState: AgentOrchestrationState;
   onOpenAgentsPage?: () => void;
+  activeModelId: string;
+  activeModelList: Array<{ id: string; name: string }>;
+  onOpenModelSelector: () => void;
   convex?: {
     isConvexConnected: boolean;
     metrics: any;
@@ -4601,102 +4604,23 @@ function ComposioSubPanel() {
 }
 
 // ─── Main Panel ─────────────────────────────────────────────────────────────────
-export function LuminaAgentPanel({ onClose, agents, orchestrationState, onOpenAgentsPage, convex, isSidebarOpen, onToggleSidebar }: LuminaAgentPanelProps) {
+export function LuminaAgentPanel({
+  onClose,
+  agents,
+  orchestrationState,
+  onOpenAgentsPage,
+  activeModelId,
+  activeModelList,
+  onOpenModelSelector,
+  convex,
+  isSidebarOpen,
+  onToggleSidebar
+}: LuminaAgentPanelProps) {
   const [activeView, setActiveView] = useState<View>('dashboard');
   const isComingSoon = true;
 
-  // Lumina Agent custom model states
-  const [activeModel, setActiveModel] = useState<string>(() => {
-    return localStorage.getItem('lumina_agent_active_model') || 'openprovider/auto-free';
-  });
-  const [luminaModels, setLuminaModels] = useState<{ id: string; name: string }[]>(() => {
-    try {
-      const saved = localStorage.getItem('lumina_agent_available_models');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [loadingModels, setLoadingModels] = useState<boolean>(false);
-  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
-  const [modelSearchQuery, setModelSearchQuery] = useState('');
-  const dropdownRef = React.useRef<HTMLDivElement>(null);
-
-  const fetchLuminaModels = useCallback(async () => {
-    const serverUrl = localStorage.getItem('lumina_server_url') || 'https://openprovider.mimika.in/v1';
-    const apiKey = localStorage.getItem('lumina_api_key') || '';
-    const selectedProvider = localStorage.getItem('lumina_provider') || 'openprovider';
-
-    setLoadingModels(true);
-    try {
-      const isExternal = serverUrl.startsWith('http://') || serverUrl.startsWith('https://');
-      let modelsData: any[] = [];
-      const headers: Record<string, string> = selectedProvider === 'opencode'
-        ? { 'x-api-key': apiKey }
-        : { 'Authorization': `Bearer ${apiKey}` };
-
-      const response = await fetch(`${serverUrl.replace(/\/+$/, '')}/models`, { method: 'GET', headers });
-      if (response.ok) {
-        const data = await response.json();
-        if (data && Array.isArray(data)) {
-          modelsData = data;
-        } else if (data && Array.isArray(data.data)) {
-          modelsData = data.data;
-        }
-      }
-
-      if (modelsData && modelsData.length > 0) {
-        const formatted = modelsData.map((m: any) => ({
-          id: m.id || m.name,
-          name: m.name || m.id || 'Unknown Model'
-        }));
-        setLuminaModels(formatted);
-        localStorage.setItem('lumina_agent_available_models', JSON.stringify(formatted));
-      } else if (luminaModels.length === 0) {
-        const fallbacks = [
-          { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free' },
-          { id: 'meta-llama/llama-3-70b-instruct', name: 'Llama 3 70B Instruct' },
-          { id: 'gpt-4o', name: 'GPT-4o' },
-          { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' }
-        ];
-        setLuminaModels(fallbacks);
-        localStorage.setItem('lumina_agent_available_models', JSON.stringify(fallbacks));
-      }
-    } catch (err) {
-      console.error("Error fetching models for Lumina settings:", err);
-      if (luminaModels.length === 0) {
-        const fallbacks = [
-          { id: 'openprovider/auto-free', name: 'OpenProvider Auto Free' },
-          { id: 'meta-llama/llama-3-70b-instruct', name: 'Llama 3 70B Instruct' },
-          { id: 'gpt-4o', name: 'GPT-4o' },
-          { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' }
-        ];
-        setLuminaModels(fallbacks);
-        localStorage.setItem('lumina_agent_available_models', JSON.stringify(fallbacks));
-      }
-    } finally {
-      setLoadingModels(false);
-    }
-  }, [luminaModels.length]);
-
-  useEffect(() => {
-    fetchLuminaModels();
-  }, [activeView]);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsModelDropdownOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
   const getCleanModelName = (id: string) => {
-    const matched = luminaModels.find(m => m.id === id);
+    const matched = activeModelList.find(m => m.id === id);
     if (matched) return matched.name;
     let name = id;
     if (name.includes("/")) {
@@ -4707,12 +4631,6 @@ export function LuminaAgentPanel({ onClose, agents, orchestrationState, onOpenAg
       .replace(/\bgguf\b/gi, "")
       .trim() || id;
   };
-
-  const filteredModels = useMemo(() => {
-    const query = modelSearchQuery.trim().toLowerCase();
-    if (!query) return luminaModels;
-    return luminaModels.filter(m => m.name.toLowerCase().includes(query) || m.id.toLowerCase().includes(query));
-  }, [luminaModels, modelSearchQuery]);
 
   const NAV_ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
@@ -4761,81 +4679,17 @@ export function LuminaAgentPanel({ onClose, agents, orchestrationState, onOpenAg
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {/* Custom Model Selection Dropdown for Lumina Agent settings */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--theme-card-bg)] hover:bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] rounded-full transition-all text-[11px] font-bold text-[var(--theme-primary)] shadow-sm cursor-pointer select-none max-w-[210px]"
-              title="Change active model for Lumina Agent"
-            >
-              <Sparkles size={10} className="text-[var(--theme-accent)] shrink-0" />
-              <span className="truncate text-[var(--theme-primary)] font-bold max-w-[120px]">
-                {getCleanModelName(activeModel)}
-              </span>
-              <ChevronDown size={10} className={`text-[var(--theme-secondary)] shrink-0 transition-transform duration-150 ${isModelDropdownOpen ? "rotate-180" : ""}`} />
-            </button>
-
-            <AnimatePresence>
-              {isModelDropdownOpen && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                  transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                  className="absolute right-0 mt-2 w-[260px] bg-[var(--theme-card-bg)] border border-[var(--theme-border)] rounded-xl shadow-2xl z-[100] flex flex-col overflow-hidden text-left"
-                >
-                  {/* Search bar inside dropdown */}
-                  <div className="p-2 border-b border-[var(--theme-border)]">
-                    <div className="relative">
-                      <Search size={10} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--theme-muted)]" />
-                      <input
-                        type="text"
-                        value={modelSearchQuery}
-                        onChange={(e) => setModelSearchQuery(e.target.value)}
-                        placeholder="Search model..."
-                        className="w-full bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] rounded-lg pl-7 pr-2 py-1 text-[11px] text-[var(--theme-primary)] placeholder-[var(--theme-muted)] focus:outline-none focus:border-[var(--theme-accent)]/50"
-                      />
-                    </div>
-                  </div>
-
-                  {/* List of models */}
-                  <div className="max-h-[220px] overflow-y-auto py-1">
-                    {loadingModels && filteredModels.length === 0 ? (
-                      <div className="flex items-center justify-center py-4 text-xs text-[var(--theme-secondary)] gap-2">
-                        <Loader2 size={12} className="animate-spin text-[var(--theme-accent)]" />
-                        <span>Fetching models...</span>
-                      </div>
-                    ) : filteredModels.length === 0 ? (
-                      <div className="px-3 py-4 text-xs text-[var(--theme-muted)] text-center">
-                        No models found
-                      </div>
-                    ) : (
-                      filteredModels.map((model) => (
-                        <button
-                          key={model.id}
-                          onClick={() => {
-                            setActiveModel(model.id);
-                            localStorage.setItem('lumina_agent_active_model', model.id);
-                            setIsModelDropdownOpen(false);
-                            window.dispatchEvent(new Event('lumina_agent_model_changed'));
-                          }}
-                          className={`w-[100%] text-left px-3.5 py-2 text-[11px] cursor-pointer hover:bg-[var(--theme-hover-bg)] transition-colors flex items-center justify-between ${
-                            activeModel === model.id ? 'text-[var(--theme-accent)] font-bold bg-[var(--theme-accent)]/5' : 'text-[var(--theme-secondary)]'
-                          }`}
-                        >
-                          <div className="flex flex-col min-w-0 pr-2">
-                            <span className="truncate">{model.name}</span>
-                            <span className="text-[9px] text-[var(--theme-muted)] truncate font-mono">{model.id}</span>
-                          </div>
-                          {activeModel === model.id && <Check size={12} className="text-[var(--theme-accent)] shrink-0" />}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          <button
+            onClick={onOpenModelSelector}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--theme-card-bg)] hover:bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] rounded-full transition-all text-[11px] font-bold text-[var(--theme-primary)] shadow-sm cursor-pointer select-none max-w-[230px]"
+            title="Open shared model selector"
+          >
+            <Sparkles size={10} className="text-[var(--theme-accent)] shrink-0" />
+            <span className="truncate text-[var(--theme-primary)] font-bold max-w-[138px]">
+              {getCleanModelName(activeModelId)}
+            </span>
+            <ChevronDown size={10} className="text-[var(--theme-secondary)] shrink-0" />
+          </button>
 
           <button
             onClick={onClose}

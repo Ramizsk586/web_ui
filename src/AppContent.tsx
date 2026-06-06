@@ -2770,6 +2770,9 @@ const startCoderPreview = useCallback(async () => {
                   onClose={() => setIsLuminaAgentOpen(false)}
                   agents={agents}
                   orchestrationState={orchestrationState}
+                  activeModelId={activeModelId}
+                  activeModelList={activeModelList}
+                  onOpenModelSelector={() => setIsModelDrawerOpen(true)}
                   onOpenAgentsPage={() => {
                     setIsLuminaAgentOpen(false);
                     setShowAgentsPage(true);
