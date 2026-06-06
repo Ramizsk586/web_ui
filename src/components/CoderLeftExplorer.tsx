@@ -1054,29 +1054,6 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
     }
   }, [addToast, triggerWorkspaceRefresh, onWorkspaceRootPathChange]);
 
-  const handleOpenDemoFolder = useCallback(async () => {
-    try {
-      const response = await fetch('/api/fs/create-demo', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      const data = await response.json();
-      if (response.ok && data.success && data.folderPath) {
-        onWorkspaceRootPathChange(data.folderPath);
-        setExpandedPaths(new Set());
-        setSelectedId(null);
-        addToast(`Opened and initialized demo Git repository!`, "success");
-        triggerWorkspaceRefresh();
-      } else {
-        addToast(data.error || "Failed to initialize demo repository", "error");
-      }
-    } catch (err: any) {
-      addToast(err.message || "Failed to connect to server", "error");
-    }
-  }, [addToast, triggerWorkspaceRefresh, onWorkspaceRootPathChange]);
-
   // ==================== FUZZY SEARCH MATCH RENDERERS ====================
   
   const searchResults = useMemo(() => {
@@ -1243,12 +1220,6 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
                 className="text-[11px] w-full py-1.5 rounded-md bg-[#0F0D0C] text-[#AD9F91] border border-[#2D241E] hover:bg-[#1D1917] transition-all cursor-pointer font-medium"
               >
                 Open Folder
-              </button>
-              <button
-                onClick={handleOpenDemoFolder}
-                className="text-[11px] w-full py-1.5 rounded-md bg-[#D97756]/15 text-[#D97756] border border-[#D97756]/30 hover:bg-[#D97756]/25 transition-all cursor-pointer font-semibold animate-pulse"
-              >
-                Open Demo Workspace
               </button>
             </div>
           </div>
