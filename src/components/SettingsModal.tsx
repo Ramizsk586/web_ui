@@ -1940,9 +1940,6 @@ export function SettingsModal({
               >
                 {tab.icon}
                 <span className="flex-1 text-left">{tab.label}</span>
-                {tab.id === 'skills' && (
-                  <span className="absolute right-3 w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
-                )}
               </button>
             ))}
           </nav>

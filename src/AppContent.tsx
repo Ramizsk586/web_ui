@@ -209,6 +209,7 @@ import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 import { LivePreviewPanel } from './components/LivePreviewPanel';
 import { ThemeCustomizerPanel } from './components/ThemeCustomizerPanel';
+import { LuminaAgentPanel } from './components/LuminaAgentPanel';
 
 import { RAGPanel } from './components/RAGPanel';
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
@@ -429,9 +430,12 @@ export default function AppContent({
     urlToolError, setUrlToolError,
     attachedUrlDocs, setAttachedUrlDocs,
     isTranscriptToolOpen, setIsTranscriptToolOpen,
+    isTranscriptToolMinimized, setIsTranscriptToolMinimized,
     transcriptToolInput, setTranscriptToolInput,
     transcriptToolLoading, setTranscriptToolLoading,
     transcriptToolError, setTranscriptToolError,
+    transcriptToolProgress, setTranscriptToolProgress,
+    transcriptToolStatus, setTranscriptToolStatus,
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,
@@ -465,6 +469,7 @@ export default function AppContent({
   const [showAgentsPage, setShowAgentsPage] = useState(false);
   const [isLuminaAgentOpen, setIsLuminaAgentOpen] = useState(false);
   const [isCustomThemeOpen, setIsCustomThemeOpen] = useState(false);
+  const [isClearChatConfirmOpen, setIsClearChatConfirmOpen] = useState(false);
 
   const [selectedProjectForChats, setSelectedProjectForChats] = useState<any | null>(null);
   const [selectedAgentForChats, setSelectedAgentForChats] = useState<any | null>(null);
@@ -1478,10 +1483,13 @@ const startCoderPreview = useCallback(async () => {
     urlToolInput, setUrlToolInput,
     urlToolLoading, setUrlToolLoading,
     urlToolError, setUrlToolError,
-    isTranscriptToolOpen, setIsTranscriptToolOpen,
-    transcriptToolInput, setTranscriptToolInput,
-    transcriptToolLoading, setTranscriptToolLoading,
-    transcriptToolError, setTranscriptToolError,
+        isTranscriptToolOpen, setIsTranscriptToolOpen,
+        isTranscriptToolMinimized, setIsTranscriptToolMinimized,
+        transcriptToolInput, setTranscriptToolInput,
+        transcriptToolLoading, setTranscriptToolLoading,
+        transcriptToolError, setTranscriptToolError,
+    transcriptToolProgress, setTranscriptToolProgress,
+    transcriptToolStatus, setTranscriptToolStatus,
     setTranscriptionOptionsDoc,
     setActiveArtifact, setIsCanvasOpen, setCanvasView,
     showToast,
@@ -1536,7 +1544,22 @@ const startCoderPreview = useCallback(async () => {
     visible: boolean;
     x: number;
     y: number;
-  }>({ visible: false, x: 0, y: 0 });
+    isEditable: boolean;
+    selectedText: string;
+  }>({ visible: false, x: 0, y: 0, isEditable: false, selectedText: '' });
+  const [rewriteSelectionState, setRewriteSelectionState] = useState<{
+    open: boolean;
+    sourceText: string;
+    resultText: string;
+    loading: boolean;
+    error: string | null;
+  }>({
+    open: false,
+    sourceText: '',
+    resultText: '',
+    loading: false,
+    error: null,
+  });
   const isDesktopShell = isTauriDesktop();
 
   useEffect(() => {
@@ -1556,19 +1579,24 @@ const startCoderPreview = useCallback(async () => {
 
     const handleContextMenu = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target?.closest('input, textarea, [contenteditable="true"]')) {
-        return;
-      }
+      const isEditable = Boolean(target?.closest('input, textarea, [contenteditable="true"]'));
+      const selectedText = window.getSelection?.()?.toString().trim() || '';
       e.preventDefault();
       setDesktopContextMenu({
         visible: true,
         x: e.clientX,
         y: e.clientY,
+        isEditable,
+        selectedText,
       });
     };
 
     const dismissMenu = () => {
-      setDesktopContextMenu((prev) => (prev.visible ? { visible: false, x: 0, y: 0 } : prev));
+      setDesktopContextMenu((prev) => (
+        prev.visible
+          ? { visible: false, x: 0, y: 0, isEditable: false, selectedText: '' }
+          : prev
+      ));
     };
 
     window.addEventListener('contextmenu', handleContextMenu);
@@ -1598,15 +1626,101 @@ const startCoderPreview = useCallback(async () => {
     }
   }, [isDesktopShell]);
 
-  const handleDesktopContextAction = useCallback(async (action: 'zoom_in' | 'zoom_out' | 'zoom_reset' | 'inspect' | 'reload') => {
-    setDesktopContextMenu({ visible: false, x: 0, y: 0 });
+  const handleDesktopContextAction = useCallback(async (
+    action: 'zoom_in' | 'zoom_out' | 'zoom_reset' | 'inspect' | 'reload' | 'copy' | 'paste' | 'cut' | 'rewrite'
+  ) => {
+    const selectedText = desktopContextMenu.selectedText;
+    setDesktopContextMenu({ visible: false, x: 0, y: 0, isEditable: false, selectedText: '' });
+
+    if (action === 'copy' || action === 'cut' || action === 'paste') {
+      try {
+        if (action === 'paste' && navigator.clipboard?.readText) {
+          const pastedText = await navigator.clipboard.readText();
+          const activeElement = document.activeElement as HTMLInputElement | HTMLTextAreaElement | HTMLElement | null;
+
+          if (
+            activeElement instanceof HTMLInputElement ||
+            activeElement instanceof HTMLTextAreaElement
+          ) {
+            const start = activeElement.selectionStart ?? activeElement.value.length;
+            const end = activeElement.selectionEnd ?? activeElement.value.length;
+            const nextValue = `${activeElement.value.slice(0, start)}${pastedText}${activeElement.value.slice(end)}`;
+            activeElement.value = nextValue;
+            activeElement.setSelectionRange(start + pastedText.length, start + pastedText.length);
+            activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+          } else if (activeElement?.isContentEditable) {
+            document.execCommand('insertText', false, pastedText);
+          } else {
+            document.execCommand(action);
+          }
+        } else {
+          document.execCommand(action);
+        }
+      } catch (error) {
+        console.error(`Desktop edit action failed: ${action}`, error);
+        showToast(`${action.charAt(0).toUpperCase()}${action.slice(1)} is not available here.`);
+      }
+      return;
+    }
+
+    if (action === 'rewrite') {
+      if (!selectedText) {
+        showToast('Select some text first, then use Rewrite.');
+        return;
+      }
+
+      setRewriteSelectionState({
+        open: true,
+        sourceText: selectedText,
+        resultText: '',
+        loading: true,
+        error: null,
+      });
+
+      try {
+        const response = await callLlamaBridge(
+          [
+            {
+              role: 'system',
+              content: 'Rewrite the user text so it reads better, with stronger clarity, grammar, and flow, while preserving the original intent. Return only the rewritten text.',
+            },
+            {
+              role: 'user',
+              content: selectedText,
+            },
+          ],
+          []
+        );
+
+        const resultText = response?.choices?.[0]?.message?.content?.trim() || '';
+        if (!resultText) {
+          throw new Error('No rewritten text returned.');
+        }
+
+        setRewriteSelectionState((prev) => ({
+          ...prev,
+          loading: false,
+          resultText,
+        }));
+      } catch (error: any) {
+        console.error('Rewrite selection failed:', error);
+        setRewriteSelectionState((prev) => ({
+          ...prev,
+          loading: false,
+          error: error?.message || 'Failed to rewrite the selected text.',
+        }));
+      }
+
+      return;
+    }
+
     if (!isDesktopShell) return;
     try {
       await invokeTauri(action);
     } catch (error) {
       console.error(`Desktop context action failed: ${action}`, error);
     }
-  }, [isDesktopShell]);
+  }, [callLlamaBridge, desktopContextMenu.selectedText, isDesktopShell, showToast]);
 
   // Scan models directory on startup to discover downloaded models
   useEffect(() => {
@@ -3366,15 +3480,64 @@ const startCoderPreview = useCallback(async () => {
 
       {/* Transcript Tool Modal */}
       <TranscriptModal
-        isOpen={isTranscriptToolOpen}
-        onClose={() => setIsTranscriptToolOpen(false)}
+        isOpen={isTranscriptToolOpen && !isTranscriptToolMinimized}
+        onClose={() => {
+          if (transcriptToolLoading) {
+            setIsTranscriptToolMinimized(true);
+            return;
+          }
+          setIsTranscriptToolOpen(false);
+          setIsTranscriptToolMinimized(false);
+        }}
+        onMinimize={() => setIsTranscriptToolMinimized(true)}
         videoUrlInput={transcriptToolInput}
         setVideoUrlInput={setTranscriptToolInput}
         loading={transcriptToolLoading}
+        progress={transcriptToolProgress}
+        statusText={transcriptToolStatus}
         error={transcriptToolError}
         setError={setTranscriptToolError}
         onSubmit={handleFetchTranscript}
       />
+
+      <AnimatePresence>
+        {isTranscriptToolMinimized && (
+          <motion.button
+            initial={{ opacity: 0, y: 20, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.96 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            onClick={() => setIsTranscriptToolMinimized(false)}
+            className="fixed bottom-5 right-5 z-[610] w-[320px] rounded-2xl border border-[var(--theme-border)] bg-[var(--theme-surface)]/95 p-4 text-left shadow-[0_24px_60px_rgba(0,0,0,0.34)] backdrop-blur-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold text-[var(--theme-primary)]">Transcript Running</div>
+                <div className="mt-1 text-[11px] text-[var(--theme-secondary)]">{transcriptToolStatus}</div>
+              </div>
+              <div className="text-[11px] font-semibold text-[var(--theme-secondary)]">
+                {Math.max(0, Math.min(100, Math.round(transcriptToolProgress)))}%
+              </div>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--theme-hover-bg)]">
+              <motion.div
+                className="h-full rounded-full bg-gradient-to-r from-rose-500 via-rose-400 to-orange-300"
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.max(6, Math.min(100, transcriptToolProgress))}%` }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+              />
+            </div>
+            <div className="mt-3 flex items-center justify-between text-[11px]">
+              <span className="text-[var(--theme-secondary)]">
+                {transcriptToolLoading ? 'Working in background. Click to reopen.' : 'Finished. Click to reopen.'}
+              </span>
+              {!transcriptToolLoading && (
+                <span className="text-[var(--theme-primary)] font-semibold">Open</span>
+              )}
+            </div>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Floating Action Context Menu */}
       {attachmentContextMenu.visible && (
@@ -3421,37 +3584,146 @@ const startCoderPreview = useCallback(async () => {
 
       {desktopContextMenu.visible && (
         <div
-          className="fixed bg-[#161312]/97 border border-[#2A221E] rounded-xl shadow-[0_18px_40px_rgba(0,0,0,0.42)] p-1 z-[320] w-[148px] backdrop-blur-xl"
+          className="fixed z-[320] w-[228px] select-none overflow-hidden rounded-[22px] border border-[#2A221E] bg-[linear-gradient(180deg,rgba(20,17,16,0.985)_0%,rgba(15,13,12,0.995)_100%)] px-3 py-3 shadow-[0_26px_72px_rgba(0,0,0,0.46)] backdrop-blur-xl"
           style={{ top: desktopContextMenu.y, left: desktopContextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            onClick={() => handleDesktopContextAction('zoom_in')}
-            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
-          >
-            Zoom In
-          </button>
-          <button
-            onClick={() => handleDesktopContextAction('zoom_out')}
-            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
-          >
-            Zoom Out
-          </button>
-          <button
-            onClick={() => handleDesktopContextAction('zoom_reset')}
-            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
-          >
-            Reset Zoom
-          </button>
-          <button
-            onClick={() => handleDesktopContextAction('reload')}
-            className="w-full px-2.5 py-1.5 text-[11px] text-[#EDE6DD] hover:bg-white/5 rounded-lg transition-colors text-left"
-          >
-            Reload
-          </button>
-          <div className="my-1 h-px bg-white/6" />
+          <div className="px-2 pb-2 text-[9px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
+            Quick Actions
+          </div>
+          <div className="space-y-1">
+            <button
+              onClick={() => handleDesktopContextAction('copy')}
+              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+            >
+              Copy
+            </button>
+            <button
+              onClick={() => handleDesktopContextAction('paste')}
+              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+            >
+              Paste
+            </button>
+            <button
+              onClick={() => handleDesktopContextAction('cut')}
+              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+            >
+              Cut
+            </button>
+            <button
+              onClick={() => handleDesktopContextAction('rewrite')}
+              disabled={!desktopContextMenu.selectedText}
+              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white disabled:cursor-not-allowed disabled:text-[#6F645D] disabled:hover:bg-transparent"
+            >
+              Rewrite
+            </button>
+          </div>
+
+          <div className="mx-1 my-3 h-px bg-[#2A221E]" />
+
+          <div className="px-2 pb-2 text-[9px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
+            Window
+          </div>
+          <div className="space-y-1">
+            <button
+              onClick={() => handleDesktopContextAction('zoom_in')}
+              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+            >
+              Zoom In
+            </button>
+            <button
+              onClick={() => handleDesktopContextAction('zoom_out')}
+              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+            >
+              Zoom Out
+            </button>
+            <button
+              onClick={() => handleDesktopContextAction('reload')}
+              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+            >
+              Reload
+            </button>
+          </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {rewriteSelectionState.open && (
+          <div
+            className="fixed inset-0 z-[330] flex items-center justify-center bg-[#0F0D0C]/80 px-4 backdrop-blur-md"
+            onClick={() => setRewriteSelectionState({ open: false, sourceText: '', resultText: '', loading: false, error: null })}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 14 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="relative w-full max-w-3xl overflow-hidden rounded-[28px] border border-[#342A24] bg-[linear-gradient(180deg,rgba(25,20,18,0.985)_0%,rgba(17,14,13,0.992)_100%)] shadow-[0_38px_100px_rgba(0,0,0,0.55)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="absolute left-0 top-0 h-32 w-32 rounded-full bg-[#D97756]/10 blur-3xl" />
+              <div className="absolute bottom-0 right-0 h-32 w-32 rounded-full bg-[#E8B179]/8 blur-3xl" />
+              <div className="relative border-b border-[#2B221D] px-6 py-5">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
+                  AI Rewrite
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-[#F5EFE7]">Rewritten selection preview</h3>
+                    <p className="mt-1 text-sm text-[#9F9187]">Reworked for clarity, grammar, and smoother flow.</p>
+                  </div>
+                  <button
+                    onClick={() => setRewriteSelectionState({ open: false, sourceText: '', resultText: '', loading: false, error: null })}
+                    className="rounded-xl border border-[#342A24] bg-[#191413]/80 px-3 py-2 text-[12px] font-medium text-[#C9BCB1] transition-all hover:border-[#4A3B33] hover:text-white"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative grid gap-4 px-6 py-5 md:grid-cols-2">
+                <div className="rounded-2xl border border-[#2D241E] bg-[#141110]/88 p-4">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#8C7A70]">Original</div>
+                  <div className="mt-3 max-h-[320px] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#D7CCC2]">
+                    {rewriteSelectionState.sourceText}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-[#3A2D26] bg-[#171210]/92 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#B59A87]">Improved</div>
+                    <button
+                      onClick={async () => {
+                        if (!rewriteSelectionState.resultText) return;
+                        try {
+                          await navigator.clipboard.writeText(rewriteSelectionState.resultText);
+                          showToast('Rewritten text copied.');
+                        } catch (error) {
+                          console.error('Copy rewritten text failed:', error);
+                          showToast('Could not copy the rewritten text.');
+                        }
+                      }}
+                      disabled={!rewriteSelectionState.resultText}
+                      className="rounded-lg border border-[#3C2E27] bg-[#1E1714]/85 px-2.5 py-1.5 text-[11px] font-medium text-[#E7DBD0] transition-all hover:border-[#5A463B] hover:text-white disabled:cursor-not-allowed disabled:text-[#6F645D]"
+                    >
+                      Copy Result
+                    </button>
+                  </div>
+                  <div className="mt-3 max-h-[320px] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#F5EFE7]">
+                    {rewriteSelectionState.loading && (
+                      <div className="text-[#BFAFA2]">Rewriting your selected text...</div>
+                    )}
+                    {!rewriteSelectionState.loading && rewriteSelectionState.error && (
+                      <div className="text-rose-300">{rewriteSelectionState.error}</div>
+                    )}
+                    {!rewriteSelectionState.loading && !rewriteSelectionState.error && rewriteSelectionState.resultText}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Transcription Option selector Popup Modal */}
       <TranscriptionOptionsModal

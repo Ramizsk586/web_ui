@@ -20,6 +20,7 @@ const pdf = require("pdf-parse");
 import mammoth from "mammoth";
 
 import { RagBackendService } from "./src/services/ragBackendService";
+import { runDeepResearch } from "./server/deepResearchAgent";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -412,6 +413,40 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       status: 'ok',
       server: 'Lumina Web UI Server',
     });
+  });
+
+  app.post("/api/deep-research/run", async (req, res) => {
+    const {
+      query,
+      preset = "standard",
+      tavilyKey,
+      serpKey,
+      provider,
+      model,
+      apiKey,
+      baseUrl
+    } = req.body || {};
+
+    if (!query || !String(query).trim()) {
+      return res.status(400).json({ error: "query is required" });
+    }
+
+    try {
+      const result = await runDeepResearch({
+        query: String(query),
+        preset: preset === "extreme" ? "extreme" : "standard",
+        tavilyKey: typeof tavilyKey === "string" ? tavilyKey : undefined,
+        serpKey: typeof serpKey === "string" ? serpKey : undefined,
+        provider: typeof provider === "string" ? provider : undefined,
+        model: typeof model === "string" ? model : undefined,
+        apiKey: typeof apiKey === "string" ? apiKey : undefined,
+        baseUrl: typeof baseUrl === "string" ? baseUrl : undefined,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("[deep-research] failed:", error);
+      res.status(500).json({ error: error?.message || "Deep research failed" });
+    }
   });
 
   app.post("/api/agents/run", async (req, res) => {

@@ -65,7 +65,8 @@ export const deepResearchTools: ToolDefinition[] = [
       description: 'Get the current local date, time, timezone, timestamp, and ISO datetime before beginning research.',
       parameters: {
         type: 'object',
-        properties: {}
+        properties: {},
+        required: []
       }
     }
   },

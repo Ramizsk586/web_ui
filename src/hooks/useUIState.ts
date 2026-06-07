@@ -88,9 +88,12 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   >([]);
 
   const [isTranscriptToolOpen, setIsTranscriptToolOpen] = useState(false);
+  const [isTranscriptToolMinimized, setIsTranscriptToolMinimized] = useState(false);
   const [transcriptToolInput, setTranscriptToolInput] = useState('');
   const [transcriptToolLoading, setTranscriptToolLoading] = useState(false);
   const [transcriptToolError, setTranscriptToolError] = useState<string | null>(null);
+  const [transcriptToolProgress, setTranscriptToolProgress] = useState(0);
+  const [transcriptToolStatus, setTranscriptToolStatus] = useState('Ready to fetch transcript');
   const [selectedTranscriptDoc, setSelectedTranscriptDoc] = useState<any | null>(null);
   const [transcriptionOptionsDoc, setTranscriptionOptionsDoc] = useState<any | null>(null);
 
@@ -432,9 +435,12 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     urlToolError, setUrlToolError,
     attachedUrlDocs, setAttachedUrlDocs,
     isTranscriptToolOpen, setIsTranscriptToolOpen,
+    isTranscriptToolMinimized, setIsTranscriptToolMinimized,
     transcriptToolInput, setTranscriptToolInput,
     transcriptToolLoading, setTranscriptToolLoading,
     transcriptToolError, setTranscriptToolError,
+    transcriptToolProgress, setTranscriptToolProgress,
+    transcriptToolStatus, setTranscriptToolStatus,
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,

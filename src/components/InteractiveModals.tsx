@@ -322,9 +322,12 @@ export function UrlAttachmentModal({
 interface TranscriptModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onMinimize: () => void;
   videoUrlInput: string;
   setVideoUrlInput: (val: string) => void;
   loading: boolean;
+  progress: number;
+  statusText: string;
   error: string | null;
   setError: (err: string | null) => void;
   onSubmit: () => void;
@@ -333,9 +336,12 @@ interface TranscriptModalProps {
 export function TranscriptModal({
   isOpen,
   onClose,
+  onMinimize,
   videoUrlInput,
   setVideoUrlInput,
   loading,
+  progress,
+  statusText,
   error,
   setError,
   onSubmit
@@ -347,8 +353,16 @@ export function TranscriptModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-zinc-950/75 z-[600] flex items-center justify-center p-4 font-sans"
-          onClick={() => { if (!loading) { onClose(); setError(null); setVideoUrlInput(''); } }}
+          className="fixed inset-0 bg-zinc-950/55 z-[600] flex items-center justify-center p-4 font-sans"
+          onClick={() => {
+            if (loading) {
+              onMinimize();
+              return;
+            }
+            onClose();
+            setError(null);
+            setVideoUrlInput('');
+          }}
         >
           <motion.div
             initial={{ scale: 0.96, y: 12 }}
@@ -368,13 +382,30 @@ export function TranscriptModal({
                   <p className="text-[11px] text-[var(--theme-muted)] mt-1">Fetch captions from YouTube &amp; attach as context</p>
                 </div>
               </div>
-              <button
-                onClick={() => { onClose(); setError(null); setVideoUrlInput(''); }}
-                disabled={loading}
-                className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all cursor-pointer disabled:opacity-40"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                {loading && (
+                  <button
+                    onClick={onMinimize}
+                    className="rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-all cursor-pointer"
+                  >
+                    Minimize
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    if (loading) {
+                      onMinimize();
+                      return;
+                    }
+                    onClose();
+                    setError(null);
+                    setVideoUrlInput('');
+                  }}
+                  className="p-1.5 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -413,6 +444,23 @@ export function TranscriptModal({
                 </>
               )}
             </button>
+
+            {loading && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between text-[11px] font-medium text-[var(--theme-secondary)]">
+                  <span>{statusText}</span>
+                  <span>{Math.max(0, Math.min(100, Math.round(progress)))}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-[var(--theme-hover-bg)]">
+                  <motion.div
+                    className="h-full rounded-full bg-gradient-to-r from-rose-500 via-rose-400 to-orange-300"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.max(6, Math.min(100, progress))}%` }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="text-[10px] text-center text-[var(--theme-muted)] space-y-0.5">
               <p>Works with YouTube videos that have captions enabled.</p>

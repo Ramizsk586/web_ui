@@ -251,6 +251,10 @@ export interface UseAppHandlersParams {
   setTranscriptToolLoading: (v: boolean) => void;
   transcriptToolError: string | null;
   setTranscriptToolError: (v: string | null) => void;
+  transcriptToolProgress: number;
+  setTranscriptToolProgress: (v: number) => void;
+  transcriptToolStatus: string;
+  setTranscriptToolStatus: (v: string) => void;
   setTranscriptionOptionsDoc: (v: any) => void;
   setActiveArtifact: (v: any) => void;
   setIsCanvasOpen: (v: boolean) => void;
@@ -440,6 +444,8 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     transcriptToolInput, setTranscriptToolInput,
     transcriptToolLoading, setTranscriptToolLoading,
     transcriptToolError, setTranscriptToolError,
+    transcriptToolProgress, setTranscriptToolProgress,
+    transcriptToolStatus, setTranscriptToolStatus,
     setTranscriptionOptionsDoc,
     setActiveArtifact, setIsCanvasOpen, setCanvasView,
     showToast,
@@ -1972,6 +1978,167 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         console.log('[LUMINA_DEBUG] Final apiMessages structure:', JSON.stringify(logSafe, null, 2));
       }
 
+      if (isDeepSearchEnabled && !isCoderMode) {
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map(m => m.id === thinkingId
+              ? { ...m, thinking: 'Running Deep Research agent...', isSearching: true }
+              : m)
+          };
+        }));
+
+        const deepResearchResponse = await fetch('/api/deep-research/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: content,
+            preset: researchMode?.depthPreset || 'standard',
+            tavilyKey: tavilyApiKey,
+            serpKey: serpApiKey,
+            provider: searchProvider,
+            model: selectedModel || activeModelId,
+            apiKey,
+            baseUrl: serverUrl
+          }),
+          signal
+        });
+
+        if (!deepResearchResponse.ok) {
+          const errorPayload = await deepResearchResponse.json().catch(() => ({}));
+          throw new Error(errorPayload?.error || 'Deep Research request failed');
+        }
+
+        const deepResearchData = await deepResearchResponse.json();
+        const finalContent = sanitizeDeepResearchReport(deepResearchData.report || 'Deep Research completed, but no final report text was returned.');
+        const toolCallNodes: ToolCallNode[] = Array.isArray(deepResearchData.toolCalls)
+          ? deepResearchData.toolCalls.map((tc: any, idx: number) => ({
+              id: tc.id || `deep-tool-${idx}`,
+              type: tc.type === 'ai' ? 'ai' : 'tool',
+              label: tc.label || tc.toolName || 'deep research step',
+              status: tc.status === 'failed' ? 'failed' : tc.status === 'active' ? 'active' : 'complete',
+              toolName: tc.toolName,
+              argsCount: tc.argsCount,
+              resultSummary: tc.resultSummary,
+              icon: tc.icon || (
+                (tc.toolName || '').includes('search') ? 'search' :
+                (tc.toolName || '').includes('wiki') || (tc.toolName || '').includes('visit') || (tc.toolName || '').includes('scrape') ? 'globe' :
+                'sparkles'
+              )
+            }))
+          : [];
+
+        const activeToolNodes = toolCallNodes.map((node: ToolCallNode) => ({ ...node, status: 'active' as const }));
+        const thinkTagMatch = finalContent.match(/<think>[\s\S]*?<\/think>/);
+        const finalThinkContent = thinkTagMatch ? thinkTagMatch[0] : '';
+        const finalDisplayContent = finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+        const startTime = Date.now();
+        let currentPos = 0;
+        let lastRenderTime = 0;
+        const totalLength = finalContent.length;
+        const speedFactor = totalLength > 4000 ? 1200 : totalLength > 1000 ? 550 : 280;
+        const RENDER_INTERVAL = 30;
+
+        while (currentPos < totalLength) {
+          if (signal.aborted) {
+            break;
+          }
+          const elapsed = Date.now() - startTime;
+          const targetPos = Math.min(totalLength, Math.floor(elapsed * (speedFactor / 1000)));
+          if (targetPos > currentPos) {
+            currentPos = targetPos;
+            const partial = finalContent.slice(0, currentPos);
+            const now = Date.now();
+            if (now - lastRenderTime > RENDER_INTERVAL || currentPos === totalLength) {
+              lastRenderTime = now;
+              const parsed = parseThinkTags(partial);
+              const displayContent = (parsed.before + parsed.after).trim();
+              setChats(prev => prev.map(chat => {
+                if (chat.id === chatId) {
+                  return {
+                    ...chat,
+                    messages: chat.messages.map(m => m.id === thinkingId ? {
+                      ...m,
+                      content: parsed.isThinking ? displayContent : (displayContent || partial),
+                      thinkContent: parsed.think || undefined,
+                      isThinking: parsed.isThinking,
+                      streamPos: currentPos,
+                      toolCalls: activeToolNodes
+                    } : m),
+                  };
+                }
+                return chat;
+              }));
+            }
+          }
+          await new Promise(resolve => setTimeout(resolve, 8));
+        }
+
+        if (signal.aborted) {
+          return;
+        }
+
+        let finalArtifacts = extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
+        const cleanReport = sanitizeDeepResearchReport(finalDisplayContent || finalContent);
+        if (cleanReport.length > 80) {
+          finalArtifacts = [
+            {
+              id: 'deep-research-report-' + Date.now().toString(36),
+              title: createDeepResearchReportTitle(cleanReport),
+              language: 'markdown',
+              content: cleanReport,
+              type: 'report'
+            },
+            ...finalArtifacts.filter(artifact => artifact.type !== 'report' && artifact.type !== 'markdown')
+          ];
+        }
+
+        if (finalArtifacts.length > 0) {
+          setActiveArtifact(finalArtifacts[0]);
+          setIsCanvasOpen(true);
+          setCanvasView(['html', 'markdown', 'report'].includes(finalArtifacts[0].type) ? 'preview' : 'code');
+        }
+
+        try {
+          triggerBackgroundMemoryExtraction(content, finalDisplayContent || finalContent.trim());
+        } catch (err) {
+          console.warn('Memory extraction invocation failed:', err);
+        }
+
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: chat.messages.map(m =>
+                m.id === thinkingId
+                  ? {
+                      ...m,
+                      content: finalDisplayContent || finalContent.trim(),
+                      thinkContent: finalThinkContent.replace(/<\/?think>/g, '').trim() || undefined,
+                      isThinking: false,
+                      streamPos: undefined,
+                      thinking: undefined,
+                      toolCalls: toolCallNodes,
+                      isStreaming: false,
+                      sources: searchResults.length > 0 ? searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) : undefined,
+                      images: undefined,
+                      searchQuery: userMessage.content,
+                      isSearching: false,
+                      timestamp: new Date(),
+                      artifacts: finalArtifacts.length > 0 ? finalArtifacts : undefined
+                    }
+                  : m
+              ),
+              updatedAt: new Date(),
+            };
+          }
+          return chat;
+        }));
+        return;
+      }
+      
       // Direct call to Llama Bridge
       let rawResponse: any = await callLlamaBridge(apiMessages, activeTools, signal);
 
@@ -4102,12 +4269,17 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
     if (!url) return;
     setTranscriptToolLoading(true);
     setTranscriptToolError(null);
+    setTranscriptToolProgress(8);
+    setTranscriptToolStatus('Checking video link...');
     
     try {
       const videoId = extractYouTubeId(url);
       if (!videoId) throw new Error('Could not detect a valid YouTube video ID from this URL.');
-      
+      setTranscriptToolProgress(24);
+      setTranscriptToolStatus('Requesting transcript from local server...');
       const transcriptRes = await fetchYouTubeTranscript(videoId);
+      setTranscriptToolProgress(68);
+      setTranscriptToolStatus('Preparing transcript for workspace...');
       const transcript = transcriptRes.text;
       const segments = transcriptRes.segments;
       const title = `YouTube Transcript – ${videoId}`;
@@ -4126,9 +4298,13 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
       setAttachedUrlDocs(prev => [...prev, newDoc]);
       
       // Auto save on disk & refresh workspace
+      setTranscriptToolProgress(86);
+      setTranscriptToolStatus('Saving transcript into workspace...');
       await ensureTranscriptFilesOnDisk(newDoc);
-      
+
       setTranscriptionOptionsDoc(newDoc); // Prompt with option choices!
+      setTranscriptToolProgress(100);
+      setTranscriptToolStatus('Transcript ready.');
       
       setTranscriptToolInput('');
       setIsTranscriptToolOpen(false);

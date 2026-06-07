@@ -54,7 +54,6 @@ import {
   CloudSun,
   Wrench,
   Sidebar,
-  Database,
   Server
 } from 'lucide-react';
 import { Agent } from '../agents/types';
@@ -179,7 +178,7 @@ if (typeof window !== 'undefined' && !(window as any).__lumina_fetch_proxied__) 
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
-type View = 'dashboard' | 'agents' | 'memory' | 'automations' | 'events' | 'consolidation' | 'telegram' | 'settings' | 'convex' | 'composio' | 'logs';
+type View = 'dashboard' | 'agents' | 'memory' | 'automations' | 'events' | 'consolidation' | 'settings' | 'composio' | 'logs';
 
 interface SubAgent {
   id: string;
@@ -4640,8 +4639,6 @@ export function LuminaAgentPanel({
     { id: 'events', label: 'Events', icon: <Activity size={16} /> },
     { id: 'consolidation', label: 'Consolidation', icon: <GitMerge size={16} /> },
     { id: 'logs', label: 'Traffic Logs', icon: <TerminalIcon size={16} /> },
-    { id: 'telegram', label: 'Telegram', icon: <MessageSquare size={16} /> },
-    { id: 'convex', label: 'Convex', icon: <Database size={16} /> },
     { id: 'composio', label: 'Composio', icon: <Server size={16} /> },
   ];
 
@@ -4654,9 +4651,7 @@ export function LuminaAgentPanel({
       case 'events': return <EventsSubPanel orchestrationState={orchestrationState} />;
       case 'consolidation': return <ConsolidationSubPanel />;
       case 'logs': return <LogsSubPanel />;
-      case 'telegram': return <TelegramSubPanel convex={convex} />;
       case 'settings': return <SettingsSubPanel />;
-      case 'convex': return <ConvexSubPanel />;
       case 'composio': return <ComposioSubPanel />;
       default: return null;
     }

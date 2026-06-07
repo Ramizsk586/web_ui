@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{Emitter, Manager};
+use tauri::{
+    menu::{MenuBuilder, MenuEvent},
+    Emitter, Manager, PhysicalPosition, WebviewWindow,
+};
 
 // ── Embedded loading HTML ──────────────────────────────────────────────
 const LOADING_HTML: &str = r#"<!DOCTYPE html>
@@ -39,6 +42,8 @@ fn resolve_loading_template_path() -> Option<PathBuf> {
 // ── Managed state ──────────────────────────────────────────────────────
 struct ServerProcess(Mutex<Option<Child>>);
 struct WindowZoom(Mutex<f64>);
+
+const CONTEXT_MENU_INSPECT_ID: &str = "context_inspect";
 
 fn stop_server_process(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<ServerProcess>() {
@@ -191,6 +196,17 @@ async fn show_prompt(
     Some(default_value)
 }
 
+#[tauri::command]
+fn show_context_menu(app: tauri::AppHandle, x: f64, y: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+    let menu = build_context_menu(&window).map_err(|err| err.to_string())?;
+    window
+        .popup_menu_at(&menu, PhysicalPosition::new(x, y))
+        .map_err(|err| err.to_string())
+}
+
 // ── State file path ────────────────────────────────────────────────────
 fn app_state_path(app: &tauri::AppHandle) -> PathBuf {
     let dir = app
@@ -286,34 +302,37 @@ fn open_native_terminal(cwd: Option<String>) -> Result<(), String> {
 
 // ── Server management ──────────────────────────────────────────────────
 
-fn start_server_process(app: &tauri::AppHandle) -> Option<Child> {
-    let resource_dir = app.path().resource_dir().ok()?;
+fn start_server_process_with_error(app: &tauri::AppHandle) -> Result<Child, String> {
+    let mut candidates = Vec::new();
 
-    // In production, the server is bundled as a resource
-    let server_path = resource_dir.join("dist").join("server.mjs");
-    if !server_path.exists() {
-        // Fallback: try next to the executable (dev or portable)
-        let alt_path = PathBuf::from("dist").join("server.mjs");
-        if !alt_path.exists() {
-            eprintln!("Server file not found at {:?} or {:?}", server_path, alt_path);
-            return None;
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("dist").join("server.mjs"));
+        candidates.push(resource_dir.join("server.mjs"));
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("dist").join("server.mjs"));
+            candidates.push(exe_dir.join("server.mjs"));
+            candidates.push(exe_dir.join("_up_").join("dist").join("server.mjs"));
+            candidates.push(exe_dir.join("_up_").join("server.mjs"));
         }
     }
 
-    let actual_path = if server_path.exists() {
-        server_path
-    } else {
-        PathBuf::from("dist").join("server.mjs")
-    };
+    candidates.push(PathBuf::from("dist").join("server.mjs"));
+    candidates.push(PathBuf::from("server.mjs"));
 
-    let child = Command::new("node")
-        .arg(&actual_path)
+    let server_path = candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| "Bundled server file was not found in the installed app.".to_string())?;
+
+    Command::new("node")
+        .arg(&server_path)
         .env("PORT", "3000")
         .env("NODE_ENV", "production")
         .spawn()
-        .ok()?;
-
-    Some(child)
+        .map_err(|err| err.to_string())
 }
 
 fn wait_for_server(timeout_secs: u64) -> bool {
@@ -352,6 +371,73 @@ fn navigate_to_loading(window: &tauri::WebviewWindow) {
     }
 }
 
+fn update_loading_status(window: &tauri::WebviewWindow, status: &str, is_error: bool) {
+    let escaped = status
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "");
+    let color = if is_error { "#f87171" } else { "#52525b" };
+    let script = format!(
+        "(() => {{ const el = document.getElementById('status'); if (el) {{ el.textContent = '{}'; el.style.color = '{}'; }} }})()",
+        escaped, color
+    );
+    let _ = window.eval(&script);
+}
+
+fn context_menu_script() -> &'static str {
+    r#"
+(() => {
+  if (window.__luminaNativeContextMenuBound) return;
+  window.__luminaNativeContextMenuBound = true;
+  window.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (typeof invoke === 'function') {
+      invoke('show_context_menu', {
+        x: Math.round(event.clientX || 0),
+        y: Math.round(event.clientY || 0)
+      }).catch(() => {});
+    }
+  }, true);
+})();
+"#
+}
+
+fn install_context_menu_bridge(window: &WebviewWindow) {
+    let _ = window.eval(context_menu_script());
+}
+
+fn build_context_menu(window: &WebviewWindow) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    MenuBuilder::new(window)
+        .copy_with_text("Copy")
+        .paste_with_text("Paste")
+        .cut_with_text("Cut")
+        .separator()
+        .text(CONTEXT_MENU_INSPECT_ID, "Inspect")
+        .build()
+}
+
+fn handle_context_menu_event(window: &WebviewWindow, event: &MenuEvent) {
+    let event_id = event.id().0.as_str();
+    match event_id {
+        "copy" => {
+            let _ = window.eval("document.execCommand('copy');");
+        }
+        "paste" => {
+            let _ = window.eval("document.execCommand('paste');");
+        }
+        "cut" => {
+            let _ = window.eval("document.execCommand('cut');");
+        }
+        CONTEXT_MENU_INSPECT_ID => {
+            #[cfg(debug_assertions)]
+            window.open_devtools();
+        }
+        _ => {}
+    }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -366,15 +452,41 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 navigate_to_loading(&window);
                 set_window_zoom(&window, 0.7);
+                install_context_menu_bridge(&window);
+                window.on_menu_event(|window, event| {
+                    if let Some(webview_window) = window.app_handle().get_webview_window(window.label()) {
+                        handle_context_menu_event(&webview_window, &event);
+                    }
+                });
             }
 
             let handle = app.handle().clone();
 
             tauri::async_runtime::spawn(async move {
                 if cfg!(not(debug_assertions)) {
-                    if let Some(child) = start_server_process(&handle) {
-                        handle.manage(ServerProcess(Mutex::new(Some(child))));
+                    if let Some(window) = handle.get_webview_window("main") {
+                        update_loading_status(&window, "Starting bundled server...", false);
                     }
+
+                    match start_server_process_with_error(&handle) {
+                        Ok(child) => {
+                            handle.manage(ServerProcess(Mutex::new(Some(child))));
+                        }
+                        Err(err) => {
+                            if let Some(window) = handle.get_webview_window("main") {
+                                update_loading_status(
+                                    &window,
+                                    &format!("Server failed to start: {}", err),
+                                    true,
+                                );
+                            }
+                            return;
+                        }
+                    }
+                }
+
+                if let Some(window) = handle.get_webview_window("main") {
+                    update_loading_status(&window, "Waiting for server on http://localhost:3000...", false);
                 }
 
                 let ready = tokio::task::spawn_blocking(|| wait_for_server(60)).await;
@@ -383,6 +495,12 @@ pub fn run() {
                     if let Some(window) = handle.get_webview_window("main") {
                         let _ = window.navigate("http://localhost:3000".parse().unwrap());
                     }
+                } else if let Some(window) = handle.get_webview_window("main") {
+                    update_loading_status(
+                        &window,
+                        "Server did not respond on port 3000. Check whether Node.js is installed and restart the app.",
+                        true,
+                    );
                 }
             });
 
@@ -418,6 +536,7 @@ pub fn run() {
             show_alert,
             show_prompt,
             open_native_terminal,
+            show_context_menu,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
