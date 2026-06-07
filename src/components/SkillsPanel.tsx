@@ -100,6 +100,66 @@ Use this skill for:
 7. Summarize what changed and any remaining risk.
 `;
 
+const OPENCODE_CUSTOMIZE_SKILL_MD = `---
+name: customize-opencode
+description: Use ONLY when editing or creating opencode configuration, agents, skills, plugins, MCP servers, or permission rules. Do not use for normal application code.
+---
+
+# Customizing opencode
+
+Use this skill when the task is specifically about opencode's own configuration surface.
+
+## Scope
+
+- \`opencode.json\` / \`opencode.jsonc\`
+- files under \`.opencode/\`
+- agents, subagents, skills, plugins, MCP servers
+- permission rules and config troubleshooting
+
+## Key Rules
+
+1. Prefer file-based agent and skill definitions for non-trivial setups.
+2. Treat \`SKILL.md\` as the main skill entry file.
+3. Preserve existing config unless the change is explicitly requested.
+4. If config is changed, remind the user that opencode must be restarted to pick up config-time changes.
+
+## Important Notes
+
+- \`mode\` can be \`primary\`, \`subagent\`, or \`all\`.
+- Skills are discovered from skill folders that contain \`SKILL.md\`.
+- Permission rules matter for tool availability and execution behavior.
+- MCP server commands are arrays of strings, not a single shell string.
+`;
+
+const OPENCODE_EFFECT_SKILL_MD = `---
+name: effect
+description: Work with Effect v4 / effect-smol TypeScript code in this repo. Use when the task involves Effect services, layers, schemas, typed workflows, or Effect-specific project patterns.
+---
+
+# Effect
+
+This skill is for Effect-style TypeScript codebases and repositories that use Effect services, schemas, and layers.
+
+## Source Of Truth
+
+Use current Effect v4 / effect-smol examples and nearby repo code instead of stale memory.
+
+## Guidelines
+
+- Prefer \`Effect.gen(function* () { ... })\` for multi-step workflows.
+- Prefer named reusable effects for important workflows and service methods.
+- Prefer Effect \`Schema\` for domain and API data structures.
+- Keep HTTP handlers thin and move business logic into services.
+- Keep dependency provisioning explicit.
+- Avoid \`any\`, unchecked casts, and outdated Effect APIs.
+
+## Testing Patterns
+
+- Prefer the repo's Effect test helpers and realistic live tests when platform behavior matters.
+- Keep test layers explicit.
+- Use scoped fixtures and finalizers for cleanup-sensitive resources.
+`;
+
 const DEFAULT_SKILL_MD = `# Lumina Skill Creator
 
 An executive, high-fidelity framework within Lumina Intelligence to bootstrap, benchmark, and iteratively refine custom modular agent skills in Coder Mode. Perfecting an agent skill relies on systematic, closed-loop evaluation rather than static prompts.
@@ -2130,6 +2190,14 @@ const EXECUTION_PLAYBOOK_TREE: FileNode[] = [
   }
 ];
 
+const OPENCODE_CUSTOMIZE_TREE: FileNode[] = [
+  { name: 'SKILL.md', type: 'file', content: OPENCODE_CUSTOMIZE_SKILL_MD }
+];
+
+const OPENCODE_EFFECT_TREE: FileNode[] = [
+  { name: 'SKILL.md', type: 'file', content: OPENCODE_EFFECT_SKILL_MD }
+];
+
 
 export function SkillsPanel() {
   const SKILLS_ROOT = 'A:/web_ui/.lumina/skills';
@@ -2156,6 +2224,22 @@ export function SkillsPanel() {
       addedBy: 'Anthropic',
       trigger: 'Slash command + auto',
       description: 'Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize a skill\'s description for better triggering accuracy.',
+      enabled: true
+    },
+    'customize-opencode': {
+      id: 'customize-opencode',
+      name: 'customize-opencode',
+      addedBy: 'OpenCode (MIT)',
+      trigger: 'Slash command + auto',
+      description: 'Use when working on opencode configuration, agents, skills, plugins, MCP servers, or permission rules.',
+      enabled: true
+    },
+    'effect': {
+      id: 'effect',
+      name: 'effect',
+      addedBy: 'OpenCode (MIT)',
+      trigger: 'Slash command + auto',
+      description: 'Use for Effect v4 / effect-smol TypeScript code, services, layers, schemas, and testing patterns.',
       enabled: true
     }
   };
@@ -2270,7 +2354,9 @@ export function SkillsPanel() {
     const defaultSkillTrees = [
       { id: 'master-orchestrator', tree: MASTER_INITIAL_TREE },
       { id: 'execution-playbook', tree: EXECUTION_PLAYBOOK_TREE },
-      { id: 'skill-creator', tree: INITIAL_TREE }
+      { id: 'skill-creator', tree: INITIAL_TREE },
+      { id: 'customize-opencode', tree: OPENCODE_CUSTOMIZE_TREE },
+      { id: 'effect', tree: OPENCODE_EFFECT_TREE }
     ];
 
     for (const skill of defaultSkillTrees) {

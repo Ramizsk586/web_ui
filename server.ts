@@ -78,6 +78,10 @@ async function startServer() {
     tools?: RuntimeTool[];
     skills?: Array<{ id: string; name: string; enabled: boolean }>;
     skillFiles?: Array<{ name: string; content: string; description?: string }>;
+    mode?: 'primary' | 'subagent' | 'all';
+    hidden?: boolean;
+    steps?: number;
+    permissions?: Record<string, any>;
   };
 
   const randomRuntimeId = (prefix: string) =>
@@ -111,6 +115,28 @@ async function startServer() {
       parameters: tool.parameters || { type: 'object', properties: {}, required: [] }
     }
   });
+
+  const DEFAULT_SUBAGENT_PERMISSIONS = {
+    read: 'allow',
+    list: 'allow',
+    glob: 'allow',
+    grep: 'allow',
+    edit: 'allow',
+    bash: 'ask',
+    webfetch: 'ask',
+    websearch: 'ask',
+    question: 'allow',
+  };
+
+  const normalizeAgentMode = (mode?: string): 'primary' | 'subagent' | 'all' => {
+    if (mode === 'primary' || mode === 'subagent' || mode === 'all') return mode;
+    return 'all';
+  };
+
+  const normalizeAgentPermissions = (permissions?: Record<string, any>) =>
+    permissions && typeof permissions === 'object'
+      ? permissions
+      : DEFAULT_SUBAGENT_PERMISSIONS;
 
   const buildAgentInstruction = (agent: RuntimeAgent) => {
     // 1. Check if any docs/ files exist in skillFiles (e.g. docs/soul.md, docs/guidelines.md, etc.)
@@ -188,8 +214,34 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       `Execution policy:
 - Decide whether to answer directly or spawn a focused sub-agent for tool-heavy work.
 - Spawn a sub-agent when the task needs web research, external APIs, file operations, or multiple-step execution.
-- Be concise, grounded, and only claim tool results you actually observed.`
+- Be concise, grounded, and only claim tool results you actually observed.
+- Treat agents attached by the user as available collaborators. Delegate only when their role clearly matches the task.`
     ].filter(Boolean).join('\n\n');
+  };
+
+  const filterToolsByAgentPermissions = (tools: RuntimeTool[], permissions?: Record<string, any>) => {
+    const normalized = normalizeAgentPermissions(permissions);
+    const editState = normalized.edit;
+    const bashState = normalized.bash;
+    const webfetchState = normalized.webfetch;
+    const websearchState = normalized.websearch;
+
+    return tools.filter((tool) => {
+      const name = tool.name || tool.id;
+      if (['write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file'].includes(name)) {
+        return editState !== 'deny';
+      }
+      if (name === 'run_command') {
+        return bashState !== 'deny';
+      }
+      if (['fetch_url', 'web_scrape', 'visit'].includes(name)) {
+        return webfetchState !== 'deny';
+      }
+      if (['search', 'web_search', 'wiki_search', 'google_scholar'].includes(name)) {
+        return websearchState !== 'deny';
+      }
+      return true;
+    });
   };
 
   const looksLikeResearchTask = (text: string) =>
@@ -276,9 +328,13 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         id: spawnId,
         type: 'spawn',
         name: agent.name,
+        agentId: agent.id,
+        mode: normalizeAgentMode(agent.mode),
         status: 'active',
         task,
-        integrations: enabledTools.map(tool => tool.name || tool.id)
+        integrations: enabledTools.map(tool => tool.name || tool.id),
+        permissions: normalizeAgentPermissions(agent.permissions),
+        summary: `Delegated to ${agent.name} with ${enabledTools.length} tool${enabledTools.length === 1 ? '' : 's'}`
       }
     });
 
@@ -397,9 +453,13 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         id: spawnId,
         type: 'spawn',
         name: agent.name,
+        agentId: agent.id,
+        mode: normalizeAgentMode(agent.mode),
         status: 'complete',
         task,
         integrations: enabledTools.map(tool => tool.name || tool.id),
+        permissions: normalizeAgentPermissions(agent.permissions),
+        summary: finalText.trim() ? 'Subagent completed delegated task' : 'Subagent completed with no text output',
         result: finalText.slice(0, 4000)
       }
     });
@@ -450,10 +510,11 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
   });
 
   app.post("/api/agents/run", async (req, res) => {
-    const { agent, messages, bridgeTools = [] } = req.body as {
+    const { agent, messages, bridgeTools = [], attachedAgents = [] } = req.body as {
       agent: RuntimeAgent;
       messages: Array<{ role: string; content: any }>;
       bridgeTools?: RuntimeTool[];
+      attachedAgents?: RuntimeAgent[];
     };
 
     if (!agent || !messages || !Array.isArray(messages) || messages.length === 0) {
@@ -473,7 +534,15 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         ? latestUserMessage?.content?.map((part: any) => part?.text || '').join('\n')
         : String(latestUserMessage?.content || '');
 
-      const dispatcherSystem = buildAgentInstruction(agent);
+      const attachedAgentSummaries = attachedAgents
+        .filter((item) => normalizeAgentMode(item.mode) === 'subagent' || normalizeAgentMode(item.mode) === 'all')
+        .map((item) => `Attached agent: ${item.name}\nMode: ${normalizeAgentMode(item.mode)}\nDescription: ${item.description || 'No description'}`)
+        .join('\n\n');
+
+      const dispatcherSystem = [
+        buildAgentInstruction(agent),
+        attachedAgentSummaries ? `Available attached agents for delegation:\n\n${attachedAgentSummaries}` : ''
+      ].filter(Boolean).join('\n\n');
       const dispatcherMessages = [
         { role: 'system', content: dispatcherSystem },
         ...messages.map(message => ({
@@ -483,11 +552,19 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       ];
 
       let finalReply = '';
-      if (looksLikeResearchTask(userText) || (agent.tools || []).some(tool => tool.active || tool.enabled)) {
+      const permittedBridgeTools = filterToolsByAgentPermissions(
+        bridgeTools.filter(tool => tool.enabled !== false),
+        agent.permissions
+      );
+      if (looksLikeResearchTask(userText) || permittedBridgeTools.length > 0 || (agent.tools || []).some(tool => tool.active || tool.enabled)) {
         finalReply = await runExecutionAgent({
-          agent,
+          agent: {
+            ...agent,
+            mode: normalizeAgentMode(agent.mode),
+            permissions: normalizeAgentPermissions(agent.permissions),
+          },
           task: userText,
-          bridgeTools,
+          bridgeTools: permittedBridgeTools,
           res
         });
       } else {
@@ -541,12 +618,14 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     activeSubagents[agentId] = {
       id: agentId,
       name: agentName,
+      mode: 'subagent',
       phase: 1,
       status: 'running',
       filesCreated: [],
       startedAt: Date.now(),
       events: [],
-      summary: ''
+      summary: '',
+      permissions: { ...DEFAULT_SUBAGENT_PERMISSIONS }
     };
 
     res.json({
@@ -3915,6 +3994,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       attributes = {},
       dataAttributes = {},
       domPath = [],
+      selectorPath,
+      childIndexPath = [],
       sourceHint,
       role,
       ariaLabel,
@@ -3990,6 +4071,73 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       };
     };
 
+    const countTagOccurrences = (snippet: string, tagName: string) => {
+      if (!tagName) return 0;
+      const matches = snippet.match(new RegExp(`<${tagName}(?=\\s|>|/)`, 'gi'));
+      return matches ? matches.length : 0;
+    };
+
+    const normalizeHtmlFragment = (value = '') =>
+      String(value)
+        .replace(/\s+/g, ' ')
+        .replace(/>\s+</g, '><')
+        .trim();
+
+    type ElementSnippetMatch = {
+      snippet: string;
+      lineNumber: number;
+      lineRangeStart: number;
+      lineRangeEnd: number;
+      score: number;
+      exact: boolean;
+    };
+
+    const exactAttributeMatchers = () => {
+      const matchers: Array<{ name: string; value: string; weight: number; exact: boolean }> = [];
+      if (id) matchers.push({ name: 'id', value: String(id), weight: 900, exact: true });
+      if (placeholder) matchers.push({ name: 'placeholder', value: String(placeholder), weight: 360, exact: true });
+      if (href) matchers.push({ name: 'href', value: String(href), weight: 420, exact: true });
+      if (src) matchers.push({ name: 'src', value: String(src), weight: 420, exact: true });
+      if (role) matchers.push({ name: 'role', value: String(role), weight: 240, exact: true });
+      if (ariaLabel) matchers.push({ name: 'aria-label', value: String(ariaLabel), weight: 500, exact: true });
+      if (title) matchers.push({ name: 'title', value: String(title), weight: 260, exact: true });
+
+      for (const [name, value] of Object.entries(dataAttributes as Record<string, string>)) {
+        if (typeof value === 'string' && value.trim() && value.length < 300) {
+          matchers.push({ name, value, weight: 760, exact: true });
+        }
+      }
+      for (const [name, value] of Object.entries(attributes as Record<string, string>)) {
+        if (name === 'class' || name.startsWith('data-')) continue;
+        if (typeof value === 'string' && value.trim() && value.length < 300) {
+          matchers.push({ name, value, weight: 240, exact: true });
+        }
+      }
+      return matchers;
+    };
+
+    const lineHasAttribute = (line: string, name: string, value: string) =>
+      line.includes(`${name}="${value}"`) ||
+      line.includes(`${name}='${value}'`) ||
+      line.includes(`${name}={${value}}`) ||
+      line.includes(`${name}={"${value}"}`) ||
+      line.includes(`${name}={'${value}'}`);
+
+    const isSingleElementLine = (line: string) =>
+      tag ? countTagOccurrences(line, tag) === 1 : false;
+
+    const buildElementWork = () => {
+      const elementClasses = String(classes || '').split(/\s+/).filter(Boolean);
+      const selectorDetails = [
+        id ? `#${id}` : '',
+        Object.entries(dataAttributes as Record<string, string>)
+          .map(([name, value]) => `[${name}="${value}"]`)
+          .join(''),
+        elementClasses.length ? `.${elementClasses.slice(0, 2).join('.')}` : ''
+      ].filter(Boolean).join('');
+      return `Represents the selected <${tag}>${selectorDetails ? ` (${selectorDetails})` : ''} element from the preview. The attached code is the exact source node matched from its DOM attributes${selectorPath ? ` and selector path ${selectorPath}` : ''}.`;
+    };
+
     const findNeedleIndex = (content: string) => {
       const checks: string[] = [];
       if (id) checks.push(`id="${id}"`, `id='${id}'`, `id={${id}}`, `id={"${id}"}`, String(id));
@@ -4019,6 +4167,25 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     const scoreSnippet = (snippet: string) => {
       let score = 0;
       const normalizedSnippet = normalizeText(snippet);
+      const normalizedOuterHTML = normalizeHtmlFragment(outerHTML || '');
+      const normalizedSnippetHtml = normalizeHtmlFragment(snippet);
+      const tagOccurrences = countTagOccurrences(snippet, tag);
+      const exactDataAttributeCount = Object.entries(dataAttributes as Record<string, string>).reduce((count, [attrName, attrValue]) => {
+        if (!attrValue || attrValue.length > 200) return count;
+        return count + (
+          snippet.includes(`${attrName}="${attrValue}"`) || snippet.includes(`${attrName}='${attrValue}'`)
+            ? 1
+            : 0
+        );
+      }, 0);
+      const hasUniqueDataAttributeMatch = exactDataAttributeCount > 0;
+
+      if (normalizedOuterHTML && normalizedSnippetHtml === normalizedOuterHTML) {
+        score += 700;
+      } else if (normalizedOuterHTML && normalizedSnippetHtml.includes(normalizedOuterHTML)) {
+        score += 320;
+      }
+
       if (selectedText.length > 1 && normalizedSnippet.includes(selectedText)) {
         score += 240 + Math.min(120, selectedText.length * 2);
       }
@@ -4056,6 +4223,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           score += 50;
         }
       }
+      if (hasUniqueDataAttributeMatch && tagOccurrences === 1) {
+        score += 260;
+      }
       if (typeof siblingIndex === 'number' && siblingIndex >= 0) {
         if (snippet.includes(`[${siblingIndex}]`)) score += 20;
         if (snippet.includes(`index === ${siblingIndex}`) || snippet.includes(`index===${siblingIndex}`)) score += 70;
@@ -4065,6 +4235,19 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         if (snippet.includes(`index === ${sameTagSiblingIndex}`) || snippet.includes(`index===${sameTagSiblingIndex}`)) score += 90;
         if (snippet.includes(`key={${sameTagSiblingIndex}}`) || snippet.includes(`key="${sameTagSiblingIndex}"`)) score += 40;
       }
+
+      if (tagOccurrences > 1) {
+        score -= Math.min(240, (tagOccurrences - 1) * 55);
+      }
+      if (hasUniqueDataAttributeMatch && tagOccurrences > 1) {
+        score -= Math.min(420, (tagOccurrences - 1) * 110);
+      }
+
+      if (parentText && selectedText && normalizeText(parentText) !== selectedText && normalizedSnippet.includes(normalizeText(parentText))) {
+        score -= 45;
+      }
+
+      score -= Math.floor(snippet.length / 140);
       return score;
     };
 
@@ -4074,6 +4257,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       const lineIndex = Math.max(0, (getLineNumberFromIndex(content, index) || 1) - 1);
 
       let bestSnippet: { snippet: string; startLine: number; endLine: number; score: number } | null = null;
+      const exactAttrMatchers = Object.entries(attributes as Record<string, string>)
+        .filter(([, value]) => typeof value === 'string' && value.trim().length > 0 && value.length < 220)
+        .map(([name, value]) => `${name}="${value}"`);
+      const exactSingleAttrMatchers = Object.entries(attributes as Record<string, string>)
+        .filter(([, value]) => typeof value === 'string' && value.trim().length > 0 && value.length < 220)
+        .map(([name, value]) => `${name}='${value}'`);
+      const normalizedOuterHTML = normalizeHtmlFragment(outerHTML || '');
+
       for (let start = lineIndex; start >= Math.max(0, lineIndex - 12); start--) {
         const firstLine = lines[start];
         if (!new RegExp(`<${tag}(\\s|>|/)`, 'i').test(firstLine) && !firstLine.includes('<')) continue;
@@ -4094,7 +4285,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           if (closeMatches.length > 0) tagBalance -= closeMatches.length;
           if (selfClosingMatches.length > 0) tagBalance -= selfClosingMatches.length;
           if (!seenTargetTag) continue;
-          const snippetScore = scoreSnippet(snippet) - Math.floor(snippet.length / 160);
+          let snippetScore = scoreSnippet(snippet);
+          if (exactAttrMatchers.some((match) => snippet.includes(match)) || exactSingleAttrMatchers.some((match) => snippet.includes(match))) {
+            snippetScore += 220;
+          }
+          if (normalizedOuterHTML && normalizeHtmlFragment(snippet) === normalizedOuterHTML) {
+            snippetScore += 320;
+          }
           if (!bestSnippet || snippetScore > bestSnippet.score || (snippetScore === bestSnippet.score && snippet.length < bestSnippet.snippet.length)) {
             bestSnippet = { snippet, startLine: start + 1, endLine: end + 1, score: snippetScore };
           }
@@ -4174,6 +4371,80 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         lineRangeStart: startLine + 1,
         lineRangeEnd: endLine + 1
       };
+    };
+
+    const extractExactElementSnippet = (content: string): ElementSnippetMatch | null => {
+      const lines = content.split(/\r?\n/);
+      const exactAttrMatchers = Object.entries(attributes as Record<string, string>)
+        .filter(([, value]) => typeof value === 'string' && value.trim().length > 0 && value.length < 220)
+        .flatMap(([name, value]) => [`${name}="${value}"`, `${name}='${value}'`]);
+      const normalizedOuterHTML = normalizeHtmlFragment(outerHTML || '');
+      const sourceMatchers = exactAttributeMatchers();
+
+      let best: ElementSnippetMatch | null = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const rawLine = lines[i];
+        const trimmed = rawLine.trim();
+        if (!trimmed) continue;
+        if (!tag || !new RegExp(`^<${tag}(\\s|>|/)`, 'i').test(trimmed)) continue;
+
+        let score = 0;
+        const normalizedLine = normalizeHtmlFragment(trimmed);
+        if (normalizedOuterHTML && normalizedLine === normalizedOuterHTML) score += 1000;
+        if (id && (trimmed.includes(`id="${id}"`) || trimmed.includes(`id='${id}'`))) score += 400;
+        if (selectedText && normalizeText(trimmed).includes(selectedText)) score += 120;
+        if (ariaLabel && trimmed.includes(ariaLabel)) score += 250;
+        if (title && trimmed.includes(title)) score += 120;
+
+        let authoritativeMatches = 0;
+        for (const matcher of sourceMatchers) {
+          if (lineHasAttribute(trimmed, matcher.name, matcher.value)) {
+            score += matcher.weight;
+            if (matcher.exact) authoritativeMatches += 1;
+          }
+        }
+        for (const cls of selectedClasses) {
+          if (trimmed.includes(cls)) score += 50;
+        }
+        for (const matcher of exactAttrMatchers) {
+          if (trimmed.includes(matcher)) score += 320;
+        }
+        for (const [, value] of Object.entries(dataAttributes as Record<string, string>)) {
+          if (value && trimmed.includes(String(value))) score += 220;
+        }
+        if (Object.keys(dataAttributes as Record<string, string>).length > 0) {
+          const exactDataMatches = Object.entries(dataAttributes as Record<string, string>).filter(([attrName, attrValue]) =>
+            Boolean(attrValue) &&
+            (trimmed.includes(`${attrName}="${attrValue}"`) || trimmed.includes(`${attrName}='${attrValue}'`))
+          ).length;
+          if (exactDataMatches > 0) {
+            score += 420 + exactDataMatches * 80;
+          }
+        }
+
+        if (score <= 0) continue;
+        if (authoritativeMatches > 0 && isSingleElementLine(trimmed)) {
+          score += 900;
+        }
+        if (tag && countTagOccurrences(trimmed, tag) > 1) {
+          score -= countTagOccurrences(trimmed, tag) * 300;
+        }
+        score -= Math.floor(trimmed.length / 40);
+
+        if (!best || score > best.score || (score === best.score && trimmed.length < best.snippet.length)) {
+          best = {
+            snippet: rawLine.trimEnd(),
+            lineNumber: i + 1,
+            lineRangeStart: i + 1,
+            lineRangeEnd: i + 1,
+            score,
+            exact: authoritativeMatches > 0 && isSingleElementLine(trimmed)
+          };
+        }
+      }
+
+      return best;
     };
 
     const allFiles = getFilesRecursively(previewRoot);
@@ -4376,7 +4647,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     let matchIndex = typeof targetFile.matchIndex === 'number' ? targetFile.matchIndex : -1;
     if (matchIndex === -1) matchIndex = findNeedleIndex(fileContent);
 
-    const extractedSnippet = extractBalancedSnippet(fileContent, matchIndex);
+    const exactElementSnippet = extractExactElementSnippet(fileContent);
+    const extractedSnippet = exactElementSnippet || extractBalancedSnippet(fileContent, matchIndex);
     if (typeof extractedSnippet === 'string') {
       fileContentWindow = extractedSnippet;
     } else {
@@ -4389,6 +4661,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           lineRangeStart: extractedSnippet.lineRangeStart,
           lineRangeEnd: extractedSnippet.lineRangeEnd
         };
+
+    if (exactElementSnippet?.exact) {
+      return res.json({
+        success: true,
+        analysis: {
+          fileName: targetFile.name,
+          filePath: filePath,
+          specificCode: exactElementSnippet.snippet,
+          lineNumber: exactElementSnippet.lineNumber,
+          lineRangeStart: exactElementSnippet.lineRangeStart,
+          lineRangeEnd: exactElementSnippet.lineRangeEnd,
+          connections: [],
+          elementWork: buildElementWork()
+        }
+      });
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {

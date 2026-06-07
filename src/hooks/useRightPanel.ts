@@ -31,6 +31,8 @@ export function useRightPanel({
     outerHTML?: string;
     attributes?: Record<string, string>;
     domPath?: string[];
+    selectorPath?: string;
+    childIndexPath?: number[];
       sourceHint?: {
         fileName?: string;
         lineNumber?: number;
@@ -169,6 +171,36 @@ export function useRightPanel({
               domPath.unshift(`${pathEl.tagName.toLowerCase()}${pathEl.id ? `#${pathEl.id}` : pathClasses}`);
               pathEl = pathEl.parentElement;
             }
+            const selectorSegments: string[] = [];
+            const childIndexPath: number[] = [];
+            pathEl = clickedEl;
+            while (pathEl && pathEl !== doc.body && selectorSegments.length < 8) {
+              const parent = pathEl.parentElement;
+              const siblings = parent ? Array.from(parent.children) : [];
+              const childIndex = siblings.indexOf(pathEl);
+              childIndexPath.unshift(childIndex);
+
+              let segment = pathEl.tagName.toLowerCase();
+              if (pathEl.id) {
+                segment += `#${pathEl.id}`;
+              } else {
+                const stableDataAttr = Array.from(pathEl.attributes || []).find(attr =>
+                  attr.name.startsWith('data-') && attr.value && attr.value.length < 120
+                );
+                if (stableDataAttr) {
+                  segment += `[${stableDataAttr.name}="${stableDataAttr.value.replace(/"/g, '\\"')}"]`;
+                } else if (typeof pathEl.className === 'string' && pathEl.className.trim()) {
+                  const firstClass = pathEl.className.split(/\s+/).find(Boolean);
+                  if (firstClass) segment += `.${firstClass}`;
+                }
+                if (parent && childIndex >= 0) {
+                  segment += `:nth-child(${childIndex + 1})`;
+                }
+              }
+              selectorSegments.unshift(segment);
+              pathEl = parent;
+            }
+            const selectorPath = selectorSegments.join(' > ');
 
             const getReactSourceHint = (el: HTMLElement) => {
               let node: HTMLElement | null = el;
@@ -212,6 +244,8 @@ export function useRightPanel({
               attributes,
               dataAttributes,
               domPath,
+              selectorPath,
+              childIndexPath,
               outerHTML: clickedEl.outerHTML?.slice(0, 4000),
               sourceHint: getReactSourceHint(clickedEl)
             });

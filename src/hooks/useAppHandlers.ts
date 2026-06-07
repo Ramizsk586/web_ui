@@ -1450,6 +1450,20 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
           {
             type: 'function',
             function: {
+              name: 'apply_patch',
+              description: 'Apply a unified patch to one or more existing files. Prefer this for precise code edits across multiple hunks.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  patch: { type: 'string', description: 'Unified patch text to apply.' }
+                },
+                required: ['patch']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
               name: 'write_file',
               description: 'Create or overwrite a file. Creates parent dirs automatically.',
               parameters: {
@@ -1459,6 +1473,21 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
                   content: { type: 'string', description: 'File content to write.' }
                 },
                 required: ['filePath', 'content']
+              }
+            }
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'todowrite',
+              description: 'Create or update TODO.md task checklists for coder-mode execution progress.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  content: { type: 'string', description: 'Full markdown content to write into TODO.md.' },
+                  filePath: { type: 'string', description: 'Optional relative path. Defaults to TODO.md.' }
+                },
+                required: ['content']
               }
             }
           },
@@ -1736,11 +1765,15 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       // Append general custom skill registry so AI knows its capabilities
       if (enabledCustomSkills.length > 0) {
         systemPrompt += `\n\n[AVAILABLE CUSTOM MODULAR SKILLS]
-You have direct, real-time access to the following custom workspace skills. You can automatically invoke any of them or read/write their files:`;
+You have direct, real-time access to the following custom workspace skills. When a task clearly matches one of these skills, proactively load it with the 'run_skill' tool before major reasoning or file changes. You may also read/write their files directly when refining them:`;
         enabledCustomSkills.forEach((s: any) => {
           systemPrompt += `\n- **${s.name}** (Trigger: ${s.trigger}) — ${s.description}`;
         });
-        systemPrompt += `\n\nYou can access or customize their configuration files in your virtual directory at \".lumina/skills/{skill-name}/SKILL.md\". If helpful, you can read them with 'read_file' or improve them with 'write_file'/'edit_file'!`;
+        systemPrompt += `\n\nSkill usage rules:
+- If the task matches a skill description, call 'run_skill' first to load it.
+- Treat the skill result as live execution guidance for the current task.
+- You can access or customize their configuration files in your virtual directory at ".lumina/skills/{skill-name}/SKILL.md".
+- Prefer 'run_skill' for execution guidance and 'read_file'/'edit_file' for maintenance or improvement.`;
       }
 
       if (masterSkill && isHeavySkillTask(content)) {
@@ -1761,7 +1794,7 @@ ${masterSkillMd.content}
         if (skillMd && skillMd.content) {
           systemPrompt += `\n\n=== 🧠 ACTIVE DISPATCH SKILL PROMPT: ${activeCustomSkill.name} ===
 You have automatically transitioned your core system prompt to prioritize this specialized skill.
-Please execute the following skill guide with absolute discipline:
+You should prefer a 'run_skill' call for ${activeCustomSkill.id} so the skill is explicitly loaded into the tool/result chain before execution. Then execute the following skill guide with absolute discipline:
 
 ${skillMd.content}
 
@@ -2605,6 +2638,45 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 }
                 resultValue = { query, count: matches.length, matches };
                 showToast(`Grep found ${matches.length} match${matches.length === 1 ? '' : 'es'}`);
+              } else if (name === 'apply_patch') {
+                const patch = String(args.patch || '');
+                if (!patch.trim()) throw new Error("apply_patch requires a patch parameter");
+                showToast('Applying patch...');
+                const runData = await executeViaTerminal(`apply_patch <<'PATCH'\n${patch}\nPATCH`, coderWorkspacePath, {
+                  workspaceRoot: coderWorkspacePath,
+                  isCoderMode: isCoderMode,
+                  signal,
+                });
+                resultValue = {
+                  exitCode: runData.exitCode,
+                  stdout: runData.stdout,
+                  stderr: runData.stderr,
+                  applied: runData.exitCode === 0
+                };
+                if (runData.exitCode === 0) {
+                  triggerWorkspaceRefresh();
+                }
+              } else if (name === 'todowrite') {
+                const contentValue = String(args.content || '');
+                const todoPathRaw = String(args.filePath || 'TODO.md');
+                const cleanedPath = normalizeToolFilePath(todoPathRaw, coderWorkspacePath) || 'TODO.md';
+                if (!contentValue.trim()) throw new Error("todowrite requires content");
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/${cleanedPath}` : `./${cleanedPath}`;
+                const writeRes = await fetch('/api/fs/write', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, content: contentValue, ...workspaceArg }),
+                  signal
+                });
+                const writeData = await writeRes.json();
+                if (!writeRes.ok) throw new Error(writeData.error || writeData.detail || 'Failed to write TODO file');
+                resultValue = {
+                  ...writeData,
+                  filePath: cleanedPath,
+                  action: 'todowrite'
+                };
+                triggerWorkspaceRefresh();
+                showToast(`Updated ${cleanedPath}`);
               } else if (name === 'analyze_file') {
                 const cleanedPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
                 if (!cleanedPath) throw new Error("LSP_Experimental requires filePath");

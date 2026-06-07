@@ -110,6 +110,8 @@ class SpeechController {
 }
 
 const globalSpeechController = new SpeechController();
+const EMPTY_SCRAPE_RESULTS = new Map<string, ScrapeResult>();
+const EMPTY_WIKI_RESULTS = new Map<string, { wikiType: string, data: any }>();
 
 function cleanMessageTextForSpeech(content: string): string {
   if (!content) return "";
@@ -182,7 +184,7 @@ interface MessageItemProps {
   onSendMessage?: (msg: string) => void;
 }
 
-export const MessageItem = React.memo(({ 
+function MessageItemComponent({ 
   message, 
   markdownComponents, 
   userProfile, 
@@ -198,10 +200,10 @@ export const MessageItem = React.memo(({
   onUpdateTodoPlan,
   onUpdateMessage,
   onStartBuilding,
-  scrapingResults = new Map(),
-  wikiResults = new Map(),
+  scrapingResults = EMPTY_SCRAPE_RESULTS,
+  wikiResults = EMPTY_WIKI_RESULTS,
   onSendMessage
-}: MessageItemProps) => {
+}: MessageItemProps) {
   const [copied, setCopied] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [textAnswer, setTextAnswer] = useState("");
@@ -1326,6 +1328,31 @@ export const MessageItem = React.memo(({
       )}
     </motion.div>
   );
-});
+}
+
+const areMessageItemPropsEqual = (prev: MessageItemProps, next: MessageItemProps) => {
+  return (
+    prev.message === next.message &&
+    prev.markdownComponents === next.markdownComponents &&
+    prev.userProfile === next.userProfile &&
+    prev.persona === next.persona &&
+    prev.isSourcesPanelOpen === next.isSourcesPanelOpen &&
+    prev.scrapingResults === next.scrapingResults &&
+    prev.wikiResults === next.wikiResults &&
+    prev.onSendMessage === next.onSendMessage &&
+    prev.onOpenInEditor === next.onOpenInEditor &&
+    prev.showToast === next.showToast &&
+    prev.onUpdateTodoPlan === next.onUpdateTodoPlan &&
+    prev.onUpdateMessage === next.onUpdateMessage &&
+    prev.onStartBuilding === next.onStartBuilding &&
+    prev.setIsSourcesPanelOpen === next.setIsSourcesPanelOpen &&
+    prev.setSourcesPanelMessageId === next.setSourcesPanelMessageId &&
+    prev.setActiveArtifact === next.setActiveArtifact &&
+    prev.setIsCanvasOpen === next.setIsCanvasOpen &&
+    prev.setCanvasView === next.setCanvasView
+  );
+};
+
+export const MessageItem = React.memo(MessageItemComponent, areMessageItemPropsEqual);
 
 

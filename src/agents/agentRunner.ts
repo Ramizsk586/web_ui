@@ -10,15 +10,25 @@ interface RunAgentParams {
   onEvent?: (event: AgentRunEvent) => void;
   imageUrls?: string[];
   bridgeTools?: Array<{ id: string; name: string; description: string; enabled: boolean; parameters?: any }>;
+  attachedAgents?: Agent[];
 }
 
-function buildMessages(history: AgentMessage[], userMessage: string, imageUrls?: string[]) {
+function buildMessages(history: AgentMessage[], userMessage: string, imageUrls?: string[], attachedAgents: Agent[] = []) {
   let userContent: any = userMessage;
+  const attachedAgentBlock = attachedAgents.length > 0
+    ? `\n\n[ATTACHED AGENTS]\n${attachedAgents.map((item) => {
+        const mode = item.mode || 'all';
+        const desc = item.description || 'No description';
+        return `- ${item.name} (id: ${item.id}, mode: ${mode})\n  Description: ${desc}\n  System Prompt: ${item.systemPrompt}`;
+      }).join('\n')}`
+    : '';
   if (imageUrls && imageUrls.length > 0) {
     userContent = [
-      { type: 'text', text: userMessage },
+      { type: 'text', text: `${userMessage}${attachedAgentBlock}` },
       ...imageUrls.map(url => ({ type: 'image_url', image_url: { url } }))
     ];
+  } else if (attachedAgentBlock) {
+    userContent = `${userMessage}${attachedAgentBlock}`;
   }
 
   return [
@@ -39,9 +49,10 @@ export async function runAgent({
   onError,
   onEvent,
   imageUrls,
-  bridgeTools = []
+  bridgeTools = [],
+  attachedAgents = []
 }: RunAgentParams): Promise<void> {
-  const messages = buildMessages(history, userMessage, imageUrls);
+  const messages = buildMessages(history, userMessage, imageUrls, attachedAgents);
 
   try {
     const response = await fetch('/api/agents/run', {
@@ -52,7 +63,8 @@ export async function runAgent({
       body: JSON.stringify({
         agent,
         messages,
-        bridgeTools
+        bridgeTools,
+        attachedAgents
       }),
     });
 

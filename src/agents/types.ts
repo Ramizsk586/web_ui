@@ -42,6 +42,32 @@ export interface AgentTool {
 
 export type AgentModel = string;
 
+export type AgentMode = 'primary' | 'subagent' | 'all';
+
+export type AgentPermissionAction = 'allow' | 'ask' | 'deny';
+
+export interface AgentPermissionRule {
+  [pattern: string]: AgentPermissionAction;
+}
+
+export interface AgentPermissions {
+  read?: AgentPermissionAction | AgentPermissionRule;
+  edit?: AgentPermissionAction | AgentPermissionRule;
+  glob?: AgentPermissionAction | AgentPermissionRule;
+  grep?: AgentPermissionAction | AgentPermissionRule;
+  list?: AgentPermissionAction | AgentPermissionRule;
+  bash?: AgentPermissionAction | AgentPermissionRule;
+  task?: AgentPermissionAction | AgentPermissionRule;
+  external_directory?: AgentPermissionAction | AgentPermissionRule;
+  todowrite?: AgentPermissionAction;
+  question?: AgentPermissionAction;
+  webfetch?: AgentPermissionAction;
+  websearch?: AgentPermissionAction;
+  lsp?: AgentPermissionAction | AgentPermissionRule;
+  doom_loop?: AgentPermissionAction;
+  skill?: AgentPermissionAction;
+}
+
 export interface AgentSkillFile {
   name: string;          // e.g. "AGENT.md", "TOOLS.md", "WORKFLOWS.md", "DOMAIN.md", "MEMORY.md"
   content: string;       // markdown content
@@ -70,6 +96,10 @@ export interface Agent {
   bridgeUrl?: string;
   bridgeApiKey?: string;
   bridgeModel?: string;
+  mode?: AgentMode;
+  hidden?: boolean;
+  steps?: number;
+  permissions?: AgentPermissions;
   executionMode?: 'legacy' | 'dispatcher';
 }
 
@@ -84,6 +114,7 @@ export interface AgentMessage {
   toolCalls?: any[]; // For render animations
   runId?: string;
   agentEvents?: AgentRunEvent[];
+  attachedAgentIds?: string[];
 }
 
 export interface AgentCreationDraft {
@@ -107,9 +138,13 @@ export interface AgentRunSpawnEvent {
   id: string;
   type: 'spawn';
   name: string;
+  agentId?: string;
+  mode?: AgentMode;
   status: 'active' | 'complete' | 'failed';
   task: string;
   integrations: string[];
+  permissions?: AgentPermissions;
+  summary?: string;
   result?: string;
 }
 
