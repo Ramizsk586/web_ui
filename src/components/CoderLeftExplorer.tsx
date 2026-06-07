@@ -995,14 +995,17 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
 
     setSelectedId(node.id);
 
-    // Clamp boundaries
+    // Keep the menu inside the viewport and nudge it inward near edges.
     const w = 200;
     const h = 210;
+    const margin = 12;
     let x = e.clientX;
     let y = e.clientY;
 
-    if (x + w > window.innerWidth) x = window.innerWidth - w - 4;
-    if (y + h > window.innerHeight) y = window.innerHeight - h - 4;
+    if (x + w > window.innerWidth - margin) x = window.innerWidth - w - margin;
+    if (y + h > window.innerHeight - margin) y = window.innerHeight - h - margin;
+    if (x < margin) x = margin;
+    if (y < margin) y = margin;
 
     setContextMenu({ x, y, node });
   };

@@ -115,6 +115,7 @@ export interface AgentMessage {
   runId?: string;
   agentEvents?: AgentRunEvent[];
   attachedAgentIds?: string[];
+  thinkContent?: string;
 }
 
 export interface AgentCreationDraft {

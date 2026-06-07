@@ -234,10 +234,22 @@ fn normalize_terminal_cwd(cwd: Option<String>) -> PathBuf {
 }
 
 #[cfg(target_os = "windows")]
+fn displayable_windows_path(cwd: &Path) -> String {
+    let raw = cwd.display().to_string();
+    if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{}", stripped)
+    } else if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        stripped.to_string()
+    } else {
+        raw
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn try_spawn_windows_terminal(cwd: &Path) -> Result<(), String> {
     // Use `cmd /c start` to launch Windows Terminal as a fully detached process.
     // This avoids inheriting the parent's console (e.g. VS Code integrated terminal).
-    let cwd_str = cwd.display().to_string();
+    let cwd_str = displayable_windows_path(cwd);
     Command::new("cmd")
         .args(["/c", "start", "wt", "-d", &cwd_str])
         .spawn()
@@ -248,9 +260,9 @@ fn try_spawn_windows_terminal(cwd: &Path) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn try_spawn_powershell_terminal(cwd: &Path) -> Result<(), String> {
     // Fallback: launch a standalone PowerShell window via `cmd /c start`.
-    let cwd_str = cwd.display().to_string();
+    let cwd_str = displayable_windows_path(cwd).replace('\'', "''");
     Command::new("cmd")
-        .args(["/c", "start", "powershell.exe", "-NoExit", "-Command", &format!("Set-Location -LiteralPath '{}'", cwd_str)])
+        .args(["/c", "start", "powershell.exe", "-NoExit", "-Command", &format!("cd '{}'", cwd_str)])
         .spawn()
         .map_err(|err| err.to_string())?;
     Ok(())

@@ -17,6 +17,7 @@ export interface ToolCallNode {
   removedCount?: number;
   oldContent?: string;
   newContent?: string;
+  toolCategory?: 'discovery' | 'read' | 'write' | 'execute' | 'delegate' | 'web' | 'question' | 'workflow' | 'other';
 }
 
 export interface Artifact {
@@ -32,6 +33,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  startedAt?: Date;
   thinking?: string;
   thinkContent?: string;
   isThinking?: boolean;

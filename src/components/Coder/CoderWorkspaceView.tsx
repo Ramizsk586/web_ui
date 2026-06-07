@@ -5,13 +5,9 @@ import {
   Sparkles, 
   Trash2, 
   Terminal, 
-  SquareTerminal, 
   Play, 
   Palette, 
-  Bot, 
   RefreshCw, 
-  X, 
-  Maximize2, 
   Code, 
   Activity, 
   FileText, 
@@ -23,9 +19,9 @@ import {
 } from 'lucide-react';
 import { CoderLeftExplorer } from '../CoderLeftExplorer';
 import { MessageItem } from '../Chat/MessageItem';
-import TerminalConsole from '../TerminalConsole';
 import { LivePreviewPanel } from '../LivePreviewPanel';
 import { FloatingCodeEditor } from '../FloatingCodeEditor';
+import { invokeTauri, isTauriDesktop } from '../../utils/tauriDesktop';
 
 import { Message, Chat } from '../../types';
 
@@ -51,17 +47,8 @@ interface CoderWorkspaceViewProps {
   handleClearChat: () => void;
   isWhiteboardOpen: boolean;
   setIsWhiteboardOpen: (open: boolean) => void;
-  isTerminalOpen: boolean;
-  setIsTerminalOpen: (open: boolean) => void;
-  isTerminalPopupOpen: boolean;
-  setIsTerminalPopupOpen: (open: boolean) => void;
   isCoderRightPanelOpen: boolean;
   setIsCoderRightPanelOpen: (open: boolean) => void;
-  elizaToggleSignal: number;
-  setElizaToggleSignal: React.Dispatch<React.SetStateAction<number>>;
-  isElizaActive: boolean;
-  setIsElizaActive: (active: boolean) => void;
-  setWorkspaceRefreshKey: React.Dispatch<React.SetStateAction<number>>;
   messages: Message[];
   markdownComponents: any;
   userProfile: any;
@@ -117,17 +104,8 @@ export default function CoderWorkspaceView({
   handleClearChat,
   isWhiteboardOpen,
   setIsWhiteboardOpen,
-  isTerminalOpen,
-  setIsTerminalOpen,
-  isTerminalPopupOpen,
-  setIsTerminalPopupOpen,
   isCoderRightPanelOpen,
   setIsCoderRightPanelOpen,
-  elizaToggleSignal,
-  setElizaToggleSignal,
-  isElizaActive,
-  setIsElizaActive,
-  setWorkspaceRefreshKey,
   messages,
   markdownComponents,
   userProfile,
@@ -204,6 +182,23 @@ export default function CoderWorkspaceView({
       return name.includes(q) || id.includes(q);
     });
   }, [activeModelList, searchQuery]);
+
+  const handleOpenNativeTerminal = React.useCallback(async () => {
+    if (!isTauriDesktop()) {
+      showToast('Native terminal launch is available in the desktop app only.');
+      return;
+    }
+
+    try {
+      await invokeTauri('open_native_terminal', {
+        cwd: coderWorkspacePath || undefined,
+      });
+      showToast('Opened Windows terminal in the project directory.');
+    } catch (error) {
+      console.error('Failed to open native terminal', error);
+      showToast('Could not open the native terminal.');
+    }
+  }, [coderWorkspacePath, showToast]);
 
   const handleExplorerResizeStart = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -492,27 +487,11 @@ export default function CoderWorkspaceView({
             </button>
 
             <button
-              onClick={() => setIsTerminalOpen(!isTerminalOpen)}
-              className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
-                isTerminalOpen 
-                  ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
-                  : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
-              }`}
-              title={isTerminalOpen ? "Collapse Terminal Panel" : "Expand Terminal Panel"}
+              onClick={handleOpenNativeTerminal}
+              className="p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]"
+              title="Open Windows terminal in the project folder"
             >
-              <Terminal size={14} className={isTerminalOpen ? 'text-[#D97756]' : ''} />
-            </button>
-
-            <button
-              onClick={() => setIsTerminalPopupOpen(!isTerminalPopupOpen)}
-              className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
-                isTerminalPopupOpen 
-                  ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
-                  : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
-              }`}
-              title={isTerminalPopupOpen ? "Close Terminal Popup" : "Open Terminal Popup Panel"}
-            >
-              <SquareTerminal size={14} className={isTerminalPopupOpen ? 'text-[#D97756]' : ''} />
+              <Terminal size={14} />
             </button>
 
             <button
@@ -582,6 +561,7 @@ export default function CoderWorkspaceView({
                       markdownComponents={markdownComponents}
                       userProfile={userProfile}
                       persona={persona}
+                      isCoderMode={true}
                       isSourcesPanelOpen={false}
                       setIsSourcesPanelOpen={STABLE_NOOP}
                       setSourcesPanelMessageId={STABLE_NOOP}
@@ -613,76 +593,6 @@ export default function CoderWorkspaceView({
           </div>
         </div>
 
-        {/* Collapsible Integrated Terminal */}
-        <AnimatePresence>
-          {isTerminalOpen && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 280, opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="h-[280px] border-t border-[#2C241E] bg-[#030302] flex flex-col overflow-hidden shrink-0 z-20"
-            >
-              {/* Header */}
-              <div className="h-8 bg-[#0F0D0C] border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 select-none">
-                <div className="flex items-center gap-2">
-                  <Terminal size={12} className="text-[#D97756]" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#D97756]">Developer Shell Terminal</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setIsTerminalPopupOpen(true);
-                      setIsTerminalOpen(false);
-                    }}
-                    className="p-1 hover:bg-[#201916] rounded text-[#AD9F91] hover:text-[#EDE6DD] transition-all cursor-pointer"
-                    title="Pop Out Terminal to Popup Panel"
-                  >
-                    <Maximize2 size={11} />
-                  </button>
-                  <button
-                    onClick={() => setElizaToggleSignal((s: number) => s + 1)}
-                    className={`p-1 rounded transition-all cursor-pointer border ${
-                      isElizaActive
-                        ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
-                        : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/20 hover:text-white'
-                    }`}
-                    title={isElizaActive ? "Exit ELIZA Psychotherapist CLI" : "Launch ELIZA Psychotherapist CLI"}
-                  >
-                    <Bot size={11} className={isElizaActive ? "animate-bounce text-pink-400" : ""} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setWorkspaceRefreshKey((k: number) => k + 1);
-                    }}
-                    className="p-1 hover:bg-[#201916] rounded text-[#AD9F91] hover:text-[#EDE6DD] transition-all cursor-pointer"
-                    title="Refresh Filesystem State"
-                  >
-                    <RefreshCw size={11} />
-                  </button>
-                  <button 
-                    onClick={() => setIsTerminalOpen(false)}
-                    className="p-1 hover:bg-[#201916] rounded text-[#7F7469] hover:text-[#EDE6DD] transition-all cursor-pointer"
-                    title="Close Terminal Console"
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              </div>
-              {/* Terminal Console Component */}
-              <div className="flex-1 min-h-0">
-                <TerminalConsole 
-                  workspaceRoot={coderWorkspacePath}
-                  isCoderMode={true}
-                  onToast={showToast} 
-                  triggerRefresh={() => setWorkspaceRefreshKey((k: number) => k + 1)}
-                  onElizaActiveChange={(active) => setIsElizaActive(active)}
-                  elizaToggleSignal={elizaToggleSignal}
-                />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       {/* RIGHT PANEL: Live App Preview Frame (collapsible sidebar) */}
@@ -728,95 +638,6 @@ export default function CoderWorkspaceView({
           triggerWorkspaceRefresh={triggerWorkspaceRefresh}
         />
       )}
-
-      {/* Floating manual terminal popup panel */}
-      <AnimatePresence>
-        {isTerminalPopupOpen && (
-          <div className="fixed inset-0 bg-[#0F0D0C]/85 backdrop-blur-md flex items-center justify-center z-[200] p-4 md:p-6 select-none animate-fade-in animate-duration-200">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.96, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 16 }}
-              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-              className="w-full max-w-4xl h-[78vh] bg-[#141211] border border-[#2D241E] rounded-2xl flex flex-col overflow-hidden shadow-[0_32px_80px_rgba(10,8,7,0.85)] relative font-sans"
-            >
-              {/* Soft ambient glow backing */}
-              <div className="absolute top-0 left-0 w-64 h-64 bg-[#D97756]/5 rounded-full blur-[70px] pointer-events-none" />
-              <div className="absolute bottom-0 right-0 w-64 h-64 bg-teal-500/3 rounded-full blur-[70px] pointer-events-none" />
-
-              {/* Header */}
-              <div className="h-14 border-b border-[#2C241E] bg-[#1F1917]/95 px-5 flex items-center justify-between shrink-0 relative z-10 select-none backdrop-blur-sm">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-[#D97756]/15 text-[#D97756] border border-[#D97756]/20">
-                    <SquareTerminal size={16} />
-                  </div>
-                  <div className="flex flex-col text-left">
-                    <span className="text-xs font-bold text-[#EDE6DD] tracking-wider uppercase font-sans">
-                      Interactive Developer Shell
-                    </span>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
-                      <span className="text-[10px] font-mono text-[#AD9F91]">
-                        Terminal Popup Mode
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setElizaToggleSignal((s: number) => s + 1)}
-                    className={`p-2 border rounded-lg transition-all cursor-pointer flex items-center justify-center ${
-                      isElizaActive
-                        ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
-                        : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/20 hover:text-white'
-                    }`}
-                    title={isElizaActive ? "Exit ELIZA Psychotherapist CLI" : "Launch ELIZA Psychotherapist CLI"}
-                  >
-                    <Bot size={12} className={isElizaActive ? "animate-bounce text-pink-400" : ""} />
-                  </button>
-
-                  <button
-                    onClick={() => setWorkspaceRefreshKey((k: number) => k + 1)}
-                    className="p-2 border border-[#2D241E] bg-[#1C1816]/40 text-[#AD9F91] hover:text-white rounded-lg transition-all cursor-pointer flex items-center gap-1.5 text-xs font-medium"
-                    title="Refresh Filesystem State"
-                  >
-                    <RefreshCw size={12} />
-                    <span className="text-[10px] font-semibold">Sync</span>
-                  </button>
-
-                  <button
-                    onClick={() => setIsTerminalPopupOpen(false)}
-                    className="p-2 hover:bg-[#2A2420] border border-[#2F2722] bg-[#1C1816]/50 rounded-lg text-[#AD9F91] hover:text-white transition-all cursor-pointer"
-                    title="Close Terminal Popup"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Interactive Terminal TerminalConsole */}
-              <div className="flex-1 min-h-0 bg-[#060505]">
-                <TerminalConsole 
-                  workspaceRoot={coderWorkspacePath}
-                  isCoderMode={true}
-                  onToast={showToast} 
-                  triggerRefresh={() => setWorkspaceRefreshKey((k: number) => k + 1)}
-                  onElizaActiveChange={(active) => setIsElizaActive(active)}
-                  elizaToggleSignal={elizaToggleSignal}
-                />
-              </div>
-
-              {/* Footer Info Bar */}
-              <div className="h-9 border-t border-[#2C241E] bg-[#0F0E0D] px-5 flex items-center justify-between text-[10px] text-[#7F7469] font-mono shrink-0 select-none">
-                <span>Server Terminal environment: Active on port 3000</span>
-                <span>Press ESC or click outside to dismiss</span>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
     </div>
   );
 }

@@ -1038,10 +1038,21 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    const menuWidth = 192;
+                    const menuHeight = 140;
+                    const margin = 12;
+                    const x = Math.min(
+                      Math.max(e.clientX, margin),
+                      Math.max(margin, window.innerWidth - menuWidth - margin)
+                    );
+                    const y = Math.min(
+                      Math.max(e.clientY, margin),
+                      Math.max(margin, window.innerHeight - menuHeight - margin)
+                    );
                     setAttachmentContextMenu({
                       visible: true,
-                      x: e.clientX,
-                      y: e.clientY,
+                      x,
+                      y,
                       attachment: att,
                       index: idx,
                     });

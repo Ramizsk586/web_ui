@@ -9,10 +9,6 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
   const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
   const [coderWorkspacePath, setCoderWorkspacePath] = useState('');
   const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(false);
-  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
-  const [isTerminalPopupOpen, setIsTerminalPopupOpen] = useState(false);
-  const [isElizaActive, setIsElizaActive] = useState(false);
-  const [elizaToggleSignal, setElizaToggleSignal] = useState(0);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
   const [floatingEditFile, setFloatingEditFile] = useState<string | null>(null);
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0);
@@ -140,10 +136,6 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
     isCoderLeftPanelOpen, setIsCoderLeftPanelOpen,
     coderWorkspacePath, setCoderWorkspacePath,
     isCoderRightPanelOpen, setIsCoderRightPanelOpen,
-    isTerminalOpen, setIsTerminalOpen,
-    isTerminalPopupOpen, setIsTerminalPopupOpen,
-    isElizaActive, setIsElizaActive,
-    elizaToggleSignal, setElizaToggleSignal,
     isWhiteboardOpen, setIsWhiteboardOpen,
     floatingEditFile, setFloatingEditFile,
     workspaceRefreshKey, setWorkspaceRefreshKey,

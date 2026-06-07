@@ -461,7 +461,7 @@ export function SettingsModal({
       id: 'coder',
       name: 'Coder Agent',
       role: 'Implements features, refactors, and edits workspace files.',
-      tools: ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'glob_tool', 'grep_tool'],
+      tools: ['read_file', 'write_file', 'edit_file', 'delete_file', 'rename_file', 'glob_tool', 'grep_tool'],
       prompt: 'You are the Coder subagent. Your role is to write clean, maintainable, and correct code in the workspace. Read the necessary files first, implement requested features or refactors, and ensure file paths are resolved properly.'
     },
     {
@@ -481,7 +481,7 @@ export function SettingsModal({
   ];
 
   const ALL_AVAILABLE_TOOLS = [
-    'read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file',
+    'read_file', 'write_file', 'edit_file', 'delete_file', 'rename_file',
     'glob_tool', 'grep_tool', 'analyze_file', 'run_command', 'ask_user', 'fetch_url', 'web_search'
   ];
 

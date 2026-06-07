@@ -111,13 +111,28 @@ import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
 import ResearchWorkspacePanel from './components/ResearchWorkspacePanel';
 import { CoderLeftExplorer } from './components/CoderLeftExplorer';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
-import TerminalConsole from './components/TerminalConsole';
 import Whiteboard from './components/Whiteboard';
 import { ChatsManagerPanel } from './components/ChatsManagerPanel';
 
 import { scrapeUrl, ScrapeResult, ScrapeOptions } from './services/scrapingService';
 import { ScrapingResultArtifact } from './components/ScrapingResultArtifact';
 import { ScrapingProgressIndicator } from './components/ScrapingProgressIndicator';
+
+const clampContextMenuPosition = (
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+  margin: number = 12
+) => {
+  const maxX = Math.max(margin, window.innerWidth - menuWidth - margin);
+  const maxY = Math.max(margin, window.innerHeight - menuHeight - margin);
+
+  return {
+    x: Math.min(Math.max(x, margin), maxX),
+    y: Math.min(Math.max(y, margin), maxY),
+  };
+};
 
 import { WikiArticleArtifact } from './components/WikiArticleArtifact';
 import { WikiSearchResultList } from './components/WikiSearchResultList';
@@ -174,8 +189,6 @@ import {
   computeLineDiff,
   getFileNameOnly
 } from './components/NodeGraph/FileDiffNode';
-
-import { NodeGraph } from './components/NodeGraph/NodeGraph';
 
 import { CanvasBlock } from './components/Chat/CanvasBlock';
 
@@ -393,10 +406,6 @@ export default function AppContent({
     isCoderLeftPanelOpen, setIsCoderLeftPanelOpen,
     coderWorkspacePath, setCoderWorkspacePath,
     isCoderRightPanelOpen, setIsCoderRightPanelOpen,
-    isTerminalOpen, setIsTerminalOpen,
-    isTerminalPopupOpen, setIsTerminalPopupOpen,
-    isElizaActive, setIsElizaActive,
-    elizaToggleSignal, setElizaToggleSignal,
     isWhiteboardOpen, setIsWhiteboardOpen,
     floatingEditFile, setFloatingEditFile,
     workspaceRefreshKey, setWorkspaceRefreshKey,
@@ -1540,6 +1549,7 @@ const startCoderPreview = useCallback(async () => {
   const markdownComponents = useMarkdownComponents();
 
   const [isMaximized, setIsMaximized] = useState(false);
+  const desktopContextMenuRef = useRef<HTMLDivElement | null>(null);
   const [desktopContextMenu, setDesktopContextMenu] = useState<{
     visible: boolean;
     x: number;
@@ -1563,6 +1573,26 @@ const startCoderPreview = useCallback(async () => {
   const isDesktopShell = isTauriDesktop();
 
   useEffect(() => {
+    if (!desktopContextMenu.visible || !desktopContextMenuRef.current) return;
+
+    const rect = desktopContextMenuRef.current.getBoundingClientRect();
+    const { x, y } = clampContextMenuPosition(
+      desktopContextMenu.x,
+      desktopContextMenu.y,
+      rect.width,
+      rect.height
+    );
+
+    if (x !== desktopContextMenu.x || y !== desktopContextMenu.y) {
+      setDesktopContextMenu((prev) => ({
+        ...prev,
+        x,
+        y,
+      }));
+    }
+  }, [desktopContextMenu]);
+
+  useEffect(() => {
     if (!isDesktopShell) return;
 
     let unlisten: (() => void) | undefined;
@@ -1581,11 +1611,12 @@ const startCoderPreview = useCallback(async () => {
       const target = e.target as HTMLElement | null;
       const isEditable = Boolean(target?.closest('input, textarea, [contenteditable="true"]'));
       const selectedText = window.getSelection?.()?.toString().trim() || '';
+      const { x, y } = clampContextMenuPosition(e.clientX, e.clientY, 228, 260);
       e.preventDefault();
       setDesktopContextMenu({
         visible: true,
-        x: e.clientX,
-        y: e.clientY,
+        x,
+        y,
         isEditable,
         selectedText,
       });
@@ -2650,17 +2681,8 @@ const startCoderPreview = useCallback(async () => {
             handleClearChat={handleClearChat}
             isWhiteboardOpen={isWhiteboardOpen}
             setIsWhiteboardOpen={setIsWhiteboardOpen}
-            isTerminalOpen={isTerminalOpen}
-            setIsTerminalOpen={setIsTerminalOpen}
-            isTerminalPopupOpen={isTerminalPopupOpen}
-            setIsTerminalPopupOpen={setIsTerminalPopupOpen}
             isCoderRightPanelOpen={isCoderRightPanelOpen}
             setIsCoderRightPanelOpen={setIsCoderRightPanelOpen}
-            elizaToggleSignal={elizaToggleSignal}
-            setElizaToggleSignal={setElizaToggleSignal}
-            isElizaActive={isElizaActive}
-            setIsElizaActive={setIsElizaActive}
-            setWorkspaceRefreshKey={setWorkspaceRefreshKey}
             messages={messages}
             markdownComponents={markdownComponents}
             userProfile={userProfile}
@@ -2990,6 +3012,7 @@ const startCoderPreview = useCallback(async () => {
                           markdownComponents={markdownComponents}
                           userProfile={userProfile}
                           persona={persona}
+                          isCoderMode={isCoderMode}
                           isSourcesPanelOpen={false}
                           setIsSourcesPanelOpen={STABLE_NOOP}
                           setSourcesPanelMessageId={STABLE_NOOP}
@@ -3584,6 +3607,7 @@ const startCoderPreview = useCallback(async () => {
 
       {desktopContextMenu.visible && (
         <div
+          ref={desktopContextMenuRef}
           className="fixed z-[320] w-[228px] select-none overflow-hidden rounded-[22px] border border-[#2A221E] bg-[linear-gradient(180deg,rgba(20,17,16,0.985)_0%,rgba(15,13,12,0.995)_100%)] px-3 py-3 shadow-[0_26px_72px_rgba(0,0,0,0.46)] backdrop-blur-xl"
           style={{ top: desktopContextMenu.y, left: desktopContextMenu.x }}
           onClick={(e) => e.stopPropagation()}

@@ -20,7 +20,8 @@ import {
   ThumbsDown,
   RotateCcw,
   Volume2,
-  VolumeX
+  VolumeX,
+  Clock3
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -31,6 +32,7 @@ import { NodeGraph, InlineToolCallCard } from '../NodeGraph/NodeGraph';
 import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
+import { TodoGenerationAnimation } from '../ui/Animations';
 
 
 interface SpeechStateListener {
@@ -168,6 +170,7 @@ interface MessageItemProps {
   markdownComponents: any; 
   userProfile: any; 
   persona: any; 
+  isCoderMode?: boolean;
   isSourcesPanelOpen: boolean; 
   setIsSourcesPanelOpen: (v: boolean) => void;
   setSourcesPanelMessageId: (v: string | null) => void;
@@ -189,6 +192,7 @@ function MessageItemComponent({
   markdownComponents, 
   userProfile, 
   persona, 
+  isCoderMode = false,
   isSourcesPanelOpen, 
   setIsSourcesPanelOpen, 
   setSourcesPanelMessageId,
@@ -225,9 +229,50 @@ function MessageItemComponent({
     };
   }, [message.id]);
 
+  const [isWorkSummaryCollapsed, setIsWorkSummaryCollapsed] = useState(true);
+
+  useEffect(() => {
+    if (message.isStreaming) {
+      setIsWorkSummaryCollapsed(false);
+    } else {
+      setIsWorkSummaryCollapsed(true);
+    }
+  }, [message.isStreaming, message.id]);
+
+  const toolCallsForSummary = useMemo(() => {
+    if (!message.toolCalls) return [];
+    return message.toolCalls.filter(node => node.id !== 'thinking-node');
+  }, [message.toolCalls]);
+
+  const shouldShowWorkedSummary = useMemo(() => {
+    return toolCallsForSummary.length > 0 && !message.isStreaming;
+  }, [toolCallsForSummary, message.isStreaming]);
+
+  const workedDurationLabel = useMemo(() => {
+    const started = message.startedAt ? new Date(message.startedAt) : null;
+    const ended = message.timestamp ? new Date(message.timestamp) : null;
+    if (!started || !ended) return 'Worked';
+    const diffMs = Math.max(0, ended.getTime() - started.getTime());
+    const totalSeconds = Math.max(1, Math.round(diffMs / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0) return `Worked for ${minutes}m ${seconds}s`;
+    return `Worked for ${seconds}s`;
+  }, [message.startedAt, message.timestamp]);
+
+  const isTodoPlanningState = useMemo(() => {
+    if (!message.isStreaming || message.content) return false;
+    const thinkingText = String(message.thinking || '').toLowerCase();
+    const toolNames = (message.toolCalls || []).map(node => String(node.toolName || '').toLowerCase());
+    return thinkingText.includes('todo') || toolNames.includes('manage_todos');
+  }, [message.isStreaming, message.content, message.thinking, message.toolCalls]);
+
   const nonInlineToolCalls = useMemo(() => {
     if (!message.toolCalls) return [];
-    return message.toolCalls.filter(node => !message.content?.includes(`[[tool_call:${node.id}]]`));
+    return message.toolCalls.filter(node => {
+      if (node.id === 'thinking-node') return false;
+      return !message.content?.includes(`[[tool_call:${node.id}]]`);
+    });
   }, [message.toolCalls, message.content]);
 
   const renderInlineContent = (content: string, isStreaming: boolean) => {
@@ -242,6 +287,9 @@ function MessageItemComponent({
           if (match) {
             const toolCallId = match[1];
             const node = message.toolCalls?.find(n => n.id === toolCallId);
+            if (!isStreaming && shouldShowWorkedSummary) {
+              return null;
+            }
             if (!node) {
               return (
                 <div key={idx} className="my-2 p-3 border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl flex items-center gap-2">
@@ -621,10 +669,13 @@ function MessageItemComponent({
         </motion.div>
       ) : (
         <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-4xl xl:max-w-[1100px]">
-          {((nonInlineToolCalls && nonInlineToolCalls.length > 0) || (message.thinkContent !== undefined && message.thinkContent.length > 0) || message.searchQuery || message.isSearching) && (
-            <NodeGraph 
-              nodes={nonInlineToolCalls} 
-              isStreaming={message.isStreaming} 
+          {((nonInlineToolCalls && nonInlineToolCalls.length > 0) ||
+            (message.thinkContent !== undefined && message.thinkContent.length > 0) ||
+            message.searchQuery ||
+            message.isSearching) && (
+            <NodeGraph
+              nodes={nonInlineToolCalls}
+              isStreaming={message.isStreaming}
               thinkContent={message.thinkContent}
               isStreamingThinking={message.isThinking}
               isSearching={message.isSearching}
@@ -635,6 +686,47 @@ function MessageItemComponent({
               onSendMessage={onSendMessage}
             />
           )}
+          {shouldShowWorkedSummary && (
+            <div className="border-t border-white/6 pt-1">
+              <button
+                type="button"
+                onClick={() => setIsWorkSummaryCollapsed(!isWorkSummaryCollapsed)}
+                className="w-full flex items-center justify-between py-2 text-left text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Clock3 size={14} className="text-zinc-500 shrink-0" />
+                  <span className="text-[13px] font-medium truncate">{workedDurationLabel}</span>
+                </div>
+                <ChevronDown
+                  size={14}
+                  className={`shrink-0 transition-transform duration-200 ${isWorkSummaryCollapsed ? '-rotate-90' : 'rotate-0'}`}
+                />
+              </button>
+              <AnimatePresence initial={false}>
+                {!isWorkSummaryCollapsed && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-3 pb-2">
+                      {toolCallsForSummary.map((node) => (
+                        <InlineToolCallCard
+                          key={node.id}
+                          node={node}
+                          scrapingResults={scrapingResults}
+                          wikiResults={wikiResults}
+                          onSendMessage={onSendMessage}
+                        />
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
           {message.searchQuery && (
             <SearchResultsUI 
               query={message.searchQuery} 
@@ -644,6 +736,8 @@ function MessageItemComponent({
           <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined, paddingLeft: '-1px' }}>
             {message.content ? (
               renderInlineContent(message.content, message.isStreaming ?? false)
+            ) : isTodoPlanningState ? (
+              <TodoGenerationAnimation />
             ) : message.isStreaming ? (
               <span className="text-zinc-400 animate-pulse text-left block">Generating...</span>
             ) : null}

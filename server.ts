@@ -21,6 +21,7 @@ import mammoth from "mammoth";
 
 import { RagBackendService } from "./src/services/ragBackendService";
 import { runDeepResearch } from "./server/deepResearchAgent";
+import { loadOpenCodeWorkspaceContext, resolveOpenCodeAgentProfile } from "./server/opencode";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,6 +85,8 @@ async function startServer() {
     permissions?: Record<string, any>;
   };
 
+  type OpenCodeContextPayload = ReturnType<typeof loadOpenCodeWorkspaceContext>;
+
   const randomRuntimeId = (prefix: string) =>
     `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -137,6 +140,85 @@ async function startServer() {
     permissions && typeof permissions === 'object'
       ? permissions
       : DEFAULT_SUBAGENT_PERMISSIONS;
+
+  const summarizeOpenCodeContext = (context: OpenCodeContextPayload) => {
+    if (!context.available) return '';
+
+    const sections: string[] = [];
+
+    if (context.commands.length > 0) {
+      sections.push(
+        `OpenCode workspace commands:\n${context.commands
+          .map((command) => `- /${command.id}: ${command.description}`)
+          .join('\n')}`
+      );
+    }
+
+    if (context.agents.length > 0) {
+      sections.push(
+        `OpenCode workspace agents:\n${context.agents
+          .map((agent) => `- ${agent.name} [mode=${agent.mode}]: ${agent.description}`)
+          .join('\n')}`
+      );
+    }
+
+    if (context.tools.length > 0) {
+      sections.push(
+        `OpenCode workspace tools:\n${context.tools
+          .map((tool) => `- ${tool.name}: ${tool.description}`)
+          .join('\n')}`
+      );
+    }
+
+    if (context.config) {
+      const enabledTools = Object.entries(context.config.toolStates)
+        .filter(([, enabled]) => enabled !== false)
+        .map(([name]) => name);
+      if (enabledTools.length > 0) {
+        sections.push(`OpenCode enabled tool flags: ${enabledTools.join(', ')}`);
+      }
+      const references = Object.entries(context.config.references || {});
+      if (references.length > 0) {
+        sections.push(
+          `OpenCode references:\n${references
+            .map(([name, target]) => `- ${name}: ${target}`)
+            .join('\n')}`
+        );
+      }
+    }
+
+    return sections.join('\n\n');
+  };
+
+  const extractOpenCodeToolIds = (context: OpenCodeContextPayload) => {
+    const ids = new Set<string>();
+    for (const item of [...context.commands, ...context.agents, ...context.tools]) {
+      for (const toolId of item.tools || []) {
+        if (toolId) ids.add(toolId);
+      }
+    }
+    return [...ids];
+  };
+
+  const normalizeOpenCodeToolNames = (toolIds: string[]) => {
+    const mappedTools: string[] = [];
+    for (const rt of toolIds.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)) {
+      if (rt === 'write') {
+        mappedTools.push('write_file', 'edit_file');
+      } else if (rt === 'filecreate') {
+        mappedTools.push('create_file');
+      } else if (rt === 'read') {
+        mappedTools.push('read_file');
+      } else if (rt === 'command' || rt === 'run_command' || rt === 'bash') {
+        mappedTools.push('run_command');
+      } else if (rt === 'search' || rt === 'search_code') {
+        mappedTools.push('glob_tool', 'grep_tool');
+      } else {
+        mappedTools.push(rt);
+      }
+    }
+    return [...new Set(mappedTools)];
+  };
 
   const buildAgentInstruction = (agent: RuntimeAgent) => {
     // 1. Check if any docs/ files exist in skillFiles (e.g. docs/soul.md, docs/guidelines.md, etc.)
@@ -509,6 +591,16 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     }
   });
 
+  app.post("/api/opencode/context", (req, res) => {
+    const workspaceRoot = resolveCoderPath(req.body?.workspaceRoot);
+    try {
+      const context = loadOpenCodeWorkspaceContext(workspaceRoot);
+      res.json(context);
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to load OpenCode workspace context" });
+    }
+  });
+
   app.post("/api/agents/run", async (req, res) => {
     const { agent, messages, bridgeTools = [], attachedAgents = [] } = req.body as {
       agent: RuntimeAgent;
@@ -636,16 +728,36 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     (async () => {
       try {
         const resolvedWorkspace = resolveCoderPath(workspaceRoot);
+        const openCodeContext = loadOpenCodeWorkspaceContext(resolvedWorkspace);
+        const openCodeProfile = resolveOpenCodeAgentProfile(resolvedWorkspace, agentName);
 
         // If customPrompt is provided from settings, use it directly
         let systemPrompt: string;
         let configuredTools: string[];
+        let resolvedPermissions = { ...DEFAULT_SUBAGENT_PERMISSIONS };
 
         if (customPrompt) {
           systemPrompt = customPrompt;
           configuredTools = Array.isArray(customTools) && customTools.length > 0
             ? customTools
             : ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool'];
+          if (openCodeProfile?.permissions) {
+            resolvedPermissions = { ...resolvedPermissions, ...openCodeProfile.permissions };
+          }
+        } else if (openCodeProfile) {
+          systemPrompt = openCodeProfile.content;
+          configuredTools = normalizeOpenCodeToolNames(openCodeProfile.tools);
+          if (configuredTools.length === 0) {
+            configuredTools = normalizeOpenCodeToolNames(extractOpenCodeToolIds(openCodeContext));
+          }
+          if (configuredTools.length === 0) {
+            configuredTools = ['read_file', 'glob_tool', 'grep_tool', 'run_command'];
+          }
+          if (openCodeProfile.permissions) {
+            resolvedPermissions = { ...resolvedPermissions, ...openCodeProfile.permissions };
+          } else if (openCodeContext.config?.permissions) {
+            resolvedPermissions = { ...resolvedPermissions, ...openCodeContext.config.permissions };
+          }
         } else {
           const promptPath = path.join(resolvedWorkspace, '.lumina', 'subagents', `${agentName}.prompt`);
           let promptContent = '';
@@ -656,12 +768,12 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
             if (fs.existsSync(fallbackPath)) {
               promptContent = fs.readFileSync(fallbackPath, 'utf8');
             } else {
-              promptContent = `---\ntools: [read_file, write_file, edit_file, create_file, delete_file, rename_file, run_command, search_code]\n---\nYou are ${agentName}, a specialized software engineering subagent. Your task is: ${task}`;
+              promptContent = `---\ntools: [read_file, write_file, edit_file, delete_file, rename_file, run_command, glob_tool, grep_tool]\n---\nYou are ${agentName}, a specialized software engineering subagent. Your task is: ${task}`;
             }
           }
 
           systemPrompt = promptContent;
-          configuredTools = ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'search_code'];
+          configuredTools = ['read_file', 'write_file', 'edit_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool'];
           const fmMatch = promptContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
           if (fmMatch) {
             const fmContent = fmMatch[1];
@@ -673,8 +785,8 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
               for (const rt of rawTools) {
                 if (rt === 'write') {
                   mappedTools.push('write_file', 'edit_file');
-                } else if (rt === 'filecreate') {
-                  mappedTools.push('create_file');
+                } else if (rt === 'filecreate' || rt === 'create_file') {
+                  mappedTools.push('write_file');
                 } else if (rt === 'read') {
                   mappedTools.push('read_file');
                 } else if (rt === 'command' || rt === 'run_command') {
@@ -691,6 +803,15 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
             }
           }
         }
+
+        if (openCodeContext.available) {
+          const contextSummary = summarizeOpenCodeContext(openCodeContext);
+          if (contextSummary) {
+            systemPrompt += `\n\n[OPENCODE WORKSPACE CONTEXT]\n${contextSummary}`;
+          }
+        }
+
+        activeSubagents[agentId].permissions = resolvedPermissions;
 
         if (agentName.toLowerCase().includes('analyzer')) {
           systemPrompt += `\n\nAnalyzer operating rules:
@@ -751,23 +872,6 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 all: { type: 'boolean', description: 'Replace all occurrences.' }
               },
               required: ['filePath', 'search', 'replace']
-            }
-          }
-        });
-
-        toolMap.set('create_file', {
-          type: 'function',
-          function: {
-            name: 'create_file',
-            description: 'Create a file or directory.',
-            parameters: {
-              type: 'object',
-              properties: {
-                filePath: { type: 'string', description: 'Path to create.' },
-                isDirectory: { type: 'boolean', description: 'Create directory.' },
-                content: { type: 'string', description: 'Optional initial content.' }
-              },
-              required: ['filePath']
             }
           }
         });
@@ -863,7 +967,6 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
             toolMap.get('read_file'),
             toolMap.get('write_file'),
             toolMap.get('edit_file'),
-            toolMap.get('create_file'),
             toolMap.get('glob_tool')
           );
         }
@@ -975,16 +1078,6 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 } else {
                   toolOutput = { error: 'File not found' };
                 }
-              } else if (toolName === 'create_file') {
-                const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
-                if (args.isDirectory) {
-                  fs.mkdirSync(fileRes, { recursive: true });
-                  toolOutput = { success: true, action: 'created_directory' };
-                } else {
-                  fs.mkdirSync(path.dirname(fileRes), { recursive: true });
-                  fs.writeFileSync(fileRes, args.content || '', 'utf8');
-                  toolOutput = { success: true, action: 'created_file' };
-                }
               } else if (toolName === 'delete_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
                 if (fs.existsSync(fileRes)) {
@@ -1032,7 +1125,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
                 let files = getFilesRecursively(resolvedWorkspace);
                 if (fileGlob) {
-                  files = files.filter(f => !f.isDirectory && f.relativePath.toLowerCase().includes(fileGlob));
+                  files = files.filter(f => !f.isDirectory && matchesWorkspaceGlob(f.relativePath, fileGlob));
                 } else {
                   files = files.filter(f => !f.isDirectory);
                 }
@@ -1046,11 +1139,11 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
                 let files = getFilesRecursively(resolvedWorkspace);
                 if (fileGlob) {
-                  files = files.filter(f => !f.isDirectory && f.relativePath.toLowerCase().includes(fileGlob));
+                  files = files.filter(f => !f.isDirectory && matchesWorkspaceGlob(f.relativePath, fileGlob));
                 } else {
                   files = files.filter(f => !f.isDirectory);
                 }
-                const matches = [];
+                const matches: { filePath: string; line: number; text: string }[] = [];
                 const maxResults = Math.min(Number(args.maxResults) || 30, 80);
                 let count = 0;
                 for (const file of files) {
@@ -1075,13 +1168,13 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 toolOutput = { error: `Tool ${toolName} not implemented` };
               }
 
-              const ev = agentEvents.find(e => e.id === eventId);
+              const ev = agentEvents.find((e: { id: string }) => e.id === eventId);
               if (ev) {
                 ev.status = 'complete';
                 ev.output = JSON.stringify(toolOutput).slice(0, 500);
               }
 
-              if (toolName === 'create_file' || toolName === 'write_file' || toolName === 'edit_file') {
+              if (toolName === 'write_file' || toolName === 'edit_file') {
                 const relPath = path.relative(resolvedWorkspace, resolveCoderPath(args.filePath, resolvedWorkspace)).replace(/\\/g, '/');
                 if (!activeSubagents[agentId].filesCreated.includes(relPath)) {
                   activeSubagents[agentId].filesCreated.push(relPath);
@@ -1089,7 +1182,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
               }
             } catch (toolErr: any) {
               toolOutput = { error: toolErr.message };
-              const ev = agentEvents.find(e => e.id === eventId);
+              const ev = agentEvents.find((e: { id: string }) => e.id === eventId);
               if (ev) {
                 ev.status = 'failed';
                 ev.output = toolErr.message;
@@ -2824,6 +2917,61 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     return results;
   }
 
+  const escapeGlobRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const globToRegExp = (pattern: string) => {
+    const normalized = String(pattern || '')
+      .replace(/\\/g, '/')
+      .trim()
+      .replace(/^\.\//, '');
+
+    if (!normalized) return null;
+
+    let regex = '';
+    for (let i = 0; i < normalized.length; i += 1) {
+      const char = normalized[i];
+      const next = normalized[i + 1];
+
+      if (char === '*' && next === '*') {
+        const afterNext = normalized[i + 2];
+        if (afterNext === '/') {
+          regex += '(?:.*/)?';
+          i += 2;
+        } else {
+          regex += '.*';
+          i += 1;
+        }
+        continue;
+      }
+
+      if (char === '*') {
+        regex += '[^/]*';
+        continue;
+      }
+
+      if (char === '?') {
+        regex += '[^/]';
+        continue;
+      }
+
+      regex += escapeGlobRegex(char);
+    }
+
+    return new RegExp(`^${regex}$`, 'i');
+  };
+
+  const matchesWorkspaceGlob = (filePath: string, pattern: string) => {
+    const normalizedPath = String(filePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const normalizedPattern = String(pattern || '').replace(/\\/g, '/').trim();
+
+    if (!normalizedPattern) return true;
+
+    const regex = globToRegExp(normalizedPattern);
+    if (!regex) return true;
+
+    return regex.test(normalizedPath);
+  };
+
   const resolveCoderPath = (inputPath?: string, workspaceRoot?: string) => {
     const raw = (inputPath || '').trim();
     const base = workspaceRoot || process.cwd();
@@ -3160,7 +3308,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       let numstatMap = new Map<string, { added: number, removed: number }>();
       try {
         const numstatOutput = execSync('git diff --numstat', { cwd: targetDir, encoding: 'utf8' });
-        numstatOutput.split('\n').filter(Boolean).forEach(line => {
+        numstatOutput.split('\n').filter(Boolean).forEach((line: string) => {
           const parts = line.trim().split(/\s+/);
           if (parts.length >= 3) {
             const added = parseInt(parts[0], 10) || 0;
@@ -3173,7 +3321,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         console.warn('git diff --numstat failed:', err);
       }
 
-      const changes = lines.map(line => {
+      const changes = lines.map((line: string) => {
         const status = line.substring(0, 2);
         const filePath = line.substring(3).trim().replace(/"/g, '');
         const normPath = filePath.replace(/\\/g, '/');
@@ -3223,7 +3371,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       });
       
       const ledgerChanges = Array.from((workspaceChangeLedger.get(normalizeWorkspaceKey(targetDir)) || new Map()).values())
-        .filter(change => !changes.some(gitChange => gitChange.filePath === change.filePath))
+        .filter(change => !changes.some((gitChange: { filePath: string }) => gitChange.filePath === change.filePath))
         .map(({ oldContent, newContent, ...change }) => change);
 
       res.json({ success: true, changes: [...changes, ...ledgerChanges], source: 'git' });
@@ -4138,6 +4286,86 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       return `Represents the selected <${tag}>${selectorDetails ? ` (${selectorDetails})` : ''} element from the preview. The attached code is the exact source node matched from its DOM attributes${selectorPath ? ` and selector path ${selectorPath}` : ''}.`;
     };
 
+    const staticAssetPathFromRef = (refValue: string) => {
+      const raw = String(refValue || '').trim();
+      if (!raw || /^([a-z]+:)?\/\//i.test(raw) || raw.startsWith('data:') || raw.startsWith('#')) return null;
+      const clean = raw.split('?')[0].split('#')[0].replace(/^\/+/, '');
+      if (!clean) return null;
+      const resolved = path.resolve(previewRoot, clean);
+      if (resolved !== previewRoot && !resolved.startsWith(previewRoot + path.sep)) return null;
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
+      return resolved;
+    };
+
+    const extractStaticLinkedAssets = (htmlContent: string) => {
+      const assets: Array<{ path: string; kind: 'script' | 'style' }> = [];
+      for (const match of htmlContent.matchAll(/<script[^>]+src=["']([^"']+)["'][^>]*>/gi)) {
+        const resolved = staticAssetPathFromRef(match[1]);
+        if (resolved) assets.push({ path: resolved, kind: 'script' });
+      }
+      for (const match of htmlContent.matchAll(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi)) {
+        const tagText = match[0] || '';
+        if (!/stylesheet/i.test(tagText)) continue;
+        const resolved = staticAssetPathFromRef(match[1]);
+        if (resolved) assets.push({ path: resolved, kind: 'style' });
+      }
+      return assets.filter((asset, index, arr) =>
+        arr.findIndex((entry) => normalizePath(entry.path) === normalizePath(asset.path)) === index
+      );
+    };
+
+    const runtimeHintTerms = (() => {
+      const values = [
+        tag,
+        id,
+        text,
+        parentText,
+        ariaLabel,
+        title,
+        selectorPath,
+        ...(domPath as string[]),
+        ...Object.keys(attributes as Record<string, string>),
+        ...Object.values(attributes as Record<string, string>),
+        ...Object.keys(dataAttributes as Record<string, string>),
+        ...Object.values(dataAttributes as Record<string, string>),
+        ...String(classes || '').split(/\s+/)
+      ];
+      return [...new Set(values
+        .flatMap((value) => String(value || '').toLowerCase().split(/[^a-z0-9_-]+/))
+        .map((term) => term.trim())
+        .filter((term) => term.length >= 3)
+      )];
+    })();
+
+    const looksRuntimeDrivenSelection = () => {
+      if (tag === 'canvas') return true;
+      if (sourceHint?.componentName || sourceHint?.ownerName) return true;
+      if ((domPath as string[]).some((segment) => /canvas|board|snake|food|apple|game|tile|cell|segment|score/i.test(String(segment)))) {
+        return true;
+      }
+      return runtimeHintTerms.some((term) => ['snake', 'food', 'apple', 'game', 'board', 'score', 'segment', 'cell', 'tile'].includes(term));
+    };
+
+    const scoreRuntimeAsset = (content: string, kind: 'script' | 'style') => {
+      let score = kind === 'script' ? 120 : 80;
+      for (const term of runtimeHintTerms) {
+        if (!term) continue;
+        if (content.includes(term)) score += kind === 'script' ? 40 : 28;
+      }
+      if (id && content.includes(id)) score += kind === 'script' ? 90 : 70;
+      for (const cls of selectedClasses) {
+        if (content.includes(cls)) score += kind === 'script' ? 65 : 95;
+      }
+      for (const [name, value] of Object.entries(dataAttributes as Record<string, string>)) {
+        if (value && content.includes(`${name}`)) score += 55;
+        if (value && content.includes(String(value))) score += 65;
+      }
+      if (selectedText && content.toLowerCase().includes(selectedText.toLowerCase())) score += 40;
+      if (selectorPath && content.includes(selectorPath.split('>').slice(-1)[0]?.trim() || '')) score += 20;
+      if (kind === 'script' && looksRuntimeDrivenSelection()) score += 140;
+      return score;
+    };
+
     const findNeedleIndex = (content: string) => {
       const checks: string[] = [];
       if (id) checks.push(`id="${id}"`, `id='${id}'`, `id={${id}}`, `id={"${id}"}`, String(id));
@@ -4642,10 +4870,65 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     }
 
     let fileContentWindow = targetFile.content;
-    const fileContent = targetFile.content;
-    const filePath = targetFile.path;
+    let fileContent = targetFile.content;
+    let filePath = targetFile.path;
     let matchIndex = typeof targetFile.matchIndex === 'number' ? targetFile.matchIndex : -1;
     if (matchIndex === -1) matchIndex = findNeedleIndex(fileContent);
+
+    let relatedConnections: Array<{ fileName: string; filePath: string; name?: string }> = [];
+    const htmlReferenceFile =
+      /\.(html?|htm)$/i.test(targetFile.name)
+        ? targetFile
+        : candidates.find((candidate) => normalizePath(candidate.path) !== normalizePath(targetFile.path) && /\.(html?|htm)$/i.test(candidate.name));
+
+    if (htmlReferenceFile?.content) {
+      const linkedAssets = extractStaticLinkedAssets(htmlReferenceFile.content);
+      relatedConnections = linkedAssets.map((asset) => ({
+        fileName: path.basename(asset.path),
+        filePath: normalizePath(asset.path),
+        name: asset.kind === 'script' ? 'Linked script' : 'Linked stylesheet'
+      }));
+
+      if (/\.(html?|htm)$/i.test(targetFile.name) && linkedAssets.length > 0) {
+        let promotedAsset: { name: string; path: string; content: string; score: number; matchIndex: number } | null = null;
+
+        for (const asset of linkedAssets) {
+          try {
+            const content = fs.readFileSync(asset.path, 'utf8');
+            const score = scoreRuntimeAsset(content.toLowerCase(), asset.kind);
+            const rawMatchIndex = findNeedleIndex(content);
+            const clsMatchIndex = selectedClasses.find((cls) => content.includes(cls));
+            const matchIndexForAsset = rawMatchIndex !== -1
+              ? rawMatchIndex
+              : clsMatchIndex
+                ? content.indexOf(clsMatchIndex)
+                : runtimeHintTerms.find((term) => content.toLowerCase().includes(term))
+                  ? content.toLowerCase().indexOf(runtimeHintTerms.find((term) => content.toLowerCase().includes(term)) as string)
+                  : -1;
+
+            if (!promotedAsset || score > promotedAsset.score) {
+              promotedAsset = {
+                name: path.basename(asset.path),
+                path: normalizePath(asset.path),
+                content,
+                score,
+                matchIndex: matchIndexForAsset
+              };
+            }
+          } catch {
+            // Ignore unreadable linked asset.
+          }
+        }
+
+        if (promotedAsset && promotedAsset.score >= 180) {
+          targetFile = promotedAsset;
+          fileContent = promotedAsset.content;
+          filePath = promotedAsset.path;
+          fileContentWindow = promotedAsset.content;
+          matchIndex = promotedAsset.matchIndex;
+        }
+      }
+    }
 
     const exactElementSnippet = extractExactElementSnippet(fileContent);
     const extractedSnippet = exactElementSnippet || extractBalancedSnippet(fileContent, matchIndex);
@@ -4672,7 +4955,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           lineNumber: exactElementSnippet.lineNumber,
           lineRangeStart: exactElementSnippet.lineRangeStart,
           lineRangeEnd: exactElementSnippet.lineRangeEnd,
-          connections: [],
+          connections: relatedConnections,
           elementWork: buildElementWork()
         }
       });
@@ -4691,7 +4974,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           lineNumber: lineMetadata.lineNumber,
           lineRangeStart: lineMetadata.lineRangeStart,
           lineRangeEnd: lineMetadata.lineRangeEnd,
-          connections: [],
+          connections: relatedConnections,
           elementWork: `Controls the UI view and rendering logic for selected <${tag}> element on the preview viewport.`
         }
       });
@@ -4767,7 +5050,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
           lineRangeStart: parsed.lineRangeStart || lineMetadata.lineRangeStart || parsed.lineNumber || sourceHint?.lineNumber,
           lineRangeEnd: parsed.lineRangeEnd || lineMetadata.lineRangeEnd || parsed.lineNumber || sourceHint?.lineNumber,
           specificCode: parsed.specificCode || fileContentWindow.substring(0, 1000),
-          connections: parsed.connections || [],
+          connections: Array.isArray(parsed.connections) && parsed.connections.length > 0 ? parsed.connections : relatedConnections,
           elementWork: parsed.elementWork || `Controls interaction and state updates for this selected <${tag}> element.`
         }
       });
@@ -4783,7 +5066,7 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
           lineRangeStart: lineMetadata.lineRangeStart,
           lineRangeEnd: lineMetadata.lineRangeEnd,
           specificCode: fileContentWindow.substring(0, 1000),
-          connections: [],
+          connections: relatedConnections,
           elementWork: `Controls state updates and visual layout representation for the selected <${tag}> element.`
         }
       });
@@ -6586,6 +6869,3 @@ ${contextStr}`;
 }
 
 startServer();
-
-
-

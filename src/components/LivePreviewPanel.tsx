@@ -26,7 +26,6 @@ import {
   Settings,
   Activity
 } from 'lucide-react';
-import { getTerminalSessionId } from '../utils/terminalService';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -1298,24 +1297,6 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                 )}
               </div>
 
-              {/* Terminal Session Task */}
-              <div className="flex flex-col p-3 rounded-xl border border-zinc-850 bg-[#141211] space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-teal-500" />
-                    <span className="text-xs font-semibold text-zinc-200">Lumina Terminal Shell</span>
-                  </div>
-                  <span className="text-[9px] font-mono uppercase tracking-wider text-zinc-550 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
-                    active
-                  </span>
-                </div>
-                <div className="text-[9px] text-zinc-550 font-mono space-y-0.5 pl-4 border-l border-zinc-800">
-                  {getTerminalSessionId() && (
-                    <div>Session ID: <span className="text-zinc-450">{getTerminalSessionId()?.slice(0, 8)}...</span></div>
-                  )}
-                  <div>CWD: <span className="text-zinc-450">{workspaceRootPath || '.'}</span></div>
-                </div>
-              </div>
             </div>
           </div>
         </div>

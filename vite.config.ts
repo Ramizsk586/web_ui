@@ -9,6 +9,21 @@ export default defineConfig(({mode}) => {
   const isProd = mode === 'production';
   return {
     plugins: [
+      {
+        name: 'strip-broken-monaco-loader-sourcemap',
+        enforce: 'pre',
+        transform(code, id) {
+          const normalizedId = id.replace(/\\/g, '/');
+          if (!normalizedId.endsWith('/monaco-editor/min/vs/loader.js')) {
+            return null;
+          }
+
+          return {
+            code: code.replace(/\n\/\/# sourceMappingURL=\.\.\/\.\.\/min-maps\/vs\/loader\.js\.map\s*$/, ''),
+            map: null,
+          };
+        },
+      },
       react({
         // Enable automatic JSX runtime for smaller output
         jsxRuntime: 'automatic',
@@ -106,9 +121,6 @@ export default defineConfig(({mode}) => {
       port: 3000,
       strictPort: true,
       hmr: false,
-      sourcemapIgnoreList: (_sourcePath, sourcemapPath) => {
-        return sourcemapPath.includes('monaco-editor/min/vs/loader.js.map');
-      },
       watch: {
         ignored: ['**/src-tauri/**', '**/target/**'],
       },

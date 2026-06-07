@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { 
   Globe, 
   Sparkles, 
@@ -102,6 +102,201 @@ const normalizeToolFilePath = (filePath: string, workspaceRoot?: string) => {
   return withoutLeading.replace(/^[A-Za-z]:\/Project\/?/i, '');
 };
 
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const splitGlobBraceOptions = (value: string) => {
+  const options: string[] = [];
+  let current = '';
+  let depth = 0;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i];
+
+    if (char === ',' && depth === 0) {
+      options.push(current);
+      current = '';
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}' && depth > 0) {
+      depth -= 1;
+    }
+
+    current += char;
+  }
+
+  options.push(current);
+  return options;
+};
+
+const globToRegExp = (pattern: string) => {
+  const normalized = String(pattern || '')
+    .replace(/\\/g, '/')
+    .trim()
+    .replace(/^\.\//, '');
+
+  if (!normalized) return null;
+
+  let regex = '';
+  for (let i = 0; i < normalized.length; i += 1) {
+    const char = normalized[i];
+    const next = normalized[i + 1];
+
+    if (char === '*' && next === '*') {
+      const afterNext = normalized[i + 2];
+      if (afterNext === '/') {
+        regex += '(?:.*/)?';
+        i += 2;
+      } else {
+        regex += '.*';
+        i += 1;
+      }
+      continue;
+    }
+
+    if (char === '*') {
+      regex += '[^/]*';
+      continue;
+    }
+
+    if (char === '?') {
+      regex += '[^/]';
+      continue;
+    }
+
+    if (char === '{') {
+      let depth = 1;
+      let end = i + 1;
+
+      while (end < normalized.length && depth > 0) {
+        if (normalized[end] === '{') depth += 1;
+        if (normalized[end] === '}') depth -= 1;
+        end += 1;
+      }
+
+      if (depth === 0) {
+        const braceContent = normalized.slice(i + 1, end - 1);
+        const options = splitGlobBraceOptions(braceContent)
+          .map(option => globToRegExp(option))
+          .filter((value): value is RegExp => Boolean(value))
+          .map(value => value.source.replace(/^\^/, '').replace(/\$$/, ''));
+
+        if (options.length > 0) {
+          regex += `(?:${options.join('|')})`;
+          i = end - 1;
+          continue;
+        }
+      }
+    }
+
+    regex += escapeRegex(char);
+  }
+
+  return new RegExp(`^${regex}$`, 'i');
+};
+
+const matchesWorkspaceGlob = (filePath: string, pattern: string) => {
+  const normalizedPath = String(filePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const normalizedPattern = String(pattern || '').replace(/\\/g, '/').trim();
+
+  if (!normalizedPattern) return true;
+
+  const regex = globToRegExp(normalizedPattern);
+  if (!regex) return true;
+
+  return regex.test(normalizedPath);
+};
+
+const getToolCategory = (toolName: string): ToolCallNode['toolCategory'] => {
+  if (['glob_tool', 'grep_tool', 'analyze_file'].includes(toolName)) return 'discovery';
+  if (toolName === 'read_file') return 'read';
+  if (['write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'apply_patch'].includes(toolName)) return 'write';
+  if (toolName === 'run_command') return 'execute';
+  if (toolName.startsWith('spawn_')) return 'delegate';
+  if (['fetch_url', 'web_search', 'web_scrape', 'search', 'visit', 'google_scholar'].includes(toolName) || toolName.startsWith('wiki_') || toolName.startsWith('composio_')) return 'web';
+  if (toolName === 'ask_user') return 'question';
+  if (['run_skill', 'manage_todos', 'todowrite', 'current_time'].includes(toolName)) return 'workflow';
+  return 'other';
+};
+
+const buildCoderToolSelection = (
+  allTools: any[],
+  userInput: string,
+  activeAssistantMode: string
+) => {
+  const lower = String(userInput || '').toLowerCase();
+  const allow = new Set<string>();
+
+  [
+    'run_skill', 'read_file', 'glob_tool', 'grep_tool', 'analyze_file',
+    'edit_file', 'apply_patch', 'write_file', 'create_file',
+    'todowrite', 'ask_user'
+  ].forEach(name => allow.add(name));
+
+  if (/\b(run|test|build|lint|start|npm|pnpm|yarn|command|terminal|debug|error|failing|verify|compile)\b/.test(lower) || activeAssistantMode === 'debugger' || activeAssistantMode === 'tester') {
+    allow.add('run_command');
+    allow.add('spawn_debugger');
+  }
+
+  if (/\b(delete|remove)\b/.test(lower)) {
+    allow.add('delete_file');
+  }
+
+  if (/\b(rename|move)\b/.test(lower)) {
+    allow.add('rename_file');
+  }
+
+  if (/\b(search the web|latest|docs|documentation|api|website|url|fetch|scrape|current)\b/.test(lower)) {
+    allow.add('fetch_url');
+    allow.add('web_search');
+  }
+
+  if (/\b(review|audit|analyze|trace|find|locate|where|which file)\b/.test(lower) || activeAssistantMode === 'reviewer' || activeAssistantMode === 'planner') {
+    allow.add('spawn_analyzer');
+    allow.add('spawn_reviewer');
+  }
+
+  if (/\b(build|implement|feature|refactor|create)\b/.test(lower) || activeAssistantMode === 'builder') {
+    allow.add('spawn_coder');
+  }
+
+  if (/\b(orchestrate|plan|phases|workflow|complex|full app|full project)\b/.test(lower) || activeAssistantMode === 'planner') {
+    allow.add('spawn_orchestrator');
+  }
+
+  const priorityOrder = [
+    'run_skill', 'glob_tool', 'grep_tool', 'read_file', 'analyze_file',
+    'edit_file', 'apply_patch', 'write_file', 'create_file', 'rename_file', 'delete_file',
+    'run_command', 'spawn_analyzer', 'spawn_coder', 'spawn_debugger', 'spawn_reviewer', 'spawn_orchestrator',
+    'fetch_url', 'web_search', 'ask_user', 'todowrite'
+  ];
+
+  const tools = allTools
+    .filter((tool: any) => allow.has(tool?.function?.name))
+    .sort((a: any, b: any) => {
+      const aIdx = priorityOrder.indexOf(a?.function?.name);
+      const bIdx = priorityOrder.indexOf(b?.function?.name);
+      return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+    });
+
+  const toolNames = tools.map((tool: any) => tool?.function?.name).filter(Boolean);
+  const guidance = [
+    'Tool strategy for this request:',
+    `- Start with discovery tools when the target file or symbol is not already known: ${toolNames.filter((name: string) => ['run_skill', 'glob_tool', 'grep_tool', 'read_file', 'analyze_file'].includes(name)).join(', ') || 'glob_tool, grep_tool, read_file'}.`,
+    `- Use edit tools for existing files and reserve full rewrites for clear cases: ${toolNames.filter((name: string) => ['edit_file', 'apply_patch', 'write_file', 'create_file', 'rename_file', 'delete_file'].includes(name)).join(', ') || 'edit_file, write_file'}.`,
+    `- Use execution or delegation only when needed for verification or parallel work: ${toolNames.filter((name: string) => ['run_command', 'spawn_analyzer', 'spawn_coder', 'spawn_debugger', 'spawn_reviewer', 'spawn_orchestrator'].includes(name)).join(', ') || 'run_command'}.`,
+    '- Avoid repeating the same tool call with identical arguments after it has already succeeded or failed in this turn.',
+    '- Prefer one high-signal tool call over multiple overlapping exploratory calls.'
+  ].join('\n');
+
+  return {
+    tools: tools.length > 0 ? tools : allTools,
+    guidance
+  };
+};
+
 const getVirtualSkillMatch = (filePath: string) => {
   const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '').trim();
   const match = normalized.match(/^(?:\.lumina\/)?skills\/([a-zA-Z0-9_-]+)\/(.+)$/i);
@@ -163,6 +358,126 @@ const createStableTurnId = (prefix: string, ...parts: Array<string | number | un
     .map((part) => String(part).replace(/[^a-zA-Z0-9_.-]+/g, '-'))
     .join('-');
   return `${prefix}-${Date.now().toString(36)}-${suffix || 'item'}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
+type OpenCodeContextItem = {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  sourcePath: string;
+  tools: string[];
+  mode: 'primary' | 'subagent' | 'all';
+  permissions?: Record<string, any>;
+};
+
+type OpenCodeContext = {
+  available: boolean;
+  root: string;
+  commands: OpenCodeContextItem[];
+  agents: OpenCodeContextItem[];
+  tools: OpenCodeContextItem[];
+  config: {
+    references: Record<string, string>;
+    permissions: Record<string, any>;
+    toolStates: Record<string, boolean>;
+  } | null;
+};
+
+const normalizeOpenCodeKey = (value: string) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+const inferOpenCodeCommandKey = (input: string) => {
+  const trimmed = String(input || '').trim();
+  if (!trimmed.startsWith('/')) return '';
+  const firstSpace = trimmed.indexOf(' ');
+  const raw = firstSpace === -1 ? trimmed.slice(1) : trimmed.slice(1, firstSpace);
+  return normalizeOpenCodeKey(raw);
+};
+
+const buildOpenCodePromptPrelude = (
+  context: OpenCodeContext | null,
+  input: string,
+  activeAssistantMode: string
+) => {
+  if (!context?.available) {
+    return {
+      prompt: '',
+      preferredTools: [] as string[],
+    };
+  }
+
+  const commandKey = inferOpenCodeCommandKey(input);
+  const normalizedMode = normalizeOpenCodeKey(activeAssistantMode);
+  const directCommand = commandKey
+    ? context.commands.find((item) => normalizeOpenCodeKey(item.id) === commandKey || normalizeOpenCodeKey(item.name) === commandKey)
+    : null;
+  const roleAgent = context.agents.find((item) => {
+    const id = normalizeOpenCodeKey(item.id);
+    return (
+      id === normalizedMode ||
+      (normalizedMode === 'builder' && id === 'build') ||
+      (normalizedMode === 'planner' && id === 'plan') ||
+      ((normalizedMode === 'reviewer' || normalizedMode === 'tester') && id === 'general')
+    );
+  }) || null;
+
+  const selectedItems = [directCommand, roleAgent].filter(Boolean) as OpenCodeContextItem[];
+  const preferredTools = [...new Set(selectedItems.flatMap((item) => item.tools || []))];
+
+  const sections: string[] = [];
+  if (directCommand) {
+    sections.push(`Selected OpenCode command /${directCommand.id} from ${directCommand.sourcePath}:\n${directCommand.content}`);
+  }
+  if (roleAgent) {
+    sections.push(`Selected OpenCode agent profile ${roleAgent.name} from ${roleAgent.sourcePath}:\n${roleAgent.content}`);
+  }
+
+  if (!directCommand && context.commands.length > 0) {
+    sections.push(
+      `Available OpenCode commands:\n${context.commands
+        .map((item) => `- /${item.id}: ${item.description}`)
+        .join('\n')}`
+    );
+  }
+
+  if (context.agents.length > 0) {
+    sections.push(
+      `Available OpenCode agents:\n${context.agents
+        .map((item) => `- ${item.name} [mode=${item.mode}]: ${item.description}`)
+        .join('\n')}`
+    );
+  }
+
+  if (context.tools.length > 0) {
+    sections.push(
+      `Available OpenCode tool guides:\n${context.tools
+        .map((item) => `- ${item.name}: ${item.description}`)
+        .join('\n')}`
+    );
+  }
+
+  if (context.config) {
+    const enabledFlags = Object.entries(context.config.toolStates || {})
+      .filter(([, enabled]) => enabled !== false)
+      .map(([name]) => name);
+    if (enabledFlags.length > 0) {
+      sections.push(`OpenCode enabled tool flags: ${enabledFlags.join(', ')}`);
+    }
+    const references = Object.entries(context.config.references || {});
+    if (references.length > 0) {
+      sections.push(`OpenCode references:\n${references.map(([name, target]) => `- ${name}: ${target}`).join('\n')}`);
+    }
+  }
+
+  return {
+    prompt: sections.length > 0 ? `\n\n[OPENCODE WORKSPACE CONTEXT]\n${sections.join('\n\n')}` : '',
+    preferredTools,
+  };
 };
 
 const inferWritingStyleFromPrompt = (input: string): string => {
@@ -403,6 +718,7 @@ const buildSkillExecutionPayload = (skill: any, inputVal: string) => {
     description: skill.description || '',
     trigger: skill.trigger || '',
     input: inputVal,
+    mode: 'read_skill_context',
     markdown: skillMd?.content || '',
     files: Array.isArray(skill?.tree)
       ? skill.tree.map((node: any) => ({
@@ -417,9 +733,10 @@ const buildSkillExecutionPayload = (skill: any, inputVal: string) => {
       ? scriptsFolder.children.map((node: any) => node?.name || '').filter(Boolean)
       : [],
     instructions: [
-      `Use the SKILL.md content as the primary operating procedure for "${skill.name || skill.id}".`,
+      `Read the SKILL.md content as the primary operating procedure for "${skill.name || skill.id}".`,
+      'This tool loads skill context for the AI. It does not execute a separate built-in runtime skill.',
       'Read any referenced files from the virtual .lumina/skills directory if the skill says they are needed.',
-      'Treat this as a reusable workflow, not as a single static prefix prompt.',
+      'Treat this as a reusable workflow and knowledge source, not as a single static prefix prompt.',
       'Follow the procedure, constraints, and verification guidance described by the skill.'
     ]
   };
@@ -500,6 +817,17 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     logPermissionAction
     , luminaConvex
   } = params;
+
+  const coderPermissionModeRef = React.useRef(coderPermissionMode);
+  const alwaysAllowedCommandsRef = React.useRef(alwaysAllowedCommands);
+
+  useEffect(() => {
+    coderPermissionModeRef.current = coderPermissionMode;
+  }, [coderPermissionMode]);
+
+  useEffect(() => {
+    alwaysAllowedCommandsRef.current = alwaysAllowedCommands;
+  }, [alwaysAllowedCommands]);
 
   const retrieveAndRecallMemories = useCallback((userQuery: string): { systemPromptAddendum: string; matchedMemories: any[] } => {
     let records: any[] = [];
@@ -987,6 +1315,12 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       chatId = createNewChat(null, isCoderMode);
     }
 
+    const activeChatForTurn = chats.find(c => c.id === chatId) || null;
+    const effectiveCoderMode =
+      isCoderMode ||
+      Boolean((activeChatForTurn as any)?.isCoderMode) ||
+      content.startsWith('/coder');
+
     const userMessage: Message = {
       id: createStableTurnId('msg', chatId, 'user'),
       role: 'user',
@@ -1021,12 +1355,13 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
     }
 
     const thinkingId = createStableTurnId('msg', chatId, 'assistant');
-    const isCoderPlanning = isCoderMode || content.startsWith('/coder');
+    const isCoderPlanning = effectiveCoderMode || content.startsWith('/coder');
     const thinkingMessage: Message = {
       id: thinkingId,
       role: 'assistant',
       content: '',
       timestamp: new Date(),
+      startedAt: new Date(),
       thinking: isCoderPlanning ? 'Generating engineering TODOs...' : (isWebSearchEnabled ? 'Searching the web...' : 'Thinking...'),
       isSearching: isWebSearchEnabled,
       isStreaming: true,
@@ -1056,7 +1391,7 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
     }));
 
     const isSlash = content.startsWith('/');
-    const shouldRunCoderAgent = isCoderMode && isLikelyCoderTask(content);
+    const shouldRunCoderAgent = effectiveCoderMode && isLikelyCoderTask(content);
     if (isSlash || shouldRunCoderAgent) {
       setIsGeneratingTodos(true);
       setShowTodoPanel(true);
@@ -1410,11 +1745,28 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       }
     }
 
+    let openCodeContext: OpenCodeContext | null = null;
+    if (effectiveCoderMode) {
+      try {
+        const contextRes = await fetch('/api/opencode/context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceRoot: coderWorkspacePath || '.' }),
+          signal
+        });
+        if (contextRes.ok) {
+          openCodeContext = await contextRes.json();
+        }
+      } catch (error) {
+        console.warn('Failed to load OpenCode workspace context:', error);
+      }
+    }
+
     try {
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       
       let activeTools = buildActiveTools();
-      if (isDeepSearchEnabled && !isCoderMode) {
+      if (isDeepSearchEnabled && !effectiveCoderMode) {
         const existingNames = new Set(activeTools.map((tool: any) => tool?.function?.name).filter(Boolean));
         for (const tool of deepResearchTools) {
           if (!existingNames.has(tool.function.name)) {
@@ -1422,7 +1774,7 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
           }
         }
       }
-      if (isCoderMode) {
+      if (effectiveCoderMode) {
         activeTools.push(
           ...[
             { name: 'spawn_orchestrator', desc: 'Spawn the Orchestrator agent to coordinate execution, plan subtasks, and assign work for a project.' },
@@ -1703,7 +2055,27 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
         );
       }
 
-      if (isCoderMode && orchestrationState.awaitingUserConfirmation) {
+      let coderToolGuidance = '';
+      let openCodePreferredTools: string[] = [];
+      if (effectiveCoderMode) {
+        const coderSelection = buildCoderToolSelection(activeTools, content, activeAssistantMode);
+        activeTools = coderSelection.tools;
+        coderToolGuidance = coderSelection.guidance;
+        const openCodePrelude = buildOpenCodePromptPrelude(openCodeContext, content, activeAssistantMode);
+        openCodePreferredTools = openCodePrelude.preferredTools;
+        if (openCodePreferredTools.length > 0) {
+          const byName = new Map(activeTools.map((tool: any) => [tool?.function?.name, tool]));
+          const extraTools = buildActiveTools()
+            .filter((tool: any) => openCodePreferredTools.includes(tool?.function?.name))
+            .filter((tool: any) => !byName.has(tool?.function?.name));
+          if (extraTools.length > 0) {
+            activeTools = [...activeTools, ...extraTools];
+          }
+          coderToolGuidance += `\n- OpenCode workspace preference tools for this request: ${openCodePreferredTools.join(', ')}.`;
+        }
+      }
+
+      if (effectiveCoderMode && orchestrationState.awaitingUserConfirmation) {
         activeTools = [];
       }
       const personaLine = `You are ${persona.name}. Character description/Role: ${persona.role || 'helpful digital assistant'}.${persona.systemPrompt ? `\nInstructions: ${persona.systemPrompt}` : ''}`;
@@ -1809,6 +2181,15 @@ ${skillMd.content}
       if (activeTools.length > 0) {
         systemPrompt += `\n[TOOLS] Active: ${activeTools.map(t => t.function.name).join(', ')}. Use relevant tools proactively.`;
       }
+      if (isCoderMode && coderToolGuidance) {
+        systemPrompt += `\n\n[CODER TOOL ROUTING]\n${coderToolGuidance}`;
+      }
+      if (isCoderMode) {
+        const openCodePrelude = buildOpenCodePromptPrelude(openCodeContext, content, activeAssistantMode);
+        if (openCodePrelude.prompt) {
+          systemPrompt += openCodePrelude.prompt;
+        }
+      }
 
       const deepResearchPreset = (researchMode?.depthPreset || 'standard') as 'standard' | 'extreme';
       const deepResearchMinimums = getDeepResearchMinimums(deepResearchPreset);
@@ -1842,6 +2223,13 @@ Provide specific and detailed task strings so they know exactly what to build.
 
 [ASK USER TOOL INSTRUCTIONS]
 - Do NOT call 'ask_user' to ask trivial or basic questions (e.g. asking for file paths, project names, or generic things you can check yourself using tools like 'glob_tool', 'grep_tool', 'read_file', or by running commands).
+- Before asking any clarifying question about framework, engine, file layout, current implementation, or project structure, you MUST inspect the opened workspace first using 'glob_tool' and then 'read_file' on the most relevant files you find.
+- If the Explorer/workspace already shows files, assume the active project is the target. Use those files as ground truth instead of asking the user where the code is.
+- For requests like "improve", "fix", "make it better", "add animation", "polish UI", or similar follow-up edits, default to:
+  1. 'glob_tool' to list likely project files in the opened workspace
+  2. 'read_file' on the primary entry/source files
+  3. only then decide whether clarification is still critically necessary
+- Never ask the user to point you to a file or tell you the framework if you can infer it from filenames/imports/code in the workspace.
 - Only ask clarifying questions if there is a critical ambiguity in the requirements that prevents you from proceeding.
 - When calling 'ask_user', prefer using 'single_choice', 'multi_choice', or 'confirm' types and provide clear, actionable selectable options (e.g., in the 'options' field) rather than open-ended 'text_input'. This provides a premium, interactive experience.`;
 
@@ -1888,6 +2276,45 @@ Once compliance has been assessed, output a highly detailed, structured Markdown
 - Step-by-Step Resolution Guide (clear step-by-step instructions with code examples on how to address every issue with proper guidelines)`;
           } else if (activeAssistantMode === 'debugger') {
             systemPrompt += `\n[MODE: DEBUGGER] Trace errors, fix bugs with minimal changes.`;
+          }
+
+          systemPrompt += `\n[CODER EXECUTION DISCIPLINE]
+- Inspect before editing whenever the target file or symbol is not already certain.
+- Prefer small, verifiable tool cycles over long speculative action chains.
+- Keep edits aligned with existing project structure and naming patterns.
+- Use tools to gather evidence, then act decisively.
+- End with concrete outcomes, not generic completion language.`;
+
+          if (activeAssistantMode === 'builder') {
+            systemPrompt += `\n[BUILDER DIRECTIVES]
+- Default to implementation.
+- Make the feature actually usable end to end, including any required glue code.
+- Prefer focused edits over broad rewrites unless a rewrite is clearly simpler and safer.
+- Validate behavior after meaningful code changes when practical.`;
+          } else if (activeAssistantMode === 'planner') {
+            systemPrompt += `\n[PLANNER DIRECTIVES]
+- Default to planning, sequencing, and risk reduction.
+- Ground the plan in real files, modules, and dependencies discovered from tools.
+- Break work into concrete phases with validation steps.
+- Do not start implementation unless the user explicitly moves from planning to execution.`;
+          } else if (activeAssistantMode === 'reviewer') {
+            systemPrompt += `\n[REVIEWER DIRECTIVES]
+- Prioritize bugs, regressions, edge cases, architectural drift, and missing validation.
+- Use exact evidence with file references and concrete impact.
+- Keep findings ordered by severity.
+- Treat style commentary as secondary to correctness and maintainability risks.`;
+          } else if (activeAssistantMode === 'tester') {
+            systemPrompt += `\n[TESTER DIRECTIVES]
+- Prioritize security issues, reliability problems, failure handling gaps, and unsafe assumptions.
+- Look for missing tests, weak validation, brittle state transitions, and production risk.
+- Use commands or delegated checks for verification when they increase confidence.
+- Report severity, likely impact, and recommended fix order clearly.`;
+          } else if (activeAssistantMode === 'debugger') {
+            systemPrompt += `\n[DEBUGGER DIRECTIVES]
+- Isolate root cause before broad editing whenever possible.
+- Prefer reproduction, traces, diagnostics, and narrow code inspection over guesswork.
+- Keep the blast radius small and avoid unrelated refactors.
+- Verify the specific failure path after the fix and state what was confirmed.`;
           }
         }
       }
@@ -2298,16 +2725,35 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             const isScrape = name === 'web_scrape' || name === 'fetch_url';
             const readRange = name === 'read_file' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
             const normalizedArgPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
+            const toolCategory = getToolCategory(name);
+            const displayLabel =
+              isScrape ? `Web fetch (${args.url})` :
+              name === 'run_command' ? `Run command (${String(args.command || '').trim() || 'shell'})` :
+              name.startsWith('spawn_') ? `Delegate ${name.replace('spawn_', '')} (${String(args.task || '').slice(0, 60) || 'task'})` :
+              name === 'grep_tool' ? `Search code (${String(args.query || '').slice(0, 60) || 'query'})${args.fileGlob ? ` in ${args.fileGlob}` : ''}` :
+              name === 'glob_tool' ? `Find files (${String(args.fileGlob || '').slice(0, 60) || '*'})` :
+              name === 'read_file' ? `Read file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}` :
+              name === 'edit_file' ? `Edit file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+              name === 'write_file' ? `Write file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+              name === 'apply_patch' ? 'Apply patch' :
+              name === 'analyze_file' ? `Analyze file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+              name === 'glob_tool' ? `glob_tool ${String(args.fileGlob || args.pattern || args.glob || '').trim() ? `(${String(args.fileGlob || args.pattern || args.glob || '').trim()})` : ''}` :
+              name === 'grep_tool' ? `grep_tool ${String(args.query || args.pattern || '').trim() ? `(${String(args.query || args.pattern || '').trim()})` : ''}` :
+              name === 'run_skill' ? `read_skill ${String(args.skillId || '').trim() ? `(${String(args.skillId || '').trim()})` : ''}` :
+              name.startsWith('composio_') ? `Composio: ${name.replace('composio_', '').replace(/_/g, ' ')}` :
+              `${name} ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}`;
             const node: ToolCallNode = {
               id: tc.id || createStableTurnId('tc', loopCount, idx, name),
               type: 'tool',
-              label: isScrape ? `Web Scraper (${args.url})` : name === 'run_command' ? `Terminal command (${args.command})` : name.startsWith('composio_') ? `Composio: ${name.replace('composio_', '').replace(/_/g, ' ')}` : `${name} ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}`,
+              label: displayLabel,
               status: 'active',
               toolName: name,
+              toolCategory,
               argsCount: typeof args === 'object' && args ? Object.keys(args).length : 0,
               icon: isScrape ? 'globe' :
                     name === 'web_search' ? 'search' :
-                    name === 'glob_tool' || name === 'grep_tool' ? 'search' :
+                    name === 'glob_tool' ? 'file' :
+                    name === 'grep_tool' ? 'search' :
                     name === 'read_file' ? 'file' :
                     name === 'write_file' ? 'write' :
                     name === 'edit_file' ? 'edit' :
@@ -2371,6 +2817,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 const cachedNode = toolCallNodes.find(n => n.id === tc.id);
                 if (cachedNode) {
                   cachedNode.resultSummary = 'Reused previously collected result in this turn';
+                  cachedNode.label = `${cachedNode.label} [cached]`;
                 }
                 showToast(`Reused cached result for ${name}`);
               } else if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'glob_tool', 'grep_tool', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
@@ -2507,7 +2954,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   body: JSON.stringify({ filePath: fullPath, content: args.content, ...workspaceArg }),
                   signal
                 });
-                resultValue = await writeRes.json();
+                const writeData = await writeRes.json().catch(() => ({}));
                 
                 const newContent = args.content || '';
                 const diffValues = computeLineDiff(oldContent, newContent);
@@ -2520,13 +2967,54 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   matchingNode.newContent = newContent;
                   matchingNode.filePath = cleanedPath;
                 }
-                resultValue = {
-                  ...resultValue,
-                  filePath: cleanedPath,
-                  action: oldContent ? 'updated_file' : 'created_file',
-                  addedCount: diffValues.added,
-                  removedCount: diffValues.removed
-                };
+                if (!writeRes.ok) {
+                  try {
+                    const verifyRes = await fetch('/api/fs/read', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
+                      signal
+                    });
+                    const verifyData = await verifyRes.json().catch(() => ({}));
+                    const verifiedContent = typeof verifyData.content === 'string' ? verifyData.content : '';
+                    if (verifyRes.ok && verifiedContent === newContent) {
+                      resultValue = {
+                        success: true,
+                        recoveredAfterWriteError: true,
+                        filePath: cleanedPath,
+                        action: oldContent ? 'updated_file' : 'created_file',
+                        addedCount: diffValues.added,
+                        removedCount: diffValues.removed
+                      };
+                    } else {
+                      resultValue = {
+                        ...writeData,
+                        error: writeData.error || writeData.detail || `Failed to write ${cleanedPath}`,
+                        filePath: cleanedPath,
+                        action: oldContent ? 'updated_file' : 'created_file',
+                        addedCount: diffValues.added,
+                        removedCount: diffValues.removed
+                      };
+                    }
+                  } catch {
+                    resultValue = {
+                      ...writeData,
+                      error: writeData.error || writeData.detail || `Failed to write ${cleanedPath}`,
+                      filePath: cleanedPath,
+                      action: oldContent ? 'updated_file' : 'created_file',
+                      addedCount: diffValues.added,
+                      removedCount: diffValues.removed
+                    };
+                  }
+                } else {
+                  resultValue = {
+                    ...writeData,
+                    filePath: cleanedPath,
+                    action: oldContent ? 'updated_file' : 'created_file',
+                    addedCount: diffValues.added,
+                    removedCount: diffValues.removed
+                  };
+                }
                 showToast(`Wrote ${cleanedPath}`);
               } else if (name === 'read_file') {
                 const cleanedPath = normalizeToolFilePath(args.filePath, coderWorkspacePath);
@@ -2580,8 +3068,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 if (fileGlob) {
                   files = files.filter((f: any) => {
                     if (f.isDirectory) return false;
-                    const rel = String(f.relativePath || f.path || '').toLowerCase();
-                    return rel.includes(fileGlob) || rel.endsWith(fileGlob);
+                    const rel = String(f.relativePath || f.path || '');
+                    return matchesWorkspaceGlob(rel, fileGlob);
                   });
                 }
 
@@ -2602,8 +3090,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 if (fileGlob) {
                   files = files.filter((f: any) => {
                     if (f.isDirectory) return false;
-                    const rel = String(f.relativePath || f.path || '').toLowerCase();
-                    return rel.includes(fileGlob) || rel.endsWith(fileGlob);
+                    const rel = String(f.relativePath || f.path || '');
+                    return matchesWorkspaceGlob(rel, fileGlob);
                   });
                 }
 
@@ -2769,7 +3257,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   body: JSON.stringify({ filePath: fullPath, content: newContentVal, ...workspaceArg }),
                   signal
                 });
-                resultValue = await writeRes.json();
+                const writeData = await writeRes.json().catch(() => ({}));
                 const diffValues = computeLineDiff(oldContent, newContentVal);
                 const matchingNode = toolCallNodes.find(n => n.id === tc.id);
                 if (matchingNode) {
@@ -2779,14 +3267,58 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   matchingNode.newContent = newContentVal;
                   matchingNode.filePath = cleanedPath;
                 }
-                resultValue = {
-                  ...resultValue,
-                  filePath: cleanedPath,
-                  replacements: args.all ? occurrences : 1,
-                  addedCount: diffValues.added,
-                  removedCount: diffValues.removed,
-                  action: 'edited_file'
-                };
+                if (!writeRes.ok) {
+                  try {
+                    const verifyRes = await fetch('/api/fs/read', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ filePath: fullPath, ...workspaceArg }),
+                      signal
+                    });
+                    const verifyData = await verifyRes.json().catch(() => ({}));
+                    const verifiedContent = typeof verifyData.content === 'string' ? verifyData.content : '';
+                    if (verifyRes.ok && verifiedContent === newContentVal) {
+                      resultValue = {
+                        success: true,
+                        recoveredAfterWriteError: true,
+                        filePath: cleanedPath,
+                        replacements: args.all ? occurrences : 1,
+                        addedCount: diffValues.added,
+                        removedCount: diffValues.removed,
+                        action: 'edited_file'
+                      };
+                    } else {
+                      resultValue = {
+                        ...writeData,
+                        error: writeData.error || writeData.detail || `Failed to update ${cleanedPath}`,
+                        filePath: cleanedPath,
+                        replacements: args.all ? occurrences : 1,
+                        addedCount: diffValues.added,
+                        removedCount: diffValues.removed,
+                        action: 'edited_file'
+                      };
+                    }
+                  } catch {
+                    resultValue = {
+                      ...writeData,
+                      error: writeData.error || writeData.detail || `Failed to update ${cleanedPath}`,
+                      filePath: cleanedPath,
+                      replacements: args.all ? occurrences : 1,
+                      addedCount: diffValues.added,
+                      removedCount: diffValues.removed,
+                      action: 'edited_file'
+                    };
+                  }
+                } else {
+                  resultValue = {
+                    ...writeData,
+                    filePath: cleanedPath,
+                    replacements: args.all ? occurrences : 1,
+                    addedCount: diffValues.added,
+                    removedCount: diffValues.removed,
+                    action: 'edited_file'
+                  };
+                }
                 showToast(`Patched ${cleanedPath}`);
               } else if (name === 'run_skill') {
                 const skillId = String(args.skillId || '');
@@ -2812,12 +3344,13 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     resultValue = {
                       skillId,
                       skillLabel: skill.label,
-                      description: `Built-in quick skill: ${skill.label}`,
+                      description: `Legacy quick skill reference: ${skill.label}`,
                       input: inputVal,
-                      legacyPrompt: skill.prompt,
-                      result: `${skill.prompt}${inputVal}`,
+                      mode: 'read_skill_context',
+                      markdown: skill.prompt,
                       instructions: [
-                        'This is a legacy built-in quick skill.',
+                        'Read this legacy skill prompt as context for the task.',
+                        'This is not an executable skill runtime.',
                         'Prefer custom SKILL.md-based skills when available for richer workflows.'
                       ]
                     };
@@ -2825,7 +3358,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     resultValue = { error: `Unknown skill: ${skillId}. Available built-ins: ${SKILLS.map((s: any) => s.id).join(', ')}` };
                   }
                 }
-                showToast(`Applied skill: ${skillId}`);
+                showToast(`Loaded skill context: ${skillId}`);
               
               } else if (name === 'fetch_url') {
                 const targetUrl = args.url;
@@ -3209,20 +3742,22 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
               } else if (name === 'run_command') {
                 const commandText = args.command;
                 if (!commandText) throw new Error("run_command requires command parameter");
+                const livePermissionMode = coderPermissionModeRef.current;
+                const liveAlwaysAllowedCommands = alwaysAllowedCommandsRef.current;
                 const restrictionReason = explainCommandRestriction(commandText);
-                if (shouldRequestCommandPermission(commandText, coderPermissionMode, alwaysAllowedCommands)) {
+                if (shouldRequestCommandPermission(commandText, livePermissionMode, liveAlwaysAllowedCommands)) {
                   logPermissionAction({
                     command: commandText,
                     action: 'permission_requested',
                     detail: restrictionReason,
-                    mode: coderPermissionMode
+                    mode: livePermissionMode
                   });
                   const decision = await requestCommandPermission(commandText, restrictionReason);
                   logPermissionAction({
                     command: commandText,
                     action: decision,
                     detail: restrictionReason,
-                    mode: coderPermissionMode
+                    mode: livePermissionMode
                   });
                   if (decision === 'deny') {
                     throw new Error(`Permission denied for terminal command: ${commandText}`);
@@ -3234,8 +3769,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   logPermissionAction({
                     command: commandText,
                     action: 'auto_allowed',
-                    detail: coderPermissionMode === 'full-access' ? 'Full access mode' : 'Safe command or previously allowed command',
-                    mode: coderPermissionMode
+                    detail: livePermissionMode === 'full-access' ? 'Full access mode' : 'Safe command or previously allowed command',
+                    mode: livePermissionMode
                   });
                 }
                 showToast(`Running: ${commandText.substring(0, 30)}...`);
@@ -3861,85 +4396,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
 
       const finalToolNodes = [...toolCallNodes];
 
-      const modelForLabel = activeModelList.find(m => m.id === activeModelId);
-      const aiLabel = modelForLabel?.name || activeModelId;
-
-      const synthesisSubNodes: ToolCallNode[] = [];
-
-      if (toolCallNodes.length > 0) {
-        toolCallNodes.forEach((tc, idx) => {
-          synthesisSubNodes.push({
-            id: `synth-sub-${idx}`,
-            type: 'sub-tool',
-            label: `resolved: ${tc.toolName || tc.label}`,
-            status: 'complete',
-            icon: tc.icon,
-            resultSummary: tc.argsCount !== undefined
-              ? (tc.argsCount === 0 ? 'no args' : `${tc.argsCount} arg${tc.argsCount > 1 ? 's' : ''}`)
-              : undefined
-          });
-        });
-      }
-
-      if (searchResults.length > 0) {
-        synthesisSubNodes.push({
-          id: 'synth-sub-search',
-          type: 'sub-tool',
-          label: 'injected search context',
-          status: 'complete',
-          icon: 'globe',
-          resultSummary: `${searchResults.length} result${searchResults.length > 1 ? 's' : ''} grounded`
-        });
-      }
-
-      if (effectiveWritingStyle && effectiveWritingStyle !== 'default') {
-        synthesisSubNodes.push({
-          id: 'synth-sub-style',
-          type: 'sub-tool',
-          label: `applied style: ${effectiveWritingStyle}`,
-          status: 'complete',
-          icon: 'sparkles'
-        });
-      }
-
-      if (finalContent && finalContent.length > 0) {
-        const approxTokens = Math.round(finalContent.length / 4);
-        synthesisSubNodes.push({
-          id: 'synth-sub-tokens',
-          type: 'result',
-          label: `output generated`,
-          status: 'complete',
-          icon: 'sparkles',
-          resultSummary: `~${approxTokens} tokens`
-        });
-      }
-
-      let synthLabel: string;
-      if (toolCallNodes.length > 1) {
-        synthLabel = `${aiLabel} — ${toolCallNodes.length} tools resolved, synthesised`;
-      } else if (toolCallNodes.length === 1) {
-        synthLabel = `${aiLabel} — tool result synthesised`;
-      } else if (searchResults.length > 0) {
-        synthLabel = `${aiLabel} — web context synthesised`;
-      } else if (isWebSearchEnabled && searchResults.length === 0) {
-        synthLabel = `${aiLabel} — direct response (no search hits)`;
-      } else if (effectiveWritingStyle && effectiveWritingStyle !== 'default') {
-        synthLabel = `${aiLabel} — ${effectiveWritingStyle} response generated`;
-      } else {
-        synthLabel = `${aiLabel} — response generated`;
-      }
-
-      finalToolNodes.push({
-        id: 'final-ai',
-        type: 'ai',
-        label: synthLabel,
-        status: 'complete',
-        icon: 'sparkles',
-        subNodes: synthesisSubNodes.length > 0 ? synthesisSubNodes : undefined,
-        resultSummary: synthesisSubNodes.length > 0
-          ? `${synthesisSubNodes.length} sub-step${synthesisSubNodes.length > 1 ? 's' : ''} completed`
-          : undefined
-      });
 
       const activeToolNodes = finalToolNodes.map(n => ({ ...n, status: 'active' as const }));
       

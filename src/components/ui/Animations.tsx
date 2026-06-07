@@ -2,6 +2,66 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Hammer, Search, Cpu, Sparkles, Workflow, Cable } from 'lucide-react';
 
+export const TodoGenerationAnimation = () => (
+  <div className="relative overflow-hidden rounded-2xl border border-[#2D241E] bg-[linear-gradient(180deg,rgba(23,19,17,0.98)_0%,rgba(15,13,12,0.98)_100%)] px-4 py-4 text-left shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(217,119,86,0.12),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(45,212,191,0.08),transparent_35%)] pointer-events-none" />
+    <div className="relative flex items-start gap-3">
+      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#D97756]/25 bg-[#D97756]/10">
+        <motion.div
+          animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.08, 1] }}
+          transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+          className="text-[#F59E0B]"
+        >
+          <Workflow size={18} strokeWidth={2.2} />
+        </motion.div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[#C89A79]">
+            Planning Build Steps
+          </span>
+          <motion.span
+            animate={{ opacity: [0.35, 1, 0.35] }}
+            transition={{ repeat: Infinity, duration: 1.4 }}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-[#D97756]"
+          />
+        </div>
+        <p className="mt-1 text-sm font-semibold text-[#F3ECE4]">
+          Preparing an executable TODO runbook for this coder task.
+        </p>
+        <div className="mt-3 space-y-2">
+          {[
+            'Understanding the request and constraints',
+            'Locating the right workspace files',
+            'Sequencing implementation into clear steps'
+          ].map((label, idx) => (
+            <motion.div
+              key={label}
+              initial={{ opacity: 0.45, x: -4 }}
+              animate={{ opacity: [0.45, 1, 0.45], x: [0, 3, 0] }}
+              transition={{ repeat: Infinity, duration: 1.8, delay: idx * 0.18, ease: 'easeInOut' }}
+              className="flex items-center gap-2 text-[12px] text-[#B8ACA1]"
+            >
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#2F2722] bg-[#181513] text-[10px] font-bold text-[#D9B6A3]">
+                {idx + 1}
+              </span>
+              <span>{label}</span>
+            </motion.div>
+          ))}
+        </div>
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#231D1A]">
+          <motion.div
+            initial={{ x: '-40%' }}
+            animate={{ x: '140%' }}
+            transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
+            className="h-full w-2/5 rounded-full bg-[linear-gradient(90deg,rgba(217,119,86,0),rgba(217,119,86,0.95),rgba(45,212,191,0.75),rgba(217,119,86,0))]"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 /**
  * 🎨 Web Search Animation
  * Highly immersive, spinning orbit radar with orbiting dot waves and glowing rings

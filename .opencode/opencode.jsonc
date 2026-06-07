@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {},
+  "permission": {
+    "read": "allow",
+    "list": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "edit": "allow",
+    "bash": "ask",
+    "question": "allow"
+  },
+  "reference": {
+    "lumina": "Lumina workspace OpenCode compatibility bundle",
+    "coder_mode": "Use these commands and agents only inside Lumina Coder Mode"
+  },
+  "mcp": {},
+  "tools": {
+    "read_file": true,
+    "glob_tool": true,
+    "grep_tool": true,
+    "edit_file": true,
+    "run_command": true
+  }
+}

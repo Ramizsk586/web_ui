@@ -6,6 +6,7 @@ import { runAgent } from '../../agents/agentRunner';
 import { MessageItem } from '../Chat/MessageItem';
 import { AgentToolBadge } from './AgentToolBadge';
 import { AgentAvatar } from './AgentAvatar';
+import { parseThinkTags } from '../../utils/textUtils';
 
 const createAgentMessageId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -424,7 +425,7 @@ export function AgentChatView({
         onToken: (token) => {
           setStreamingText(prev => prev + token);
         },
-        onDone: (fullText, events, runId) => {
+        onDone: (fullText, events, runId, thinkText) => {
           const assistantMsg: AgentMessage = {
             id: createAgentMessageId('agent-assistant'),
             role: 'assistant',
@@ -432,7 +433,8 @@ export function AgentChatView({
             timestamp: Date.now(),
             toolCalls: localToolCalls.length > 0 ? localToolCalls : undefined,
             runId,
-            agentEvents: events
+            agentEvents: events,
+            thinkContent: thinkText
           };
           onUpdateAgent({ chatHistory: [...updatedHistory, assistantMsg] });
           setIsStreaming(false);
@@ -671,14 +673,18 @@ export function AgentChatView({
 
         {/* Persisted message logs */}
         {agent.chatHistory.map((msg, index) => {
+          const parsedMessage = parseThinkTags(msg.content || '');
+          const visibleContent = parsedMessage.before + parsedMessage.after;
           // Map historical message schema to fit MessageItem structure
           const formattedMsg = {
             id: msg.id,
             role: msg.role === 'tool' ? 'assistant' : msg.role,
-            content: msg.content,
+            content: visibleContent,
             timestamp: new Date(msg.timestamp),
             toolCalls: msg.toolCalls,
             isStreaming: msg.isStreaming,
+            thinkContent: (msg as any).thinkContent || parsedMessage.think || undefined,
+            isThinking: false,
           } as any;
 
           return (
@@ -708,6 +714,7 @@ export function AgentChatView({
               timestamp: new Date(),
               isStreaming: true,
               toolCalls: activeToolCalls,
+              isThinking: !streamingText && !!activeToolCalls,
             } as any}
             markdownComponents={markdownComponents}
             userProfile={userProfile}
