@@ -165,6 +165,29 @@ const createStableTurnId = (prefix: string, ...parts: Array<string | number | un
   return `${prefix}-${Date.now().toString(36)}-${suffix || 'item'}-${Math.random().toString(36).slice(2, 8)}`;
 };
 
+const inferWritingStyleFromPrompt = (input: string): string => {
+  const text = String(input || '').trim().toLowerCase();
+  if (!text) return 'default';
+
+  if (/\b(poem|poetry|haiku|sonnet|verse|rhym(e|ing)|limerick)\b/.test(text)) {
+    return 'poem';
+  }
+  if (/\b(story|short story|tale|fiction|narrative|fairy tale|bedtime story)\b/.test(text)) {
+    return 'story';
+  }
+  if (/\b(letter|email|mail|application|cover letter|formal letter|apology letter|message to)\b/.test(text)) {
+    return 'letter';
+  }
+  if (/\b(essay|article|blog post|editorial|long-form|composition|write-up)\b/.test(text)) {
+    return 'essay';
+  }
+  if (/\b(script|screenplay|dialogue scene|scene format|play format|stage play|dramatic scene)\b/.test(text)) {
+    return 'script';
+  }
+
+  return 'default';
+};
+
 const mapSpawnEventsToSubNodes = (toolCallId: string, events: any[] = []): ToolCallNode[] => {
   return events.map((evt: any, ei: number) => ({
     id: `spawn-sub-${toolCallId}-${ei}`,
@@ -857,6 +880,11 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       return;
     }
 
+    const effectiveWritingStyle =
+      writingStyle && writingStyle !== 'default'
+        ? writingStyle
+        : inferWritingStyleFromPrompt(content);
+
     if (activeSkills.length > 0) {
       const skillPrompts = activeSkills.map(id => SKILLS.find(s => s.id === id)?.prompt).filter(Boolean);
       content = skillPrompts.join('') + content;
@@ -1135,12 +1163,14 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
                 messages: chat.messages.map(m => m.id === thinkingId ? {
                   ...m,
                   thinking: shouldActivateOrchestration(content) ? 'Subagent plan prepared. Awaiting walkthrough approval...' : 'Coder TODOs ready. Starting agent...',
-                  todoPlan: {
-                    title: shouldActivateOrchestration(content) ? "📋 Multi-Agent Walkthrough Plan" : "📋 Lumina Agent Task Checklist",
-                    todos: mapped,
-                    isConfirmed: false,
-                    countdown: shouldActivateOrchestration(content) ? undefined : 15
-                  },
+                  ...(shouldActivateOrchestration(content) ? {
+                    todoPlan: {
+                      title: "📋 Multi-Agent Walkthrough Plan",
+                      todos: mapped,
+                      isConfirmed: false,
+                      countdown: undefined
+                    }
+                  } : {}),
                   toolCalls: [
                     {
                       id: 'coder-plan-node',
@@ -1179,16 +1209,18 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             messages: chat.messages.map(m => m.id === thinkingId ? {
               ...m,
               thinking: shouldActivateOrchestration(content) ? 'Fallback plan prepared. Awaiting walkthrough approval...' : 'Using fallback TODOs. Starting agent...',
-              todoPlan: {
-                title: shouldActivateOrchestration(content) ? "📋 Multi-Agent Walkthrough Plan" : "📋 Lumina Agent Task Checklist",
-                todos: [
-                  { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' as const },
-                  { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' as const },
-                  { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' as const }
-                ],
-                isConfirmed: false,
-                countdown: shouldActivateOrchestration(content) ? undefined : 15
-              },
+              ...(shouldActivateOrchestration(content) ? {
+                todoPlan: {
+                  title: "📋 Multi-Agent Walkthrough Plan",
+                  todos: [
+                    { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' as const },
+                    { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' as const },
+                    { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' as const }
+                  ],
+                  isConfirmed: false,
+                  countdown: undefined
+                }
+              } : {}),
               toolCalls: [
                 {
                   id: 'coder-plan-node',
@@ -1758,10 +1790,12 @@ ${skillMd.content}
         } else {
           systemPrompt += `\n\n[CODER MODE — ${osName}]
 You are a software engineering agent. When asked to build/modify code:
-1. Create, read, and maintain the task checklist in TODO.md at the project root. Before starting, and after completing each engineering step, use 'edit_file' or 'write_file' on TODO.md to mark that step as complete (e.g. changing '- [ ]' to '- [x]'). Also use tools to make real file system changes. Always 'read_file' before editing.
-2. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
-3. Use 'glob_tool' to find files by name patterns. Use 'grep_tool' to search text inside files. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
-4. Work in tool-call cycles until the task is complete. Give a summary when done.
+1. Create, read, and maintain the task checklist in TODO.md at the project root.
+2. Work on ONE task at a time in strict order. After completing each individual task, IMMEDIATELY use 'edit_file' to update TODO.md, changing that task's '- [ ]' to '- [x]'. Only then proceed to the next task.
+3. NEVER batch multiple tasks before updating TODO.md. Each task MUST be marked complete before starting the next.
+4. Always 'read_file' before editing. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
+5. Use 'glob_tool' to find files by name patterns. Use 'grep_tool' to search text inside files. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
+6. Work in tool-call cycles until all tasks are complete. Give a summary when done.
 
 [SUBAGENTS DELEGATION SYSTEM]
 Spawn specialized subagents for engineering tasks using their dedicated tools:
@@ -2080,7 +2114,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
           return;
         }
 
-        let finalArtifacts = extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
+        let finalArtifacts = extractArtifacts(finalDisplayContent, effectiveWritingStyle, chats, chatId);
         const cleanReport = sanitizeDeepResearchReport(finalDisplayContent || finalContent);
         if (cleanReport.length > 80) {
           finalArtifacts = [
@@ -3786,11 +3820,11 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         });
       }
 
-      if (writingStyle && writingStyle !== 'default') {
+      if (effectiveWritingStyle && effectiveWritingStyle !== 'default') {
         synthesisSubNodes.push({
           id: 'synth-sub-style',
           type: 'sub-tool',
-          label: `applied style: ${writingStyle}`,
+          label: `applied style: ${effectiveWritingStyle}`,
           status: 'complete',
           icon: 'sparkles'
         });
@@ -3817,8 +3851,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         synthLabel = `${aiLabel} — web context synthesised`;
       } else if (isWebSearchEnabled && searchResults.length === 0) {
         synthLabel = `${aiLabel} — direct response (no search hits)`;
-      } else if (writingStyle && writingStyle !== 'default') {
-        synthLabel = `${aiLabel} — ${writingStyle} response generated`;
+      } else if (effectiveWritingStyle && effectiveWritingStyle !== 'default') {
+        synthLabel = `${aiLabel} — ${effectiveWritingStyle} response generated`;
       } else {
         synthLabel = `${aiLabel} — response generated`;
       }
@@ -3936,7 +3970,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         return;
       }
 
-      let finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, writingStyle, chats, chatId);
+      let finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, effectiveWritingStyle, chats, chatId);
       if (isDeepSearchEnabled && !isCoderMode) {
         const cleanReport = sanitizeDeepResearchReport(finalDisplayContent || finalContent);
         if (cleanReport.length > 80) {

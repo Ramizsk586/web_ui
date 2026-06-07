@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { getTerminalSessionId } from '../utils/terminalService';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface LivePreviewPanelProps {
   isCoderRightPanelOpen: boolean;
@@ -342,6 +343,18 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       }
     }
   }, [isCoderRightPanelOpen, activeTab, iframeKey, workspaceRootPath]);
+
+  // Live-update polling for .md files (especially TODO.md)
+  useEffect(() => {
+    if (!isCoderRightPanelOpen || activeTab === 'overview' || activeTab === 'review' || activeTab === 'workflow') return;
+    if (!activeTab.toLowerCase().endsWith('.md')) return;
+
+    const pollInterval = setInterval(() => {
+      fetchFileContent(activeTab);
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [isCoderRightPanelOpen, activeTab]);
 
   const isDesktop = rightViewportMode === 'desktop';
   const isMobile = rightViewportMode === 'mobile';
@@ -1352,7 +1365,23 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                   </div>
                 ) : fileContents[activeTab] !== undefined ? (
                   <div className="p-6 text-left select-text markdown-body overflow-y-auto h-full text-zinc-300 font-sans space-y-4 max-w-3xl mx-auto custom-scrollbar [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-white [&_h1]:border-b [&_h1]:border-zinc-850 [&_h1]:pb-2 [&_h1]:mb-4 [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-zinc-100 [&_h2]:mt-4 [&_h2]:mb-2 [&_p]:text-sm [&_p]:text-zinc-300 [&_ul]:space-y-2.5 [&_li]:list-none [&_li]:flex [&_li]:items-start [&_li]:gap-3 [&_li]:text-sm [&_li]:text-zinc-300 [&_input[type=checkbox]]:mt-1 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:rounded [&_input[type=checkbox]]:border-zinc-750 [&_input[type=checkbox]]:bg-zinc-900 [&_input[type=checkbox]]:text-[#D97756] [&_input[type=checkbox]]:focus:ring-0 [&_input[type=checkbox]]:pointer-events-none">
-                    <Markdown>{fileContents[activeTab]}</Markdown>
+                    <Markdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        input: ({ node, ...props }) => {
+                          if (props.type === 'checkbox') {
+                            return (
+                              <input
+                                {...props}
+                                className={`w-4 h-4 rounded border-zinc-750 bg-zinc-900 text-[#D97756] focus:ring-0 pointer-events-none ${props.className || ''}`}
+                                readOnly
+                              />
+                            );
+                          }
+                          return <input {...props} />;
+                        }
+                      }}
+                    >{fileContents[activeTab]}</Markdown>
                   </div>
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 py-12 select-none gap-1">

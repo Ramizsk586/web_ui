@@ -5,6 +5,7 @@ import {
   Code, Hash, Zap, FileCode, Braces, BookOpen, Edit3, ChevronRight, ChevronDown, 
   FilePlus, FolderPlus, Copy, FolderTree, X, Search
 } from 'lucide-react';
+import { invokeTauri, isTauriDesktop } from '../utils/tauriDesktop';
 
 // ==================== TYPES ====================
 export interface TreeNode {
@@ -1048,6 +1049,20 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
         setSelectedId(null);
         addToast(`Opened folder: ${folderPath}`, "success");
         triggerWorkspaceRefresh();
+      }
+    } else if (isTauriDesktop()) {
+      try {
+        const folderPath = await invokeTauri<string | null>('open_folder_dialog');
+        if (folderPath) {
+          onWorkspaceRootPathChange(folderPath);
+          setExpandedPaths(new Set());
+          setSelectedId(null);
+          addToast(`Opened folder: ${folderPath}`, "success");
+          triggerWorkspaceRefresh();
+        }
+      } catch (error) {
+        console.error('Failed to open Tauri folder dialog:', error);
+        addToast("Could not open the folder dialog.", "error");
       }
     } else {
       addToast("Open Folder is only available in the desktop app", "info");

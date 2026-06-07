@@ -94,47 +94,6 @@ export function useCoderMode({
     }
   }, [currentChatId, currentChatActive, setIsSidebarOpen]);
 
-  // Countdown Timer Effect for To-dos
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setChats(prev => {
-        let updated = false;
-        const nextChats = prev.map(chat => {
-          const nextMessages = chat.messages.map(m => {
-            if (m.todoPlan && !m.todoPlan.isConfirmed && m.todoPlan.countdown !== undefined && m.todoPlan.countdown > 0) {
-              updated = true;
-              const nextCountdown = m.todoPlan.countdown - 1;
-              if (nextCountdown === 0) {
-                // Auto-starts
-                setTimeout(() => handleStartBuilding(chat.id, m.id, m.todoPlan!.todos), 0);
-                return {
-                  ...m,
-                  todoPlan: {
-                    ...m.todoPlan,
-                    countdown: 0,
-                    isConfirmed: true
-                  }
-                };
-              }
-              return {
-                ...m,
-                todoPlan: {
-                  ...m.todoPlan,
-                  countdown: nextCountdown
-                }
-              };
-            }
-            return m;
-          });
-          return { ...chat, messages: nextMessages };
-        });
-        return updated ? nextChats : prev;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [chats, setChats, handleStartBuilding]);
-
   // Handle Mock Todo progress auto-advancement in non-coder simulated responses
   useEffect(() => {
     if (!isTyping) return;

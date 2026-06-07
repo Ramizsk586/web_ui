@@ -927,14 +927,19 @@ export const InlineToolCallCard = React.memo(({
   onSendMessage
 }: InlineToolCallCardProps) => {
   const [isCollapsed, setIsCollapsed] = useState(() => node.status !== 'active');
+  const [hasUserToggled, setHasUserToggled] = useState(false);
+  const wasActiveRef = React.useRef(node.status === 'active');
 
   useEffect(() => {
-    if (node.status === 'active') {
+    const becameActive = node.status === 'active' && !wasActiveRef.current;
+
+    if (becameActive && !hasUserToggled) {
       setIsCollapsed(false);
     } else if ((node.status === 'complete' || node.status === 'failed') && !node.result) {
       setIsCollapsed(true);
     }
-  }, [node.status, node.result]);
+    wasActiveRef.current = node.status === 'active';
+  }, [node.status, node.result, hasUserToggled]);
 
   const isEditNode = node.toolName === 'write_file' || node.toolName === 'edit_file' || node.toolName === 'create_file';
   const isScriptNode = node.toolName === 'verify_changes' || node.toolName === 'run_command' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
@@ -948,12 +953,15 @@ export const InlineToolCallCard = React.memo(({
     >
       <button
         type="button"
-        onClick={() => setIsCollapsed(!isCollapsed)}
+        onClick={() => {
+          setHasUserToggled(true);
+          setIsCollapsed(!isCollapsed);
+        }}
         className="w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] font-semibold text-zinc-650 dark:text-zinc-300 hover:bg-zinc-150/5 dark:hover:bg-white/[0.02] cursor-pointer select-none text-left"
       >
         <div className="flex items-center gap-2.5 min-w-0 pr-4">
           <div className="shrink-0 flex items-center justify-center">
-            {node.status === 'active' ? (
+            {node.status === 'active' && !isCollapsed ? (
               node.toolName?.startsWith('composio_') ? (
                 <ComposioToolCallingAnimation />
               ) :

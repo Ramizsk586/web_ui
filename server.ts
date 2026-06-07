@@ -794,7 +794,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         const model = process.env.LLAMA_BRIDGE_MODEL || 'openprovider/auto-free';
 
         const messages: any[] = [
-          { role: 'system', content: `${systemPrompt}\n\nExecution context: Working on workspace ${resolvedWorkspace}. Only write code inside this workspace. When you are finished, output ✅ ${agentName.toUpperCase()} COMPLETE and a summary.\n\nCRITICAL DIRECTIVE:\n- There is a TODO.md file in the workspace root. Before you begin work, read it to see the checklist. After completing each logical step of your task, USE the 'edit_file' or 'write_file' tool to modify TODO.md, changing '[ ]' to '[x]' for that completed task step. Never forget to update TODO.md to mark your progress after completing every step!` },
+          { role: 'system', content: `${systemPrompt}\n\nExecution context: Working on workspace ${resolvedWorkspace}. Only write code inside this workspace. When you are finished, output ✅ ${agentName.toUpperCase()} COMPLETE and a summary.\n\nCRITICAL DIRECTIVE - TODO.md PROGRESS TRACKING:\n1. Before you begin work, READ the TODO.md file in the workspace root to see the checklist.\n2. Work on ONE task at a time in strict order.\n3. After completing each individual task step, IMMEDIATELY use 'edit_file' to update TODO.md, changing that step's '- [ ]' to '- [x]'.\n4. Only then proceed to the next task step.\n5. NEVER batch multiple tasks before updating TODO.md. Each task MUST be marked complete in TODO.md before starting the next one.\nThis ensures real-time progress visibility. Failure to update TODO.md after each step is a critical error.` },
           { role: 'user', content: task }
         ];
 

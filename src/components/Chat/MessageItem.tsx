@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   History, 
   Copy, 
-  ArrowUp, 
+  ArrowUp,
   Layout, 
   ImageIcon, 
   Play, 
@@ -12,7 +12,7 @@ import {
   ChevronDown, 
   Check, 
   Loader2, 
-  Trash2, 
+  Trash2,
   Plus,
   FileText,
   MousePointerClick,
@@ -20,8 +20,7 @@ import {
   ThumbsDown,
   RotateCcw,
   Volume2,
-  VolumeX,
-  Square
+  VolumeX
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -898,136 +897,6 @@ export const MessageItem = React.memo(({
           )}
 
 
-          {/* Custom Interactive To-Do Plan Checklist */}
-          {message.todoPlan && (
-            <div className="w-full bg-[#1b1918] border border-zinc-855 rounded-2xl p-4 shadow-xl flex flex-col gap-3 mt-4 text-left font-sans select-none">
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px]">📋</span>
-                  <span className="font-semibold text-sm tracking-tight text-white">
-                    {message.todoPlan.title}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {!message.todoPlan.isConfirmed && message.todoPlan.countdown !== undefined && message.todoPlan.countdown > 0 && (
-                    <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                      <Loader2 size={10} className="animate-spin text-amber-500 shrink-0" />
-                      Auto-starts in {message.todoPlan.countdown}s
-                    </span>
-                  )}
-                  {message.todoPlan.isConfirmed && (
-                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 font-sans">
-                      {message.todoPlan.todos.every(t => t.status === 'complete') ? "COMPLETED" : "RUNNING AGENT"}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto pr-1 text-left">
-                {message.todoPlan.todos.map((todo) => {
-                  const isDone = todo.status === 'complete';
-                  const isActive = todo.status === 'in_progress';
-
-                  return (
-                    <div
-                      key={todo.id}
-                      className="group/item flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-white/2.5 transition-all w-full"
-                    >
-                      <div className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                        isDone
-                          ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-400'
-                          : isActive
-                            ? 'border border-orange-500 bg-orange-500/10'
-                            : 'border border-zinc-750 bg-transparent'
-                      }`}>
-                        {isDone && <Check size={10} strokeWidth={3} className="text-emerald-400" />}
-                        {isActive && <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />}
-                      </div>
-
-                      {!message.todoPlan!.isConfirmed ? (
-                        <input
-                          type="text"
-                          value={todo.text}
-                          onChange={(e) => {
-                            if (!message.todoPlan) return;
-                            const updatedTodos = message.todoPlan.todos.map(t => t.id === todo.id ? { ...t, text: e.target.value } : t);
-                            onUpdateTodoPlan?.(message.id, {
-                              ...message.todoPlan,
-                              todos: updatedTodos
-                            });
-                          }}
-                          className="flex-1 text-xs font-semibold text-zinc-200 bg-transparent hover:bg-zinc-855 focus:bg-zinc-855 px-1 py-0.5 rounded-lg border border-transparent focus:border-orange-500/40 outline-none transition-all select-text font-sans"
-                        />
-                      ) : (
-                        <span className={`text-xs font-semibold flex-1 ${
-                          isDone ? 'line-through text-zinc-550' : isActive ? 'text-white' : 'text-zinc-400'
-                        }`}>
-                          {todo.text}
-                        </span>
-                      )}
-
-                      {!message.todoPlan!.isConfirmed && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!message.todoPlan) return;
-                            const updatedTodos = message.todoPlan.todos.filter(t => t.id !== todo.id);
-                            onUpdateTodoPlan?.(message.id, {
-                              ...message.todoPlan,
-                              todos: updatedTodos
-                            });
-                          }}
-                          className="opacity-0 group-hover/item:opacity-100 p-1 hover:bg-red-500/10 rounded-lg text-zinc-550 hover:text-red-400 transition-all cursor-pointer flex items-center justify-center border-0 bg-transparent"
-                          title="Delete plan step"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {!message.todoPlan.isConfirmed ? (
-                <div className="flex items-center justify-between border-t border-zinc-805 pt-3 mt-1 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!message.todoPlan) return;
-                      const newId = (message.todoPlan.todos.length + 1).toString();
-                      const updatedTodos = [
-                        ...message.todoPlan.todos,
-                        { id: newId, text: "New architectural refinement step...", status: 'pending' as const }
-                      ];
-                      onUpdateTodoPlan?.(message.id, {
-                        ...message.todoPlan,
-                        todos: updatedTodos
-                      });
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-zinc-400 hover:text-white hover:bg-white/5 border border-zinc-850 rounded-xl transition-all cursor-pointer font-sans"
-                  >
-                    <Plus size={11} />
-                    <span>Add task step</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => onStartBuilding?.(message.id)}
-                    className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-black tracking-wider uppercase bg-orange-500 hover:bg-orange-600 text-white rounded-xl transition-all shadow-md cursor-pointer font-sans border-0"
-                  >
-                    <span>Start Building</span>
-                    <ArrowUp size={11} strokeWidth={3} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1 p-1 bg-zinc-850/40 rounded-xl border border-zinc-800/25 justify-center font-mono text-[10px] text-zinc-500 select-none">
-                  <Loader2 size={10} className="animate-spin text-orange-400 shrink-0" />
-                  <span>Agent running sequence: step {message.todoPlan.todos.filter(t => t.status === 'complete').length + 1} of {message.todoPlan.todos.length}...</span>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Automatically detect and render image links from the text content */}
           {(() => {
             if (!message.content) return null;
@@ -1458,3 +1327,5 @@ export const MessageItem = React.memo(({
     </motion.div>
   );
 });
+
+
