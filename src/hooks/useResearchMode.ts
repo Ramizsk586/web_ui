@@ -91,7 +91,6 @@ export function useResearchMode({
     }
   }, [currentChatId, chats, setIsSidebarOpen]);
 
-  // Simulated live research process when active
   useEffect(() => {
     if (!isResearchActive) return;
 
@@ -108,11 +107,11 @@ export function useResearchMode({
         } else if (step === 1) {
           logs.push(`[${timestamp}] [Planner] Time anchored. Creating ${depthPreset === 'extreme' ? 'multi-phase' : 'concise'} research plan.`);
           setToolChain(tc => tc.map(n => n.type === 'time' ? { ...n, status: 'complete' } : n.type === 'query' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Building discovery, grounding, extraction, and verification stages.' : 'Building complementary query branches.' } : n));
-          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, progress: 24, currentTask: 'Planning search angles and evidence stages...' } : a));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'searching', progress: 24, currentTask: 'Planning search angles and evidence stages...' } : a));
         } else if (step === 2) {
           logs.push(`[${timestamp}] [Searcher] ${depthPreset === 'extreme' ? 'Running wider discovery across multiple search angles.' : 'Running core discovery queries.'}`);
           setToolChain(tc => tc.map(n => n.type === 'query' ? { ...n, status: 'complete' } : n.type === 'search' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Expanding search coverage, ranking URLs, and comparing query branches.' : 'Calling search tools and ranking URLs.' } : n));
-          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, progress: 42, resultsFound: depthPreset === 'extreme' ? 14 + i * 4 : 8 + i * 3 } : a));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'searching', progress: 42, resultsFound: depthPreset === 'extreme' ? 14 + i * 4 : 8 + i * 3 } : a));
         } else if (step === 3) {
           logs.push(`[${timestamp}] [Grounder] Using Wikipedia for definitions, timelines, and related entities.`);
           setToolChain(tc => tc.map(n => n.type === 'search' ? { ...n, status: 'complete' } : n.type === 'wiki' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Running repeated wiki passes for timeline, entity, and related-topic grounding.' : 'Gathering background context and entity grounding.' } : n));
@@ -126,9 +125,9 @@ export function useResearchMode({
           setToolChain(tc => tc.map(n => n.type === 'scrape' ? { ...n, status: 'complete' } : n.type === 'correlate' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Comparing source agreement, recency, contradictions, and evidence quality.' : 'Cross-referencing claims and conflicts.' } : n));
           setAgents(agts => agts.map((a, i) => i === 3 ? { ...a, status: 'analyzing', currentTask: 'Cross-checking evidence...', progress: 88 } : a));
         } else if (step === 6) {
-          logs.push(`[${timestamp}] [Synthesizer] Evidence is sufficient; compiling ${depthPreset === 'extreme' ? 'expanded' : 'final'} cited Markdown answer.`);
-          setToolChain(tc => tc.map(n => n.type === 'correlate' ? { ...n, status: 'complete' } : n.type === 'synthesize' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Rendering expanded Markdown report with denser sourcing...' : 'Rendering Markdown Report...' } : n));
-          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: 'done', progress: 100 } : a));
+          logs.push(`[${timestamp}] [Synthesizer] Evidence is sufficient; assembling ${depthPreset === 'extreme' ? 'expanded' : 'final'} cited Markdown answer.`);
+          setToolChain(tc => tc.map(n => n.type === 'correlate' ? { ...n, status: 'complete' } : n.type === 'synthesize' ? { ...n, status: 'active', details: depthPreset === 'extreme' ? 'Assembling expanded Markdown report with denser sourcing.' : 'Assembling Markdown report from verified evidence.' } : n));
+          setAgents(agts => agts.map((a, i) => i < activeAgentCount ? { ...a, status: i === activeAgentCount - 1 ? 'analyzing' : 'done', progress: 100, currentTask: i === activeAgentCount - 1 ? 'Compiling verified findings into final report...' : a.currentTask } : a));
         } else if (step === 7) {
           logs.push(`[${timestamp}] [Orchestrator] Deep Research ReAct loop complete or awaiting model final answer.`);
           setToolChain(tc => tc.map(n => n.type === 'synthesize' ? { ...n, status: 'complete' } : n));

@@ -1,61 +1,94 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Hammer, Search, Cpu, Sparkles, Workflow, Cable } from 'lucide-react';
+import { Hammer, Search, Cpu, Sparkles, Workflow, Cable, Activity, Database, TerminalSquare } from 'lucide-react';
 
-export const TodoGenerationAnimation = () => (
-  <div className="relative overflow-hidden rounded-2xl border border-[#2D241E] bg-[linear-gradient(180deg,rgba(23,19,17,0.98)_0%,rgba(15,13,12,0.98)_100%)] px-4 py-4 text-left shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
-    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(217,119,86,0.12),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(45,212,191,0.08),transparent_35%)] pointer-events-none" />
+interface RealtimePipelineAnimationProps {
+  statusLabel?: string;
+}
+
+const PIPELINE_STAGES = [
+  { id: 'ingest', label: 'Input', icon: Database },
+  { id: 'route', label: 'Route', icon: Cable },
+  { id: 'process', label: 'Process', icon: Activity },
+  { id: 'emit', label: 'Output', icon: TerminalSquare }
+] as const;
+
+export const RealtimePipelineAnimation = ({ statusLabel }: RealtimePipelineAnimationProps) => (
+  <div className="relative overflow-hidden rounded-2xl border border-[#23313A] bg-[linear-gradient(180deg,rgba(10,16,21,0.98)_0%,rgba(8,12,16,0.98)_100%)] px-4 py-4 text-left shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.10),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.10),transparent_34%)] pointer-events-none" />
+    <motion.div
+      animate={{ x: ['-10%', '110%'] }}
+      transition={{ repeat: Infinity, duration: 2.8, ease: 'linear' }}
+      className="pointer-events-none absolute left-0 top-[58px] h-px w-28 bg-[linear-gradient(90deg,rgba(34,211,238,0),rgba(34,211,238,0.95),rgba(16,185,129,0))]"
+    />
+
     <div className="relative flex items-start gap-3">
-      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#D97756]/25 bg-[#D97756]/10">
+      <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
         <motion.div
-          animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.08, 1] }}
-          transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-          className="text-[#F59E0B]"
+          animate={{ rotate: 360, scale: [1, 1.04, 1] }}
+          transition={{ rotate: { repeat: Infinity, duration: 6, ease: 'linear' }, scale: { repeat: Infinity, duration: 1.8, ease: 'easeInOut' } }}
+          className="text-cyan-300"
         >
           <Workflow size={18} strokeWidth={2.2} />
         </motion.div>
       </div>
+
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-[#C89A79]">
-            Planning Build Steps
+          <span className="text-[10px] font-bold uppercase tracking-[0.24em] text-cyan-200/80">
+            Realtime Pipeline
           </span>
           <motion.span
-            animate={{ opacity: [0.35, 1, 0.35] }}
-            transition={{ repeat: Infinity, duration: 1.4 }}
-            className="inline-block h-1.5 w-1.5 rounded-full bg-[#D97756]"
+            animate={{ opacity: [0.25, 1, 0.25], scale: [0.9, 1.15, 0.9] }}
+            transition={{ repeat: Infinity, duration: 1.2 }}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]"
           />
         </div>
-        <p className="mt-1 text-sm font-semibold text-[#F3ECE4]">
-          Preparing an executable TODO runbook for this coder task.
+
+        <p className="mt-1 text-sm font-semibold text-[#E6F4F7]">
+          {statusLabel || 'Streaming work through the active response pipeline.'}
         </p>
-        <div className="mt-3 space-y-2">
-          {[
-            'Understanding the request and constraints',
-            'Locating the right workspace files',
-            'Sequencing implementation into clear steps'
-          ].map((label, idx) => (
-            <motion.div
-              key={label}
-              initial={{ opacity: 0.45, x: -4 }}
-              animate={{ opacity: [0.45, 1, 0.45], x: [0, 3, 0] }}
-              transition={{ repeat: Infinity, duration: 1.8, delay: idx * 0.18, ease: 'easeInOut' }}
-              className="flex items-center gap-2 text-[12px] text-[#B8ACA1]"
-            >
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#2F2722] bg-[#181513] text-[10px] font-bold text-[#D9B6A3]">
-                {idx + 1}
-              </span>
-              <span>{label}</span>
-            </motion.div>
-          ))}
+
+        <div className="mt-3 grid grid-cols-4 gap-2">
+          {PIPELINE_STAGES.map((stage, idx) => {
+            const Icon = stage.icon;
+            return (
+              <div key={stage.id} className="relative">
+                <motion.div
+                  animate={{ opacity: [0.55, 1, 0.55], y: [0, -2, 0] }}
+                  transition={{ repeat: Infinity, duration: 1.6, delay: idx * 0.18, ease: 'easeInOut' }}
+                  className="rounded-xl border border-cyan-500/10 bg-white/[0.03] px-2 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-400/15 bg-cyan-400/8 text-cyan-300">
+                      <Icon size={12} strokeWidth={2.1} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-cyan-100/60">
+                        {stage.label}
+                      </div>
+                      <div className="mt-1 h-1 overflow-hidden rounded-full bg-cyan-950/70">
+                        <motion.div
+                          animate={{ x: ['-100%', '140%'] }}
+                          transition={{ repeat: Infinity, duration: 1.35, delay: idx * 0.12, ease: 'easeInOut' }}
+                          className="h-full w-3/4 rounded-full bg-[linear-gradient(90deg,rgba(34,211,238,0),rgba(34,211,238,0.95),rgba(16,185,129,0.9),rgba(34,211,238,0))]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+
+                {idx < PIPELINE_STAGES.length - 1 && (
+                  <div className="pointer-events-none absolute -right-1.5 top-1/2 hidden h-px w-3 -translate-y-1/2 bg-cyan-400/30 sm:block" />
+                )}
+              </div>
+            );
+          })}
         </div>
-        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[#231D1A]">
-          <motion.div
-            initial={{ x: '-40%' }}
-            animate={{ x: '140%' }}
-            transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
-            className="h-full w-2/5 rounded-full bg-[linear-gradient(90deg,rgba(217,119,86,0),rgba(217,119,86,0.95),rgba(45,212,191,0.75),rgba(217,119,86,0))]"
-          />
+
+        <div className="mt-4 flex items-center gap-2 text-[11px] text-cyan-50/70">
+          <span className="font-mono text-cyan-300/90">$ live_status</span>
+          <div className="h-px flex-1 bg-[linear-gradient(90deg,rgba(34,211,238,0.4),rgba(34,211,238,0.02))]" />
         </div>
       </div>
     </div>

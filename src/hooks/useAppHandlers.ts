@@ -752,6 +752,74 @@ const isHeavySkillTask = (content: string) => {
 
 const DDG_SEQUENTIAL_DELAY_MS = 5000;
 
+const isOllamaSearchEnabledForCurrentProvider = (selectedProvider?: string) => {
+  try {
+    const toggleEnabled = localStorage.getItem('lumina_ollama_web_search_enabled') === 'true';
+    if (!toggleEnabled) return false;
+
+    const providerId = String(
+      selectedProvider || localStorage.getItem('lumina_provider') || ''
+    ).toLowerCase();
+
+    return providerId === 'ollama_local' || providerId === 'ollama_cloud';
+  } catch {
+    return false;
+  }
+};
+
+const runPreferredWebSearch = async ({
+  content,
+  tavilyApiKey,
+  serpApiKey,
+  searchProvider,
+  selectedProvider,
+  apiKey,
+  signal,
+}: {
+  content: string;
+  tavilyApiKey: string;
+  serpApiKey: string;
+  searchProvider: string;
+  selectedProvider?: string;
+  apiKey?: string;
+  signal?: AbortSignal;
+}) => {
+  const useOllamaSearch = isOllamaSearchEnabledForCurrentProvider(selectedProvider);
+  const response = await fetch(useOllamaSearch ? '/api/ollama/web-search' : '/api/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(
+      useOllamaSearch
+        ? {
+            query: content,
+            apiKey,
+          }
+        : {
+            query: content,
+            tavilyKey: tavilyApiKey,
+            serpKey: serpApiKey,
+            provider: searchProvider,
+          }
+    ),
+    signal
+  });
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      results: [],
+      provider: useOllamaSearch ? 'Ollama Web Search' : 'Search'
+    };
+  }
+
+  const data = await response.json();
+  return {
+    ok: true,
+    results: data.results || [],
+    provider: data.provider || (useOllamaSearch ? 'Ollama Web Search' : 'Search')
+  };
+};
+
 export function useAppHandlers(params: UseAppHandlersParams) {
   const {
     input, setInput,
@@ -885,9 +953,23 @@ export function useAppHandlers(params: UseAppHandlersParams) {
       return { systemPromptAddendum: '', matchedMemories: [] };
     }
 
+    const segmentPriority: Record<string, number> = {
+      identity: 0.18,
+      correction: 0.16,
+      preference: 0.14,
+      project: 0.12,
+      knowledge: 0.1,
+      relationship: 0.08,
+      context: 0.04,
+    };
+
     matchedMemories.sort((a, b) => {
-      const aScore = (a.importance || 0.5) * 2 + (a.decay || a.decayRate || 0) + (a.accessCount || 0) * 0.1;
-      const bScore = (b.importance || 0.5) * 2 + (b.decay || b.decayRate || 0) + (b.accessCount || 0) * 0.1;
+      const aTierBonus = a.tier === 'permanent' ? 0.35 : a.tier === 'long' ? 0.18 : 0;
+      const bTierBonus = b.tier === 'permanent' ? 0.35 : b.tier === 'long' ? 0.18 : 0;
+      const aRecencyBoost = a.lastAccessedAt ? Math.max(0, 0.12 - ((Date.now() - a.lastAccessedAt) / 86_400_000) * 0.01) : 0;
+      const bRecencyBoost = b.lastAccessedAt ? Math.max(0, 0.12 - ((Date.now() - b.lastAccessedAt) / 86_400_000) * 0.01) : 0;
+      const aScore = (a.importance || 0.5) * 2.4 + (a.decay || a.decayRate || 0) + (a.accessCount || 0) * 0.14 + aTierBonus + (segmentPriority[a.segment] || 0) + aRecencyBoost;
+      const bScore = (b.importance || 0.5) * 2.4 + (b.decay || b.decayRate || 0) + (b.accessCount || 0) * 0.14 + bTierBonus + (segmentPriority[b.segment] || 0) + bRecencyBoost;
       return bScore - aScore;
     });
 
@@ -926,7 +1008,7 @@ You have recalled the following structured memories from your memory vault. Thes
         {
           role: 'system',
           content: `You are the Cognitive Memory Consolidation Processor for the Lumina AI agent.
-Your job is to analyze the preceding single conversational turn (the user's request and the assistant's response) and extract any key, durable memories to commit to the long-term memory vault.
+Your job is to analyze the preceding single conversational turn (the user's request and the assistant's response) and extract only key, durable memories that should survive beyond the current moment.
 
 Focus strictly on high-value facts:
 - **identity**: Facts about who the user is, their job, goals, background, habits.
@@ -936,7 +1018,20 @@ Focus strictly on high-value facts:
 - **knowledge**: Critical domain knowledge or solutions discovered in the turn.
 - **correction**: Direct instructions to fix something, changes in styling, or behavioral rules.
 
-Do NOT extract trivial conversational filler, general greetings, or temporary questions. Only extract items of high long-term utility.
+Treat memory like a human brain:
+- store only things likely to matter again
+- prefer fewer, sharper memories over many weak ones
+- avoid one-off details unless they clearly affect future behavior
+- repeated corrections, stable preferences, identity facts, and recurring project constraints are especially valuable
+
+Tier selection rules:
+- "short": useful soon, but may fade if not referenced again
+- "long": likely useful across multiple future turns or the whole project
+- "permanent": core identity, stable preferences, critical corrections, or truths that should rarely be forgotten
+
+Only choose "permanent" when the information is central and durable. Do not mark ordinary temporary work details as permanent.
+
+Do NOT extract trivial conversational filler, general greetings, or temporary questions. Do NOT store throwaway one-turn planning unless it defines an ongoing project constraint.
 
 You must respond with a JSON array under the "memories" key. Each memory object must have:
 - "content": A concise declarative sentence expressing the memory (e.g. "User prefers a Swiss minimal dark aesthetic for their dashboards.").
@@ -981,6 +1076,12 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             const tierVal = ['short', 'long', 'permanent'].includes(rawMem.tier) ? rawMem.tier : 'long';
             const segmentVal = ['identity', 'preference', 'relationship', 'project', 'knowledge', 'correction', 'context'].includes(rawMem.segment) ? rawMem.segment : 'knowledge';
 
+            const importanceByTier: Record<string, number> = {
+              short: 0.58,
+              long: 0.78,
+              permanent: 0.94,
+            };
+
             const compatMem = {
               id: generatedId,
               decay: tierVal === 'permanent' ? 0.99 : tierVal === 'long' ? 0.85 : 0.6,
@@ -990,9 +1091,9 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
               content: rawMem.content.trim(),
               tier: tierVal,
               segment: segmentVal,
-              importance: 0.8,
+              importance: Math.min(0.99, (importanceByTier[tierVal] || 0.78) + (segmentVal === 'identity' || segmentVal === 'correction' ? 0.03 : 0)),
               decayRate: tierVal === 'short' ? 0.002 : tierVal === 'long' ? 0.0003 : 0.00001,
-              accessCount: 1,
+              accessCount: 0,
               lastAccessedAt: Date.now(),
               lifecycle: 'active',
               source: 'conversation',
@@ -1362,15 +1463,15 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       content: '',
       timestamp: new Date(),
       startedAt: new Date(),
-      thinking: isCoderPlanning ? 'Generating engineering TODOs...' : (isWebSearchEnabled ? 'Searching the web...' : 'Thinking...'),
+      thinking: isCoderPlanning ? 'Preparing engineering task plan...' : (isWebSearchEnabled ? 'Collecting live web sources...' : `${persona.name} is preparing a response...`),
       isSearching: isWebSearchEnabled,
       isStreaming: true,
       toolCalls: [
         {
           id: 'thinking-node',
           label: isCoderPlanning
-            ? 'Coder planner - generating TODOs...'
-            : (isWebSearchEnabled ? 'Searching the web...' : `${persona.name} - thinking...`),
+            ? 'Coder planner - preparing TODO plan'
+            : (isWebSearchEnabled ? 'Web search in progress' : `${persona.name} - response preparation`),
           type: 'ai',
           status: 'active',
           icon: isCoderPlanning ? 'manage_todos' : (isWebSearchEnabled ? 'globe' : 'sparkles')
@@ -1449,11 +1550,11 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
           ...chat,
           messages: chat.messages.map(m => m.id === thinkingId ? {
             ...m,
-            thinking: 'Generating engineering TODOs...',
+            thinking: 'Preparing engineering task plan...',
             toolCalls: [
               {
                 id: 'coder-plan-node',
-                label: 'Generating coder TODO runbook',
+                label: 'Preparing coder TODO runbook',
                 type: 'tool',
                 status: 'active',
                 toolName: 'manage_todos',
@@ -1637,22 +1738,21 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
           providerName = 'SerpApi';
         }
 
-        const searchResp = await fetch(`/api/search`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            query: content, 
-            tavilyKey: tavilyApiKey,
-            serpKey: serpApiKey,
-            provider: searchProvider
-          }),
+        const searchData = await runPreferredWebSearch({
+          content,
+          tavilyApiKey,
+          serpApiKey,
+          searchProvider,
+          selectedProvider,
+          apiKey,
           signal
         });
         
-        if (searchResp.ok) {
-          const searchData = await searchResp.json();
+        if (searchData.ok) {
           searchResults = searchData.results || [];
-          searchProviderVal = "Deep Research Engine (" + providerName + ")";
+          searchProviderVal = searchData.provider === 'Ollama Web Search'
+            ? 'Deep Research Engine (Ollama Web Search)'
+            : "Deep Research Engine (" + providerName + ")";
         } else {
           console.warn('Backend search failed, no further fallback available.');
         }
@@ -1683,7 +1783,13 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
           return {
             ...chat,
             messages: chat.messages.map(m => m.id === thinkingId
-              ? { ...m, thinking: 'Searching the web...', isSearching: true }
+              ? {
+                  ...m,
+                  thinking: isOllamaSearchEnabledForCurrentProvider(selectedProvider)
+                    ? 'Searching with Ollama Web Search...'
+                    : 'Searching the web...',
+                  isSearching: true
+                }
               : m)
           };
         }));
@@ -1702,20 +1808,17 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
           providerName = 'SerpApi';
         }
 
-        const searchResp = await fetch(`/api/search`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            query: content, 
-            tavilyKey: tavilyApiKey,
-            serpKey: serpApiKey,
-            provider: searchProvider
-          }),
+        const searchData = await runPreferredWebSearch({
+          content,
+          tavilyApiKey,
+          serpApiKey,
+          searchProvider,
+          selectedProvider,
+          apiKey,
           signal
         });
         
-        if (searchResp.ok) {
-          const searchData = await searchResp.json();
+        if (searchData.ok) {
           searchResults = searchData.results || [];
           searchProviderVal = searchData.provider || "Search";
         } else {
@@ -2491,7 +2594,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             preset: researchMode?.depthPreset || 'standard',
             tavilyKey: tavilyApiKey,
             serpKey: serpApiKey,
-            provider: searchProvider,
+            provider: selectedProvider,
             model: selectedModel || activeModelId,
             apiKey,
             baseUrl: serverUrl
@@ -2504,71 +2607,92 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
           throw new Error(errorPayload?.error || 'Deep Research request failed');
         }
 
-        const deepResearchData = await deepResearchResponse.json();
-        const finalContent = sanitizeDeepResearchReport(deepResearchData.report || 'Deep Research completed, but no final report text was returned.');
-        const toolCallNodes: ToolCallNode[] = Array.isArray(deepResearchData.toolCalls)
-          ? deepResearchData.toolCalls.map((tc: any, idx: number) => ({
-              id: tc.id || `deep-tool-${idx}`,
-              type: tc.type === 'ai' ? 'ai' : 'tool',
-              label: tc.label || tc.toolName || 'deep research step',
-              status: tc.status === 'failed' ? 'failed' : tc.status === 'active' ? 'active' : 'complete',
-              toolName: tc.toolName,
-              argsCount: tc.argsCount,
-              resultSummary: tc.resultSummary,
-              icon: tc.icon || (
-                (tc.toolName || '').includes('search') ? 'search' :
-                (tc.toolName || '').includes('wiki') || (tc.toolName || '').includes('visit') || (tc.toolName || '').includes('scrape') ? 'globe' :
-                'sparkles'
-              )
-            }))
-          : [];
+        const reader = deepResearchResponse.body?.getReader();
+        if (!reader) {
+          throw new Error('Deep Research stream was not available');
+        }
 
-        const activeToolNodes = toolCallNodes.map((node: ToolCallNode) => ({ ...node, status: 'active' as const }));
+        const decoder = new TextDecoder();
+        let streamBuffer = '';
+        let deepResearchData: any = null;
+        let streamedReport = '';
+        const toolCallNodeMap = new Map<string, ToolCallNode>();
+        const buildToolNode = (tc: any, idx = 0): ToolCallNode => ({
+          id: tc.id || `deep-tool-${idx}`,
+          type: tc.type === 'ai' ? 'ai' : 'tool',
+          label: tc.label || tc.toolName || 'deep research step',
+          status: tc.status === 'failed' ? 'failed' : tc.status === 'active' ? 'active' : 'complete',
+          toolName: tc.toolName,
+          argsCount: tc.argsCount,
+          resultSummary: tc.resultSummary,
+          icon: tc.icon || (
+            (tc.toolName || '').includes('search') ? 'search' :
+            (tc.toolName || '').includes('wiki') || (tc.toolName || '').includes('visit') || (tc.toolName || '').includes('scrape') ? 'globe' :
+            'sparkles'
+          )
+        });
+        const syncThinkingMessage = (contentValue: string, toolCallsValue: ToolCallNode[], isFinal = false) => {
+          setChats(prev => prev.map(chat => {
+            if (chat.id !== chatId) return chat;
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === thinkingId ? {
+                ...m,
+                content: contentValue || m.content,
+                thinking: isFinal ? undefined : 'Running Deep Research pipeline...',
+                isSearching: !isFinal,
+                isThinking: !isFinal,
+                toolCalls: toolCallsValue,
+                isStreaming: !isFinal,
+                timestamp: isFinal ? new Date() : m.timestamp
+              } : m)
+            };
+          }));
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          streamBuffer += decoder.decode(value, { stream: true });
+          const lines = streamBuffer.split('\n');
+          streamBuffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const evt = JSON.parse(trimmed);
+
+            if (evt.type === 'pipeline' && evt.node) {
+              const nextNode = buildToolNode(evt.node, toolCallNodeMap.size);
+              toolCallNodeMap.set(nextNode.id, {
+                ...(toolCallNodeMap.get(nextNode.id) || {}),
+                ...nextNode
+              });
+              syncThinkingMessage(streamedReport, [...toolCallNodeMap.values()]);
+            } else if (evt.type === 'report') {
+              streamedReport = sanitizeDeepResearchReport(evt.report || `${streamedReport}${evt.chunk || ''}`);
+              syncThinkingMessage(streamedReport, [...toolCallNodeMap.values()]);
+            } else if (evt.type === 'final' && evt.result) {
+              deepResearchData = evt.result;
+            } else if (evt.type === 'done' && evt.result) {
+              deepResearchData = evt.result;
+            } else if (evt.type === 'error') {
+              throw new Error(evt.error || 'Deep Research stream failed');
+            }
+          }
+        }
+
+        if (!deepResearchData) {
+          throw new Error('Deep Research completed without a final result');
+        }
+
+        const toolCallNodes: ToolCallNode[] = Array.isArray(deepResearchData.toolCalls)
+          ? deepResearchData.toolCalls.map((tc: any, idx: number) => buildToolNode(tc, idx))
+          : [...toolCallNodeMap.values()];
+        const finalContent = sanitizeDeepResearchReport(deepResearchData.report || streamedReport || 'Deep Research completed, but no final report text was returned.');
         const thinkTagMatch = finalContent.match(/<think>[\s\S]*?<\/think>/);
         const finalThinkContent = thinkTagMatch ? thinkTagMatch[0] : '';
         const finalDisplayContent = finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-        const startTime = Date.now();
-        let currentPos = 0;
-        let lastRenderTime = 0;
-        const totalLength = finalContent.length;
-        const speedFactor = totalLength > 4000 ? 1200 : totalLength > 1000 ? 550 : 280;
-        const RENDER_INTERVAL = 30;
-
-        while (currentPos < totalLength) {
-          if (signal.aborted) {
-            break;
-          }
-          const elapsed = Date.now() - startTime;
-          const targetPos = Math.min(totalLength, Math.floor(elapsed * (speedFactor / 1000)));
-          if (targetPos > currentPos) {
-            currentPos = targetPos;
-            const partial = finalContent.slice(0, currentPos);
-            const now = Date.now();
-            if (now - lastRenderTime > RENDER_INTERVAL || currentPos === totalLength) {
-              lastRenderTime = now;
-              const parsed = parseThinkTags(partial);
-              const displayContent = (parsed.before + parsed.after).trim();
-              setChats(prev => prev.map(chat => {
-                if (chat.id === chatId) {
-                  return {
-                    ...chat,
-                    messages: chat.messages.map(m => m.id === thinkingId ? {
-                      ...m,
-                      content: parsed.isThinking ? displayContent : (displayContent || partial),
-                      thinkContent: parsed.think || undefined,
-                      isThinking: parsed.isThinking,
-                      streamPos: currentPos,
-                      toolCalls: activeToolNodes
-                    } : m),
-                  };
-                }
-                return chat;
-              }));
-            }
-          }
-          await new Promise(resolve => setTimeout(resolve, 8));
-        }
 
         if (signal.aborted) {
           return;
@@ -2576,16 +2700,29 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
 
         let finalArtifacts = extractArtifacts(finalDisplayContent, effectiveWritingStyle, chats, chatId);
         const cleanReport = sanitizeDeepResearchReport(finalDisplayContent || finalContent);
+        const cleanHtmlReport = String(deepResearchData.htmlReport || '').trim();
         if (cleanReport.length > 80) {
+          const reportTitle = createDeepResearchReportTitle(cleanReport);
+          const prioritizedArtifacts: any[] = [];
+          if (cleanHtmlReport) {
+            prioritizedArtifacts.push({
+              id: 'deep-research-html-report-' + Date.now().toString(36),
+              title: `${reportTitle} Visual Report`,
+              language: 'html',
+              content: cleanHtmlReport,
+              type: 'html'
+            });
+          }
+          prioritizedArtifacts.push({
+            id: 'deep-research-report-' + Date.now().toString(36),
+            title: reportTitle,
+            language: 'markdown',
+            content: cleanReport,
+            type: 'report'
+          });
           finalArtifacts = [
-            {
-              id: 'deep-research-report-' + Date.now().toString(36),
-              title: createDeepResearchReportTitle(cleanReport),
-              language: 'markdown',
-              content: cleanReport,
-              type: 'report'
-            },
-            ...finalArtifacts.filter(artifact => artifact.type !== 'report' && artifact.type !== 'markdown')
+            ...prioritizedArtifacts,
+            ...finalArtifacts.filter(artifact => !['report', 'markdown', 'html'].includes(artifact.type))
           ];
         }
 
@@ -2608,7 +2745,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
               messages: chat.messages.map(m =>
                 m.id === thinkingId
                   ? {
-                      ...m,
+                    ...m,
                       content: finalDisplayContent || finalContent.trim(),
                       thinkContent: finalThinkContent.replace(/<\/?think>/g, '').trim() || undefined,
                       isThinking: false,
@@ -3481,6 +3618,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
 
                   let customPrompt = '';
                   let customTools: string[] = [];
+                  let targetRuntime: 'default' | 'pi' = 'default';
 
                   try {
                     const savedConfigsStr = localStorage.getItem('lumina_subagent_configs');
@@ -3503,6 +3641,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                       if (mappedAgentId && configs[mappedAgentId]) {
                         const agentCfg = configs[mappedAgentId];
                         const modelId = agentCfg.modelId;
+                        targetRuntime = agentCfg.runtime === 'pi' ? 'pi' : 'default';
                         if (agentCfg.systemPrompt) {
                           customPrompt = agentCfg.systemPrompt;
                         }
@@ -3544,6 +3683,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                       workspaceRoot: coderWorkspacePath,
                       modelConfig: {
                         model: activeModel,
+                        runtime: targetRuntime,
                         config: {
                           provider: activeProvider,
                           baseUrl: activeBaseUrl,

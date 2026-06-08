@@ -11,6 +11,21 @@ export interface UseLlamaBridgeProps {
   useLocalModelsOnly: boolean;
 }
 
+function getLocalThinkingPreference() {
+  try {
+    return localStorage.getItem('lumina_local_thinking_enabled') === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function resolveThinkSetting(modelId: string) {
+  if (!getLocalThinkingPreference()) return undefined;
+  const normalized = String(modelId || '').toLowerCase();
+  if (normalized.includes('gpt-oss')) return 'medium';
+  return true;
+}
+
 function isRateLimitError(msg: string): boolean {
   const lower = msg.toLowerCase();
   return lower.includes('429') ||
@@ -508,6 +523,7 @@ export function useLlamaBridge({
 
       const doLocalChatRequest = async () => {
         const hasVisionContent = messagesPrompt.some(m => Array.isArray(m.content));
+        const thinkSetting = resolveThinkSetting(activeModelId);
         console.log('[LUMINA_DEBUG] doLocalChatRequest -> LOCAL DIRECT PATH');
         console.log('[LUMINA_DEBUG] URL:', `${localUrl}/chat/completions`);
         console.log('[LUMINA_DEBUG] Has vision content:', hasVisionContent);
@@ -533,7 +549,8 @@ export function useLlamaBridge({
               content: m.content  // may be string or array (vision)
             })),
             stream: false,
-            temperature: 0.7
+            temperature: 0.7,
+            ...(thinkSetting !== undefined ? { think: thinkSetting } : {})
           }),
           signal
         });
@@ -641,7 +658,8 @@ export function useLlamaBridge({
         },
         tools: requestTools,
         stream: false,
-        ragConfig
+        ragConfig,
+        think: resolveThinkSetting(activeModelId)
       }),
       signal,
     });

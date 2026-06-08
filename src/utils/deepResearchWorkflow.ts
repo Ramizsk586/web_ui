@@ -16,9 +16,15 @@ export const DEEP_RESEARCH_SYSTEM_PROMPT = `You are a deep research assistant. Y
 9. Every deep research run must include at least 3 successful wiki_search calls and at least 3 successful web_scrape calls before you finalize.
 10. Blend evidence from search results, scraped pages, and Wikipedia instead of relying on a single source type.
 11. Iterate through search, visit, scrape, compare, and synthesize until you have enough evidence.
-12. Cite sources with source titles/URLs when available. Flag uncertainty and conflicting evidence.
-13. Do not finalize early. If the minimum required wiki searches or web scrapes are not complete yet, continue researching.
-14. When finished, provide the final answer directly in Markdown with a brief source-grounded structure.`;
+12. During each research round, gather both factual evidence and useful visual material when available: portraits, product images, diagrams, maps, logos, charts, or contextual photos.
+13. For people-heavy topics, build enough evidence to support dedicated people spotlight/profile sections in the final report.
+14. Cite sources with source titles/URLs when available. Flag uncertainty and conflicting evidence.
+15. Do not finalize early. If the minimum required wiki searches or web scrapes are not complete yet, continue researching.
+16. The research process should feel iterative: web search, Wikipedia grounding, targeted scraping, comparison, reasoning, and another round if evidence is still thin.
+17. Finish with two deliverables:
+   a. a polished Markdown report for the chat transcript
+   b. a self-contained HTML visual report for preview/export
+18. The HTML report must be wrapped in one \`\`\`html fenced block and should include a strong hero section, executive summary, evidence-based sections, source-aware callouts, segmented narrative structure, and visual/profile blocks when relevant.`;
 
 export const getDeepResearchPresetPrompt = (preset: DeepResearchPreset) => {
   if (preset === 'extreme') {

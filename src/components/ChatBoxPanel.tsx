@@ -339,9 +339,28 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   isVoicePanelOpen,
   setIsVoicePanelOpen,
 }) => {
+  const LARGE_PROVIDER_THRESHOLD = 50;
+  const LARGE_PROVIDER_VISIBLE_COUNT = 30;
+  const normalizedModelSearchQuery = modelSearchQuery.trim().toLowerCase();
+  const hasModelSearch = normalizedModelSearchQuery.length > 0;
+
   const [isRagSelectorOpen, setIsRagSelectorOpen] = React.useState(false);
   const [isDeepResearchPresetOpen, setIsDeepResearchPresetOpen] = React.useState(false);
   const deepResearchPresetRef = React.useRef<HTMLDivElement | null>(null);
+  const [localThinkingEnabled, setLocalThinkingEnabled] = React.useState(() => {
+    try {
+      return localStorage.getItem('lumina_local_thinking_enabled') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [ollamaWebSearchEnabled, setOllamaWebSearchEnabled] = React.useState(() => {
+    try {
+      return localStorage.getItem('lumina_ollama_web_search_enabled') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [ragEnabled, setRagEnabled] = React.useState(() => {
     return localStorage.getItem('lumina_rag_enabled') !== 'false';
   });
@@ -362,6 +381,53 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
     setSelectedDocIds(ids);
     localStorage.setItem('lumina_rag_doc_ids', JSON.stringify(ids));
   };
+
+  const isLocalThinkingModel = React.useMemo(() => {
+    try {
+      const providerId = (localStorage.getItem('lumina_provider') || '').toLowerCase();
+      const modelId = String(activeModelId || '').toLowerCase();
+      const providerLooksLocal =
+        !!useLocalModelsOnly ||
+        providerId === 'ollama_local' ||
+        providerId === 'ollama_cloud' ||
+        providerId === 'lm_studio' ||
+        providerId === 'custom';
+
+      const modelLooksThinkingCapable =
+        modelId.includes('qwen3') ||
+        modelId.includes('qwen-3') ||
+        modelId.includes('deepseek-r1') ||
+        modelId.includes('deepseek-v3.1') ||
+        modelId.includes('gpt-oss') ||
+        modelId.includes('r1') ||
+        modelId.includes('think');
+
+      return providerLooksLocal && modelLooksThinkingCapable;
+    } catch {
+      return false;
+    }
+  }, [activeModelId, useLocalModelsOnly]);
+
+  const isOllamaProvider = React.useMemo(() => {
+    try {
+      const providerId = (localStorage.getItem('lumina_provider') || '').toLowerCase();
+      return providerId === 'ollama_local' || providerId === 'ollama_cloud';
+    } catch {
+      return false;
+    }
+  }, [activeModelId]);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('lumina_local_thinking_enabled', localThinkingEnabled ? 'true' : 'false');
+    } catch {}
+  }, [localThinkingEnabled]);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('lumina_ollama_web_search_enabled', ollamaWebSearchEnabled ? 'true' : 'false');
+    } catch {}
+  }, [ollamaWebSearchEnabled]);
 
   const [isPermissionDropdownOpen, setIsPermissionDropdownOpen] =
     React.useState(false);
@@ -480,16 +546,34 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
 
       {providerModelCategories.map(category => {
         const collapsed = collapsedModelCategories[category.id];
+        const categoryModels = Array.isArray(category.models) ? category.models : [];
+        const matchingModels = hasModelSearch
+          ? categoryModels.filter((model) => {
+              const id = String(model?.id || '').toLowerCase();
+              const name = String(model?.name || '').toLowerCase();
+              const author = String(model?.author || model?.providerProfileName || '').toLowerCase();
+              return (
+                id.includes(normalizedModelSearchQuery) ||
+                name.includes(normalizedModelSearchQuery) ||
+                author.includes(normalizedModelSearchQuery)
+              );
+            })
+          : categoryModels;
+        const visibleModels = !hasModelSearch && categoryModels.length > LARGE_PROVIDER_THRESHOLD
+          ? matchingModels.slice(0, LARGE_PROVIDER_VISIBLE_COUNT)
+          : matchingModels;
+        const hiddenCount = Math.max(0, categoryModels.length - visibleModels.length);
+
         return (
           <div key={category.id} className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
             <button onClick={() => toggleModelCategory(category.id)} className="w-full h-8 px-2.5 flex items-center gap-2 text-[10px] font-bold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]">
               {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
               <span className="flex-1 text-left truncate">{category.label}</span>
-              <span className="text-[8px] text-[var(--theme-secondary)]">{category.models.length}</span>
+              <span className="text-[8px] text-[var(--theme-secondary)]">{categoryModels.length}</span>
             </button>
             {!collapsed && (
               <div className="p-1 space-y-1">
-                {category.models.map((model) => {
+                {visibleModels.map((model) => {
                   const isSelected = activeModelId === model.id;
                   const isLocal = model.id.toLowerCase().includes("gguf");
                   const isFavorite = favoriteModelIds.includes(model.id);
@@ -511,6 +595,16 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     </div>
                   );
                 })}
+                {hasModelSearch && visibleModels.length === 0 && (
+                  <div className="py-3 px-2 text-center text-[10px] text-[var(--theme-muted)]">
+                    No models in this provider match "{modelSearchQuery.trim()}".
+                  </div>
+                )}
+                {!hasModelSearch && hiddenCount > 0 && (
+                  <div className="px-2 py-2 text-[10px] text-center text-[var(--theme-muted)] border border-dashed border-[var(--theme-border)] rounded-lg bg-[var(--theme-surface-alt)]/60">
+                    Showing {visibleModels.length} of {categoryModels.length} models. Search a model name to reveal the rest.
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1532,12 +1626,24 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             icon: <Globe size={16} />,
                             isSelected: isWebSearchEnabled,
                           },
+                          ...(isOllamaProvider ? [{
+                            id: "ollama_web_search",
+                            label: "Ollama Web Search",
+                            icon: <Search size={16} className="text-emerald-400" />,
+                            isSelected: ollamaWebSearchEnabled,
+                          }] : []),
                           {
                             id: "deep_research",
                             label: "Deep Research",
                             icon: <GraduationCap size={16} className="text-purple-400" />,
                             isSelected: isDeepSearchEnabled,
                           },
+                          ...(isLocalThinkingModel ? [{
+                            id: "local_thinking",
+                            label: "Thinking",
+                            icon: <Cpu size={16} className="text-amber-400" />,
+                            isSelected: localThinkingEnabled,
+                          }] : []),
                         ].map((item) => (
                           <button
                             key={item.id}
@@ -1564,7 +1670,20 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                     const newVal = !isWebSearchEnabled;
                                     setIsWebSearchEnabled(newVal);
                                     if (newVal) setIsDeepSearchEnabled(false);
+                                    if (!newVal && isOllamaProvider) setOllamaWebSearchEnabled(false);
                                   })();
+                                  break;
+                                case "ollama_web_search":
+                                  setIsPlusMenuOpen(false);
+                                  setOllamaWebSearchEnabled(prev => {
+                                    const nextVal = !prev;
+                                    if (nextVal) {
+                                      setIsWebSearchEnabled(true);
+                                      setIsDeepSearchEnabled(false);
+                                    }
+                                    showToast(nextVal ? 'Ollama web search enabled.' : 'Ollama web search disabled.');
+                                    return nextVal;
+                                  });
                                   break;
                                 case "deep_research":
                                   setIsPlusMenuOpen(false);
@@ -1572,7 +1691,16 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                     const nextVal = !prev;
                                     if (nextVal) {
                                       setIsWebSearchEnabled(false);
+                                      setOllamaWebSearchEnabled(false);
                                     }
+                                    return nextVal;
+                                  });
+                                  break;
+                                case "local_thinking":
+                                  setIsPlusMenuOpen(false);
+                                  setLocalThinkingEnabled(prev => {
+                                    const nextVal = !prev;
+                                    showToast(nextVal ? 'Thinking enabled for local models.' : 'Thinking disabled for local models.');
                                     return nextVal;
                                   });
                                   break;
@@ -1581,13 +1709,13 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-colors group/item"
                           >
                             <div className="flex items-center gap-3">
-                              <span className={`transition-colors ${(item as any).isSelected ? (item.id === "deep_research" ? "text-purple-500" : "text-blue-500") : "group-hover/item:text-[var(--theme-primary)]"}`}>
+                              <span className={`transition-colors ${(item as any).isSelected ? (item.id === "deep_research" ? "text-purple-500" : item.id === "local_thinking" ? "text-amber-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500") : "group-hover/item:text-[var(--theme-primary)]"}`}>
                                 {item.icon}
                               </span>
                               {item.label}
                             </div>
                             {(item as any).isSelected && (
-                              <Check size={14} className={item.id === "deep_research" ? "text-purple-500" : "text-blue-500"} />
+                              <Check size={14} className={item.id === "deep_research" ? "text-purple-500" : item.id === "local_thinking" ? "text-amber-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500"} />
                             )}
                           </button>
                         ))}

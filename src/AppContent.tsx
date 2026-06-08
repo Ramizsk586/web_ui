@@ -222,7 +222,7 @@ import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 import { LivePreviewPanel } from './components/LivePreviewPanel';
 import { ThemeCustomizerPanel } from './components/ThemeCustomizerPanel';
-import { LuminaAgentPanel } from './components/LuminaAgentPanel';
+import { LuminaAgentPanel, LuminaMemoryPanel } from './components/LuminaAgentPanel';
 
 import { RAGPanel } from './components/RAGPanel';
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
@@ -477,6 +477,7 @@ export default function AppContent({
   const [showProjectsPage, setShowProjectsPage] = useState(false);
   const [showAgentsPage, setShowAgentsPage] = useState(false);
   const [isLuminaAgentOpen, setIsLuminaAgentOpen] = useState(false);
+  const [isLuminaMemoryOpen, setIsLuminaMemoryOpen] = useState(false);
   const [isCustomThemeOpen, setIsCustomThemeOpen] = useState(false);
   const [isClearChatConfirmOpen, setIsClearChatConfirmOpen] = useState(false);
 
@@ -2024,6 +2025,14 @@ const startCoderPreview = useCallback(async () => {
     );
   };
 
+  const chatColumnWidthClass = messages.length === 0
+    ? (isSidebarOpen ? 'max-w-xl md:max-w-[44rem]' : 'max-w-xl md:max-w-2xl')
+    : (isSidebarOpen ? 'max-w-4xl xl:max-w-[1020px]' : 'max-w-4xl xl:max-w-[1100px]');
+
+  const chatColumnGutterClass = isSidebarOpen
+    ? 'px-4 md:px-6 xl:px-8'
+    : 'px-4 md:px-0';
+
   if (showLogin) {
     return (
       <OnboardingModal
@@ -2335,7 +2344,7 @@ const startCoderPreview = useCallback(async () => {
           </header>
         )}
 
-        {!isCoderMode && !isLuminaAgentOpen && !isSettingsOpen && !isRagPanelOpen && (
+        {!isCoderMode && !isLuminaAgentOpen && !isLuminaMemoryOpen && !isSettingsOpen && !isRagPanelOpen && (
           <header className={`h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md transition-all duration-300 ease-in-out ${
             autoHideTopBar 
               ? 'absolute top-0 left-0 right-0 z-[160] transform -translate-y-[48px] hover:translate-y-0 opacity-0 hover:opacity-100 hover:shadow-lg' 
@@ -2611,7 +2620,8 @@ const startCoderPreview = useCallback(async () => {
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen((prev: boolean) => !prev); setIsHeaderMenuOpen(false); } },
                         { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
-                        { id: 'lumina_agent', label: 'Lumina Agent', icon: <Bot size={16} className="text-emerald-500" />, onClick: () => { setIsLuminaAgentOpen(true); setIsHeaderMenuOpen(false); } },
+                        { id: 'lumina_agent', label: 'Lumina Agent', icon: <Bot size={16} className="text-emerald-500" />, onClick: () => { setIsLuminaMemoryOpen(false); setIsLuminaAgentOpen(true); setIsHeaderMenuOpen(false); } },
+                        { id: 'lumina_memory', label: 'Memory Panel', icon: <Brain size={16} className="text-cyan-400" />, onClick: () => { setIsLuminaAgentOpen(false); setIsLuminaMemoryOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'theme_customizer', label: 'Theme Studio', icon: <Palette size={16} className="text-amber-500" />, onClick: () => { setIsCustomThemeOpen(true); setIsHeaderMenuOpen(false); } },
                       ].map((item) => (
                         <button
@@ -2917,6 +2927,21 @@ const startCoderPreview = useCallback(async () => {
                   onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
                 />
               </motion.div>
+            ) : isLuminaMemoryOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-zinc-950"
+              >
+                <LuminaMemoryPanel
+                  onClose={() => setIsLuminaMemoryOpen(false)}
+                  agents={agents}
+                  isSidebarOpen={isSidebarOpen}
+                  onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+                />
+              </motion.div>
             ) : false ? (
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
@@ -2946,9 +2971,9 @@ const startCoderPreview = useCallback(async () => {
                 <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
               <div 
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto px-4 md:px-0 py-8 custom-scrollbar scroll-smooth"
+                className={`flex-1 overflow-y-auto py-8 custom-scrollbar scroll-smooth ${chatColumnGutterClass}`}
               >
-                <div className="mx-auto space-y-8 pb-24 max-w-4xl xl:max-w-[1100px]">
+                <div className={`mx-auto space-y-8 pb-24 w-full ${chatColumnWidthClass}`}>
                   <AnimatePresence initial={false}>
                     {messages.length === 0 ? (
                       <motion.div 
@@ -3071,12 +3096,8 @@ const startCoderPreview = useCallback(async () => {
               )}
             </div>
 
-            <div className="px-6 pb-6 pt-2 z-30 shrink-0 select-none bg-transparent border-transparent">
-              <div className={`mx-auto relative flex flex-col gap-2 transition-all duration-300 ${
-                messages.length === 0 
-                  ? 'max-w-xl md:max-w-2xl' 
-                  : 'max-w-4xl xl:max-w-[1100px]'
-              }`}>
+            <div className={`pb-6 pt-2 z-30 shrink-0 select-none bg-transparent border-transparent ${isSidebarOpen ? 'px-4 md:px-6 xl:px-8' : 'px-6'}`}>
+              <div className={`mx-auto relative flex flex-col gap-2 transition-all duration-300 w-full ${chatColumnWidthClass}`}>
                 {renderChatBox(messages.length === 0)}
                 <div className="text-center">
                   <span className="text-[10px] text-zinc-500/80 font-medium tracking-tight">Claude is AI and can make mistakes. Please double-check responses.</span>

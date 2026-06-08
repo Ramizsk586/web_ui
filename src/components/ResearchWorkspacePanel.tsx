@@ -82,10 +82,14 @@ export default function ResearchWorkspacePanel({
   const [newStageTitle, setNewStageTitle] = useState('');
   const [newStageDesc, setNewStageDesc] = useState('');
   const [newStageType, setNewStageType] = useState<'query' | 'search' | 'scrape' | 'correlate' | 'synthesize'>('search');
-
-  // AI Automatic Synthesizer States
-  const [isSynthesizing, setIsSynthesizing] = useState(false);
-  const [synthesisLogs, setSynthesisLogs] = useState<string[]>([]);
+  const activeNodes = toolChain.filter(node => node.status === 'active');
+  const completedNodes = toolChain.filter(node => node.status === 'complete');
+  const liveAgentCount = agents.filter(agent => agent.status !== 'idle' && agent.status !== 'failed').length;
+  const totalResultsFound = agents.reduce((sum, agent) => sum + agent.resultsFound, 0);
+  const latestSystemLog = [...researchLogs].reverse().find(log => log.includes('[SYSTEM]') || log.includes('[Orchestrator]')) || researchLogs[researchLogs.length - 1] || 'No system activity recorded yet.';
+  const latestAgentLog = [...researchLogs].reverse().find(log => log.includes('[Planner]') || log.includes('[Searcher]') || log.includes('[Grounder]') || log.includes('[Reader]') || log.includes('[Verifier]') || log.includes('[Synthesizer]')) || 'No agent activity recorded yet.';
+  const activeNode = activeNodes[0] || null;
+  const selectedNode = selectedNodeId ? toolChain.find(n => n.id === selectedNodeId) || null : null;
 
   // Agent Operations
   const handleSpawnAgent = (e: React.FormEvent) => {
@@ -173,118 +177,93 @@ export default function ResearchWorkspacePanel({
     showToast(`Stage "${title}" removed.`);
   };
 
-  // AI-driven Spawns & Synthesis
+  // Agent/pipeline templating
   const handleAiSynthesis = () => {
     if (isResearchActive) {
-      showToast('Cannot run AI spawner while research loop is active.');
+      showToast('Stop the active research run before applying a new agent template.');
       return;
     }
-    setIsSynthesizing(true);
-    setSynthesisLogs([]);
-    
-    const timestamp = () => new Date().toLocaleTimeString();
-    
-    const phrases = [
-      `[AI_SPAWNER] Instantiating neural synthesizer protocol...`,
-      `[AI_SPAWNER] Reviewing active research objectives: [${customQueries}]`,
-      `[AI_SPAWNER] Architecting hyper-specialized expert research team...`,
-      `[AI_SPAWNER] Generating personalized pipeline execution toolchain nodes...`,
-      `[AI_SPAWNER] Optimizing concurrency locks and cache buffers...`,
-      `[AI_SPAWNER] Deployment secure! Injecting custom agents & pipeline graphs into Lumina environment.`
+    const timestamp = new Date().toLocaleTimeString();
+    const rawQueries = customQueries.split(',').map(q => q.trim()).filter(Boolean);
+    const coreTopic = rawQueries[0] || 'Target Domain';
+    const topicName = coreTopic.replace(/\b\w/g, c => c.toUpperCase());
+
+    const customAgents: ResearchAgent[] = [
+      {
+        id: '1',
+        name: `${topicName} Planner`,
+        role: 'Objective Planner & Angle Mapper',
+        status: 'idle',
+        currentTask: `Preparing research outline for "${coreTopic}"`,
+        progress: 0,
+        resultsFound: 0
+      },
+      {
+        id: '2',
+        name: `${topicName.split(' ')[0] || 'Domain'} Search Lead`,
+        role: 'Web Search & Source Discovery',
+        status: 'idle',
+        currentTask: 'Waiting for search assignments',
+        progress: 0,
+        resultsFound: 0
+      },
+      {
+        id: '3',
+        name: 'Evidence Verifier',
+        role: 'Scrape Review & Claim Validation',
+        status: 'idle',
+        currentTask: 'Waiting for evidence packets',
+        progress: 0,
+        resultsFound: 0
+      },
     ];
 
-    let currentIdx = 0;
-    const interval = setInterval(() => {
-      setSynthesisLogs(prev => [...prev, `[${timestamp()}] ${phrases[currentIdx]}`]);
-      currentIdx++;
-
-      if (currentIdx >= phrases.length) {
-        clearInterval(interval);
-        
-        const rawQueries = customQueries.split(',').map(q => q.trim()).filter(Boolean);
-        const coreTopic = rawQueries[0] || 'Target Domain';
-        const topicName = coreTopic.replace(/\b\w/g, c => c.toUpperCase());
-
-        const customAgents: ResearchAgent[] = [
-          { 
-            id: '1', 
-            name: `${topicName} Investigator`, 
-            role: 'Lead Deep Scraper & Heuristic Objective Coordinator', 
-            status: 'idle', 
-            currentTask: `Analyzing specific targets for "${coreTopic}"`, 
-            progress: 0, 
-            resultsFound: 0 
-          },
-          { 
-            id: '2', 
-            name: `Academic ${topicName.split(' ')[0] || 'Domain'} Evaluator`, 
-            role: 'Jina Scholar & Bibliography Verification Scout', 
-            status: 'idle', 
-            currentTask: 'Waiting for citation crawling assignments', 
-            progress: 0, 
-            resultsFound: 0 
-          },
-          { 
-            id: '3', 
-            name: 'Synthesizer & Claims Auditor', 
-            role: 'Conflict Resolver & Confidence Matrix Compiler', 
-            status: 'idle', 
-            currentTask: 'Consolidating cross-domain research facts', 
-            progress: 0, 
-            resultsFound: 0 
-          },
-        ];
-
-        const customPipeline: ToolChainNode[] = [
-          { 
-            id: '1', 
-            type: 'query', 
-            title: `Formulate ${topicName.split(' ')[0] || 'Target'} Hypotheses`, 
-            description: `Deconstructs "${coreTopic}" objectives into testable assertions`, 
-            status: 'idle' 
-          },
-          { 
-            id: '2', 
-            type: 'search', 
-            title: 'SerpAPI Targeted Crawl', 
-            description: `Crawls academic repositories for: ${customQueries}`, 
-            status: 'idle' 
-          },
-          { 
-            id: '3', 
-            type: 'scrape', 
-            title: 'Jina Extraction & Filtering', 
-            description: 'Strips paywalls and parses raw markdown from citation URLs', 
-            status: 'idle' 
-          },
-          { 
-            id: '4', 
-            type: 'correlate', 
-            title: 'Audited Claims Validation', 
-            description: 'Flags overlapping claims and filters weak consensus', 
-            status: 'idle' 
-          },
-          { 
-            id: '5', 
-            type: 'synthesize', 
-            title: 'Synthesize Verified Findings', 
-            description: 'Compiles formatted final brief with footnotes', 
-            status: 'idle' 
-          }
-        ];
-
-        setAgents(customAgents);
-        setToolChain(customPipeline);
-        setActiveAgentCount(3);
-        setIsSynthesizing(false);
-
-        setResearchLogs(prev => [
-          ...prev,
-          `[${timestamp()}] [SYSTEM] AI Spawner has successfully synthesized team of ${customAgents.length} custom agents and custom ${customPipeline.length}-node pipeline matching "${coreTopic}".`
-        ]);
-        showToast('AI synthesized custom agents and pipeline!');
+    const customPipeline: ToolChainNode[] = [
+      {
+        id: '1',
+        type: 'query',
+        title: `Outline ${topicName.split(' ')[0] || 'Target'} Angles`,
+        description: `Breaks "${coreTopic}" into actionable research directions.`,
+        status: 'idle'
+      },
+      {
+        id: '2',
+        type: 'search',
+        title: 'Source Discovery Pass',
+        description: `Collects candidate sources for ${customQueries}.`,
+        status: 'idle'
+      },
+      {
+        id: '3',
+        type: 'scrape',
+        title: 'Evidence Extraction Pass',
+        description: 'Reads the highest-value pages and captures evidence.',
+        status: 'idle'
+      },
+      {
+        id: '4',
+        type: 'correlate',
+        title: 'Cross-Check Findings',
+        description: 'Compares evidence, dates, and source agreement.',
+        status: 'idle'
+      },
+      {
+        id: '5',
+        type: 'synthesize',
+        title: 'Assemble Final Brief',
+        description: 'Produces the cited report from validated findings.',
+        status: 'idle'
       }
-    }, 600);
+    ];
+
+    setAgents(customAgents);
+    setToolChain(customPipeline);
+    setActiveAgentCount(3);
+    setResearchLogs(prev => [
+      ...prev,
+      `[${timestamp}] [SYSTEM] Applied research template for "${coreTopic}" with ${customAgents.length} agents and ${customPipeline.length} execution stages.`
+    ]);
+    showToast('Research template applied.');
   };
 
   // Scroll logs to bottom
@@ -662,34 +641,28 @@ export default function ResearchWorkspacePanel({
                     <div className="border border-[var(--theme-accent)]/20 bg-[var(--theme-accent)]/[0.02] p-4 rounded-xl space-y-3 relative overflow-hidden backdrop-blur-md">
                       <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-[var(--theme-accent)] to-[var(--theme-success)]" />
                       <h3 className="text-[10px] font-bold font-mono text-[var(--theme-accent)] uppercase flex items-center gap-1.5">
-                        <Sparkles size={11} className="animate-pulse" /> AI Spawner Protocols
+                        <Sparkles size={11} /> Research Template
                       </h3>
                       <p className="text-[9.5px] text-[var(--theme-secondary)]/75 font-sans leading-relaxed">
-                        Synthesize customized research experts and tailored toolchain pipelines matching your sub-queries target perfectly.
+                        Apply a structured agent and pipeline template that matches the current research target.
                       </p>
-                      
-                      {isSynthesizing ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-[var(--theme-accent)] font-mono text-[8px] font-semibold">
-                            <span className="animate-spin text-[10px]">⚙️</span>
-                            <span>COMPILING VIRTUAL AGENT CODES...</span>
-                          </div>
-                          <div className="bg-black/40 border border-[var(--theme-border)] p-2 rounded-lg font-mono text-[7.5px] leading-normal text-[var(--theme-secondary)] max-h-24 overflow-y-auto custom-scrollbar">
-                            {synthesisLogs.map((log, idx) => (
-                              <div key={idx}>{log}</div>
-                            ))}
-                          </div>
+                      <div className="bg-black/30 border border-[var(--theme-border)] rounded-lg p-3 text-[8.5px] font-mono text-[var(--theme-secondary)] space-y-1.5">
+                        <div className="flex justify-between gap-3">
+                          <span>Latest system activity</span>
+                          <span className="text-[var(--theme-success)]">{isResearchActive ? 'ACTIVE' : 'READY'}</span>
                         </div>
-                      ) : (
-                        <button
-                          disabled={isResearchActive}
-                          onClick={handleAiSynthesis}
-                          className="w-full py-2 bg-gradient-to-r from-[var(--theme-accent)]/20 to-[var(--theme-success)]/10 hover:from-[var(--theme-accent)]/30 hover:to-[var(--theme-success)]/20 border border-[var(--theme-accent)]/30 hover:border-[var(--theme-accent)]/50 text-[var(--theme-accent)] hover:text-[var(--theme-primary)] rounded-lg text-[9.5px] font-bold uppercase transition-all duration-300 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
-                        >
-                          <Sparkles size={12} className="text-[var(--theme-success)]" />
-                          <span>Synthesize Team & Pipeline</span>
-                        </button>
-                      )}
+                        <div className="text-[9px] leading-relaxed text-[var(--theme-primary)] break-words">
+                          {latestSystemLog}
+                        </div>
+                      </div>
+                      <button
+                        disabled={isResearchActive}
+                        onClick={handleAiSynthesis}
+                        className="w-full py-2 bg-gradient-to-r from-[var(--theme-accent)]/20 to-[var(--theme-success)]/10 hover:from-[var(--theme-accent)]/30 hover:to-[var(--theme-success)]/20 border border-[var(--theme-accent)]/30 hover:border-[var(--theme-accent)]/50 text-[var(--theme-accent)] hover:text-[var(--theme-primary)] rounded-lg text-[9.5px] font-bold uppercase transition-all duration-300 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Sparkles size={12} className="text-[var(--theme-success)]" />
+                        <span>Apply Team & Pipeline Template</span>
+                      </button>
                     </div>
 
                   </div>
@@ -829,11 +802,11 @@ export default function ResearchWorkspacePanel({
                     {isResearchActive ? (
                       <div className="space-y-3 py-1">
                         <div className="flex items-center gap-2 text-[var(--theme-accent)] font-bold text-[10px]">
-                          <span className="animate-spin inline-block">⚙️</span>
-                          <span>SYNTHESIZING PARALLEL MULTI-AGENT INGESTION FEEDS...</span>
+                          <Activity size={10} />
+                          <span>{activeNode ? `ACTIVE STAGE: ${activeNode.title.toUpperCase()}` : 'RESEARCH RUN ACTIVE'}</span>
                         </div>
-                        <p className="text-[9px] text-[var(--theme-secondary)]/50 animate-pulse">
-                          Consolidating academic databases, compiling cited research footprints, cross-checking findings between sources. Submitting final report draft soon.
+                        <p className="text-[9px] text-[var(--theme-secondary)]/70">
+                          {activeNode?.details || latestAgentLog}
                         </p>
                       </div>
                     ) : researchLogs.length > 3 ? (
@@ -842,7 +815,7 @@ export default function ResearchWorkspacePanel({
                           <CheckCircle size={10} /> CORE FEED READY FOR COMPILATION
                         </span>
                         <p className="text-[11px] leading-relaxed">
-                          [Draft synthesized successfully from SerpAPI & Jina context models. The structured markdown report is completed and cited. You can read, review, and follow cited academic sources inside the central conversation workspace pane.]
+                          The latest research cycle completed. Review the report in the main workspace and use the telemetry panel for source and stage history.
                         </p>
                       </div>
                     ) : (
@@ -874,9 +847,9 @@ export default function ResearchWorkspacePanel({
                     {/* Block A: Core */}
                     <div className="flex flex-col items-center">
                       <div className="w-10 h-10 rounded-xl bg-[var(--theme-accent)]/10 border border-[var(--theme-accent)]/20 flex items-center justify-center text-[var(--theme-accent)] shadow-[0_0_15px_rgba(217,119,86,0.15)] relative">
-                        <Cpu size={18} className={isResearchActive ? 'animate-pulse' : ''} />
+                        <Cpu size={18} />
                         {isResearchActive && (
-                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[var(--theme-accent)] border-2 border-black animate-ping" />
+                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[var(--theme-accent)] border-2 border-black" />
                         )}
                       </div>
                       <span className="text-[8.5px] font-bold font-mono tracking-wider mt-1.5 text-[var(--theme-accent)] hover:brightness-110">CORE ORCHESTRATOR</span>
@@ -885,22 +858,22 @@ export default function ResearchWorkspacePanel({
                     {/* Central Flow Tubes */}
                     <div className="flex-1 flex items-center justify-center gap-3 px-6 text-zinc-400 relative">
                       <div className="h-[1.5px] flex-1 bg-gradient-to-r from-[var(--theme-accent)]/60 to-[var(--theme-success)]/60 flex items-center justify-around relative">
-                        {isResearchActive && (
+                        {isResearchActive && activeNodes.length > 0 && (
                           <>
-                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] absolute left-[15%] animate-[ping_1.5s_infinite]" />
-                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-success)] absolute right-[25%] animate-[ping_1.8s_infinite]" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] absolute left-[15%]" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-success)] absolute right-[25%]" />
                           </>
                         )}
                       </div>
                       <div className="flex flex-col items-center select-none shrink-0 border border-[var(--theme-accent)]/20 px-3 py-1 rounded bg-black/60 font-mono text-[7px] text-[var(--theme-accent)] font-bold gap-0.5 shadow-md">
-                        <Radio size={9} className={isResearchActive ? 'animate-spin' : ''} style={{ animationDuration: '4s' }} />
-                        <span>{isResearchActive ? 'PARALLEL POOLING INTERCEPT' : 'READY TO PROBE'}</span>
+                        <Radio size={9} />
+                        <span>{isResearchActive ? `${activeNodes.length} ACTIVE STAGES` : 'READY TO PROBE'}</span>
                       </div>
                       <div className="h-[1.5px] flex-1 bg-gradient-to-r from-[var(--theme-success)]/60 to-[var(--theme-accent)]/60 flex items-center justify-around relative">
-                        {isResearchActive && (
+                        {isResearchActive && activeNodes.length > 0 && (
                           <>
-                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-success)] absolute left-[35%] animate-[ping_2s_infinite]" />
-                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] absolute right-[15%] animate-[ping_1.3s_infinite]" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-success)] absolute left-[35%]" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--theme-accent)] absolute right-[15%]" />
                           </>
                         )}
                       </div>
@@ -909,9 +882,9 @@ export default function ResearchWorkspacePanel({
                     {/* Block B: Web Mesh */}
                     <div className="flex flex-col items-center">
                       <div className="w-10 h-10 rounded-xl bg-[var(--theme-success)]/10 border border-[var(--theme-success)]/20 flex items-center justify-center text-[var(--theme-success)] shadow-[0_0_15px_rgba(73,160,120,0.15)] relative">
-                        <Globe size={18} className={isResearchActive ? 'animate-spin' : ''} style={{ animationDuration: '6s' }} />
+                        <Globe size={18} />
                         {isResearchActive && (
-                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[var(--theme-success)] border-2 border-black animate-ping" />
+                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[var(--theme-success)] border-2 border-black" />
                         )}
                       </div>
                       <span className="text-[8.5px] font-bold font-mono tracking-wider mt-1.5 text-[var(--theme-success)] hover:brightness-110">WEB METASYNTHESIS</span>
@@ -920,15 +893,15 @@ export default function ResearchWorkspacePanel({
                   </div>
 
                   <div className="absolute bottom-2 right-3 flex items-center gap-1.5">
-                    <span className={`w-1.5 h-1.5 rounded-full bg-[var(--theme-success)] ${isResearchActive ? 'animate-ping' : ''}`} />
-                    <span className="text-[7.5px] font-mono text-[var(--theme-success)] uppercase tracking-widest">GRID ALIGNED</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--theme-success)]" />
+                    <span className="text-[7.5px] font-mono text-[var(--theme-success)] uppercase tracking-widest">{isResearchActive ? `${liveAgentCount} AGENTS ENGAGED` : 'GRID ALIGNED'}</span>
                   </div>
                 </div>
 
                 {/* Subtitle text */}
                 <div className="flex justify-between items-center px-1">
                   <p className="text-[11px] text-[var(--theme-secondary)] italic leading-tight">
-                    Showing active agents configured for research. Concurrently scanning up to {activeAgentCount} targets.
+                    Showing active agents configured for research. Current live workload: {liveAgentCount} agents, {activeNodes.length} active stages, {totalResultsFound} results tracked.
                   </p>
                   <button
                     onClick={() => setShowSpawnForm(prev => !prev)}
@@ -1035,7 +1008,7 @@ export default function ResearchWorkspacePanel({
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <div className={`w-2 h-2 rounded-full ${
-                              isModelActive ? 'bg-[var(--theme-accent)] animate-pulse' : 'bg-zinc-500'
+                              isModelActive ? 'bg-[var(--theme-accent)]' : 'bg-zinc-500'
                             }`} />
                             <div>
                               <span className="text-xs font-bold text-[var(--theme-primary)]">{agent.name}</span>
@@ -1097,7 +1070,7 @@ export default function ResearchWorkspacePanel({
                           </div>
                         </div>
 
-                        {/* Expandable Simulated State view */}
+                        {/* Expandable Activity View */}
                         <AnimatePresence>
                           {selectedAgentId === agent.id && (
                             <motion.div 
@@ -1107,20 +1080,16 @@ export default function ResearchWorkspacePanel({
                               className="mt-3 pt-3 border-t border-[var(--theme-border)]/30 space-y-2 overflow-hidden"
                             >
                               <div className="flex items-center justify-between text-[8px] font-mono text-[var(--theme-accent)]/80">
-                                <span>Simulated Core Payload Memory</span>
-                                <span className="text-[7px] text-[var(--theme-secondary)]/40">JSON format</span>
+                                <span>Current Agent Activity</span>
+                                <span className="text-[7px] text-[var(--theme-secondary)]/40">Live state</span>
                               </div>
                               <pre className="bg-black/70 p-2.5 rounded-lg border border-[var(--theme-border)] text-[8.5px] font-mono text-[var(--theme-success)]/90 leading-normal overflow-x-auto select-all">
 {`{
   "agentId": "${agent.id}",
-  "capabilities": ["SerpAPI", "JinaExtract", "WebExtract"],
-  "concurrencyLock": false,
-  "loadedHeuristics": 14,
-  "scannedDomains": [
-    "nature.com",
-    "scholar.google.com",
-    "arxiv.org"
-  ]
+  "status": "${isResearchActive ? agent.status : 'idle'}",
+  "currentTask": "${(isResearchActive ? agent.currentTask : 'Standing by for execution...').replace(/"/g, '\\"')}",
+  "progress": ${isResearchActive ? agent.progress : 0},
+  "resultsFound": ${isResearchActive ? agent.resultsFound : 0}
 }`}
                               </pre>
                             </motion.div>
@@ -1147,7 +1116,7 @@ export default function ResearchWorkspacePanel({
                 
                 <div className="flex justify-between items-center px-1">
                   <p className="text-[11px] text-[var(--theme-secondary)] italic leading-tight">
-                    Click on the active pipeline nodes to inspect sub-task diagnostics and mock payload memory states.
+                    Click on the active pipeline nodes to inspect current stage diagnostics and execution details.
                   </p>
                   <button
                     onClick={() => setShowAddStageForm(prev => !prev)}
@@ -1262,7 +1231,7 @@ export default function ResearchWorkspacePanel({
                             onClick={() => setSelectedNodeId(node.id)}
                             >
                               {nodeActive && (
-                                <span className="absolute w-6.5 h-6.5 rounded-full border border-[var(--theme-accent)] animate-ping opacity-60" />
+                                <span className="absolute w-6.5 h-6.5 rounded-full border border-[var(--theme-accent)] opacity-60" />
                               )}
                             </div>
 
@@ -1363,36 +1332,16 @@ export default function ResearchWorkspacePanel({
                           </div>
 
                           <div className="space-y-2 pt-2 border-t border-[var(--theme-border)]/40">
-                            <span className="text-[8.5px] font-mono text-[var(--theme-secondary)]/60">Simulated Stage Parameters & Registers</span>
+                            <span className="text-[8.5px] font-mono text-[var(--theme-secondary)]/60">Current Stage Snapshot</span>
                             <pre className="bg-black/50 p-2.5 rounded-lg border border-[var(--theme-border)] text-[9px] font-mono text-[var(--theme-secondary)] leading-normal overflow-x-auto select-all">
-{selectedNode.type === 'query' && `{
-  "inputs": ["${customQueries}"],
-  "expansionLimit": 4,
-  "synthesizerEngine": "Lumina-Claims"
-}`}
-{selectedNode.type === 'search' && `{
-  "serviceProvider": "SerpAPI",
-  "concurrentIndex": 32,
-  "filteringExclusion": ["spam", "paywalls"],
-  "resultsMatch": 14
-}`}
-{selectedNode.type === 'scrape' && `{
-  "extractionFilter": "r.jina.ai",
-  "markdownDistillation": true,
-  "totalCharacters": 16500,
-  "citationIndex": ["Footprints"]
-}`}
-{selectedNode.type === 'correlate' && `{
-  "algorithm": "ClaimAlignment-v2",
-  "crossFactCheck": true,
-  "fusedClaimsFound": 8,
-  "confidenceScore": "0.94"
-}`}
-{selectedNode.type === 'synthesize' && `{
-  "renderingEngine": "markdown-it",
-  "citedEntries": 12,
-  "generatedSizeKb": 8.4,
-  "compilationDone": true
+{`{
+  "stageId": "${selectedNode.id}",
+  "type": "${selectedNode.type}",
+  "status": "${isResearchActive ? selectedNode.status : 'idle'}",
+  "details": "${(selectedNode.details || selectedNode.description).replace(/"/g, '\\"')}",
+  "activeQueryTarget": "${customQueries.replace(/"/g, '\\"')}",
+  "completedStages": ${completedNodes.length},
+  "activeStages": ${activeNodes.length}
 }`}
                             </pre>
                           </div>

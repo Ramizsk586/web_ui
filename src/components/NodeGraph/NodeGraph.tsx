@@ -118,7 +118,7 @@ const humanizeToolName = (toolName?: string, rawLabel?: string) => {
   if (lower === 'web_search') return 'Web search';
   if (lower === 'ask_user') return 'Ask user';
   if (lower === 'manage_todos') return 'Manage todos';
-  if (lower === 'run_skill') return 'Run skill';
+  if (lower === 'run_skill') return 'Read skill documentation';
   if (lower === 'list_coder_files') return 'Query and analyze codebase project file tree';
   if (lower === 'verify_changes') return 'Verify target changes';
   if (lower.startsWith('composio_')) {
@@ -188,6 +188,23 @@ const ToolActivityDots = ({ tone }: { tone: string }) => (
   </span>
 );
 
+const ActiveGlobeIcon = () => (
+  <div className="relative flex h-4 w-4 items-center justify-center">
+    <motion.span
+      animate={{ scale: [0.9, 1.2, 0.9], opacity: [0.2, 0.45, 0.2] }}
+      transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
+      className="absolute inset-0 rounded-full bg-blue-500/20"
+    />
+    <motion.div
+      animate={{ rotate: 360 }}
+      transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}
+      className="relative z-10"
+    >
+      <Globe size={13} className="text-blue-400" />
+    </motion.div>
+  </div>
+);
+
 const getInlineSummary = (node: ToolCallNode, status: ToolCallNode['status']) => {
   const filePath = formatPath(normalizeDisplayPath(node.filePath || ''));
   const command = getCommandFromLabel(node.label);
@@ -217,6 +234,7 @@ const getInlineSummary = (node: ToolCallNode, status: ToolCallNode['status']) =>
   if (node.toolName === 'web_scrape' || node.toolName === 'fetch_url') return status === 'active' ? 'Fetching page' : 'Fetched page';
   if (node.toolName?.startsWith('wiki_')) return status === 'active' ? 'Reading Wikipedia' : 'Read Wikipedia';
   if (node.toolName?.startsWith('composio_')) return status === 'active' ? 'Calling integration' : 'Called integration';
+  if (node.toolName === 'run_skill') return status === 'active' ? 'Reading skill documentation' : 'Read skill documentation';
 
   if (command) {
     return status === 'active' ? 'Running command' : 'Ran command';
@@ -396,7 +414,7 @@ const ToolLogBlock = ({
               transition={{ repeat: Infinity, duration: 1.0 }}
               className="inline-block w-1.5 h-3 bg-cyan-400 rounded-sm"
             />
-            <span>Executing background tasks...</span>
+            <span>Reading context and preparing the next step...</span>
           </div>
         )}
       </div>
@@ -642,7 +660,7 @@ export const NodeGraph = React.memo(({
         id: 'search-item',
         type: 'search',
         title: isSearching ? 'Searching the web...' : `Searched the web for "${searchQuery || 'information'}"`,
-        icon: isSearching ? <ToolActivityDots tone="bg-blue-400" /> : <Globe size={13} className="text-emerald-500" />,
+        icon: isSearching ? <ActiveGlobeIcon /> : <Globe size={13} className="text-emerald-500" />,
         status: isSearching ? 'active' : 'complete'
       });
     }
@@ -961,7 +979,11 @@ export const NodeGraph = React.memo(({
                                   renderPlainToolResult(item.node)
                                 ) : (
                                   <div className="text-[11px] text-zinc-500 font-mono italic p-2 bg-[#0c0c0e]/85 rounded-lg border border-zinc-900">
-                                    {item.node.status === 'complete' ? 'Execution completed.' : item.node.status === 'failed' ? 'Execution failed.' : 'Executing step...'}
+                                    {item.node.status === 'complete'
+                                      ? (item.node.resultSummary || item.node.label || 'Step completed.')
+                                      : item.node.status === 'failed'
+                                        ? (item.node.resultSummary || item.node.label || 'Step failed.')
+                                        : (item.node.label || item.node.resultSummary || 'Processing step...')}
                                   </div>
                                 )}
                                 

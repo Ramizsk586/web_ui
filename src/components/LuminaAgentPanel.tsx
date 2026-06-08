@@ -27,6 +27,7 @@ import {
   TrendingUp,
   Users,
   Coins,
+  Database,
   Calendar,
   Eye,
   EyeOff,
@@ -933,7 +934,7 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
 
 // ─── Memory Types ───────────────────────────────────────────────────────────────
 type MemoryTier = 'short' | 'long' | 'permanent';
-type MemorySegment = 'identity' | 'preference' | 'relationship' | 'project' | 'knowledge' | 'context';
+type MemorySegment = 'identity' | 'preference' | 'correction' | 'relationship' | 'project' | 'knowledge' | 'context';
 type MemoryViewMode = 'table' | 'graph';
 type MemorySortField = 'content' | 'tier' | 'segment' | 'decay' | 'lastAccessed' | 'createdAt';
 type MemorySortDir = 'asc' | 'desc';
@@ -982,6 +983,7 @@ const TIER_CONFIG: Record<MemoryTier, { label: string; color: string; bgColor: s
 const SEGMENT_CONFIG: Record<MemorySegment, { label: string; color: string; dotColor: string }> = {
   identity: { label: 'Identity', color: 'text-rose-400', dotColor: 'bg-rose-400' },
   preference: { label: 'Preference', color: 'text-teal-400', dotColor: 'bg-teal-400' },
+  correction: { label: 'Correction', color: 'text-amber-300', dotColor: 'bg-amber-300' },
   relationship: { label: 'Relationship', color: 'text-pink-400', dotColor: 'bg-pink-400' },
   project: { label: 'Project', color: 'text-orange-400', dotColor: 'bg-orange-400' },
   knowledge: { label: 'Knowledge', color: 'text-blue-400', dotColor: 'bg-blue-400' },
@@ -990,8 +992,28 @@ const SEGMENT_CONFIG: Record<MemorySegment, { label: string; color: string; dotC
 
 const INITIAL_MEMORIES: MemoryRecord[] = [];
 
+const clampMemoryValue = (value: number) => Math.max(0, Math.min(1, value));
+
+const computePanelDecayStep = (memory: MemoryRecord, elapsedMs: number) => {
+  const hours = Math.max(0, elapsedMs / 3_600_000);
+  const baseRate =
+    memory.tier === 'permanent' ? 0.00001 :
+    memory.tier === 'long' ? 0.0003 :
+    0.002;
+
+  const reinforcementShield = Math.min(0.82, (memory.decay || 0) * 0.45 + ((memory.lastAccessed ? 1 : 0) * 0.02));
+  const dormancyDays = Math.max(0, (Date.now() - (memory.lastAccessed || memory.createdAt || Date.now())) / 86_400_000);
+  const dormancyMultiplier =
+    dormancyDays > 45 ? 2.6 :
+    dormancyDays > 21 ? 1.9 :
+    dormancyDays > 7 ? 1.35 :
+    1;
+
+  return hours * baseRate * dormancyMultiplier * (1 - reinforcementShield);
+};
+
 // ─── Memory Panel ───────────────────────────────────────────────────────────────
-function MemorySubPanel({ agents }: { agents: Agent[] }) {
+export function MemorySubPanel({ agents }: { agents: Agent[] }) {
   const [memories, setMemories] = useState<MemoryRecord[]>(() => {
     const loaded = loadMemoryRecords();
     return loaded;
@@ -1021,12 +1043,13 @@ function MemorySubPanel({ agents }: { agents: Agent[] }) {
   useEffect(() => {
     const interval = setInterval(() => {
       setMemories(prev => prev.map(m => {
-        let decayRate = 0;
-        if (m.tier === 'short') decayRate = 0.002;
-        else if (m.tier === 'long') decayRate = 0.0003;
-        else decayRate = 0.00001;
-        const newDecay = Math.max(0, m.decay - decayRate);
-        return { ...m, decay: newDecay };
+        const decayDelta = computePanelDecayStep(m, 10_000);
+        const newDecay = clampMemoryValue(m.decay - decayDelta);
+        const nextTier =
+          m.tier === 'permanent' && newDecay < 0.72 ? 'long' :
+          m.tier === 'long' && newDecay < 0.38 ? 'short' :
+          m.tier;
+        return { ...m, decay: newDecay, tier: nextTier };
       }));
     }, 10000);
     return () => clearInterval(interval);
@@ -1062,7 +1085,7 @@ function MemorySubPanel({ agents }: { agents: Agent[] }) {
   // Stats
   const stats = useMemo(() => {
     const tierCounts: Record<MemoryTier, number> = { short: 0, long: 0, permanent: 0 };
-    const segmentCounts: Record<MemorySegment, number> = { identity: 0, preference: 0, relationship: 0, project: 0, knowledge: 0, context: 0 };
+    const segmentCounts: Record<MemorySegment, number> = { identity: 0, preference: 0, correction: 0, relationship: 0, project: 0, knowledge: 0, context: 0 };
     let totalDecay = 0;
     memories.forEach(m => {
       tierCounts[m.tier]++;
@@ -1467,7 +1490,7 @@ function MemorySubPanel({ agents }: { agents: Agent[] }) {
               <div className="divide-y divide-zinc-800/50">
                 {filtered.map((mem) => {
                   const tierCfg = TIER_CONFIG[mem.tier];
-                  const segCfg = SEGMENT_CONFIG[mem.segment];
+                  const segCfg = SEGMENT_CONFIG[mem.segment] || { label: mem.segment, color: 'text-zinc-400', dotColor: 'bg-zinc-500' };
                   const decayColor = mem.decay > 0.7 ? 'text-emerald-400' : mem.decay > 0.4 ? 'text-amber-400' : 'text-rose-400';
                   return (
                     <div
@@ -4739,6 +4762,54 @@ export function LuminaAgentPanel({
           <div className="flex-1 overflow-y-auto p-4">
             {renderContent()}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface LuminaMemoryPanelProps {
+  onClose: () => void;
+  agents: Agent[];
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+}
+
+export function LuminaMemoryPanel({
+  onClose,
+  agents,
+  isSidebarOpen,
+  onToggleSidebar
+}: LuminaMemoryPanelProps) {
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden relative w-full h-full bg-[var(--theme-bg)] text-[var(--theme-primary)]">
+      <header className="h-14 border-b border-[var(--theme-border)] flex items-center justify-between px-4 bg-[var(--theme-header-bg)] shrink-0 z-10 w-full">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onToggleSidebar}
+            className="p-2 hover:bg-[var(--theme-hover-bg)] rounded-lg text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer"
+            title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+          >
+            <Sidebar size={18} />
+          </button>
+          <span className="text-xs font-semibold text-[var(--theme-secondary)] uppercase tracking-wider">
+            Lumina Memory Panel
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-rose-500/10 text-[var(--theme-secondary)] hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
+            title="Close panel"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-auto bg-[var(--theme-bg)]">
+        <div className="mx-auto w-full max-w-[1600px] px-5 py-5">
+          <MemorySubPanel agents={agents} />
         </div>
       </div>
     </div>

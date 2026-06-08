@@ -438,6 +438,7 @@ export function SettingsModal({
   type SubagentConfig = {
     modelId: string;
     providerProfileId?: string;
+    runtime?: 'default' | 'pi';
     systemPrompt: string;
     tools: string[];
   };
@@ -497,6 +498,7 @@ export function SettingsModal({
           merged[agent.id] = {
             modelId: existing?.modelId || 'openprovider/auto-free',
             providerProfileId: existing?.providerProfileId || undefined,
+            runtime: existing?.runtime || (agent.id === 'coder' ? 'pi' : 'default'),
             systemPrompt: existing?.systemPrompt || agent.prompt,
             tools: existing?.tools || [...agent.tools]
           };
@@ -508,6 +510,7 @@ export function SettingsModal({
     for (const agent of DEFAULT_AGENTS) {
       defaults[agent.id] = {
         modelId: 'openprovider/auto-free',
+        runtime: agent.id === 'coder' ? 'pi' : 'default',
         systemPrompt: agent.prompt,
         tools: [...agent.tools]
       };
@@ -527,6 +530,15 @@ export function SettingsModal({
     };
     persistSubagentConfigs(next);
     showToast(`Updated model for ${agentId.charAt(0).toUpperCase() + agentId.slice(1)} Agent`);
+  };
+
+  const handleAgentRuntimeChange = (agentId: string, runtime: 'default' | 'pi') => {
+    const next = {
+      ...subagentConfigs,
+      [agentId]: { ...subagentConfigs[agentId], runtime }
+    };
+    persistSubagentConfigs(next);
+    showToast(`Updated runtime for ${agentId.charAt(0).toUpperCase() + agentId.slice(1)} Agent`);
   };
 
   const handleAgentProviderChange = (agentId: string, providerProfileId: string | null) => {
@@ -2546,6 +2558,16 @@ export function SettingsModal({
                       <label className="text-xs font-bold text-gray-500 uppercase block mb-3">Search Provider</label>
                       <div className="flex gap-2">
                         <button
+                          onClick={() => { setSearchProvider('duckduckgo'); }}
+                          className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all border ${
+                            searchProvider === 'duckduckgo' || searchProvider === 'ddg'
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-gray-50 dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-white/10'
+                          }`}
+                        >
+                          DuckDuckGo
+                        </button>
+                        <button
                           onClick={() => { setSearchProvider('tavily'); }}
                           className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-all border ${
                             searchProvider === 'tavily'
@@ -2567,7 +2589,18 @@ export function SettingsModal({
                         </button>
                       </div>
                     </div>
-                    {searchProvider === 'tavily' ? (
+                    {searchProvider === 'duckduckgo' || searchProvider === 'ddg' ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-gray-500 uppercase">DuckDuckGo Search</label>
+                          <span className="text-[10px] text-emerald-500 font-semibold">Built in</span>
+                        </div>
+                        <div className="w-full bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl px-4 py-3 text-sm text-gray-500 dark:text-zinc-300">
+                          Uses Lumina&apos;s integrated DuckDuckGo search pipeline with pacing, browser-like headers, and HTML fallback parsing. No API key required.
+                        </div>
+                        <p className="text-[10px] text-gray-500 italic">Best zero-key option for general web discovery and fallback-safe browsing.</p>
+                      </div>
+                    ) : searchProvider === 'tavily' ? (
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <label className="text-xs font-bold text-gray-500 uppercase">Tavily API Key</label>
@@ -2641,16 +2674,16 @@ export function SettingsModal({
                       </p>
                       <div className="text-[10px] text-gray-400 space-y-1">
                         <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${tavilyApiKey && tavilyApiKey.trim() ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                          <span className={`w-2 h-2 rounded-full ${(searchProvider === 'tavily' || tavilyApiKey?.trim()) ? 'bg-green-500' : 'bg-gray-300'}`}></span>
                           <span>Tavily {tavilyApiKey?.trim() ? '(Active)' : '(Not configured)'}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${serpApiKey && serpApiKey.trim() ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                          <span className={`w-2 h-2 rounded-full ${(searchProvider === 'serpapi' || serpApiKey?.trim()) ? 'bg-green-500' : 'bg-gray-300'}`}></span>
                           <span>SerpAPI {serpApiKey?.trim() ? '(Active)' : '(Not configured)'}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                          <span>DuckDuckGo (Fallback)</span>
+                          <span className={`w-2 h-2 rounded-full ${(searchProvider === 'duckduckgo' || searchProvider === 'ddg') ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                          <span>DuckDuckGo {(searchProvider === 'duckduckgo' || searchProvider === 'ddg') ? '(Primary)' : '(Available)'}</span>
                         </div>
                       </div>
                     </div>
@@ -4232,7 +4265,7 @@ export function SettingsModal({
 
                   <div className="space-y-4">
                     {DEFAULT_AGENTS.map((agent) => {
-                      const cfg = subagentConfigs[agent.id] || { modelId: 'openprovider/auto-free', systemPrompt: agent.prompt, tools: [...agent.tools] };
+                      const cfg = subagentConfigs[agent.id] || { modelId: 'openprovider/auto-free', runtime: agent.id === 'coder' ? 'pi' : 'default', systemPrompt: agent.prompt, tools: [...agent.tools] };
                       const isEditing = editingPromptAgent === agent.id;
                       return (
                         <div 
@@ -4250,6 +4283,33 @@ export function SettingsModal({
                               </p>
                             </div>
                             <div className="shrink-0 flex flex-col gap-2 min-w-[220px]">
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Runtime</label>
+                                <div className="flex gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAgentRuntimeChange(agent.id, 'default')}
+                                    className={`flex-1 h-8 px-3 text-[11px] rounded-full border transition-all font-bold ${
+                                      (cfg.runtime || 'default') === 'default'
+                                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300 border-blue-400/40'
+                                        : 'bg-gray-150/80 dark:bg-zinc-800/85 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-zinc-700/60'
+                                    }`}
+                                  >
+                                    Default
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAgentRuntimeChange(agent.id, 'pi')}
+                                    className={`flex-1 h-8 px-3 text-[11px] rounded-full border transition-all font-bold ${
+                                      (cfg.runtime || 'default') === 'pi'
+                                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border-emerald-400/40'
+                                        : 'bg-gray-150/80 dark:bg-zinc-800/85 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-zinc-700/60'
+                                    }`}
+                                  >
+                                    Pi
+                                  </button>
+                                </div>
+                              </div>
                               <div className="flex flex-col gap-1.5 relative">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Provider</label>
                                 <button

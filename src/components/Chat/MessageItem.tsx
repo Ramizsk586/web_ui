@@ -32,7 +32,7 @@ import { NodeGraph, InlineToolCallCard } from '../NodeGraph/NodeGraph';
 import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
-import { TodoGenerationAnimation } from '../ui/Animations';
+import { RealtimePipelineAnimation } from '../ui/Animations';
 
 
 interface SpeechStateListener {
@@ -274,6 +274,39 @@ function MessageItemComponent({
       return !message.content?.includes(`[[tool_call:${node.id}]]`);
     });
   }, [message.toolCalls, message.content]);
+
+  const streamingStatusLabel = useMemo(() => {
+    const activeTool = message.toolCalls?.find(node => node.status === 'active');
+    if (typeof message.thinking === 'string' && message.thinking.trim()) {
+      return message.thinking.trim();
+    }
+    if (activeTool?.label) {
+      return activeTool.label;
+    }
+    return 'Preparing response...';
+  }, [message.thinking, message.toolCalls]);
+
+  const fallbackStreamingNodes = useMemo(() => {
+    if (!message.isStreaming || message.content || nonInlineToolCalls.length > 0 || isTodoPlanningState) {
+      return [];
+    }
+
+    return [{
+      id: `${message.id}-streaming-node`,
+      type: 'ai',
+      label: streamingStatusLabel,
+      status: 'active',
+      icon: 'sparkles',
+      resultSummary: 'Live response pipeline'
+    }];
+  }, [
+    message.id,
+    message.isStreaming,
+    message.content,
+    nonInlineToolCalls,
+    isTodoPlanningState,
+    streamingStatusLabel
+  ]);
 
   const renderInlineContent = (content: string, isStreaming: boolean) => {
     if (!content) return null;
@@ -670,11 +703,12 @@ function MessageItemComponent({
       ) : (
         <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-4xl xl:max-w-[1100px]">
           {((nonInlineToolCalls && nonInlineToolCalls.length > 0) ||
+            fallbackStreamingNodes.length > 0 ||
             (message.thinkContent !== undefined && message.thinkContent.length > 0) ||
             message.searchQuery ||
             message.isSearching) && (
             <NodeGraph
-              nodes={nonInlineToolCalls}
+              nodes={fallbackStreamingNodes.length > 0 ? fallbackStreamingNodes : nonInlineToolCalls}
               isStreaming={message.isStreaming}
               thinkContent={message.thinkContent}
               isStreamingThinking={message.isThinking}
@@ -737,9 +771,7 @@ function MessageItemComponent({
             {message.content ? (
               renderInlineContent(message.content, message.isStreaming ?? false)
             ) : isTodoPlanningState ? (
-              <TodoGenerationAnimation />
-            ) : message.isStreaming ? (
-              <span className="text-zinc-400 animate-pulse text-left block">Generating...</span>
+              <RealtimePipelineAnimation statusLabel={streamingStatusLabel} />
             ) : null}
           </div>
 

@@ -237,7 +237,7 @@ export function useAppSettings({
   const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', DEFAULT_API_KEY));
 
   const [selectedProvider, setSelectedProvider] = useState(() => safeGetItem('lumina_provider', 'openprovider'));
-  const [searchProvider, setSearchProvider] = useState(() => localStorage.getItem('lumina_search_provider') || 'tavily');
+  const [searchProvider, setSearchProvider] = useState(() => localStorage.getItem('lumina_search_provider') || 'duckduckgo');
   const [tavilyApiKey, setTavilyApiKey] = useState(() => safeGetItem('lumina_tavily_key', ''));
   const [serpApiKey, setSerpApiKey] = useState(() => safeGetItem('lumina_serp_key', ''));
 
@@ -262,7 +262,7 @@ export function useAppSettings({
       const savedSearchProvider = localStorage.getItem('lumina_verified_search_provider') || '';
       const savedTavilyKey = localStorage.getItem('lumina_verified_tavily_key') || '';
       const savedSerpKey = localStorage.getItem('lumina_verified_serp_key') || '';
-      const currentSearchProvider = localStorage.getItem('lumina_search_provider') || 'tavily';
+      const currentSearchProvider = localStorage.getItem('lumina_search_provider') || 'duckduckgo';
       const currentTavilyKey = localStorage.getItem('lumina_tavily_key') || '';
       const currentSerpKey = localStorage.getItem('lumina_serp_key') || '';
       const isVerified = localStorage.getItem('lumina_search_verified') === 'true';
@@ -708,7 +708,7 @@ export function useAppSettings({
     setSearchVerificationState('verifying');
     try {
       const key = searchProvider === 'serpapi' ? serpApiKey : tavilyApiKey;
-      if (!key || !key.trim()) {
+      if (searchProvider !== 'duckduckgo' && searchProvider !== 'ddg' && (!key || !key.trim())) {
         setSearchVerificationState('error');
         setTimeout(() => setSearchVerificationState('idle'), 3000);
         return;
