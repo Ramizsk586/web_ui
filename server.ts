@@ -1066,17 +1066,70 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 toolOutput = { success: true };
               } else if (toolName === 'edit_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
-                if (fs.existsSync(fileRes)) {
-                  let content = fs.readFileSync(fileRes, 'utf8');
-                  if (content.includes(args.search)) {
-                    content = args.all ? content.split(args.search).join(args.replace) : content.replace(args.search, args.replace);
-                    fs.writeFileSync(fileRes, content, 'utf8');
-                    toolOutput = { success: true };
-                  } else {
-                    toolOutput = { error: 'Search text not found' };
-                  }
-                } else {
+                if (!fs.existsSync(fileRes)) {
                   toolOutput = { error: 'File not found' };
+                } else {
+                  const rawContent = fs.readFileSync(fileRes, 'utf8');
+                  const searchText = String(args.search ?? '');
+                  const replaceText = String(args.replace ?? '');
+                  const replaceAll = Boolean(args.all);
+                  const normalizeForMatch = (s: string) =>
+                    s.replace(/\r\n?/g, '\n')
+                     .split('\n')
+                     .map((line) => line.replace(/[ \t]+$/g, ''))
+                     .join('\n')
+                     .trim();
+                  const buildSearchError = (hint: string) => {
+                    const totalLines = rawContent.split('\n').length;
+                    const searchPreview = searchText.length > 240
+                      ? `${searchText.slice(0, 240)}… (+${searchText.length - 240} more chars)`
+                      : searchText;
+                    const fileHead = rawContent.length > 2000
+                      ? `${rawContent.slice(0, 2000)}\n… [truncated, file has ${totalLines} lines and ${rawContent.length} chars]`
+                      : rawContent;
+                    return {
+                      error: `Exact search text was not found in ${path.basename(fileRes)} (${hint}).`,
+                      hint: 'The search text must EXACTLY match a contiguous block of the file content. You may be working from a stale copy. Recovery: (1) call read_file on this file to get the current contents, (2) copy the EXACT text from the read_file output as your new search value, (3) re-issue the edit. For small files (<= ~150 lines) you can use write_file to rewrite the whole file in one call. Do NOT retry the same search text.',
+                      filePath: path.relative(resolvedWorkspace, fileRes).replace(/\\/g, '/'),
+                      totalLines,
+                      fileLength: rawContent.length,
+                      searchLength: searchText.length,
+                      replaceLength: replaceText.length,
+                      searchPreview,
+                      fileContent: fileHead
+                    };
+                  };
+                  if (searchText && rawContent.includes(searchText)) {
+                    const updated = replaceAll
+                      ? rawContent.split(searchText).join(replaceText)
+                      : rawContent.replace(searchText, replaceText);
+                    fs.writeFileSync(fileRes, updated, 'utf8');
+                    toolOutput = { success: true, match: 'exact' };
+                  } else {
+                    const normalizedContent = normalizeForMatch(rawContent);
+                    const normalizedSearch = normalizeForMatch(searchText);
+                    if (normalizedSearch && normalizedContent.includes(normalizedSearch)) {
+                      const searchLines = normalizedSearch.split('\n');
+                      const contentLines = rawContent.replace(/\r\n?/g, '\n').split('\n');
+                      let matched = false;
+                      outer: for (let i = 0; i <= contentLines.length - searchLines.length; i++) {
+                        for (let j = 0; j < searchLines.length; j++) {
+                          if (contentLines[i + j].replace(/[ \t]+$/g, '') !== searchLines[j]) continue outer;
+                        }
+                        const startCharOffset = contentLines.slice(0, i).join('\n').length + (i > 0 ? 1 : 0);
+                        const matchedBlock = contentLines.slice(i, i + searchLines.length).join('\n');
+                        const before = rawContent.slice(0, startCharOffset);
+                        const after = rawContent.slice(startCharOffset + matchedBlock.length);
+                        fs.writeFileSync(fileRes, before + replaceText + after, 'utf8');
+                        toolOutput = { success: true, match: 'normalized', normalizedWhitespace: true };
+                        matched = true;
+                        break;
+                      }
+                      if (!matched) toolOutput = buildSearchError('normalized match failed during splice');
+                    } else {
+                      toolOutput = buildSearchError('even after whitespace normalization');
+                    }
+                  }
                 }
               } else if (toolName === 'delete_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
