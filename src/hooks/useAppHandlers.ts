@@ -360,6 +360,109 @@ const createStableTurnId = (prefix: string, ...parts: Array<string | number | un
   return `${prefix}-${Date.now().toString(36)}-${suffix || 'item'}-${Math.random().toString(36).slice(2, 8)}`;
 };
 
+const SCRAPE_SEARCH_HOST_PATTERNS = [
+  /(^|\.)google\./i,
+  /(^|\.)bing\.com$/i,
+  /(^|\.)duckduckgo\.com$/i,
+  /(^|\.)search\.yahoo\.com$/i,
+  /(^|\.)yahoo\.com$/i,
+];
+
+const looksLikeSearchEngineUrl = (value: string) => {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    const host = parsed.hostname.toLowerCase();
+    return SCRAPE_SEARCH_HOST_PATTERNS.some((pattern) => pattern.test(host));
+  } catch {
+    return false;
+  }
+};
+
+const extractSearchQueryFromUrl = (value: string) => {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    const directQuery =
+      parsed.searchParams.get('q') ||
+      parsed.searchParams.get('query') ||
+      parsed.searchParams.get('p') ||
+      parsed.searchParams.get('text');
+
+    if (directQuery && directQuery.trim()) {
+      return directQuery.trim();
+    }
+
+    if (parsed.hash) {
+      const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+      const hashQuery = hashParams.get('q') || hashParams.get('query') || hashParams.get('text');
+      if (hashQuery && hashQuery.trim()) {
+        return hashQuery.trim();
+      }
+    }
+  } catch {}
+
+  return '';
+};
+
+const pickResolvedScrapeCandidate = (results: any[] = []) => {
+  for (const item of results) {
+    const candidate = String(item?.url || item?.link || '').trim();
+    if (!candidate) continue;
+    if (looksLikeSearchEngineUrl(candidate)) continue;
+    return candidate;
+  }
+  return '';
+};
+
+const resolveScrapeTargetUrl = async ({
+  targetUrl,
+  queryFallback,
+  tavilyApiKey,
+  serpApiKey,
+  searchProvider,
+  signal
+}: {
+  targetUrl: string;
+  queryFallback?: string;
+  tavilyApiKey?: string;
+  serpApiKey?: string;
+  searchProvider?: string;
+  signal?: AbortSignal;
+}) => {
+  const requestedUrl = String(targetUrl || '').trim();
+  if (!requestedUrl || !looksLikeSearchEngineUrl(requestedUrl)) {
+    return { requestedUrl, resolvedUrl: requestedUrl };
+  }
+
+  const inferredQuery = extractSearchQueryFromUrl(requestedUrl) || String(queryFallback || '').trim();
+  if (!inferredQuery) {
+    return { requestedUrl, resolvedUrl: requestedUrl };
+  }
+
+  try {
+    const searchRes = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: inferredQuery,
+        tavilyKey: tavilyApiKey,
+        serpKey: serpApiKey,
+        provider: searchProvider
+      }),
+      signal
+    });
+
+    if (!searchRes.ok) {
+      return { requestedUrl, resolvedUrl: requestedUrl, inferredQuery };
+    }
+
+    const searchData = await searchRes.json();
+    const resolvedUrl = pickResolvedScrapeCandidate(searchData.results || []);
+    return { requestedUrl, resolvedUrl: resolvedUrl || requestedUrl, inferredQuery };
+  } catch {
+    return { requestedUrl, resolvedUrl: requestedUrl, inferredQuery };
+  }
+};
+
 type OpenCodeContextItem = {
   id: string;
   name: string;
@@ -1416,11 +1519,24 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       chatId = createNewChat(null, isCoderMode);
     }
 
-    const activeChatForTurn = chats.find(c => c.id === chatId) || null;
+    // Find or create chat and ensure coder mode is set
+    let activeChatForTurn = chats.find(c => c.id === chatId) || null;
+    
+    // If this is a new chat and coder mode is active, set it on the chat
+    if (!activeChatForTurn && isCoderMode) {
+      setChats((prev: Chat[]) => prev.map(chat => {
+        if (chat.id === chatId) {
+          return { ...chat, isCoderMode: true };
+        }
+        return chat;
+      }));
+      activeChatForTurn = { ...activeChatForTurn, isCoderMode: true };
+    }
+    
     const effectiveCoderMode =
       isCoderMode ||
-      Boolean((activeChatForTurn as any)?.isCoderMode) ||
-      content.startsWith('/coder');
+      Boolean(activeChatForTurn?.isCoderMode) ||
+      content.toLowerCase().startsWith('/coder');
 
     const userMessage: Message = {
       id: createStableTurnId('msg', chatId, 'user'),
@@ -1920,12 +2036,14 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             type: 'function',
             function: {
               name: 'write_file',
-              description: 'Create or overwrite a file. Creates parent dirs automatically.',
+              description: 'Create or overwrite a file. Creates parent dirs automatically. For partial writes, use offset to append or limit to control content size.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative path from project root.' },
-                  content: { type: 'string', description: 'File content to write.' }
+                  content: { type: 'string', description: 'File content to write.' },
+                  offset: { type: 'number', description: 'Line number to append to (default: 0 = overwrite from start).' },
+                  limit: { type: 'number', description: 'Max lines to write at a time (helps for large files).' }
                 },
                 required: ['filePath', 'content']
               }
@@ -1950,13 +2068,13 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             type: 'function',
             function: {
               name: 'read_file',
-              description: 'Read file contents. Optional line range with offset/limit.',
+              description: 'Read file contents. Use offset/limit to read large files in chunks. For 100-200 lines at a time.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative file path.' },
-                  offset: { type: 'number', description: 'Start line (1-indexed).' },
-                  limit: { type: 'number', description: 'Max lines to return.' }
+                  offset: { type: 'number', description: 'Start line number (1-indexed). Default 1.' },
+                  limit: { type: 'number', description: 'Max lines to return (default 200). Use smaller values for large files.' }
                 },
                 required: ['filePath']
               }
@@ -1966,12 +2084,13 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             type: 'function',
             function: {
               name: 'glob_tool',
-              description: 'Finds files by matching patterns against their file names or directory paths.',
+              description: 'Finds files by matching patterns. Use exclude to skip node_modules, dist, etc.',
               parameters: {
                 type: 'object',
                 properties: {
                   fileGlob: { type: 'string', description: 'File filter pattern like "**/*.tsx" or "*.css".' },
-                  maxResults: { type: 'number', description: 'Max results (default 30).' }
+                  maxResults: { type: 'number', description: 'Max results (default 50).' },
+                  exclude: { type: 'string', description: 'Comma-separated patterns to exclude (e.g. "node_modules,dist,.git").' }
                 },
                 required: ['fileGlob']
               }
@@ -1981,13 +2100,15 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             type: 'function',
             function: {
               name: 'grep_tool',
-              description: 'Finds text lines inside files by matching regular expressions against the file contents.',
+              description: 'Finds text lines in files using regex. Use offset/limit to paginate through results.',
               parameters: {
                 type: 'object',
                 properties: {
                   query: { type: 'string', description: 'Regex/text to search for.' },
                   fileGlob: { type: 'string', description: 'Optional file filter like "*.tsx".' },
-                  maxResults: { type: 'number', description: 'Max results (default 30).' }
+                  maxResults: { type: 'number', description: 'Max results per file (default 30).' },
+                  offset: { type: 'number', description: 'Start line number to search from (1-indexed).' },
+                  limit: { type: 'number', description: 'Max lines to search in each file.' }
                 },
                 required: ['query']
               }
@@ -2011,14 +2132,16 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             type: 'function',
             function: {
               name: 'edit_file',
-              description: 'Find and replace text in an existing file.',
+              description: 'Find and replace text in an existing file. Use offset/limit to target specific line ranges.',
               parameters: {
                 type: 'object',
                 properties: {
                   filePath: { type: 'string', description: 'Relative file path.' },
                   search: { type: 'string', description: 'Exact text to find.' },
                   replace: { type: 'string', description: 'Replacement text.' },
-                  all: { type: 'boolean', description: 'Replace all occurrences.' }
+                  all: { type: 'boolean', description: 'Replace all occurrences.' },
+                  offset: { type: 'number', description: 'Start line for search (1-indexed).' },
+                  limit: { type: 'number', description: 'Max lines to search in.' }
                 },
                 required: ['filePath', 'search', 'replace']
               }
@@ -2281,8 +2404,22 @@ ${skillMd.content}
         systemPrompt += `\n[CHAT MODE] Respond as a conversational assistant. Do not claim to be in Coder/Builder mode unless asked.`;
       }
 
+      systemPrompt += `\n[CURRENT DATE] Today is ${new Date().toISOString().slice(0, 10)}. Do not invent a different current year or date.`;
+
       if (activeTools.length > 0) {
         systemPrompt += `\n[TOOLS] Active: ${activeTools.map(t => t.function.name).join(', ')}. Use relevant tools proactively.`;
+      }
+      if (!isCoderMode) {
+        const hasWebTooling = activeTools.some((tool: any) => ['fetch_url', 'web_search', 'web_scrape'].includes(tool?.function?.name));
+        const requestsLiveInfo = /\b(latest|current|today|now|recent|real[- ]?time|use the tool|search|scrape|fetch|look up|check online|web)\b/i.test(content);
+        if (hasWebTooling && requestsLiveInfo) {
+          systemPrompt += `\n[MANDATORY WEB TOOL RULE]
+For this request, you MUST use the available web tools before answering if the user is asking for current, recent, live, searchable, scraped, or externally verifiable information.
+- Do not answer from memory first.
+- First call an appropriate web tool such as 'web_search', 'fetch_url', or 'web_scrape'.
+- If the user gives a search-engine URL or asks a factual current-events question, resolve and inspect real destination pages, not just search result summaries.
+- After tool results arrive, answer using the collected data.`;
+        }
       }
       if (isCoderMode && coderToolGuidance) {
         systemPrompt += `\n\n[CODER TOOL ROUTING]\n${coderToolGuidance}`;
@@ -2310,9 +2447,14 @@ You are a software engineering agent. When asked to build/modify code:
 1. Create, read, and maintain the task checklist in TODO.md at the project root.
 2. Work on ONE task at a time in strict order. After completing each individual task, IMMEDIATELY use 'edit_file' to update TODO.md, changing that task's '- [ ]' to '- [x]'. Only then proceed to the next task.
 3. NEVER batch multiple tasks before updating TODO.md. Each task MUST be marked complete before starting the next.
-4. Always 'read_file' before editing. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
-5. Use 'glob_tool' to find files by name patterns. Use 'grep_tool' to search text inside files. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
-6. Work in tool-call cycles until all tasks are complete. Give a summary when done.
+4. File reading efficiency:
+   - For small files (<200 lines), read WITHOUT offset/limit to get the full content
+   - For large files, use offset=1 and a reasonable limit (100-200 lines)
+   - Do NOT re-read the same file multiple times in a row - the content stays in context
+   - Only re-read if you need to see changes made by other tool calls
+5. Use 'edit_file' for targeted changes, 'write_file' for full rewrites/new files.
+6. Use 'glob_tool' to find files by name patterns. Use 'grep_tool' to search text inside files. Use 'create_file'/'delete_file'/'rename_file' for file ops. Use 'run_command' to run shell commands or execute code.
+7. Work in tool-call cycles until all tasks are complete. Give a summary when done.
 
 [SUBAGENTS DELEGATION SYSTEM]
 Spawn specialized subagents for engineering tasks using their dedicated tools:
@@ -3504,26 +3646,43 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   resultValue = { error: "Scraping limit of 3 successful pages reached. Further web scrapes are blocked in this turn." };
                   showToast("Scrape limit reached (3 max)");
                 } else {
-                  setActiveScrapingJobs(prev => { const c = new Set(prev); c.add(tc.id); return c; });
-                  showToast(`Fetching: ${targetUrl.substring(0, 30)}...`);
-                  const scrapeResult = await scrapeUrl({
-                    url: targetUrl,
-                    outputFormat: args.outputFormat || 'markdown'
+                  const scrapeTarget = await resolveScrapeTargetUrl({
+                    targetUrl,
+                    queryFallback: content,
+                    tavilyApiKey,
+                    serpApiKey,
+                    searchProvider,
+                    signal
                   });
-                  setScrapingResults(prev => { const c = new Map(prev); c.set(tc.id, scrapeResult); return c; });
+                  setActiveScrapingJobs(prev => { const c = new Set(prev); c.add(tc.id); return c; });
+                  showToast(`Fetching: ${scrapeTarget.resolvedUrl.substring(0, 30)}...`);
+                  const scrapeResult = await scrapeUrl({
+                    url: scrapeTarget.resolvedUrl,
+                    outputFormat: args.outputFormat || 'markdown',
+                    extractLinks: args.extractLinks ?? true,
+                    extractImages: args.extractImages ?? true
+                  });
+                  const normalizedScrapeResult = {
+                    ...scrapeResult,
+                    requestedUrl: scrapeTarget.requestedUrl,
+                    url: scrapeResult.url || scrapeTarget.resolvedUrl
+                  };
+                  setScrapingResults(prev => { const c = new Map(prev); c.set(tc.id, normalizedScrapeResult); return c; });
                   setActiveScrapingJobs(prev => { const c = new Set(prev); c.delete(tc.id); return c; });
-                  if (scrapeResult.error) {
-                    resultValue = { error: scrapeResult.error };
+                  if (normalizedScrapeResult.error) {
+                    resultValue = { error: normalizedScrapeResult.error };
                   } else {
                     successfulScrapesCount++;
-                    const rawText = scrapeResult.rawText || '';
+                    const rawText = normalizedScrapeResult.rawText || '';
                     const processedText = useTurboQuant
                       ? turboQuantCompress(rawText, 4000, 'medium')
                       : rawText.substring(0, 3000) + (rawText.length > 3000 ? '...' : '');
                     resultValue = {
-                      title: scrapeResult.title,
-                      statusCode: scrapeResult.statusCode,
-                      linksFound: scrapeResult.links?.length || 0,
+                      title: normalizedScrapeResult.title,
+                      url: normalizedScrapeResult.url,
+                      requestedUrl: normalizedScrapeResult.requestedUrl,
+                      statusCode: normalizedScrapeResult.statusCode,
+                      linksFound: normalizedScrapeResult.links?.length || 0,
                       content: processedText
                     };
                   }
@@ -4083,6 +4242,14 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 if (!targetUrl) {
                   throw new Error("Missing required 'url' parameter for web_scrape.");
                 }
+                const scrapeTarget = await resolveScrapeTargetUrl({
+                  targetUrl,
+                  queryFallback: String(args.goal || args.query || content || ''),
+                  tavilyApiKey,
+                  serpApiKey,
+                  searchProvider,
+                  signal
+                });
 
                 // Push to active scraping jobs set
                 setActiveScrapingJobs(prev => {
@@ -4091,22 +4258,33 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   return cloned;
                 });
 
-                showToast(`Scraping webpage: ${targetUrl.substring(0, 30)}...`);
+                showToast(`Scraping webpage: ${scrapeTarget.resolvedUrl.substring(0, 30)}...`);
 
                 // Perform proxy-mediated scraping
                 const scrapeResult = await scrapeUrl({
-                  url: targetUrl,
+                  url: scrapeTarget.resolvedUrl,
+                  strategy: args.strategy,
+                  browserEngine: args.browserEngine,
                   selectors: args.selectors,
-                  usePuppeteer: args.usePuppeteer,
-                  extractLinks: args.extractLinks,
+                  useJavaScript: args.useJavaScript,
+                  waitForSelector: args.waitForSelector,
+                  extractLinks: args.extractLinks ?? true,
+                  extractImages: args.extractImages ?? true,
                   extractTables: args.extractTables,
-                  outputFormat: args.outputFormat
+                  outputFormat: args.outputFormat,
+                  maxPages: args.maxPages,
+                  maxDepth: args.maxDepth
                 });
+                const normalizedScrapeResult = {
+                  ...scrapeResult,
+                  requestedUrl: scrapeTarget.requestedUrl,
+                  url: scrapeResult.url || scrapeTarget.resolvedUrl
+                };
 
                 // Update scraping results Map state
                 setScrapingResults(prev => {
                   const cloned = new Map(prev);
-                  cloned.set(tc.id, scrapeResult);
+                  cloned.set(tc.id, normalizedScrapeResult);
                   return cloned;
                 });
 
@@ -4117,26 +4295,28 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   return cloned;
                 });
 
-                if (scrapeResult.error) {
-                  resultValue = { error: scrapeResult.error };
-                  showToast(`Scrape failed: ${scrapeResult.error.substring(0, 30)}...`);
+                if (normalizedScrapeResult.error) {
+                  resultValue = { error: normalizedScrapeResult.error };
+                  showToast(`Scrape failed: ${normalizedScrapeResult.error.substring(0, 30)}...`);
                 } else {
-                  const rawMarkdown = scrapeResult.rawText || '';
+                  const rawMarkdown = normalizedScrapeResult.rawText || '';
                   const processedMarkdown = useTurboQuant
                     ? turboQuantCompress(rawMarkdown, 4000, 'medium')
                     : (rawMarkdown.substring(0, 3000) + (rawMarkdown.length > 3000 ? '... [Truncated for prompt boundaries]' : ''));
 
                   resultValue = {
-                    title: scrapeResult.title,
-                    statusCode: scrapeResult.statusCode,
-                    scrapedAt: scrapeResult.scrapedAt,
-                    dataExcerpt: scrapeResult.data,
-                    linksFound: scrapeResult.links?.length || 0,
+                    title: normalizedScrapeResult.title,
+                    url: normalizedScrapeResult.url,
+                    requestedUrl: normalizedScrapeResult.requestedUrl,
+                    statusCode: normalizedScrapeResult.statusCode,
+                    scrapedAt: normalizedScrapeResult.scrapedAt,
+                    dataExcerpt: normalizedScrapeResult.data,
+                    linksFound: normalizedScrapeResult.links?.length || 0,
                     markdownExcerpt: processedMarkdown || 'No page text extracted.',
                     turboQuantApplied: useTurboQuant,
                   };
                   successfulScrapesCount++;
-                  showToast(`Successfully scraped "${scrapeResult.title || 'Page'}"`);
+                  showToast(`Successfully scraped "${normalizedScrapeResult.title || 'Page'}"`);
                 }
               } else if (name === 'wiki_search') {
                 const { query, limit = 10, language = 'en' } = args;
@@ -4873,8 +5053,15 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
     setUrlToolLoading(true);
     setUrlToolError(null);
     try {
+      const scrapeTarget = await resolveScrapeTargetUrl({
+        targetUrl: url,
+        queryFallback: '',
+        tavilyApiKey,
+        serpApiKey,
+        searchProvider
+      });
       // Use the existing scrapeUrl service
-      const result: ScrapeResult = await scrapeUrl({ url, extractLinks: false, extractImages: false });
+      const result: ScrapeResult = await scrapeUrl({ url: scrapeTarget.resolvedUrl, extractLinks: false, extractImages: false });
       
       // Compress: strip HTML, collapse whitespace, cap at 8000 chars
       let text = '';
@@ -4890,10 +5077,11 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         throw new Error(result.error);
       }
       
-      const title = result.title || url;
-      const favicon = `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=32`;
+      const finalUrl = result.url || scrapeTarget.resolvedUrl;
+      const title = result.title || finalUrl;
+      const favicon = `https://www.google.com/s2/favicons?domain=${new URL(finalUrl).hostname}&sz=32`;
       
-      const newDoc = { id: Date.now().toString(), url, title, content: text, favicon };
+      const newDoc = { id: Date.now().toString(), url: finalUrl, requestedUrl: scrapeTarget.requestedUrl, title, content: text, favicon };
       
       setAttachedUrlDocs(prev => [
         ...prev,

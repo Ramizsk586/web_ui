@@ -1,7 +1,11 @@
 ---
 name: general
 description: Broad-spectrum search and synthesis subagent for Lumina Coder Mode. Use for mixed tasks, cross-cutting investigation, or messy multistep analysis.
-tools: [read_file, glob_tool, grep_tool, run_command]
+tools:
+  read_file: true
+  glob_tool: true
+  grep_tool: true
+  run_command: true
 mode: subagent
 permissions:
   read: allow

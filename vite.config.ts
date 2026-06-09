@@ -2,7 +2,6 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
-import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
@@ -29,30 +28,6 @@ export default defineConfig(({mode}) => {
         jsxRuntime: 'automatic',
       }),
       tailwindcss(),
-      VitePWA({
-        registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'icon.svg', 'mask-icon.svg'],
-        workbox: {
-          maximumFileSizeToCacheInBytes: 50 * 1024 * 1024,
-          // Faster service worker
-          cleanupOutdatedCaches: true,
-          skipWaiting: true,
-          clientsClaim: true,
-        },
-        manifest: {
-          name: 'Lumina',
-          short_name: 'Lumina',
-          description: 'Modern intelligence, refined interface.',
-          theme_color: '#09090b',
-          background_color: '#09090b',
-          display: 'standalone',
-          icons: [
-            { src: 'icon.svg', sizes: '192x192', type: 'image/svg+xml' },
-            { src: 'icon.svg', sizes: '512x512', type: 'image/svg+xml' },
-            { src: 'icon.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable' },
-          ],
-        },
-      }),
     ],
     build: {
       // CSS optimization
@@ -114,6 +89,8 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        // Pi agent module (from "src - pi" directory)
+        '@pi-agent': path.resolve(__dirname, 'src - pi'),
       },
     },
     server: {

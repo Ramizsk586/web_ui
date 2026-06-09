@@ -1062,8 +1062,29 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
               } else if (toolName === 'write_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
                 fs.mkdirSync(path.dirname(fileRes), { recursive: true });
-                fs.writeFileSync(fileRes, args.content || '', 'utf8');
-                toolOutput = { success: true };
+                const writeOffset = args.offset ? Math.max(0, Number(args.offset) - 1) : 0;
+                const writeLimit = args.limit ? Math.max(1, Number(args.limit)) : undefined;
+                const newContent = args.content || '';
+                
+                if (writeOffset > 0 && fs.existsSync(fileRes)) {
+                  // Append mode: read existing, slice, then append
+                  const existingContent = fs.readFileSync(fileRes, 'utf8');
+                  const existingLines = existingContent.split('\n');
+                  const contentLines = newContent.split('\n');
+                  const limitedLines = writeLimit ? contentLines.slice(0, writeLimit) : contentLines;
+                  const finalLines = [...existingLines.slice(0, writeOffset), ...limitedLines];
+                  fs.writeFileSync(fileRes, finalLines.join('\n'), 'utf8');
+                  toolOutput = { success: true, appended: true, atLine: writeOffset, linesWritten: limitedLines.length };
+                } else if (writeLimit) {
+                  // Limit mode: only write specified number of lines
+                  const contentLines = newContent.split('\n');
+                  const limitedLines = contentLines.slice(0, writeLimit);
+                  fs.writeFileSync(fileRes, limitedLines.join('\n'), 'utf8');
+                  toolOutput = { success: true, linesWritten: limitedLines.length, totalContentLines: contentLines.length };
+                } else {
+                  fs.writeFileSync(fileRes, newContent, 'utf8');
+                  toolOutput = { success: true };
+                }
               } else if (toolName === 'edit_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
                 if (!fs.existsSync(fileRes)) {
@@ -1073,13 +1094,63 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                   const searchText = String(args.search ?? '');
                   const replaceText = String(args.replace ?? '');
                   const replaceAll = Boolean(args.all);
+                  const editOffset = args.offset ? Math.max(1, Number(args.offset)) : 1;
+                  const editLimit = args.limit ? Math.max(1, Number(args.limit)) : Infinity;
+                  
+                  // If offset/limit provided, only search within that range
+                  let searchContent = rawContent;
+                  if (args.offset || args.limit) {
+                    const lines = rawContent.split('\n');
+                    const startIdx = Math.max(0, editOffset - 1);
+                    const endIdx = Math.min(lines.length, startIdx + (editLimit === Infinity ? lines.length : editLimit));
+                    const rangeLines = lines.slice(startIdx, endIdx);
+                    searchContent = rangeLines.join('\n');
+                    
+                    // If not found in range, check if it exists at all for helpful error
+                    if (!searchContent.includes(searchText) && rawContent.includes(searchText)) {
+                      toolOutput = { 
+                        error: `Search text found in file but not within specified range (lines ${editOffset}-${endIdx}). Use read_file to find the correct location.`,
+                        foundInRange: false,
+                        searchRange: { start: editOffset, end: endIdx }
+                      };
+                    }
+                  }
+                  
+                  // Improved matching - try multiple strategies
                   const normalizeForMatch = (s: string) =>
                     s.replace(/\r\n?/g, '\n')
                      .split('\n')
                      .map((line) => line.replace(/[ \t]+$/g, ''))
                      .join('\n')
                      .trim();
-                  const buildSearchError = (hint: string) => {
+                  
+                  // Try to find closest matching lines for better error messages
+                  const findClosestMatch = (search: string, content: string) => {
+                    const searchLines = search.split('\n');
+                    const contentLines = content.split('\n');
+                    let bestMatch = null;
+                    let bestScore = 0;
+                    
+                    for (let i = 0; i <= contentLines.length - searchLines.length; i++) {
+                      let score = 0;
+                      for (let j = 0; j < searchLines.length; j++) {
+                        const fileLine = contentLines[i + j].trim();
+                        const searchLine = searchLines[j].trim();
+                        if (fileLine === searchLine) {
+                          score += searchLine.length;
+                        } else if (fileLine.includes(searchLine) || searchLine.includes(fileLine)) {
+                          score += Math.min(fileLine.length, searchLine.length) * 0.5;
+                        }
+                      }
+                      if (score > bestScore) {
+                        bestScore = score;
+                        bestMatch = contentLines.slice(Math.max(0, i - 1), i + searchLines.length + 1).join('\n');
+                      }
+                    }
+                    return bestMatch;
+                  };
+                  
+                  const buildSearchError = (hint: string, closestMatch?: string) => {
                     const totalLines = rawContent.split('\n').length;
                     const searchPreview = searchText.length > 240
                       ? `${searchText.slice(0, 240)}… (+${searchText.length - 240} more chars)`
@@ -1089,25 +1160,33 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                       : rawContent;
                     return {
                       error: `Exact search text was not found in ${path.basename(fileRes)} (${hint}).`,
-                      hint: 'The search text must EXACTLY match a contiguous block of the file content. You may be working from a stale copy. Recovery: (1) call read_file on this file to get the current contents, (2) copy the EXACT text from the read_file output as your new search value, (3) re-issue the edit. For small files (<= ~150 lines) you can use write_file to rewrite the whole file in one call. Do NOT retry the same search text.',
+                      hint: closestMatch 
+                        ? `Found similar content in file. Try using this exact text:\n${closestMatch.slice(0, 500)}`
+                        : 'The search text must EXACTLY match a contiguous block of the file content. Recovery: (1) call read_file on this file to get the current contents, (2) copy the EXACT text from the read_file output as your new search value, (3) re-issue the edit. For small files (<= ~150 lines) you can use write_file to rewrite the whole file in one call. Do NOT retry the same search text.',
                       filePath: path.relative(resolvedWorkspace, fileRes).replace(/\\/g, '/'),
                       totalLines,
                       fileLength: rawContent.length,
                       searchLength: searchText.length,
                       replaceLength: replaceText.length,
                       searchPreview,
-                      fileContent: fileHead
+                      fileContent: fileHead,
+                      closestMatch: closestMatch?.slice(0, 500)
                     };
                   };
+                  
+                  // Strategy 1: Exact match
                   if (searchText && rawContent.includes(searchText)) {
                     const updated = replaceAll
                       ? rawContent.split(searchText).join(replaceText)
                       : rawContent.replace(searchText, replaceText);
                     fs.writeFileSync(fileRes, updated, 'utf8');
                     toolOutput = { success: true, match: 'exact' };
-                  } else {
+                  } 
+                  // Strategy 2: Normalized match (trim trailing whitespace)
+                  else {
                     const normalizedContent = normalizeForMatch(rawContent);
                     const normalizedSearch = normalizeForMatch(searchText);
+                    
                     if (normalizedSearch && normalizedContent.includes(normalizedSearch)) {
                       const searchLines = normalizedSearch.split('\n');
                       const contentLines = rawContent.replace(/\r\n?/g, '\n').split('\n');
@@ -1125,9 +1204,38 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                         matched = true;
                         break;
                       }
-                      if (!matched) toolOutput = buildSearchError('normalized match failed during splice');
-                    } else {
-                      toolOutput = buildSearchError('even after whitespace normalization');
+                      if (!matched) {
+                        const closest = findClosestMatch(searchText, rawContent);
+                        toolOutput = buildSearchError('normalized match failed during splice', closest);
+                      }
+                    }
+                    // Strategy 3: Flexible match - try without leading/trailing empty lines
+                    else {
+                      const flexibleSearch = searchText.replace(/^\n+/, '').replace(/\n+$/, '');
+                      const flexContent = rawContent.replace(/\r\n?/g, '\n');
+                      
+                      // Try finding with loose matching
+                      let foundPos = -1;
+                      const searchTrimmed = flexibleSearch.trim();
+                      
+                      for (let i = 0; i < flexContent.length; i++) {
+                        const window = flexContent.slice(i, i + searchTrimmed.length + 50);
+                        if (window.trim().includes(searchTrimmed)) {
+                          foundPos = i;
+                          break;
+                        }
+                      }
+                      
+                      if (foundPos >= 0) {
+                        // Found a loose match, now find exact boundaries
+                        const before = rawContent.slice(0, foundPos);
+                        const after = rawContent.slice(foundPos + searchTrimmed.length);
+                        fs.writeFileSync(fileRes, before + replaceText + after, 'utf8');
+                        toolOutput = { success: true, match: 'flexible' };
+                      } else {
+                        const closest = findClosestMatch(searchText, rawContent);
+                        toolOutput = buildSearchError('even after whitespace normalization', closest);
+                      }
                     }
                   }
                 }
@@ -1176,46 +1284,63 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 }
               } else if (toolName === 'glob_tool') {
                 const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
+                const excludeStr = args.exclude ? String(args.exclude) : '';
+                const excludePatterns = excludeStr ? excludeStr.split(',').map(p => p.trim().toLowerCase()).filter(Boolean) : [];
                 let files = getFilesRecursively(resolvedWorkspace);
+                if (excludePatterns.length > 0) {
+                  files = files.filter(f => {
+                    const relPath = f.relativePath.toLowerCase();
+                    return !excludePatterns.some(pattern => relPath.includes(pattern));
+                  });
+                }
                 if (fileGlob) {
                   files = files.filter(f => !f.isDirectory && matchesWorkspaceGlob(f.relativePath, fileGlob));
                 } else {
                   files = files.filter(f => !f.isDirectory);
                 }
-                const maxResults = Math.min(Number(args.maxResults) || 30, 80);
-                toolOutput = { fileGlob, count: files.length, files: files.slice(0, maxResults).map(f => ({ filePath: f.relativePath, isDirectory: f.isDirectory })) };
+                const maxResults = Math.min(Number(args.maxResults) || 50, 100);
+                toolOutput = { fileGlob, exclude: excludeStr, count: files.length, files: files.slice(0, maxResults).map(f => ({ filePath: f.relativePath, isDirectory: f.isDirectory })) };
               } else if (toolName === 'grep_tool') {
                 const query = normalizedQuery;
                 if (!query || query === '.') {
                   toolOutput = { query, count: 0, matches: [], skipped: 'Blocked empty or non-specific search query to save tokens' };
                 } else {
-                const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
-                let files = getFilesRecursively(resolvedWorkspace);
-                if (fileGlob) {
-                  files = files.filter(f => !f.isDirectory && matchesWorkspaceGlob(f.relativePath, fileGlob));
-                } else {
-                  files = files.filter(f => !f.isDirectory);
-                }
-                const matches: { filePath: string; line: number; text: string }[] = [];
-                const maxResults = Math.min(Number(args.maxResults) || 30, 80);
-                let count = 0;
-                for (const file of files) {
-                  if (count >= maxResults) break;
-                  const fullF = path.join(resolvedWorkspace, file.relativePath);
-                  if (fs.existsSync(fullF)) {
-                    const content = fs.readFileSync(fullF, 'utf8');
-                    if (content.toLowerCase().includes(query.toLowerCase())) {
-                      const lines = content.split('\n');
-                      lines.forEach((line, idx) => {
-                        if (count < maxResults && line.toLowerCase().includes(query.toLowerCase())) {
-                          matches.push({ filePath: file.relativePath, line: idx + 1, text: line.trim() });
-                          count++;
-                        }
-                      });
+                  const fileGlob = args.fileGlob ? String(args.fileGlob).toLowerCase() : '';
+                  const grepOffset = args.offset ? Math.max(1, Number(args.offset)) : 1;
+                  const grepLimit = args.limit ? Math.max(1, Number(args.limit)) : Infinity;
+                  let files = getFilesRecursively(resolvedWorkspace);
+                  if (fileGlob) {
+                    files = files.filter(f => !f.isDirectory && matchesWorkspaceGlob(f.relativePath, fileGlob));
+                  } else {
+                    files = files.filter(f => !f.isDirectory);
+                  }
+                  const matches: { filePath: string; line: number; text: string }[] = [];
+                  const maxResults = Math.min(Number(args.maxResults) || 30, 80);
+                  let count = 0;
+                  for (const file of files) {
+                    if (count >= maxResults) break;
+                    const fullF = path.join(resolvedWorkspace, file.relativePath);
+                    if (fs.existsSync(fullF)) {
+                      let content = fs.readFileSync(fullF, 'utf8');
+                      if (grepOffset > 1 || grepLimit !== Infinity) {
+                        const lines = content.split('\n');
+                        const startIdx = Math.max(0, grepOffset - 1);
+                        const endIdx = grepLimit === Infinity ? lines.length : Math.min(lines.length, startIdx + grepLimit);
+                        content = lines.slice(startIdx, endIdx).join('\n');
+                      }
+                      if (content.toLowerCase().includes(query.toLowerCase())) {
+                        const lines = content.split('\n');
+                        const lineOffset = grepOffset > 1 ? grepOffset - 1 : 0;
+                        lines.forEach((line, idx) => {
+                          if (count < maxResults && line.toLowerCase().includes(query.toLowerCase())) {
+                            matches.push({ filePath: file.relativePath, line: idx + 1 + lineOffset, text: line.trim() });
+                            count++;
+                          }
+                        });
+                      }
                     }
                   }
-                }
-                toolOutput = { query, count: matches.length, matches };
+                  toolOutput = { query, fileGlob, offset: grepOffset, limit: grepLimit === Infinity ? undefined : grepLimit, count: matches.length, matches };
                 }
               } else {
                 toolOutput = { error: `Tool ${toolName} not implemented` };
@@ -1936,6 +2061,80 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     express.static(activePreviewRoot)(req, res, next);
   });
 
+  const decodeDuckDuckGoRedirectUrl = (inputUrl: string): string => {
+    try {
+      const parsed = new URL(inputUrl);
+      const uddg = parsed.searchParams.get('uddg');
+      if (uddg) {
+        return decodeURIComponent(uddg);
+      }
+    } catch {}
+    return inputUrl;
+  };
+
+  const normalizeSearchResults = (rawResults: any[] = []) =>
+    rawResults
+      .map((result: any) => ({
+        title: String(result?.title || '').trim(),
+        url: String(result?.url || result?.link || '').trim(),
+        snippet: String(result?.snippet || result?.description || result?.content || '').trim()
+      }))
+      .filter((result: any) => result.url);
+
+  const searchDuckDuckGoHtml = async (query: string) => {
+    const response = await axios.get('https://html.duckduckgo.com/html/', {
+      params: { q: query },
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
+
+    const $ = cheerio.load(typeof response.data === 'string' ? response.data : '');
+    const results: Array<{ title: string; url: string; snippet: string }> = [];
+
+    $('.result').each((_, element) => {
+      const anchor = $(element).find('.result__title a, a.result__a').first();
+      const snippet = $(element).find('.result__snippet').first().text().trim();
+      const title = anchor.text().trim();
+      const href = anchor.attr('href');
+      if (!title || !href) return;
+
+      results.push({
+        title,
+        url: decodeDuckDuckGoRedirectUrl(href),
+        snippet
+      });
+    });
+
+    return results.filter((result) => /^https?:\/\//i.test(result.url));
+  };
+
+  const runDuckDuckGoSearch = async (query: string) => {
+    try {
+      const ddgResults = await search(query, {
+        region: 'wt-wt',
+        safeSearch: -1,
+        time: 'y',
+        offset: 0
+      });
+
+      const normalized = normalizeSearchResults(ddgResults.results || []);
+      if (normalized.length > 0) {
+        return {
+          results: normalized,
+          related: Array.isArray(ddgResults.related) ? ddgResults.related : []
+        };
+      }
+    } catch (error) {
+      console.warn('DuckDuckGo package search failed, trying HTML fallback:', error);
+    }
+
+    const fallbackResults = await searchDuckDuckGoHtml(query);
+    return { results: fallbackResults, related: [] };
+  };
+
   // Search endpoint
   app.post("/api/search", async (req, res) => {
     const { query, tavilyKey, serpKey, provider: preferredProvider } = req.body;
@@ -1992,29 +2191,15 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
       const tryDdg = async () => {
         try {
-          const ddgResults = await search(query, {
-            region: 'wt-wt',
-            safeSearch: -1,
-            time: 'y',
-            offset: 0
-          });
+          const ddgResults = await runDuckDuckGoSearch(query);
+          let enrichedResults: any[] = ddgResults.results.slice(0, 10);
 
-          let enrichedResults: any[] = [];
-          for (const result of ddgResults.results.slice(0, 10)) {
-            enrichedResults.push({
-              title: result.title,
-              url: result.url,
-              snippet: result.description
-            });
-          }
-
-          if (ddgResults.related && ddgResults.related.length > 0) {
-            const relatedTopics = ddgResults.related.map((t) => ({
+          if (enrichedResults.length === 0 && ddgResults.related.length > 0) {
+            enrichedResults = ddgResults.related.map((t: any) => ({
               title: t.text,
               url: '',
               snippet: t.text
             }));
-            enrichedResults = [...enrichedResults, ...relatedTopics];
           }
 
           results = enrichedResults;
@@ -2065,561 +2250,576 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     }
   });
 
-  // Helper: Respect robots.txt (Warn user but allow proceeding)
+  type ScrapeStrategy = 'static' | 'dynamic' | 'crawl';
+  type BrowserEngine = 'lightpanda';
+  type LightpandaCloudConfig = {
+    region?: 'euwest' | 'uswest' | 'useast';
+    token?: string;
+    browser?: string;
+    proxy?: string;
+  };
+
+  const DEFAULT_SCRAPER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  const DEFAULT_LIGHTPANDA_CLOUD_REGION = (process.env.LIGHTPANDA_CLOUD_REGION || 'euwest') as NonNullable<LightpandaCloudConfig['region']>;
+  const DEFAULT_LIGHTPANDA_CLOUD_BROWSER = process.env.LIGHTPANDA_CLOUD_BROWSER || 'lightpanda';
+  const DEFAULT_LIGHTPANDA_CLOUD_PROXY = process.env.LIGHTPANDA_CLOUD_PROXY || 'fast_dc';
+  const LIGHTPANDA_CLOUD_HOSTS: Record<NonNullable<LightpandaCloudConfig['region']>, string> = {
+    euwest: 'euwest.cloud.lightpanda.io',
+    uswest: 'uswest.cloud.lightpanda.io',
+    useast: 'useast.cloud.lightpanda.io',
+  };
+
+  const getScraperHeaders = () => ({
+    'User-Agent': DEFAULT_SCRAPER_UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1'
+  });
+
+  const isPrivateHostname = (hostname: string) => {
+    const lower = hostname.toLowerCase();
+    return (
+      lower === 'localhost' ||
+      lower === '127.0.0.1' ||
+      lower.startsWith('192.168.') ||
+      lower.startsWith('10.') ||
+      lower.startsWith('169.254.') ||
+      lower.endsWith('.local')
+    );
+  };
+
+  const containsSuspiciousSelector = (selectors: Record<string, string> = {}) =>
+    Object.entries(selectors).some(([, value]) => typeof value === 'string' && (value.includes('<script') || value.toLowerCase().includes('javascript:')));
+
+  const getSearchQueryIfSearchEngine = (urlStr: string): string | null => {
+    try {
+      const parsed = new URL(urlStr);
+      const host = parsed.hostname.toLowerCase();
+      const isSearchEngine = host.includes('google.') || host.includes('bing.') || host.includes('duckduckgo.') || host.includes('yahoo.');
+      if (!isSearchEngine) return null;
+      const q = parsed.searchParams.get('q') || parsed.searchParams.get('query') || parsed.searchParams.get('p') || parsed.searchParams.get('text');
+      if (q && q.trim()) return q.trim();
+      if (parsed.hash) {
+        const hashParams = new URLSearchParams(parsed.hash.substring(1));
+        const hashQ = hashParams.get('q') || hashParams.get('query');
+        if (hashQ && hashQ.trim()) return hashQ.trim();
+      }
+    } catch {}
+    return null;
+  };
+
+  const isWrongOrGarbageLink = (linkUrl: string, srcUrl: string): boolean => {
+    try {
+      const parsed = new URL(linkUrl);
+      const host = parsed.hostname.toLowerCase();
+      const path = parsed.pathname.toLowerCase();
+      const search = parsed.search.toLowerCase();
+      const sourceHost = new URL(srcUrl).hostname.toLowerCase();
+      const socialMediaPatterns = ['facebook.com', 'twitter.com', 'x.com', 'instagram.com', 'linkedin.com', 'pinterest.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'snapchat.com', 'whatsapp.com', 'reddit.com', 'tumblr.com', 'flickr.com', 'vimeo.com'];
+      if (socialMediaPatterns.some((domain) => host.includes(domain)) && !sourceHost.includes(host) && !host.includes(sourceHost)) return true;
+      const adPatterns = ['ads.', 'adserver', 'doubleclick', 'googleadservices', 'amazon-adsystem', 'taboola', 'outbrain', 'adsystem', 'affiliate', 'adnxs', 'marketing', 'analytics', 'pixel', 'clktrkr'];
+      if (adPatterns.some((pattern) => host.includes(pattern) || path.includes(pattern) || search.includes(pattern))) return true;
+      const clutterPatterns = ['/privacy', '/terms', '/cookie', '/contact', '/about-us', '/about/info', '/tos', '/disclaimer', '/help', '/support', '/faq', '/subscribe', '/newsletter', '/login', '/signin', '/signup', '/register', '/cart', '/checkout', '/account', '/profile', '/settings', '/feedback', '/sitemap'];
+      if (clutterPatterns.some((pattern) => path === pattern || path.startsWith(pattern + '/') || path.endsWith(pattern))) return true;
+      if (host === sourceHost && (path.includes('/search') || search.includes('?s=') || search.includes('&s=') || search.includes('?q=') || search.includes('&q='))) return true;
+      const nonScrapableExtensions = ['.zip', '.pdf', '.docx', '.xlsx', '.pptx', '.bin', '.tar', '.gz', '.dmg', '.exe', '.mp3', '.mp4', '.avi', '.mov', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
+      if (nonScrapableExtensions.some((ext) => path.endsWith(ext))) return true;
+    } catch {}
+    return false;
+  };
+
+  const decodeRedirectUrl = (urlStr: string): string => {
+    try {
+      const parsed = new URL(urlStr);
+      const host = parsed.hostname.toLowerCase();
+      if (host.includes('duckduckgo.com') && parsed.searchParams.has('uddg')) return parsed.searchParams.get('uddg') || urlStr;
+      if (host.includes('google.') && parsed.pathname === '/url') return parsed.searchParams.get('url') || parsed.searchParams.get('q') || urlStr;
+      if (parsed.pathname === '/url' || parsed.pathname === '/redirect') {
+        return parsed.searchParams.get('url') || parsed.searchParams.get('q') || parsed.searchParams.get('to') || parsed.searchParams.get('target') || urlStr;
+      }
+    } catch {}
+    return urlStr;
+  };
+
   const checkRobotsTxt = async (targetUrl: string): Promise<{ allowed: boolean; warning?: string }> => {
     try {
       const parsed = new URL(targetUrl);
       const robotsUrl = `${parsed.protocol}//${parsed.host}/robots.txt`;
-      const response = await axios.get(robotsUrl, { 
-        timeout: 3000,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-      });
+      const response = await axios.get(robotsUrl, { timeout: 3000, headers: { 'User-Agent': DEFAULT_SCRAPER_UA } });
       if (response.status === 200 && typeof response.data === 'string') {
         const lines = response.data.split('\n');
         let inWildcardAgent = false;
         const pathToCheck = parsed.pathname + parsed.search;
-        
         for (const rawLine of lines) {
           const line = rawLine.trim();
           if (line.toLowerCase().startsWith('user-agent:')) {
-            const agent = line.split(':')[1]?.trim() || '';
-            inWildcardAgent = (agent === '*');
+            inWildcardAgent = (line.split(':')[1]?.trim() || '') === '*';
           }
           if (inWildcardAgent && line.toLowerCase().startsWith('disallow:')) {
             const rule = line.split(':')[1]?.trim() || '';
             if (rule && pathToCheck.startsWith(rule)) {
-              return { 
-                allowed: false, 
-                warning: `Robots.txt on ${parsed.host} disallows crawling paths matching "${rule}". Proceeded via user override.` 
-              };
+              return { allowed: false, warning: `Robots.txt on ${parsed.host} disallows crawling paths matching "${rule}". Proceeded via user override.` };
             }
           }
         }
       }
-    } catch (e) {
-      // Ignore robots.txt fetch errors, assume allowed
-    }
+    } catch {}
     return { allowed: true };
   };
 
-  // Web Scraping API proxy endpoint
-  app.post("/api/scrape", async (req, res) => {
-    const { url, selectors, extractLinks, extractTables, outputFormat, usePuppeteer } = req.body;
+  const buildScrapeResultFromHtml = ({
+    html,
+    effectiveUrl,
+    requestedUrl,
+    statusCode,
+    selectors,
+    extractLinks,
+    extractImages,
+    extractTables,
+    outputFormat,
+    robotsWarning,
+    strategy,
+    engine
+  }: any) => {
+    const $ = cheerio.load(html || '');
+    const effectiveParsedUrl = new URL(effectiveUrl);
+    const foundVideos: Array<{ title: string; url: string; type: 'youtube' | 'vimeo' | 'direct' | 'other' }> = [];
 
-    const isWrongOrGarbageLink = (linkUrl: string, srcUrl: string): boolean => {
+    $('iframe').each((_, el) => {
+      const srcAttr = $(el).attr('src');
+      const titleAttr = $(el).attr('title') || 'Embedded Video';
+      if (!srcAttr) return;
       try {
-        const parsed = new URL(linkUrl);
-        const host = parsed.hostname.toLowerCase();
-        const path = parsed.pathname.toLowerCase();
-        const search = parsed.search.toLowerCase();
-        const sourceHost = new URL(srcUrl).hostname.toLowerCase();
-        
-        // 1. Social media & Sharing pages
-        const socialMediaPatterns = [
-          'facebook.com', 'twitter.com', 'x.com', 'instagram.com', 'linkedin.com', 'pinterest.com', 
-          'youtube.com', 'youtu.be', 'tiktok.com', 'snapchat.com', 'whatsapp.com', 'reddit.com',
-          'tumblr.com', 'flickr.com', 'vimeo.com'
-        ];
-        if (socialMediaPatterns.some(domain => host.includes(domain))) {
-          if (!sourceHost.includes(host) && !host.includes(sourceHost)) {
-            return true;
-          }
-        }
-        
-        // 2. Generic advertising, tracking, or affiliate links
-        const adPatterns = [
-          'ads.', 'adserver', 'doubleclick', 'googleadservices', 'amazon-adsystem', 'taboola', 'outbrain', 
-          'adsystem', 'affiliate', 'adnxs', 'marketing', 'analytics', 'pixel', 'clktrkr'
-        ];
-        if (adPatterns.some(pattern => host.includes(pattern) || path.includes(pattern) || search.includes(pattern))) {
-          return true;
-        }
+        const absSrc = new URL(srcAttr, effectiveUrl).href;
+        if (absSrc.includes('youtube.com/') || absSrc.includes('youtu.be/') || absSrc.includes('youtube-nocookie.com/')) foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'youtube' });
+        else if (absSrc.includes('vimeo.com/')) foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'vimeo' });
+        else if (absSrc.endsWith('.mp4') || absSrc.endsWith('.webm') || absSrc.endsWith('.ogg')) foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'direct' });
+        else if (absSrc.includes('/embed/')) foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'other' });
+      } catch {}
+    });
 
-        // 3. Clutter/Utility pages that are rarely useful content for AI scans
-        const clutterPatterns = [
-          '/privacy', '/terms', '/cookie', '/contact', '/about-us', '/about/info', '/tos', '/disclaimer',
-          '/help', '/support', '/faq', '/subscribe', '/newsletter', '/login', '/signin', '/signup', '/register',
-          '/cart', '/checkout', '/account', '/profile', '/settings', '/feedback', '/sitemap'
-        ];
-        if (clutterPatterns.some(pattern => path === pattern || path.startsWith(pattern + '/') || path.endsWith(pattern))) {
-          return true;
-        }
+    $('video').each((_, el) => {
+      $(el).find('source').each((_, srcEl) => {
+        const src = $(srcEl).attr('src');
+        if (!src) return;
+        try {
+          foundVideos.push({ title: $(el).attr('title') || 'HTML5 Video Source', url: new URL(src, effectiveUrl).href, type: 'direct' });
+        } catch {}
+      });
+      const srcAttr = $(el).attr('src');
+      if (srcAttr) {
+        try {
+          foundVideos.push({ title: $(el).attr('title') || 'HTML5 Video Direct', url: new URL(srcAttr, effectiveUrl).href, type: 'direct' });
+        } catch {}
+      }
+    });
 
-        // 4. Search loops on the same site (e.g. /search?q=..., /?s=...)
-        if (host === sourceHost) {
-          if (path.includes('/search') || search.includes('?s=') || search.includes('&s=') || search.includes('?q=') || search.includes('&q=')) {
-            return true;
-          }
-        }
+    $('script, style, noscript, iframe, link, svg, video, audio').remove();
 
-        // 5. Binary or document downloads that axios scraping cannot process
-        const nonScrapableExtensions = [
-          '.zip', '.pdf', '.docx', '.xlsx', '.pptx', '.bin', '.tar', '.gz', '.dmg', '.exe', 
-          '.mp3', '.mp4', '.avi', '.mov', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'
-        ];
-        if (nonScrapableExtensions.some(ext => path.endsWith(ext))) {
-          return true;
-        }
-
-      } catch (e) {}
-      return false;
+    const result: any = {
+      url: effectiveUrl,
+      requestedUrl,
+      title: $('title').text().trim() || $('h1').first().text().trim() || effectiveParsedUrl.hostname,
+      statusCode,
+      scrapedAt: new Date().toISOString(),
+      data: {},
+      links: [],
+      images: [],
+      tables: [],
+      videos: Array.from(new Map(foundVideos.map((item) => [item.url, item])).values()).slice(0, 30),
+      strategy,
+      engine
     };
 
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
+    if (robotsWarning) result.robotsWarning = robotsWarning;
+
+    if (selectors && typeof selectors === 'object' && Object.keys(selectors).length > 0) {
+      const customData: Record<string, any> = {};
+      for (const [key, selector] of Object.entries(selectors)) {
+        if (typeof selector !== 'string') continue;
+        const matches: string[] = [];
+        $(selector).each((_, el) => {
+          const textVal = $(el).text().trim();
+          if (textVal) matches.push(textVal);
+        });
+        customData[key] = matches.length === 1 ? matches[0] : matches;
+      }
+      result.data = customData;
+    } else {
+      const headings: Array<{ level: string; text: string }> = [];
+      $('h1, h2, h3, h4').each((_, el) => {
+        const txt = $(el).text().trim();
+        if (txt) headings.push({ level: el.tagName.toLowerCase(), text: txt });
+      });
+      const paragraphs: string[] = [];
+      $('p').each((_, el) => {
+        const txt = $(el).text().trim();
+        if (txt && txt.length > 30) paragraphs.push(txt);
+      });
+      result.data = {
+        headings: headings.slice(0, 30),
+        paragraphs: paragraphs.slice(0, 50),
+        metaDescription: $('meta[name="description"]').attr('content') || ''
+      };
+    }
+
+    if (extractLinks) {
+      const foundLinks = new Set<string>();
+      $('a[href]').each((_, el) => {
+        const href = $(el).attr('href');
+        if (!href) return;
+        try {
+          let absUrl = new URL(href, effectiveUrl).href;
+          absUrl = decodeRedirectUrl(absUrl);
+          if (absUrl !== effectiveUrl && !absUrl.includes('#') && !isWrongOrGarbageLink(absUrl, effectiveUrl)) foundLinks.add(absUrl);
+        } catch {}
+      });
+      result.links = Array.from(foundLinks).slice(0, 500);
+    }
+
+    if (extractImages) {
+      const foundImages = new Set<string>();
+      $('img[src]').each((_, el) => {
+        const srcAttr = $(el).attr('src');
+        if (!srcAttr) return;
+        try {
+          foundImages.add(new URL(srcAttr, effectiveUrl).href);
+        } catch {}
+      });
+      result.images = Array.from(foundImages).slice(0, 50);
+    }
+
+    if (extractTables) {
+      const resolvedTables: Array<string[][]> = [];
+      $('table').each((_, tableEl) => {
+        const currentTable: string[][] = [];
+        $(tableEl).find('tr').each((_, rowEl) => {
+          const rowData: string[] = [];
+          $(rowEl).find('td, th').each((_, cellEl) => {
+            rowData.push($(cellEl).text().trim().replace(/\s+/g, ' '));
+          });
+          if (rowData.length > 0) currentTable.push(rowData);
+        });
+        if (currentTable.length > 0) resolvedTables.push(currentTable);
+      });
+      result.tables = resolvedTables.slice(0, 5);
     }
 
     try {
-      const parsedUrl = new URL(url);
-      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-        return res.status(400).json({ error: 'Only HTTP/HTTPS URLs are supported.' });
-      }
-
-      // Allowlist/Denylist to block malicious/internal addresses
-      const hostname = parsedUrl.hostname.toLowerCase();
-      if (
-        hostname === 'localhost' ||
-        hostname === '127.0.0.1' ||
-        hostname.startsWith('192.168.') ||
-        hostname.startsWith('10.') ||
-        hostname.startsWith('169.254.') ||
-        hostname.endsWith('.local')
-      ) {
-        return res.status(403).json({ error: 'Security Exception: Requests to local or private IP spaces are forbidden.' });
-      }
-
-      // Input sanitization: reject dangerous selector patterns
-      if (selectors && typeof selectors === 'object') {
-        for (const [key, val] of Object.entries(selectors)) {
-          if (typeof val === 'string' && (val.includes('<script') || val.toLowerCase().includes('javascript:'))) {
-            return res.status(400).json({ error: `Security Exception: Suspicious text in selector "${key}".` });
-          }
-        }
-      }
-
-      // Check robots.txt
-      // Auto-Interception of search engine URLs to use DuckDuckGo scrape natively
-      // This bypasses 429 rate limit errors when models attempt to scrape Google search pages
-      const getSearchQueryIfSearchEngine = (urlStr: string): string | null => {
-        try {
-          const parsed = new URL(urlStr);
-          const host = parsed.hostname.toLowerCase();
-          const isSearchEngine = host.includes('google.') || 
-                                 host.includes('bing.') || 
-                                 host.includes('duckduckgo.') || 
-                                 host.includes('yahoo.');
-          if (!isSearchEngine) return null;
-
-          const q = parsed.searchParams.get('q') || 
-                    parsed.searchParams.get('query') || 
-                    parsed.searchParams.get('p') ||
-                    parsed.searchParams.get('text');
-          if (q && q.trim()) {
-            return q.trim();
-          }
-          if (parsed.hash) {
-            const hashParams = new URLSearchParams(parsed.hash.substring(1));
-            const hashQ = hashParams.get('q') || hashParams.get('query');
-            if (hashQ && hashQ.trim()) return hashQ.trim();
-          }
-        } catch (e) {}
-        return null;
-      };
-
-      const searchQuery = getSearchQueryIfSearchEngine(url);
-      if (searchQuery) {
-        console.log(`[Scrape Bypass] Intercepting search engine scrape request for query: "${searchQuery}"`);
-        try {
-          const ddgResults = await search(searchQuery, {
-            region: 'wt-wt',
-            safeSearch: -1,
-            time: 'y',
-            offset: 0
-          });
-
-          const resultsList = ddgResults.results || [];
-          const headings = resultsList.map((r: any) => ({
-            level: 'h2',
-            text: r.title
-          }));
-
-          const paragraphs = resultsList.map((r: any) => r.description || r.snippet).filter(Boolean);
-          const links = resultsList.map((r: any) => r.url).filter(Boolean);
-
-          let markdownText = `# Search Results for "${searchQuery}"\n\n`;
-          resultsList.forEach((r: any, idx: number) => {
-            markdownText += `## ${idx + 1}. [${r.title}](${r.url})\n${r.description || r.snippet || 'No description available.'}\n\n`;
-          });
-
-          if (resultsList.length === 0) {
-            markdownText += `No results were found on DuckDuckGo for: ${searchQuery}\n`;
-          }
-
-          const resultResult: any = {
-            url,
-            title: `Search: ${searchQuery}`,
-            statusCode: 200,
-            scrapedAt: new Date().toISOString(),
-            data: {
-              headings: headings.slice(0, 30),
-              paragraphs: paragraphs.slice(0, 50),
-              metaDescription: `Direct DuckDuckGo search results for query: ${searchQuery}`
-            },
-            links,
-            images: [],
-            tables: [],
-            videos: [],
-            rawText: markdownText
-          };
-
-          if (outputFormat === 'markdown') {
-            resultResult.formattedOutput = resultResult.rawText;
-          } else if (outputFormat === 'html') {
-            resultResult.formattedOutput = `<html><body>${markdownText.replace(/\n/g, '<br>')}</body></html>`;
-          } else {
-            resultResult.formattedOutput = JSON.stringify(resultResult.data, null, 2);
-          }
-
-          return res.json(resultResult);
-        } catch (searchError: any) {
-          console.error('[Scrape Bypass] DuckDuckGo search backup failed:', searchError);
-        }
-      }
-
-      const robotsCheck = await checkRobotsTxt(url);
-
-      // Rotate list of high-quality User-Agents
-      const userAgents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-        'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'
-      ];
-      const randomAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
-
-      const headers = {
-        'User-Agent': randomAgent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        // Let Axios handle decompression naturally to avoid buffer decoding corruption
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none'
-      };
-
-      // Implement exponential backoff for rate limits 429, up to 3 retries
-      let response: any = null;
-      let delay = 1000;
-      const maxRetries = 3;
-
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-          response = await axios.get(url, {
-            timeout: 10000,
-            headers,
-            maxRedirects: 5,
-            responseType: 'arraybuffer' // handle binary/size limits reliably
-          });
-          break; // success
-        } catch (err: any) {
-          const status = err.response?.status;
-          if (status === 429 && attempt < maxRetries) {
-            console.warn(`Scraping rate limited (429) on ${url}. Attempting retry ${attempt + 1}/${maxRetries} in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2; // exponential backoff
-          } else {
-            // Unrecoverable or exceeded retries
-            if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-              return res.status(504).json({ error: 'Timeout after 10s. The target webpage failed to respond within the timeframe.' });
-            }
-            if (err.code === 'ECONNREFUSED') {
-              return res.status(502).json({ error: 'Could not reach the target URL. Connection refused.' });
-            }
-            if (status === 403) {
-              return res.status(403).json({ error: 'Access Denied: Site blocked scraping (403 Forbidden).' });
-            }
-            if (status === 401) {
-              return res.status(401).json({ error: 'Authorization Error: Page requires log-in/credentials (401 Unauthorized).' });
-            }
-            return res.status(status || 500).json({ error: err.message || 'Failed to fetch webpage contents.' });
-          }
-        }
-      }
-
-      if (!response || !response.data) {
-        return res.status(500).json({ error: 'Empty response returned from the target webpage.' });
-      }
-
-      // Cap response size at 5MB as per security guidelines
-      const byteLength = response.data.length;
-      const maxSizeBytes = 5 * 1024 * 1024; // 5MB
-      let rawData = response.data;
-      if (byteLength > maxSizeBytes) {
-        // Truncate to first 100KB representation to be safe, notify user
-        rawData = rawData.slice(0, 100 * 1024);
-      }
-
-      const rawHtml = rawData.toString('utf8');
-      const $ = cheerio.load(rawHtml);
-
-      // Extract video sources!
-      const foundVideos: Array<{ title: string; url: string; type: 'youtube' | 'vimeo' | 'direct' | 'other' }> = [];
-      
-      // Look at iframe sources (for YouTube, Vimeo, embeds/etc.)
-      $('iframe').each((_, el) => {
-        const srcAttr = $(el).attr('src');
-        const titleAttr = $(el).attr('title') || 'Embedded Video';
-        if (srcAttr) {
-          try {
-            const absSrc = new URL(srcAttr, url).href;
-            if (absSrc.includes('youtube.com/') || absSrc.includes('youtu.be/') || absSrc.includes('youtube-nocookie.com/')) {
-              foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'youtube' });
-            } else if (absSrc.includes('vimeo.com/')) {
-              foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'vimeo' });
-            } else if (absSrc.endsWith('.mp4') || absSrc.endsWith('.webm') || absSrc.endsWith('.ogg')) {
-              foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'direct' });
-            } else if (absSrc.includes('/embed/')) {
-              foundVideos.push({ title: titleAttr.trim(), url: absSrc, type: 'other' });
-            }
-          } catch {}
-        }
+      const turndownService = new TurndownService({
+        headingStyle: 'atx' as const,
+        codeBlockStyle: 'fenced' as const,
+        bulletListMarker: '-' as const
       });
-
-      // Look at HTML5 video tags
-      $('video').each((_, el) => {
-        // Source tags inside video
-        $(el).find('source').each((_, srcEl) => {
-          const src = $(srcEl).attr('src');
-          if (src) {
-            try {
-              const absSrc = new URL(src, url).href;
-              foundVideos.push({ title: $(el).attr('title') || 'HTML5 Video Source', url: absSrc, type: 'direct' });
-            } catch {}
-          }
-        });
-        
-        // Src attribute directly on video element
-        const srcAttr = $(el).attr('src');
-        if (srcAttr) {
-          try {
-            const absSrc = new URL(srcAttr, url).href;
-            foundVideos.push({ title: $(el).attr('title') || 'HTML5 Video Direct', url: absSrc, type: 'direct' });
-          } catch {}
-        }
-      });
-
-      // Add a scan for links that look like videos
-      $('a[href]').each((_, el) => {
-        const href = $(el).attr('href');
-        const anchorText = $(el).text().trim() || 'Video Link';
-        if (href) {
-          try {
-            const absHref = new URL(href, url).href;
-            if (absHref.endsWith('.mp4') || absHref.endsWith('.webm') || absHref.endsWith('.ogg')) {
-              foundVideos.push({ title: anchorText, url: absHref, type: 'direct' });
-            } else if (absHref.includes('youtube.com/watch') || absHref.includes('youtu.be/')) {
-              foundVideos.push({ title: anchorText, url: absHref, type: 'youtube' });
-            } else if (absHref.includes('vimeo.com/') && !isNaN(Number(absHref.split('/').pop()))) {
-              foundVideos.push({ title: anchorText, url: absHref, type: 'vimeo' });
-            }
-          } catch {}
-        }
-      });
-
-      // Deduplicate elements by url to avoid repeating the exact same asset
-      const seenUrl = new Set<string>();
-      const dedupedVideos = foundVideos.filter(item => {
-        if (seenUrl.has(item.url)) return false;
-        seenUrl.add(item.url);
-        return true;
-      });
-
-      // Clean script, style, noscript, etc. elements
-      $('script, style, noscript, iframe, link, svg, video, audio').remove();
-
-      // Resolve title
-      const extractedTitle = $('title').text().trim() || $('h1').first().text().trim() || parsedUrl.hostname;
-
-      const result: any = {
-        url,
-        title: extractedTitle,
-        statusCode: response.status,
-        scrapedAt: new Date().toISOString(),
-        data: {},
-        links: [],
-        images: [],
-        tables: [],
-        videos: dedupedVideos.slice(0, 30)
-      };
-
-      if (robotsCheck.warning) {
-        result.robotsWarning = robotsCheck.warning;
+      turndownService.keep(['table']);
+      const bodyContent = $('body').html();
+      if (bodyContent) {
+        let convertedMarkdown = turndownService.turndown(bodyContent);
+        if (convertedMarkdown.length > 50000) convertedMarkdown = convertedMarkdown.slice(0, 50000) + '\n\n... [Content Truncated due to size limit of 50K chars] ...';
+        result.rawText = convertedMarkdown;
       }
+    } catch {
+      result.rawText = $('body').text().slice(0, 50000);
+    }
 
-      // Handle custom selectors extraction
-      if (selectors && typeof selectors === 'object') {
-        const customData: Record<string, any> = {};
-        for (const [key, selector] of Object.entries(selectors)) {
-          if (typeof selector === 'string') {
-            const matches: string[] = [];
-            $(selector).each((_, el) => {
-              const textVal = $(el).text().trim();
-              if (textVal) matches.push(textVal);
-            });
-            customData[key] = matches.length === 1 ? matches[0] : matches;
-          }
-        }
-        result.data = customData;
-      } else {
-        // Standard high-quality parsing of headings and paragraph structures
-        const headings: Array<{ level: string; text: string }> = [];
-        $('h1, h2, h3, h4').each((_, el) => {
-          const txt = $(el).text().trim();
-          if (txt) {
-            headings.push({
-              level: el.tagName.toLowerCase(),
-              text: txt
-            });
-          }
-        });
+    if (outputFormat === 'markdown') result.formattedOutput = result.rawText;
+    else if (outputFormat === 'html') result.formattedOutput = $.html();
+    else result.formattedOutput = JSON.stringify(result.data, null, 2);
 
-        const paragraphs: string[] = [];
-        $('p').each((_, el) => {
-          const txt = $(el).text().trim();
-          if (txt && txt.length > 30) {
-            paragraphs.push(txt);
-          }
-        });
+    return result;
+  };
 
-        result.data = {
-          headings: headings.slice(0, 30),
-          paragraphs: paragraphs.slice(0, 50),
-          metaDescription: $('meta[name="description"]').attr('content') || ''
-        };
-      }
+  const resolveScrapeTargetUrl = async (inputUrl: string) => {
+    const searchQuery = getSearchQueryIfSearchEngine(inputUrl);
+    if (!searchQuery) return inputUrl;
+    const ddgResults = await runDuckDuckGoSearch(searchQuery);
+    const resultsList = (ddgResults.results || []).filter((r: any) => r.url && !isWrongOrGarbageLink(r.url, inputUrl));
+    if (resultsList.length === 0) throw new Error(`Could not resolve the search page into a real website for query: ${searchQuery}`);
+    return resultsList[0].url;
+  };
 
-      // Extract links absolute resolved (truncated to 500 items max)
-      if (extractLinks) {
-        const decodeRedirectUrl = (urlStr: string): string => {
-          try {
-            const parsed = new URL(urlStr);
-            const host = parsed.hostname.toLowerCase();
-            if (host.includes('duckduckgo.com') && parsed.searchParams.has('uddg')) {
-              const decoded = parsed.searchParams.get('uddg');
-              if (decoded) return decoded;
-            }
-            if (host.includes('google.') && parsed.pathname === '/url') {
-              const decoded = parsed.searchParams.get('url') || parsed.searchParams.get('q');
-              if (decoded) return decoded;
-            }
-            if (parsed.pathname === '/url' || parsed.pathname === '/redirect') {
-              const decoded = parsed.searchParams.get('url') || 
-                              parsed.searchParams.get('q') || 
-                              parsed.searchParams.get('to') || 
-                              parsed.searchParams.get('target');
-              if (decoded && (decoded.startsWith('http://') || decoded.startsWith('https://'))) {
-                return decoded;
-              }
-            }
-          } catch (e) {}
-          return urlStr;
-        };
-        const foundLinks: Set<string> = new Set();
-        $('a[href]').each((_, el) => {
-          const href = $(el).attr('href');
-          if (href) {
-            try {
-              let absUrl = new URL(href, url).href;
-              absUrl = decodeRedirectUrl(absUrl);
-              // Avoid self-references or hash-only links
-              if (absUrl !== url && !absUrl.includes('#') && !isWrongOrGarbageLink(absUrl, url)) {
-                foundLinks.add(absUrl);
-              }
-            } catch (e) {
-              // Ignore invalid url structures
-            }
-          }
-        });
-        result.links = Array.from(foundLinks).slice(0, 500);
-      }
+  const scrapeStaticPage = async (targetUrl: string) => {
+    const response = await axios.get(targetUrl, {
+      timeout: 15000,
+      headers: getScraperHeaders(),
+      maxRedirects: 5,
+      responseType: 'arraybuffer'
+    });
+    const rawData = response.data?.length > 5 * 1024 * 1024 ? response.data.slice(0, 100 * 1024) : response.data;
+    return {
+      html: rawData.toString('utf8'),
+      statusCode: response.status,
+      finalUrl: response.request?.res?.responseUrl || targetUrl
+    };
+  };
 
-      // Extract images matching absolute urls
-      const foundImages: Set<string> = new Set();
-      $('img[src]').each((_, el) => {
-        const srcAttr = $(el).attr('src');
-        if (srcAttr) {
-          try {
-            const absSrc = new URL(srcAttr, url).href;
-            foundImages.add(absSrc);
-          } catch {}
-        }
-      });
-      result.images = Array.from(foundImages).slice(0, 50);
+  const buildLightpandaCloudCdpUrl = (cloud?: LightpandaCloudConfig) => {
+    const region = (cloud?.region && LIGHTPANDA_CLOUD_HOSTS[cloud.region]) ? cloud.region : DEFAULT_LIGHTPANDA_CLOUD_REGION;
+    const token = String(cloud?.token || process.env.LIGHTPANDA_CLOUD_TOKEN || '').trim();
+    if (!token) {
+      throw new Error('Lightpanda Cloud is enabled, but no cloud token was provided.');
+    }
 
-      // Extract tables as dual strings
-      if (extractTables) {
-        const resolvedTables: Array<string[][]> = [];
-        $('table').each((_, tableEl) => {
-          const currentTable: string[][] = [];
-          $(tableEl).find('tr').each((_, rowEl) => {
-            const rowData: string[] = [];
-            $(rowEl).find('td, th').each((_, cellEl) => {
-              rowData.push($(cellEl).text().trim().replace(/\s+/g, ' '));
-            });
-            if (rowData.length > 0) {
-              currentTable.push(rowData);
-            }
-          });
-          if (currentTable.length > 0) {
-            resolvedTables.push(currentTable);
-          }
-        });
-        result.tables = resolvedTables.slice(0, 5); // limit to first 5 tables to avoid size blowouts
-      }
+    const browser = String(cloud?.browser || DEFAULT_LIGHTPANDA_CLOUD_BROWSER || 'lightpanda').trim() || 'lightpanda';
+    const proxy = String(cloud?.proxy || DEFAULT_LIGHTPANDA_CLOUD_PROXY || 'fast_dc').trim() || 'fast_dc';
+    const endpoint = new URL(`wss://${LIGHTPANDA_CLOUD_HOSTS[region]}/ws`);
+    endpoint.searchParams.set('token', token);
+    endpoint.searchParams.set('browser', browser);
+    endpoint.searchParams.set('proxy', proxy);
+    return endpoint.toString();
+  };
 
-      // Convert body elements to standard markdown representations
+  const connectToLightpandaCloud = async (cloud?: LightpandaCloudConfig) => {
+    let playwrightMod: any;
+    try {
+      playwrightMod = await import('playwright-core');
+    } catch {
+      throw new Error('Dynamic scraping requested, but the "playwright-core" package is not installed.');
+    }
+
+    let browser: any = null;
+    let cleanup = async () => {};
+    const cdpUrl = buildLightpandaCloudCdpUrl(cloud);
+    browser = await playwrightMod.chromium.connectOverCDP({ endpointURL: cdpUrl });
+    cleanup = async () => {
       try {
-        const turndownOptions = {
-          headingStyle: 'atx' as const,
-          codeBlockStyle: 'fenced' as const,
-          bulletListMarker: '-' as const
+        if (browser) await browser.close();
+      } catch {}
+    };
+    return { browser, cdpUrl, engineLabel: 'lightpanda-cloud', cleanup };
+  };
+
+  const withLightpandaSession = async <T>(cloud: LightpandaCloudConfig | undefined, fn: (helpers: { browser: any; cdpUrl: string; engineLabel: string }) => Promise<T>) => {
+    const session = await connectToLightpandaCloud(cloud);
+    let browser: any = null;
+    try {
+      browser = session.browser;
+      return await fn({ browser, cdpUrl: session.cdpUrl, engineLabel: session.engineLabel });
+    } finally {
+      await session.cleanup();
+    }
+  };
+
+  const scrapeDynamicPage = async (
+    targetUrl: string,
+    _engine: BrowserEngine,
+    waitForSelector?: string,
+    lightpandaCloudConfig?: LightpandaCloudConfig
+  ): Promise<{ html: string; statusCode: number; finalUrl: string; cdpUrl: string; engineLabel: string }> =>
+    withLightpandaSession(lightpandaCloudConfig, async ({ browser, cdpUrl, engineLabel }) => {
+      try {
+        const context = await browser.newContext({
+          userAgent: DEFAULT_SCRAPER_UA
+        });
+        const page = await context.newPage();
+        const response = await page.goto(targetUrl, { waitUntil: 'networkidle' });
+        if (waitForSelector) await page.waitForSelector(waitForSelector, { timeout: 10000 });
+        const html = await page.content();
+        const finalUrl = page.url();
+        await page.close();
+        await context.close();
+        return {
+          html,
+          statusCode: response?.status() || 200,
+          finalUrl,
+          cdpUrl,
+          engineLabel,
         };
-        const turndownService = new TurndownService(turndownOptions);
-        
-        // Add rule to exclude unwanted output
-        turndownService.keep(['table']); // let markdown keep tables intact or render them beautifully
+      } catch (error: any) {
+        throw new Error(`Lightpanda CDP session failed at ${cdpUrl}: ${error?.message || 'Unknown error'}`);
+      }
+    });
 
-        // Convert the clean HTML body to markdown
-        const bodyContent = $('body').html();
-        if (bodyContent) {
-          let convertedMarkdown = turndownService.turndown(bodyContent);
-          // Limit or truncate rawText to 50,000 characters
-          if (convertedMarkdown.length > 50000) {
-            convertedMarkdown = convertedMarkdown.slice(0, 50000) + '\n\n... [Content Truncated due to size limit of 50K chars] ...';
+  const scrapeWithCrawler = async (
+    targetUrl: string,
+    useJavaScript: boolean,
+    maxPages: number,
+    selectors: Record<string, string> | undefined,
+    lightpandaCloudConfig?: LightpandaCloudConfig
+  ): Promise<{
+    url: string;
+    requestedUrl: string;
+    title: string;
+    statusCode: number;
+    scrapedAt: string;
+    data: { pages: Array<{ pageNumber: number; url: string; title: string; data: any }>; totalPages: number };
+    links: any[];
+    images: any[];
+    tables: any[];
+    rawText: string;
+    strategy: 'crawl';
+    engine: string;
+    robotsWarning?: string;
+  }> => {
+    let crawleeMod: any;
+    try {
+      crawleeMod = await import('crawlee');
+    } catch {
+      throw new Error('Crawl scraping requested, but the "crawlee" package is not installed.');
+    }
+
+    const pages: any[] = [];
+    const requestLimit = Math.min(Math.max(maxPages || 3, 1), 10);
+
+    if (useJavaScript) {
+      const { PlaywrightCrawler } = crawleeMod;
+      const crawler = new PlaywrightCrawler({
+        launchContext: {
+          launcher: async () => {
+            const session = await connectToLightpandaCloud(lightpandaCloudConfig);
+            const browser = session.browser;
+            browser.on?.('disconnected', () => {
+              void session.cleanup();
+            });
+            return browser;
           }
-          result.rawText = convertedMarkdown;
+        },
+        maxRequestsPerCrawl: requestLimit,
+        requestHandler: async ({ request, page, enqueueLinks }: any) => {
+          pages.push({
+            url: page.url(),
+            title: await page.title(),
+            html: await page.content()
+          });
+          if (pages.length < requestLimit) {
+            await enqueueLinks({ strategy: 'same-domain' });
+          }
         }
-      } catch (errMarkdown) {
-        console.error('Turndown translation failure:', errMarkdown);
-        result.rawText = $('body').text().slice(0, 50000);
+      });
+      await crawler.run([targetUrl]);
+    } else {
+      const { CheerioCrawler } = crawleeMod;
+      const crawler = new CheerioCrawler({
+        maxRequestsPerCrawl: requestLimit,
+        requestHandler: async ({ request, $, enqueueLinks }: any) => {
+          pages.push({
+            url: request.loadedUrl || request.url,
+            title: $('title').text().trim() || $('h1').first().text().trim() || request.url,
+            html: $.html()
+          });
+          if (pages.length < requestLimit) {
+            await enqueueLinks({ strategy: 'same-domain' });
+          }
+        }
+      });
+      await crawler.run([targetUrl]);
+    }
+
+    const combinedData = pages.map((page, index) => {
+      const pageResult = buildScrapeResultFromHtml({
+        html: page.html,
+        effectiveUrl: page.url,
+        requestedUrl: targetUrl,
+        statusCode: 200,
+        selectors,
+        extractLinks: true,
+        extractImages: true,
+        extractTables: true,
+        outputFormat: 'json',
+        strategy: 'crawl',
+        engine: useJavaScript ? 'lightpanda-cloud' : 'cheerio'
+      });
+      return {
+        pageNumber: index + 1,
+        url: page.url,
+        title: page.title,
+        data: pageResult.data
+      };
+    });
+
+    return {
+      url: targetUrl,
+      requestedUrl: targetUrl,
+      title: combinedData[0]?.title || targetUrl,
+      statusCode: 200,
+      scrapedAt: new Date().toISOString(),
+      data: {
+        pages: combinedData,
+        totalPages: combinedData.length
+      },
+      links: [],
+      images: [],
+      tables: [],
+      rawText: combinedData.map((page: any) => `# ${page.title}\n${JSON.stringify(page.data, null, 2)}`).join('\n\n'),
+      strategy: 'crawl',
+      engine: useJavaScript ? 'lightpanda-cloud' : 'cheerio'
+    };
+  };
+
+  app.post("/api/scrape", async (req, res) => {
+    const {
+      url,
+      selectors,
+      extractLinks = true,
+      extractImages = true,
+      extractTables = false,
+      outputFormat = 'markdown',
+      strategy,
+      mode,
+      browserEngine,
+      waitForSelector,
+      useJavaScript,
+      maxPages,
+      maxDepth,
+      lightpanda
+    } = req.body;
+
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+
+    try {
+      const parsedUrl = new URL(url);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) return res.status(400).json({ error: 'Only HTTP/HTTPS URLs are supported.' });
+      if (isPrivateHostname(parsedUrl.hostname)) return res.status(403).json({ error: 'Security Exception: Requests to local or private IP spaces are forbidden.' });
+      if (selectors && typeof selectors === 'object' && containsSuspiciousSelector(selectors)) return res.status(400).json({ error: 'Security Exception: Suspicious selector payload detected.' });
+
+      const scrapeTargetUrl = await resolveScrapeTargetUrl(url);
+      const robotsCheck = await checkRobotsTxt(scrapeTargetUrl);
+      const selectedStrategy: ScrapeStrategy =
+        strategy || mode || (maxPages || maxDepth ? 'crawl' : (useJavaScript ? 'dynamic' : 'static'));
+      const selectedEngine: BrowserEngine = 'lightpanda';
+      const lightpandaCloudConfig = lightpanda?.cloud;
+
+      if (selectedStrategy === 'crawl') {
+        const crawlResult = await scrapeWithCrawler(
+          scrapeTargetUrl,
+          Boolean(useJavaScript),
+          Number(maxPages || maxDepth || 3),
+          selectors,
+          lightpandaCloudConfig
+        );
+        if (robotsCheck.warning) crawlResult.robotsWarning = robotsCheck.warning;
+        return res.json(crawlResult);
       }
 
-      // If the outputFormat is specified as markdown or HTML, set it
-      if (outputFormat === 'markdown') {
-        result.formattedOutput = result.rawText;
-      } else if (outputFormat === 'html') {
-        result.formattedOutput = $.html();
-      } else {
-        result.formattedOutput = JSON.stringify(result.data, null, 2);
-      }
+      const source: { html: string; statusCode: number; finalUrl: string; engineLabel?: string } =
+        selectedStrategy === 'dynamic'
+          ? await scrapeDynamicPage(scrapeTargetUrl, selectedEngine, waitForSelector, lightpandaCloudConfig)
+          : await scrapeStaticPage(scrapeTargetUrl);
 
-      res.json(result);
+      const result = buildScrapeResultFromHtml({
+        html: source.html,
+        effectiveUrl: source.finalUrl || scrapeTargetUrl,
+        requestedUrl: url,
+        statusCode: source.statusCode || 200,
+        selectors,
+        extractLinks,
+        extractImages,
+        extractTables,
+        outputFormat,
+        robotsWarning: robotsCheck.warning,
+        strategy: selectedStrategy,
+        engine: selectedStrategy === 'static' ? 'axios+cheerio' : (source.engineLabel || selectedEngine)
+      });
 
+      return res.json(result);
     } catch (e: any) {
       console.error('Operational error on server scrap request:', e);
-      res.status(500).json({ error: `Server Scraping Failure: ${e.message}` });
+      const msg = String(e?.message || 'Unknown scraping failure');
+      if (msg.includes('not installed')) return res.status(501).json({ error: msg });
+      if (e?.code === 'ECONNABORTED' || msg.toLowerCase().includes('timeout')) return res.status(504).json({ error: 'Timeout while scraping the target webpage.' });
+      if (e?.response?.status) return res.status(e.response.status).json({ error: e.response?.data?.error || msg });
+      return res.status(500).json({ error: `Server Scraping Failure: ${msg}` });
     }
   });
 

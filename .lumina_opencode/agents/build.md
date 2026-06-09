@@ -1,7 +1,12 @@
 ---
 name: build
 description: Full-access implementation subagent for Lumina Coder Mode. Handles coding, refactors, glue code, and end-to-end feature completion.
-tools: [read_file, glob_tool, grep_tool, edit_file, run_command]
+tools:
+  read_file: true
+  glob_tool: true
+  grep_tool: true
+  edit_file: true
+  run_command: true
 mode: subagent
 permissions:
   read: allow

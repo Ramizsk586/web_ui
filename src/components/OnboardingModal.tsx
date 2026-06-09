@@ -283,19 +283,7 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
               <p className="text-sm text-zinc-400 max-w-md">{meta.subtitle}</p>
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-[10px] uppercase tracking-[0.25em] text-zinc-500 mb-2">
-              Step {currentStepIndex + 1} of {steps.length}
-            </div>
-            <div className="flex gap-2">
-              {steps.map((step, index) => (
-                <div
-                  key={step}
-                  className={`h-2 w-10 rounded-full transition-all ${index <= currentStepIndex ? 'bg-white' : 'bg-zinc-800'}`}
-                />
-              ))}
-            </div>
-          </div>
+
         </div>
 
         <div className="space-y-5 text-left">
@@ -493,6 +481,16 @@ export function OnboardingModal({ onComplete }: OnboardingModalProps) {
           </button>
         </div>
       </motion.div>
+
+      {/* Progress indicators outside the modal */}
+      <div className="mt-8 flex gap-2">
+        {steps.map((step, index) => (
+          <div
+            key={step}
+            className={`h-2 w-16 rounded-full transition-all ${index <= currentStepIndex ? 'bg-white' : 'bg-zinc-800'}`}
+          />
+        ))}
+      </div>
     </div>
   );
 }

@@ -18,6 +18,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@pi-agent/*": [
+        "./src - pi/*"
       ]
     },
     "allowImportingTsExtensions": true,

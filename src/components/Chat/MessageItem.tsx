@@ -21,7 +21,10 @@ import {
   RotateCcw,
   Volume2,
   VolumeX,
-  Clock3
+  Clock3,
+  ListChecks,
+  Sparkles,
+  Globe
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -32,7 +35,6 @@ import { NodeGraph, InlineToolCallCard } from '../NodeGraph/NodeGraph';
 import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
-import { RealtimePipelineAnimation } from '../ui/Animations';
 
 
 interface SpeechStateListener {
@@ -171,6 +173,7 @@ interface MessageItemProps {
   userProfile: any; 
   persona: any; 
   isCoderMode?: boolean;
+  isGeneratingTodos?: boolean;
   isSourcesPanelOpen: boolean; 
   setIsSourcesPanelOpen: (v: boolean) => void;
   setSourcesPanelMessageId: (v: string | null) => void;
@@ -193,6 +196,7 @@ function MessageItemComponent({
   userProfile, 
   persona, 
   isCoderMode = false,
+  isGeneratingTodos = false,
   isSourcesPanelOpen, 
   setIsSourcesPanelOpen, 
   setSourcesPanelMessageId,
@@ -213,6 +217,10 @@ function MessageItemComponent({
   const [textAnswer, setTextAnswer] = useState("");
   const [isPlayingSpeech, setIsPlayingSpeech] = useState(false);
   const [feedback, setFeedback] = useState<'like' | 'dislike' | null>(null);
+  const [isThinkingPanelCollapsed, setIsThinkingPanelCollapsed] = useState(false);
+  const [thinkingElapsedMs, setThinkingElapsedMs] = useState(0);
+  const [isScrapePanelCollapsed, setIsScrapePanelCollapsed] = useState(false);
+  const [scrapeElapsedMs, setScrapeElapsedMs] = useState(0);
 
   useEffect(() => {
     setIsPlayingSpeech(globalSpeechController.getActiveId() === message.id);
@@ -239,9 +247,62 @@ function MessageItemComponent({
     }
   }, [message.isStreaming, message.id]);
 
+  useEffect(() => {
+    if (message.isThinking) {
+      setIsThinkingPanelCollapsed(false);
+    }
+  }, [message.isThinking, message.id]);
+
+  useEffect(() => {
+    if (!message.isThinking) return;
+
+    const getStartedAt = () => {
+      const raw = message.startedAt ?? message.timestamp;
+      if (!raw) return Date.now();
+      return raw instanceof Date ? raw.getTime() : new Date(raw).getTime();
+    };
+
+    const updateElapsed = () => {
+      setThinkingElapsedMs(Math.max(0, Date.now() - getStartedAt()));
+    };
+
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 100);
+    return () => window.clearInterval(interval);
+  }, [message.isThinking, message.startedAt, message.timestamp]);
+
+  // Filter to only show websearch and coder tools
+  const allowedToolCategories = ['web', 'read', 'write', 'execute'];
+  const isCoderTool = (toolName: string) => {
+    const name = toolName.toLowerCase();
+    return name.includes('coder') || name.includes('edit') || name.includes('read') || 
+           name.includes('write') || name.includes('file') || name.includes('terminal') ||
+           name.includes('bash') || name.includes('memory') || name.includes('list_dir') ||
+           name.includes('str_replace') || name.includes('insert_content') || name.includes('create_file') ||
+           name.includes('read_multiple') || name.includes('browser') || name.includes('puppeteer');
+  };
+
+  const isWebSearchTool = (toolName: string) => {
+    const name = toolName.toLowerCase();
+    return name.includes('web') || name.includes('search') || name.includes('wiki') || 
+           name.includes('scrape') || name.includes('http') || name.includes('url');
+  };
+
+  const shouldShowTool = (toolName: string) => {
+    return isCoderTool(toolName) || isWebSearchTool(toolName);
+  };
+
+  const isScrapeTool = (toolName: string) => {
+    const name = toolName.toLowerCase();
+    return name === 'web_scrape' || name === 'fetch_url' || name.includes('scrape');
+  };
+
   const toolCallsForSummary = useMemo(() => {
     if (!message.toolCalls) return [];
-    return message.toolCalls.filter(node => node.id !== 'thinking-node');
+    return message.toolCalls
+      .filter(node => node.id !== 'thinking-node')
+      .filter(node => !isScrapeTool(node.toolName || ''))
+      .filter(node => shouldShowTool(node.toolName || ''));
   }, [message.toolCalls]);
 
   const shouldShowWorkedSummary = useMemo(() => {
@@ -260,53 +321,153 @@ function MessageItemComponent({
     return `Worked for ${seconds}s`;
   }, [message.startedAt, message.timestamp]);
 
-  const isTodoPlanningState = useMemo(() => {
-    if (!message.isStreaming || message.content) return false;
-    const thinkingText = String(message.thinking || '').toLowerCase();
-    const toolNames = (message.toolCalls || []).map(node => String(node.toolName || '').toLowerCase());
-    return thinkingText.includes('todo') || toolNames.includes('manage_todos');
-  }, [message.isStreaming, message.content, message.thinking, message.toolCalls]);
+  // Disabled todo planning state display
+  const isTodoPlanningState = useMemo(() => false, []);
 
+  // Filter non-inline tool calls to only show allowed tools
   const nonInlineToolCalls = useMemo(() => {
     if (!message.toolCalls) return [];
-    return message.toolCalls.filter(node => {
-      if (node.id === 'thinking-node') return false;
-      return !message.content?.includes(`[[tool_call:${node.id}]]`);
-    });
+    return message.toolCalls
+      .filter(node => node.id !== 'thinking-node')
+      .filter(node => !message.content?.includes(`[[tool_call:${node.id}]]`))
+      .filter(node => !isScrapeTool(node.toolName || ''))
+      .filter(node => shouldShowTool(node.toolName || ''));
   }, [message.toolCalls, message.content]);
 
-  const streamingStatusLabel = useMemo(() => {
-    const activeTool = message.toolCalls?.find(node => node.status === 'active');
-    if (typeof message.thinking === 'string' && message.thinking.trim()) {
-      return message.thinking.trim();
-    }
-    if (activeTool?.label) {
-      return activeTool.label;
-    }
-    return 'Preparing response...';
-  }, [message.thinking, message.toolCalls]);
+  const scrapeNodes = useMemo(() => {
+    if (!message.toolCalls) return [];
+    return message.toolCalls
+      .filter(node => node.id !== 'thinking-node')
+      .filter(node => isScrapeTool(node.toolName || ''));
+  }, [message.toolCalls]);
 
-  const fallbackStreamingNodes = useMemo(() => {
-    if (!message.isStreaming || message.content || nonInlineToolCalls.length > 0 || isTodoPlanningState) {
-      return [];
+  const activeScrapeNode = useMemo(() => {
+    if (scrapeNodes.length === 0) return null;
+    return scrapeNodes.find(node => node.status === 'active') || scrapeNodes[scrapeNodes.length - 1];
+  }, [scrapeNodes]);
+
+  const scrapeProgressState = useMemo(() => {
+    if (!activeScrapeNode) return null;
+
+    const scrapeResult = scrapingResults.get(activeScrapeNode.id);
+    const startedAtValue = message.startedAt ?? message.timestamp;
+    const startedAtMs = startedAtValue
+      ? (startedAtValue instanceof Date ? startedAtValue.getTime() : new Date(startedAtValue).getTime())
+      : Date.now();
+    const elapsedMs = activeScrapeNode.status === 'active'
+      ? scrapeElapsedMs
+      : Math.max(0, Date.now() - startedAtMs);
+    const urlMatch = activeScrapeNode.label.match(/\(([^)]+)\)/);
+    const resolvedUrl = scrapeResult?.url || activeScrapeNode.filePath || urlMatch?.[1] || '';
+    const requestedUrl = scrapeResult?.requestedUrl || '';
+    const rawUrl = resolvedUrl || requestedUrl;
+    const title = scrapeResult?.title || '';
+    const cleanUrl = rawUrl || title;
+
+    let domain = 'Target page';
+    try {
+      if (cleanUrl) domain = new URL(cleanUrl).hostname;
+    } catch {}
+
+    const baseSteps = [
+      'Connecting to source',
+      'Loading page shell',
+      'Collecting text blocks',
+      'Collecting links and media',
+      'Structuring scrape payload',
+      'Preparing answer context'
+    ];
+
+    let activeStepIndex = 0;
+    let steps = baseSteps.map((label, idx) => ({
+      label,
+      status: idx === 0 ? 'active' : 'pending' as 'pending' | 'active' | 'complete' | 'failed',
+      progress: idx === 0 ? 12 : 0
+    }));
+
+    if (activeScrapeNode.status === 'complete' || scrapeResult) {
+      activeStepIndex = baseSteps.length - 1;
+      steps = baseSteps.map((label) => ({ label, status: 'complete' as const, progress: 100 }));
+    } else if (activeScrapeNode.status === 'failed') {
+      activeStepIndex = Math.min(baseSteps.length - 1, Math.floor(elapsedMs / 2200));
+      steps = baseSteps.map((label, idx) => ({
+        label,
+        status: idx < activeStepIndex ? 'complete' as const : idx === activeStepIndex ? 'failed' as const : 'pending' as const,
+        progress: idx < activeStepIndex ? 100 : idx === activeStepIndex ? 100 : 0
+      }));
+    } else {
+      let currentStepProgress = 12;
+      if (elapsedMs < 1800) {
+        activeStepIndex = 0;
+        currentStepProgress = Math.min(96, 12 + Math.floor(elapsedMs / 35));
+      } else if (elapsedMs < 4200) {
+        activeStepIndex = 1;
+        currentStepProgress = Math.min(96, 10 + Math.floor((elapsedMs - 1800) / 40));
+      } else if (elapsedMs < 7000) {
+        activeStepIndex = 2;
+        currentStepProgress = Math.min(96, 8 + Math.floor((elapsedMs - 4200) / 38));
+      } else if (elapsedMs < 9400) {
+        activeStepIndex = 3;
+        currentStepProgress = Math.min(96, 8 + Math.floor((elapsedMs - 7000) / 42));
+      } else if (elapsedMs < 11800) {
+        activeStepIndex = 4;
+        currentStepProgress = Math.min(96, 10 + Math.floor((elapsedMs - 9400) / 45));
+      } else {
+        activeStepIndex = 5;
+        currentStepProgress = Math.min(96, 12 + Math.floor((elapsedMs - 11800) / 48));
+      }
+
+      steps = baseSteps.map((label, idx) => ({
+        label,
+        status: idx < activeStepIndex ? 'complete' as const : idx === activeStepIndex ? 'active' as const : 'pending' as const
+        ,
+        progress: idx < activeStepIndex ? 100 : idx === activeStepIndex ? currentStepProgress : 0
+      }));
     }
 
-    return [{
-      id: `${message.id}-streaming-node`,
-      type: 'ai',
-      label: streamingStatusLabel,
-      status: 'active',
-      icon: 'sparkles',
-      resultSummary: 'Live response pipeline'
-    }];
-  }, [
-    message.id,
-    message.isStreaming,
-    message.content,
-    nonInlineToolCalls,
-    isTodoPlanningState,
-    streamingStatusLabel
-  ]);
+    const previewImages = (scrapeResult?.images || []).slice(0, 4);
+    const previewText = String(scrapeResult?.rawText || '').replace(/\s+/g, ' ').trim();
+    const previewLines = previewText
+      ? previewText.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 3)
+      : [];
+
+    return {
+      node: activeScrapeNode,
+      scrapeResult,
+      domain,
+      title: title || domain,
+      resolvedUrl,
+      requestedUrl,
+      steps,
+      previewImages,
+      previewLines,
+      linksFound: scrapeResult?.links?.length || 0
+    };
+  }, [activeScrapeNode, scrapingResults, message.startedAt, message.timestamp, scrapeElapsedMs]);
+
+  useEffect(() => {
+    if (activeScrapeNode?.status === 'active') {
+      setIsScrapePanelCollapsed(false);
+    }
+  }, [activeScrapeNode?.status, activeScrapeNode?.id]);
+
+  useEffect(() => {
+    if (activeScrapeNode?.status !== 'active') return;
+
+    const getStartedAt = () => {
+      const raw = message.startedAt ?? message.timestamp;
+      if (!raw) return Date.now();
+      return raw instanceof Date ? raw.getTime() : new Date(raw).getTime();
+    };
+
+    const updateElapsed = () => {
+      setScrapeElapsedMs(Math.max(0, Date.now() - getStartedAt()));
+    };
+
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 140);
+    return () => window.clearInterval(interval);
+  }, [activeScrapeNode?.status, message.startedAt, message.timestamp]);
 
   const renderInlineContent = (content: string, isStreaming: boolean) => {
     if (!content) return null;
@@ -330,6 +491,9 @@ function MessageItemComponent({
                   <span className="text-xs text-zinc-550 font-mono">Initializing tool execution...</span>
                 </div>
               );
+            }
+            if (isScrapeTool(node.toolName || '')) {
+              return null;
             }
             
             return (
@@ -703,15 +867,13 @@ function MessageItemComponent({
       ) : (
         <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-4xl xl:max-w-[1100px]">
           {((nonInlineToolCalls && nonInlineToolCalls.length > 0) ||
-            fallbackStreamingNodes.length > 0 ||
-            (message.thinkContent !== undefined && message.thinkContent.length > 0) ||
             message.searchQuery ||
             message.isSearching) && (
             <NodeGraph
-              nodes={fallbackStreamingNodes.length > 0 ? fallbackStreamingNodes : nonInlineToolCalls}
+              nodes={nonInlineToolCalls}
               isStreaming={message.isStreaming}
-              thinkContent={message.thinkContent}
-              isStreamingThinking={message.isThinking}
+              thinkContent={undefined}
+              isStreamingThinking={false}
               isSearching={message.isSearching}
               searchQuery={message.searchQuery}
               sources={message.sources || []}
@@ -719,6 +881,32 @@ function MessageItemComponent({
               wikiResults={wikiResults}
               onSendMessage={onSendMessage}
             />
+          )}
+          
+          {/* Todo Generation Status - shows like tool calls */}
+          {(message as any).isGeneratingTodos && (
+            <div className="w-full my-3 pr-1 text-left">
+              <div className="border border-zinc-200/10 dark:border-zinc-800/40 bg-zinc-950/40 dark:bg-[#141414]/90 rounded-xl overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <div className="w-8 h-8 rounded-full border border-blue-500/40 bg-blue-500/10 flex items-center justify-center shrink-0">
+                    <Sparkles size={14} className="text-blue-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-medium text-zinc-200 truncate">
+                        Preparing task list
+                      </span>
+                      <span className="shrink-0 rounded-full border border-zinc-700 bg-zinc-900/80 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
+                        IN PROGRESS
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[12px] text-zinc-500">
+                      Building a task breakdown for your request
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
           {shouldShowWorkedSummary && (
             <div className="border-t border-white/6 pt-1">
@@ -765,13 +953,226 @@ function MessageItemComponent({
             <SearchResultsUI 
               query={message.searchQuery} 
               sources={message.sources || []} 
+              isSearching={message.isSearching}
             />
+          )}
+          {scrapeProgressState && (
+            <div className="px-1 w-full max-w-full overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setIsScrapePanelCollapsed(!isScrapePanelCollapsed)}
+                className="flex items-center gap-2 text-[12px] text-zinc-300 font-medium mb-3 w-fit max-w-full cursor-pointer"
+              >
+                <span>
+                  {scrapeProgressState.node.status === 'complete'
+                    ? 'Web scrape'
+                    : scrapeProgressState.node.status === 'failed'
+                      ? 'Web scrape failed'
+                      : `Web scraping ${(scrapeElapsedMs / 1000).toFixed(1)}s`}
+                </span>
+                <ChevronDown
+                  size={12}
+                  className={`transition-transform duration-200 ${isScrapePanelCollapsed ? '-rotate-90' : 'rotate-0'}`}
+                />
+              </button>
+              <AnimatePresence initial={false}>
+                {!isScrapePanelCollapsed && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: 'easeInOut' }}
+                    className="overflow-hidden w-full max-w-full"
+                  >
+                    <div className="border-l border-zinc-600/70 pl-4 ml-1 max-w-full">
+                      <div className="flex items-center gap-2 text-[13px] text-zinc-200 break-words">
+                        <Globe size={13} className="text-sky-400 shrink-0" />
+                        <span>{scrapeProgressState.title}</span>
+                      </div>
+                      <div className="mt-1 text-[12px] text-zinc-500 break-words">
+                        {scrapeProgressState.domain}
+                      </div>
+                      {scrapeProgressState.requestedUrl && scrapeProgressState.resolvedUrl && scrapeProgressState.requestedUrl !== scrapeProgressState.resolvedUrl && (
+                        <div className="mt-2 text-[11px] text-zinc-500 break-words">
+                          Resolved from {scrapeProgressState.requestedUrl} to {scrapeProgressState.resolvedUrl}
+                        </div>
+                      )}
+                      <div className="mt-4 space-y-3">
+                        {scrapeProgressState.steps.map((step, idx) => (
+                          <div key={`${step.label}-${idx}`} className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-3 text-[12px]">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span
+                                  className={`w-2 h-2 rounded-full shrink-0 ${
+                                    step.status === 'complete'
+                                      ? 'bg-emerald-400'
+                                      : step.status === 'failed'
+                                        ? 'bg-rose-400'
+                                        : step.status === 'active'
+                                          ? 'bg-sky-400 animate-pulse'
+                                          : 'bg-zinc-600'
+                                  }`}
+                                />
+                                <span
+                                  className={`truncate ${
+                                    step.status === 'complete'
+                                      ? 'text-zinc-300'
+                                      : step.status === 'failed'
+                                        ? 'text-rose-400'
+                                        : step.status === 'active'
+                                          ? 'text-sky-300'
+                                          : 'text-zinc-500'
+                                  }`}
+                                >
+                                  {step.label}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-zinc-500 shrink-0">{step.progress}%</span>
+                            </div>
+                            <div className="h-1.5 rounded-full bg-zinc-800/90 overflow-hidden">
+                              <motion.div
+                                initial={false}
+                                animate={{ width: `${step.progress}%` }}
+                                transition={{ duration: 0.45, ease: 'easeOut' }}
+                                className={`h-full rounded-full ${
+                                  step.status === 'complete'
+                                    ? 'bg-emerald-400'
+                                    : step.status === 'failed'
+                                      ? 'bg-rose-400'
+                                      : step.status === 'active'
+                                        ? 'bg-sky-400'
+                                        : 'bg-zinc-700'
+                                }`}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {(scrapeProgressState.node.status === 'complete' || scrapeProgressState.scrapeResult) && (
+                        <div className="mt-5 space-y-3">
+                          <div className="text-[12px] text-zinc-300 font-medium">Collected data</div>
+                          {scrapeProgressState.previewImages.length > 0 && (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {scrapeProgressState.previewImages.map((imgUrl, idx) => (
+                                <a
+                                  key={`${imgUrl}-${idx}`}
+                                  href={imgUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900/70"
+                                >
+                                  <img
+                                    src={imgUrl}
+                                    alt={`Scraped asset ${idx + 1}`}
+                                    className="w-full h-20 object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                          {scrapeProgressState.previewLines.length > 0 && (
+                            <div className="space-y-2">
+                              {scrapeProgressState.previewLines.map((line, idx) => (
+                                <div key={`${line.slice(0, 40)}-${idx}`} className="text-[12px] text-zinc-400 leading-6 break-words">
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="text-[11px] text-zinc-500">
+                            {scrapeProgressState.linksFound} links discovered
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {scrapeProgressState.node.status !== 'complete' && scrapeProgressState.node.status !== 'failed' && (
+                      <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-400">
+                        <span className="relative flex h-3 w-3 shrink-0">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-sky-400/40 animate-ping" />
+                          <span className="relative inline-flex h-3 w-3 rounded-full bg-sky-400" />
+                        </span>
+                        <span>Collecting realtime page data...</span>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+          {message.thinking && !message.thinkContent && !message.isThinking && (
+            <div className="px-1 w-full max-w-full overflow-hidden">
+              <div className="flex items-center gap-2 text-[12px] text-zinc-300 font-medium mb-3 w-fit max-w-full">
+                <span>Processing request</span>
+              </div>
+              <div className="border-l border-zinc-600/70 pl-4 ml-1 max-w-full">
+                <div className="text-[13px] leading-7 text-zinc-400 whitespace-pre-wrap break-words">
+                  {message.thinking}
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-400">
+                <span className="relative flex h-3 w-3 shrink-0">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400/40 animate-ping" />
+                  <span className="relative inline-flex h-3 w-3 rounded-full bg-indigo-400" />
+                </span>
+                <span>Working...</span>
+              </div>
+            </div>
+          )}
+          {(message.thinkContent || message.isThinking) && (
+            <div className="px-1 w-full max-w-full overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setIsThinkingPanelCollapsed(!isThinkingPanelCollapsed)}
+                className="group flex items-center gap-2.5 text-[13px] text-zinc-200 font-medium cursor-pointer mb-3 w-fit max-w-full transition-colors hover:text-white"
+              >
+                <span className="flex items-center justify-center w-5 h-5 rounded-full border border-blue-500/30 bg-blue-500/8 text-blue-400 shrink-0">
+                  <Sparkles size={11} />
+                </span>
+                <span>
+                  {message.isThinking
+                    ? `Thought for ${Math.max(1, Math.round(thinkingElapsedMs / 1000))} seconds`
+                    : 'Thought for a few seconds'}
+                </span>
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform duration-200 text-zinc-500 group-hover:text-zinc-300 ${isThinkingPanelCollapsed ? '-rotate-90' : 'rotate-0'}`}
+                />
+              </button>
+              <AnimatePresence initial={false}>
+                {!isThinkingPanelCollapsed && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: 'easeInOut' }}
+                    className="overflow-hidden w-full max-w-full"
+                  >
+                    <div className="w-full max-w-full">
+                      <div className="border-l border-zinc-700/80 pl-4 ml-1 max-w-full">
+                        <div className="text-[13px] leading-8 text-zinc-300 whitespace-pre-wrap break-words">
+                          {message.thinkContent}
+                        </div>
+                      </div>
+                      {message.isThinking && (
+                        <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-400">
+                          <span className="relative flex h-3 w-3 shrink-0">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400/40 animate-ping" />
+                            <span className="relative inline-flex h-3 w-3 rounded-full bg-indigo-400" />
+                          </span>
+                          <span>Working...</span>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           )}
           <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined, paddingLeft: '-1px' }}>
             {message.content ? (
               renderInlineContent(message.content, message.isStreaming ?? false)
-            ) : isTodoPlanningState ? (
-              <RealtimePipelineAnimation statusLabel={streamingStatusLabel} />
             ) : null}
           </div>
 
@@ -1302,6 +1703,12 @@ function MessageItemComponent({
                   <button 
                     type="button"
                     onClick={() => {
+                      const isCurrentMessageOpen = isSourcesPanelOpen;
+                      if (isCurrentMessageOpen) {
+                        setIsSourcesPanelOpen(false);
+                        setSourcesPanelMessageId(null);
+                        return;
+                      }
                       setSourcesPanelMessageId(message.id);
                       setIsSourcesPanelOpen(true);
                     }}

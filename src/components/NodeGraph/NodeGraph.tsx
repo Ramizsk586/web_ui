@@ -6,7 +6,6 @@ import {
   Check, 
   X,
   Loader2, 
-  Brain, 
   FileText, 
   Search, 
   PenTool, 
@@ -21,8 +20,6 @@ import {
 } from 'lucide-react';
 import { ToolCallNode } from '../../types';
 import { ScrapeResult } from '../../services/scrapingService';
-import { ScrapingResultArtifact } from '../ScrapingResultArtifact';
-import { ScrapingProgressIndicator } from '../ScrapingProgressIndicator';
 import { WikiArticleArtifact } from '../WikiArticleArtifact';
 import { WikiToolCallIndicator } from '../WikiToolCallIndicator';
 import { ComposioToolCallIndicator } from '../ComposioToolCallIndicator';
@@ -357,27 +354,8 @@ const ToolLogBlock = ({
           {title}
         </span>
         
-        <div className="flex items-center gap-1.5 shrink-0">
-          {isActive ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[8px] font-bold tracking-widest font-sans">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-              RUNNING
-            </span>
-          ) : tone === 'success' ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[8px] font-bold tracking-widest font-sans">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-              SUCCESS
-            </span>
-          ) : tone === 'error' ? (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[8px] font-bold tracking-widest font-sans">
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-              ERROR
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[8px] font-bold tracking-widest font-sans">
-              DONE
-            </span>
-          )}
+        <div className="shrink-0 text-[8px] font-bold tracking-widest font-sans uppercase text-zinc-500">
+          {tone === 'success' ? 'Success' : tone === 'error' ? 'Error' : 'Output'}
         </div>
       </div>
       
@@ -407,16 +385,6 @@ const ToolLogBlock = ({
             </motion.div>
           );
         })}
-        {isActive && (
-          <div className="flex items-center gap-1.5 text-zinc-500 italic text-[11px] mt-2 pt-1.5 border-t border-white/[0.02]">
-            <motion.span
-              animate={{ opacity: [1, 0, 1] }}
-              transition={{ repeat: Infinity, duration: 1.0 }}
-              className="inline-block w-1.5 h-3 bg-cyan-400 rounded-sm"
-            />
-            <span>Reading context and preparing the next step...</span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -504,6 +472,69 @@ const renderPlainToolResult = (node: ToolCallNode) => {
   );
 };
 
+const renderToolBody = (
+  node: ToolCallNode,
+  effectiveStatus: ToolCallNode['status'],
+  scrapingResults: Map<string, ScrapeResult>,
+  wikiResults: Map<string, { wikiType: string, data: any }>,
+  onSendMessage?: (msg: string) => void
+) => {
+  if (node.toolName === 'web_scrape' || node.toolName === 'fetch_url') {
+    return null;
+  }
+
+  if (node.toolName?.startsWith('wiki_')) {
+    if (effectiveStatus === 'complete') {
+      const wikiRes = wikiResults.get(node.id);
+      if (!wikiRes) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving Wikipedia knowledge assets...</div>;
+      return (
+        <div className="w-full">
+          <WikiArticleArtifact
+            data={wikiRes.data}
+            wikiType={wikiRes.wikiType as any}
+            onFetchPage={(pageId) => {
+              onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`);
+            }}
+            onSearch={(query) => {
+              onSendMessage?.(`Search Wikipedia for: ${query}`);
+            }}
+          />
+        </div>
+      );
+    }
+
+    return <WikiToolCallIndicator node={node} />;
+  }
+
+  if (node.toolName?.startsWith('composio_')) {
+    return <ComposioToolCallIndicator node={node} />;
+  }
+
+  if (node.result) {
+    return renderPlainToolResult(node);
+  }
+
+  if (node.filePath) {
+    return (
+      <div className="text-xs text-zinc-500 font-mono italic">
+        {node.filePath}
+        {node.addedCount !== undefined && <span className="text-emerald-500 ml-2">+{node.addedCount}</span>}
+        {node.removedCount !== undefined && <span className="text-red-500 ml-1">-{node.removedCount}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-xs text-zinc-500 font-mono italic">
+      {effectiveStatus === 'complete'
+        ? (node.resultSummary || node.label || 'Completed')
+        : effectiveStatus === 'failed'
+          ? (node.resultSummary || node.label || 'Failed')
+          : (node.label || node.resultSummary || 'Running...')}
+    </div>
+  );
+};
+
 
 interface NodeGraphProps {
   nodes: ToolCallNode[]; 
@@ -519,9 +550,8 @@ interface NodeGraphProps {
   hideConnectors?: boolean;
 }
 
-const getActionSummaryText = (nodes: ToolCallNode[], hasSearch: boolean, hasThoughts: boolean) => {
+const getActionSummaryText = (nodes: ToolCallNode[], hasSearch: boolean) => {
   const parts: string[] = [];
-  if (hasThoughts) parts.push("viewed thought process");
   if (hasSearch) parts.push("searched the web");
   
   const toolPartsMap: Record<string, number> = {};
@@ -584,77 +614,23 @@ export const NodeGraph = React.memo(({
   onSendMessage,
   hideConnectors = false
 }: NodeGraphProps) => {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    return !(isStreamingThinking || isSearching || nodes.some(n => n.status === 'active'));
-  });
-
-  const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
-  const [isSearchExpanded, setIsSearchExpanded] = useState(true);
+  void thinkContent;
+  void isStreamingThinking;
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [collapsedToolNodes, setCollapsedToolNodes] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    if (isStreamingThinking || isSearching || nodes.some(n => n.status === 'active')) {
-      setIsCollapsed(false);
-    }
-  }, [nodes, isStreamingThinking, isSearching]);
-
-  useEffect(() => {
-    if (isStreamingThinking) {
-      setIsThinkingExpanded(true);
-    }
-  }, [isStreamingThinking]);
-
-  useEffect(() => {
-    if (isSearching) {
-      setIsSearchExpanded(true);
-    }
-  }, [isSearching]);
-
-  const hasThoughts = thinkContent !== undefined && thinkContent.length > 0;
-  const hasTools = nodes.filter(n => n.id !== 'thinking-node').length > 0;
   const hasSearch = !!(isSearching || searchQuery || (sources && sources.length > 0));
 
   const displayNodes = useMemo(() => {
-    if (hasThoughts) {
-      return nodes.filter(n => n.id !== 'thinking-node');
-    }
-    return nodes;
-  }, [nodes, hasThoughts]);
-
-  // Auto-expand active nodes & auto-collapse completed ones.
-  useEffect(() => {
-    nodes.forEach(node => {
-      if (node.status === 'active') {
-        setCollapsedToolNodes(prev => {
-          if (prev[node.id] === false) return prev;
-          return { ...prev, [node.id]: false };
-        });
-      } else if (node.status === 'complete' || node.status === 'failed') {
-        setCollapsedToolNodes(prev => {
-          if (prev[node.id] === true) return prev;
-          return { ...prev, [node.id]: true };
-        });
-      }
-    });
+    return nodes.filter(n => n.id !== 'thinking-node');
   }, [nodes]);
+
+
 
   const pipelineItems = useMemo(() => {
     const items: PipelineItem[] = [];
 
-    // 1. Thinking Process
-    if (hasThoughts) {
-      items.push({
-        id: 'think-item',
-        type: 'think',
-        title: isStreamingThinking ? 'Synthesizing final answer...' : 'Formulated response plan',
-        icon: isStreamingThinking
-          ? <ToolActivityDots tone="bg-blue-400" />
-          : <Brain size={13} className="text-zinc-500" />,
-        status: isStreamingThinking ? 'active' : 'complete'
-      });
-    }
-
-    // 2. Web Search
+    // 1. Web Search
     if (hasSearch) {
       items.push({
         id: 'search-item',
@@ -665,7 +641,7 @@ export const NodeGraph = React.memo(({
       });
     }
 
-    // 3. Tool Calls
+    // 2. Tool Calls
     displayNodes.forEach(node => {
       items.push({
         id: node.id,
@@ -677,24 +653,12 @@ export const NodeGraph = React.memo(({
       });
     });
 
-    // 4. Completed / Done
-    const allFinished = items.every(item => item.status === 'complete' || item.status === 'failed') && !isStreaming;
-    if (allFinished && items.length > 0) {
-      items.push({
-        id: 'done-item',
-        type: 'done',
-        title: 'Done',
-        icon: <Check size={12} className="text-emerald-400 font-bold" strokeWidth={3} />,
-        status: 'complete'
-      });
-    }
-
     return items;
-  }, [hasThoughts, hasSearch, displayNodes, isStreamingThinking, isSearching, searchQuery, isStreaming]);
+  }, [hasSearch, displayNodes, isSearching, searchQuery, isStreaming]);
 
   const headerText = useMemo(() => {
-    return getActionSummaryText(nodes, hasSearch, hasThoughts);
-  }, [nodes, hasSearch, hasThoughts]);
+    return getActionSummaryText(displayNodes, hasSearch);
+  }, [displayNodes, hasSearch]);
 
   return (
     <div className="w-full my-3 pr-1 text-left select-none">
@@ -705,12 +669,8 @@ export const NodeGraph = React.memo(({
           className="w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors cursor-pointer select-none border-none bg-transparent"
         >
           <div className="flex items-center gap-2.5 min-w-0 pr-4">
-            {!isCollapsed && (isStreamingThinking || isSearching || nodes.some(n => n.status === 'active')) ? (
-              <span className="flex gap-0.5 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-              </span>
+            {isSearching || nodes.some(n => n.status === 'active') ? (
+              <div className="w-3 h-3 rounded-full bg-blue-500 shrink-0" />
             ) : (
               <Check size={13} className="text-emerald-500 shrink-0" strokeWidth={3.5} />
             )}
@@ -725,19 +685,10 @@ export const NodeGraph = React.memo(({
           </motion.div>
         </button>
 
-        <AnimatePresence initial={false}>
-          {!isCollapsed && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.22, ease: "easeInOut" }}
-              className="overflow-hidden"
-            >
+        {!isCollapsed && (
               <div className="px-4 pb-4 pt-3 border-t border-zinc-200/10 dark:border-zinc-800/40 bg-zinc-950/20 dark:bg-black/30 flex flex-col gap-0.5">
                 {pipelineItems.map((item, idx) => {
                   const isLast = idx === pipelineItems.length - 1;
-                  const isThink = item.type === 'think';
                   const isSearch = item.type === 'search';
                   const isTool = item.type === 'tool';
                   
@@ -752,8 +703,8 @@ export const NodeGraph = React.memo(({
                             'border-zinc-800 bg-[#121212]'
                           }
                         `}>
-                          {item.status === 'active' && !isThink && !isSearch ? (
-                            <Loader2 size={12} className="animate-spin text-blue-500" />
+                          {item.status === 'active' && !isSearch ? (
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
                           ) : item.type === 'done' ? (
                             <div className="w-4 h-4 rounded-full bg-emerald-500/10 flex items-center justify-center">
                               <Check size={10} className="text-emerald-500 font-bold" strokeWidth={3.5} />
@@ -773,9 +724,7 @@ export const NodeGraph = React.memo(({
                       <div className="flex-1 pb-4 pt-0.5 text-left min-w-0">
                         <div 
                           onClick={() => {
-                            if (isThink) setIsThinkingExpanded(!isThinkingExpanded);
-                            else if (isSearch) setIsSearchExpanded(!isSearchExpanded);
-                            else if (isTool && item.node) {
+                            if (isTool && item.node) {
                               const nodeId = item.node.id;
                               setCollapsedToolNodes(prev => ({
                                 ...prev,
@@ -788,15 +737,12 @@ export const NodeGraph = React.memo(({
                           `}
                         >
                           <span>{item.title}</span>
-                          {item.type !== 'done' && (
+                          {item.type !== 'done' && !isSearch && (
                             <span className="text-zinc-650 hover:text-zinc-500 p-0.5 rounded cursor-pointer border-none bg-transparent">
                               <ChevronDown 
                                 size={11} 
                                 className={`transition-transform duration-200 
-                                  ${isThink ? (isThinkingExpanded ? 'rotate-0' : '-rotate-90') :
-                                    isSearch ? (isSearchExpanded ? 'rotate-0' : '-rotate-90') :
-                                    (collapsedToolNodes[item.node?.id || ''] === false ? 'rotate-0' : '-rotate-90')
-                                  }
+                                  ${(collapsedToolNodes[item.node?.id || ''] === false ? 'rotate-0' : '-rotate-90')}
                                 `} 
                               />
                             </span>
@@ -804,91 +750,8 @@ export const NodeGraph = React.memo(({
                         </div>
 
                         {/* Collapsible content layers */}
-                        <AnimatePresence initial={false}>
-                          {isThink && isThinkingExpanded && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden mt-1.5"
-                            >
-                              <div className="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-450 font-mono whitespace-pre-wrap max-h-52 overflow-y-auto custom-scrollbar italic bg-[#0c0c0e]/80 rounded-lg border border-zinc-900 p-2.5 shadow-inner">
-                                {isStreamingThinking && (
-                                  <div className="mb-3 flex items-center gap-3 rounded-lg border border-cyan-500/10 bg-cyan-500/[0.04] px-3 py-2 text-left not-italic">
-                                    <div className="w-7 h-7 flex items-center justify-center bg-cyan-950/20 border border-cyan-500/30 rounded-full shrink-0">
-                                      <Brain className="text-cyan-400 animate-pulse" size={13} />
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300/80">
-                                        AI synthesis
-                                      </div>
-                                      <div className="text-[11px] text-zinc-350">
-                                        Collected tool output is being condensed into the final answer.
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                                {thinkContent}
-                                {isStreamingThinking && (
-                                  <motion.span
-                                    animate={{ opacity: [1, 0] }}
-                                    transition={{ repeat: Infinity, duration: 0.6 }}
-                                    className="inline-block w-1.5 h-3 bg-blue-400 ml-0.5 rounded-sm align-middle"
-                                  />
-                                )}
-                              </div>
-                            </motion.div>
-                          )}
-
-                          {isSearch && isSearchExpanded && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden mt-1.5"
-                            >
-                              <div className="space-y-1 bg-[#0c0c0e]/80 rounded-lg border border-zinc-900 p-2.5 shadow-inner">
-                                <div className="flex items-center justify-between text-[9px] text-zinc-550 font-mono font-bold tracking-wider mb-1">
-                                  <span>{isSearching ? "SEARCH ENGINE ACTIVE" : "SEARCH COMPLETED"}</span>
-                                  <span>{sources.length === 1 ? '1 SOURCE BOUND' : `${sources.length} SOURCES BOUND`}</span>
-                                </div>
-                                <div className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar">
-                                  {sources.map((source, idx) => {
-                                    const domain = getDomain(source.url);
-                                    return (
-                                      <a 
-                                        key={source.url + '-' + idx}
-                                        href={source.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex items-center justify-between text-[11px] p-2 rounded-md border border-zinc-900 bg-zinc-950/40 hover:bg-zinc-900/60 transition-colors cursor-pointer"
-                                      >
-                                        <div className="flex items-center gap-1.5 pr-4 min-w-0">
-                                          <div className="p-0.5 rounded bg-zinc-900 border border-zinc-800 shrink-0">
-                                            {getFavicon(source.url) ? (
-                                              <img src={getFavicon(source.url)!} alt="" className="w-3 h-3 object-contain" />
-                                            ) : (
-                                              <Globe size={10} className="text-zinc-500" />
-                                            )}
-                                          </div>
-                                          <span className="font-semibold text-zinc-400 truncate">{source.title || domain}</span>
-                                        </div>
-                                        <Check size={10} className="text-emerald-500 shrink-0" strokeWidth={3} />
-                                      </a>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-
-                          {isTool && item.node && collapsedToolNodes[item.node.id] === false && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden mt-1.5"
-                            >
+                        {isTool && item.node && collapsedToolNodes[item.node.id] === false && (
+                            <div className="mt-1.5">
                               {item.node.filePath && (
                                 <div className="mb-1.5 flex items-center gap-1.5 flex-wrap text-left">
                                   <span className="px-1.5 py-0.5 bg-zinc-900/90 border border-zinc-850 text-zinc-350 text-[10px] font-mono rounded-md font-medium">
@@ -900,52 +763,7 @@ export const NodeGraph = React.memo(({
                               )}
 
                               <div className="w-full text-left">
-                                {item.node.toolName === 'web_scrape' ? (
-                                  item.node.status === 'complete' ? (
-                                    (() => {
-                                      const scrapeResult = scrapingResults.get(item.node!.id);
-                                      if (!scrapeResult) return <div className="text-[11px] text-zinc-550 font-mono italic">Retrieving scraped content assets...</div>;
-                                      return (
-                                        <div className="w-full">
-                                          <ScrapingResultArtifact 
-                                            result={scrapeResult} 
-                                            onReScrape={() => {}}
-                                          />
-                                        </div>
-                                      );
-                                    })()
-                                  ) : (
-                                    <ScrapingProgressIndicator 
-                                      status={item.node.status} 
-                                      url={item.node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
-                                    />
-                                  )
-                                ) : item.node.toolName?.startsWith('composio_') ? (
-                                  <ComposioToolCallIndicator node={item.node} />
-                                ) : item.node.toolName?.startsWith('wiki_') ? (
-                                  item.node.status === 'complete' ? (
-                                    (() => {
-                                      const wikiRes = wikiResults.get(item.node!.id);
-                                      if (!wikiRes) return <div className="text-[11px] text-zinc-550 font-mono italic">Retrieving Wikipedia knowledge assets...</div>;
-                                      return (
-                                        <div className="w-full">
-                                          <WikiArticleArtifact 
-                                            data={wikiRes.data} 
-                                            wikiType={wikiRes.wikiType as any}
-                                            onFetchPage={(pageId) => {
-                                              onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`);
-                                            }}
-                                            onSearch={(query) => {
-                                              onSendMessage?.(`Search Wikipedia for: ${query}`);
-                                            }}
-                                          />
-                                        </div>
-                                      );
-                                    })()
-                                  ) : (
-                                    <WikiToolCallIndicator node={item.node} />
-                                  )
-                                ) : item.node.subNodes && item.node.subNodes.length > 0 ? (
+                                {item.node.subNodes && item.node.subNodes.length > 0 ? (
                                   <div className="space-y-1">
                                     {item.node.subNodes.map((sub, si) => (
                                       <div key={sub.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[#0c0c0e]/85 border border-zinc-900">
@@ -957,7 +775,7 @@ export const NodeGraph = React.memo(({
                                           }
                                         `}>
                                           {sub.status === 'active' ? (
-                                            <Loader2 size={9} className="animate-spin text-blue-500" />
+                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                                           ) : sub.status === 'complete' ? (
                                             <Check size={8} className="text-emerald-400" strokeWidth={3} />
                                           ) : sub.status === 'failed' ? (
@@ -975,15 +793,9 @@ export const NodeGraph = React.memo(({
                                       </div>
                                     ))}
                                   </div>
-                                ) : item.node.result ? (
-                                  renderPlainToolResult(item.node)
                                 ) : (
-                                  <div className="text-[11px] text-zinc-500 font-mono italic p-2 bg-[#0c0c0e]/85 rounded-lg border border-zinc-900">
-                                    {item.node.status === 'complete'
-                                      ? (item.node.resultSummary || item.node.label || 'Step completed.')
-                                      : item.node.status === 'failed'
-                                        ? (item.node.resultSummary || item.node.label || 'Step failed.')
-                                        : (item.node.label || item.node.resultSummary || 'Processing step...')}
+                                  <div className="text-[11px] p-2 bg-[#0c0c0e]/85 rounded-lg border border-zinc-900">
+                                    {renderToolBody(item.node, item.node.status, scrapingResults, wikiResults, onSendMessage)}
                                   </div>
                                 )}
                                 
@@ -1002,17 +814,14 @@ export const NodeGraph = React.memo(({
                                   </div>
                                 )}
                               </div>
-                            </motion.div>
+                            </div>
                           )}
-                        </AnimatePresence>
                       </div>
                     </div>
                   );
                 })}
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            )}
       </div>
     </div>
   );
@@ -1036,23 +845,10 @@ export const InlineToolCallCard = React.memo(({
     : (node.result || node.status === 'complete')
       ? 'complete'
       : node.status;
-  const [isCollapsed, setIsCollapsed] = useState(() => effectiveStatus !== 'active');
-  const [hasUserToggled, setHasUserToggled] = useState(false);
-  const wasActiveRef = React.useRef(effectiveStatus === 'active');
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const accent = getToolAccentClasses(effectiveStatus);
   const inlineSummary = getInlineSummary(node, effectiveStatus);
   const inlineMeta = getInlineMeta(node);
-
-  useEffect(() => {
-    const becameActive = effectiveStatus === 'active' && !wasActiveRef.current;
-
-    if (becameActive && !hasUserToggled) {
-      setIsCollapsed(false);
-    } else if (effectiveStatus !== 'active') {
-      setIsCollapsed(true);
-    }
-    wasActiveRef.current = effectiveStatus === 'active';
-  }, [effectiveStatus, hasUserToggled]);
 
   const isEditNode = node.toolName === 'write_file' || node.toolName === 'edit_file';
   const isScriptNode = node.toolName === 'verify_changes' || node.toolName === 'run_command' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
@@ -1067,7 +863,6 @@ export const InlineToolCallCard = React.memo(({
       <button
         type="button"
         onClick={() => {
-          setHasUserToggled(true);
           setIsCollapsed(!isCollapsed);
         }}
         className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/[0.015] cursor-pointer select-none"
@@ -1103,6 +898,34 @@ export const InlineToolCallCard = React.memo(({
                 {humanizeToolName(node.toolName, node.label)}
               </div>
             )}
+            {effectiveStatus === 'failed' && node.result && (() => {
+              try {
+                const result = typeof node.result === 'string' ? JSON.parse(node.result) : node.result;
+                if (result.error) {
+                  return (
+                    <div className="mt-2 text-[11px] text-rose-400 bg-rose-950/30 border border-rose-500/20 rounded-md px-2 py-1.5 font-mono">
+                      <span className="font-semibold">Error: </span>
+                      {result.error.slice(0, 200)}
+                      {result.error.length > 200 && '...'}
+                      {result.hint && (
+                        <div className="mt-1.5 text-[10px] text-rose-300/70">
+                          💡 {result.hint.slice(0, 150)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+              } catch {
+                if (typeof node.result === 'string' && node.result.toLowerCase().includes('error')) {
+                  return (
+                    <div className="mt-2 text-[11px] text-rose-400 bg-rose-950/30 border border-rose-500/20 rounded-md px-2 py-1.5 font-mono">
+                      {node.result.slice(0, 300)}
+                    </div>
+                  );
+                }
+              }
+              return null;
+            })()}
           </div>
           {effectiveStatus === 'complete' && node.toolName && ['web_scrape', 'fetch_url'].includes(node.toolName) && (() => {
             const scrapeResult = scrapingResults.get(node.id);
@@ -1121,82 +944,19 @@ export const InlineToolCallCard = React.memo(({
         </motion.div>
       </button>
       
-      <AnimatePresence initial={false}>
-        {!isCollapsed && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
-            className="overflow-hidden"
-          >
-            <div className={`px-4 pb-4 pt-3 border-t text-left w-full animate-fade-in ${accent.panel}`}>
-              {node.toolName === 'web_scrape' ? (
-                effectiveStatus === 'complete' ? (
-                  (() => {
-                    const scrapeResult = scrapingResults.get(node.id);
-                    if (!scrapeResult) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving scraped content assets...</div>;
-                    return (
-                      <div className="w-full">
-                        <ScrapingResultArtifact 
-                          result={scrapeResult} 
-                          onReScrape={() => {}}
-                        />
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <ScrapingProgressIndicator 
-                    status={effectiveStatus} 
-                    url={node.label.match(/\(([^)]+)\)/)?.[1] || ''} 
-                  />
-                )
-              ) : node.toolName?.startsWith('composio_') ? (
-                <ComposioToolCallIndicator node={node} />
-              ) : node.toolName?.startsWith('wiki_') ? (
-                effectiveStatus === 'complete' ? (
-                  (() => {
-                    const wikiRes = wikiResults.get(node.id);
-                    if (!wikiRes) return <div className="text-xs text-zinc-500 font-mono italic">Retrieving Wikipedia knowledge assets...</div>;
-                    return (
-                      <div className="w-full">
-                        <WikiArticleArtifact 
-                          data={wikiRes.data} 
-                          wikiType={wikiRes.wikiType as any}
-                          onFetchPage={(pageId) => {
-                            onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`);
-                          }}
-                          onSearch={(query) => {
-                            onSendMessage?.(`Search Wikipedia for: ${query}`);
-                          }}
-                        />
-                      </div>
-                    );
-                  })()
-                ) : (
-                  <WikiToolCallIndicator node={node} />
-                )
-              ) : hasSubPipeline ? (
+      {!isCollapsed && (
+            <div className={`px-4 pb-4 pt-3 border-t text-left w-full ${accent.panel}`}>
+              {hasSubPipeline ? (
                 <div className="rounded-xl border border-zinc-900 bg-[#0c0c0e]/85 px-3 py-3 shadow-inner">
-                  <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="mb-2 flex items-center gap-3">
                     <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-zinc-500">
                       Execution Steps
-                    </span>
-                    <span className={`text-[9px] font-bold uppercase tracking-[0.18em] ${
-                      effectiveStatus === 'failed'
-                        ? 'text-rose-400'
-                        : effectiveStatus === 'complete'
-                          ? 'text-emerald-400'
-                          : 'text-blue-400'
-                    }`}>
-                      {effectiveStatus === 'failed' ? 'Failed' : effectiveStatus === 'complete' ? 'Done' : 'Running'}
                     </span>
                   </div>
                   <div className="space-y-0.5">
                     {node.subNodes!.map((sub, idx) => {
-                      const isLast = idx === node.subNodes!.length - 1;
                       const subIcon = sub.status === 'active'
-                        ? <Loader2 size={9} className="animate-spin text-blue-500" />
+                        ? <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                         : sub.status === 'complete'
                           ? <Check size={8} className="text-emerald-400" strokeWidth={3} />
                           : sub.status === 'failed'
@@ -1205,7 +965,7 @@ export const InlineToolCallCard = React.memo(({
 
                       return (
                         <div key={sub.id} className="relative flex gap-2.5 pl-0.5">
-                          <div className="flex flex-col items-center shrink-0">
+                          <div className="flex items-center shrink-0">
                             <div className={`w-5 h-5 rounded-full border flex items-center justify-center
                               ${sub.status === 'active' ? 'border-blue-500/45 bg-[#16181d]' :
                                 sub.status === 'complete' ? 'border-emerald-500/25 bg-[#141d18]' :
@@ -1215,13 +975,6 @@ export const InlineToolCallCard = React.memo(({
                             >
                               {subIcon}
                             </div>
-                            {!isLast && (
-                              <div className={`w-px flex-1 my-1 min-h-[14px] ${
-                                sub.status === 'complete'
-                                  ? 'bg-gradient-to-b from-emerald-500/25 to-zinc-800/40'
-                                  : 'bg-zinc-800/70'
-                              }`} />
-                            )}
                           </div>
                           <div className="flex-1 pb-3 min-w-0 text-left">
                             <div className="text-[11px] font-semibold text-zinc-300 font-mono truncate">
@@ -1243,20 +996,49 @@ export const InlineToolCallCard = React.memo(({
                     })}
                   </div>
                 </div>
-              ) : node.result ? (
-                renderPlainToolResult(node)
-              ) : node.filePath ? (
-                <div className="text-xs text-zinc-500 font-mono italic">
-                  {node.filePath}
-                  {node.addedCount !== undefined && <span className="text-emerald-500 ml-2">+{node.addedCount}</span>}
-                  {node.removedCount !== undefined && <span className="text-red-500 ml-1">-{node.removedCount}</span>}
-                </div>
               ) : (
-                <div className="text-xs text-zinc-500 font-mono italic">
-                  {effectiveStatus === 'complete' ? 'Completed' : effectiveStatus === 'failed' ? 'Failed' : 'Running...'}
-                </div>
+                renderToolBody(node, effectiveStatus, scrapingResults, wikiResults, onSendMessage)
               )}
-              
+
+              {effectiveStatus === 'failed' && node.result && (() => {
+                try {
+                  const result = typeof node.result === 'string' ? JSON.parse(node.result) : node.result;
+                  if (result.error) {
+                    return (
+                      <div className="mt-3 text-[11px] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2 font-mono">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <X size={12} className="text-rose-500" />
+                          <span className="font-semibold text-rose-300">Failed</span>
+                        </div>
+                        <div className="text-rose-300/90 break-words">
+                          {result.error}
+                        </div>
+                        {result.hint && (
+                          <div className="mt-2 pt-2 border-t border-rose-500/20 text-[10px] text-rose-300/60">
+                            💡 {result.hint}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                } catch {
+                  if (typeof node.result === 'string' && node.result.toLowerCase().includes('error')) {
+                    return (
+                      <div className="mt-3 text-[11px] text-rose-400 bg-rose-950/40 border border-rose-500/30 rounded-lg px-3 py-2 font-mono">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <X size={12} className="text-rose-500" />
+                          <span className="font-semibold text-rose-300">Failed</span>
+                        </div>
+                        <div className="text-rose-300/90 break-words">
+                          {node.result}
+                        </div>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()}
+
               {isEditNode && !node.result && (
                 <div className="mt-2.5">
                   <RealtimeEditCounter node={node} />
@@ -1266,15 +1048,13 @@ export const InlineToolCallCard = React.memo(({
               {isScriptNode && (
                 <div className="flex items-center gap-2 mt-2.5">
                   <span className="text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 bg-zinc-950/80 dark:bg-zinc-900 border border-zinc-800 text-zinc-400 rounded-md font-mono flex items-center gap-1.5 shadow-xs">
-                    <span className={`${effectiveStatus === 'active' ? 'bg-blue-400 animate-pulse' : effectiveStatus === 'failed' ? 'bg-rose-400' : 'bg-emerald-400'} w-1.5 h-1.5 rounded-full inline-block`} />
+                    <span className={`${effectiveStatus === 'active' ? 'bg-blue-400' : effectiveStatus === 'failed' ? 'bg-rose-400' : 'bg-emerald-400'} w-1.5 h-1.5 rounded-full inline-block`} />
                     SHELL EXECUTION
                   </span>
                 </div>
               )}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
     </motion.div>
   );
 });

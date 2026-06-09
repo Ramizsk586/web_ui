@@ -26,10 +26,11 @@ function resolveThinkSetting(modelId: string) {
   return true;
 }
 
-function isRateLimitError(msg: string): boolean {
+function isRateLimitError(msg: string, status?: number): boolean {
+  // Only match actual 429 status code, not text containing "429"
+  if (status === 429) return true;
   const lower = msg.toLowerCase();
-  return lower.includes('429') ||
-    lower.includes('rate_limit') ||
+  return lower.includes('rate_limit') ||
     lower.includes('rate-limited') ||
     lower.includes('rate limited') ||
     lower.includes('too many requests') ||
@@ -37,12 +38,8 @@ function isRateLimitError(msg: string): boolean {
 }
 
 function getRateLimitRetryMs(msg: string): number {
-  const match = msg.match(/try again in\s+([0-9.]+)\s*s/i) ||
-    msg.match(/retry(?:-after| after)?\s*:?\s*([0-9.]+)\s*s?/i);
-  if (!match) return 8000;
-  const seconds = Number(match[1]);
-  if (!Number.isFinite(seconds) || seconds <= 0) return 8000;
-  return Math.min(30000, Math.ceil(seconds * 1000) + 750);
+  // Disabled automatic retry - model works properly
+  return 0;
 }
 
 function summarizeContentForLog(content: any): any {
@@ -681,16 +678,7 @@ export function useLlamaBridge({
           errorMsg = text.substring(0, 200);
         }
       }
-      if (isRateLimitError(errorMsg)) {
-        const retryMs = getRateLimitRetryMs(errorMsg);
-        if (!signal?.aborted && retryMs > 0) {
-          showToast(`Rate limited. Retrying in ${Math.ceil(retryMs / 1000)}s...`);
-          await new Promise(resolve => setTimeout(resolve, retryMs));
-          response = await makeFallbackRequest();
-          if (response.ok) {
-            return response.json();
-          }
-        }
+      if (isRateLimitError(errorMsg, response.status)) {
         throw new Error(`Rate limited: ${errorMsg}. Try waiting, adding your own API key in Settings, or switching to a different model.`);
       }
       throw new Error(errorMsg);

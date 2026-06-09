@@ -30,7 +30,6 @@ import {
   Video,
   Palette,
   Box,
-  Cpu,
   Shield,
   Hand,
   ShieldCheck,
@@ -347,13 +346,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   const [isRagSelectorOpen, setIsRagSelectorOpen] = React.useState(false);
   const [isDeepResearchPresetOpen, setIsDeepResearchPresetOpen] = React.useState(false);
   const deepResearchPresetRef = React.useRef<HTMLDivElement | null>(null);
-  const [localThinkingEnabled, setLocalThinkingEnabled] = React.useState(() => {
-    try {
-      return localStorage.getItem('lumina_local_thinking_enabled') === 'true';
-    } catch {
-      return false;
-    }
-  });
   const [ollamaWebSearchEnabled, setOllamaWebSearchEnabled] = React.useState(() => {
     try {
       return localStorage.getItem('lumina_ollama_web_search_enabled') === 'true';
@@ -382,32 +374,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
     localStorage.setItem('lumina_rag_doc_ids', JSON.stringify(ids));
   };
 
-  const isLocalThinkingModel = React.useMemo(() => {
-    try {
-      const providerId = (localStorage.getItem('lumina_provider') || '').toLowerCase();
-      const modelId = String(activeModelId || '').toLowerCase();
-      const providerLooksLocal =
-        !!useLocalModelsOnly ||
-        providerId === 'ollama_local' ||
-        providerId === 'ollama_cloud' ||
-        providerId === 'lm_studio' ||
-        providerId === 'custom';
-
-      const modelLooksThinkingCapable =
-        modelId.includes('qwen3') ||
-        modelId.includes('qwen-3') ||
-        modelId.includes('deepseek-r1') ||
-        modelId.includes('deepseek-v3.1') ||
-        modelId.includes('gpt-oss') ||
-        modelId.includes('r1') ||
-        modelId.includes('think');
-
-      return providerLooksLocal && modelLooksThinkingCapable;
-    } catch {
-      return false;
-    }
-  }, [activeModelId, useLocalModelsOnly]);
-
   const isOllamaProvider = React.useMemo(() => {
     try {
       const providerId = (localStorage.getItem('lumina_provider') || '').toLowerCase();
@@ -416,12 +382,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
       return false;
     }
   }, [activeModelId]);
-
-  React.useEffect(() => {
-    try {
-      localStorage.setItem('lumina_local_thinking_enabled', localThinkingEnabled ? 'true' : 'false');
-    } catch {}
-  }, [localThinkingEnabled]);
 
   React.useEffect(() => {
     try {
@@ -1638,12 +1598,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                             icon: <GraduationCap size={16} className="text-purple-400" />,
                             isSelected: isDeepSearchEnabled,
                           },
-                          ...(isLocalThinkingModel ? [{
-                            id: "local_thinking",
-                            label: "Thinking",
-                            icon: <Cpu size={16} className="text-amber-400" />,
-                            isSelected: localThinkingEnabled,
-                          }] : []),
                         ].map((item) => (
                           <button
                             key={item.id}
@@ -1696,26 +1650,18 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                     return nextVal;
                                   });
                                   break;
-                                case "local_thinking":
-                                  setIsPlusMenuOpen(false);
-                                  setLocalThinkingEnabled(prev => {
-                                    const nextVal = !prev;
-                                    showToast(nextVal ? 'Thinking enabled for local models.' : 'Thinking disabled for local models.');
-                                    return nextVal;
-                                  });
-                                  break;
                               }
                             }}
                             className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-colors group/item"
                           >
                             <div className="flex items-center gap-3">
-                              <span className={`transition-colors ${(item as any).isSelected ? (item.id === "deep_research" ? "text-purple-500" : item.id === "local_thinking" ? "text-amber-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500") : "group-hover/item:text-[var(--theme-primary)]"}`}>
+                              <span className={`transition-colors ${(item as any).isSelected ? (item.id === "deep_research" ? "text-purple-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500") : "group-hover/item:text-[var(--theme-primary)]"}`}>
                                 {item.icon}
                               </span>
                               {item.label}
                             </div>
                             {(item as any).isSelected && (
-                              <Check size={14} className={item.id === "deep_research" ? "text-purple-500" : item.id === "local_thinking" ? "text-amber-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500"} />
+                              <Check size={14} className={item.id === "deep_research" ? "text-purple-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500"} />
                             )}
                           </button>
                         ))}

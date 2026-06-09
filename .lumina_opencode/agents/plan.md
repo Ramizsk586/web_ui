@@ -1,7 +1,10 @@
 ---
 name: plan
 description: Read-only planning and analysis subagent for Lumina Coder Mode. Best for architecture, walkthroughs, audits, and codebase mapping.
-tools: [read_file, glob_tool, grep_tool]
+tools:
+  read_file: true
+  glob_tool: true
+  grep_tool: true
 mode: subagent
 permissions:
   read: allow

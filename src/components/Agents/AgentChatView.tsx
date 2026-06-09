@@ -3,6 +3,7 @@ import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, B
 import { motion, AnimatePresence } from 'motion/react';
 import { Agent, AgentMessage } from '../../agents/types';
 import { runAgent } from '../../agents/agentRunner';
+import { createPiAgent, runPiAgent, type PiAgentEventHandler } from '../../services/piAgentService';
 import { MessageItem } from '../Chat/MessageItem';
 import { AgentToolBadge } from './AgentToolBadge';
 import { AgentAvatar } from './AgentAvatar';
@@ -43,6 +44,8 @@ export function AgentChatView({
   const [showSkillFiles, setShowSkillFiles] = useState(false);
   const [activeSkillFileIdx, setActiveSkillFileIdx] = useState(0);
   const [isInspectSkillsOpen, setIsInspectSkillsOpen] = useState(false);
+  const [usePiAgent, setUsePiAgent] = useState(false);
+  const [piAgentInstance, setPiAgentInstance] = useState<ReturnType<typeof createPiAgent> | null>(null);
 
   const handleOpenSystemPromptInEditor = async () => {
     setShowOptions(false);
@@ -412,6 +415,71 @@ export function AgentChatView({
         finalSystemPrompt = `${agent.systemPrompt}\n\n[SYSTEM TOOL LOG: CODING SANDBOX ACTIVE]\nState verified. Ready to write clean, executable output code.`;
       }
 
+      // Use pi agent if enabled
+      if (usePiAgent) {
+        const currentHistory = updatedHistory;
+        
+        // Create pi agent instance if not exists
+        let agentInstance = piAgentInstance;
+        if (!agentInstance) {
+          const apiKey = agent.bridgeApiKey || agent.apiKey;
+          agentInstance = createPiAgent({
+            model: {
+              id: agent.bridgeModel || agent.model || 'anthropic/claude-sonnet-4-20250514',
+              name: agent.model || 'claude-sonnet-4',
+              provider: agent.provider || 'anthropic',
+              api: 'anthropic',
+              baseUrl: agent.baseUrl || 'https://api.anthropic.com',
+            },
+            systemPrompt: agent.systemPrompt,
+            thinkingLevel: 'medium',
+            apiKey,
+            tools: bridgeTools.filter((t: any) => t.enabled).map((t: any) => ({
+              name: t.id,
+              description: t.description,
+              parameters: t.parameters || { type: 'object', properties: {}, required: [] },
+              handler: async () => ({ result: 'Tool execution via pi agent' }),
+            })),
+          });
+          setPiAgentInstance(agentInstance);
+        }
+        
+        const handlePiEvent: PiAgentEventHandler = (event) => {
+          if (event.type === 'text') {
+            setStreamingText(prev => prev + event.content);
+          } else if (event.type === 'tool_call_start' || event.type === 'tool_call_end') {
+            // Handle tool calls for display
+          } else if (event.type === 'thinking') {
+            // Handle thinking for display
+          }
+        };
+        
+        try {
+          const result = await runPiAgent(agentInstance, combinedContent, currentHistory, handlePiEvent);
+          const assistantMsg: AgentMessage = {
+            id: createAgentMessageId('agent-assistant'),
+            role: 'assistant',
+            content: result.text,
+            timestamp: Date.now(),
+            runId: undefined,
+          };
+          onUpdateAgent({ chatHistory: [...currentHistory, assistantMsg] });
+          setIsStreaming(false);
+          setStreamingText('');
+        } catch (err: any) {
+          const errorMsg: AgentMessage = {
+            id: createAgentMessageId('agent-error'),
+            role: 'assistant',
+            content: `❌ **Pi Agent Error**: ${err.message}`,
+            timestamp: Date.now(),
+          };
+          onUpdateAgent({ chatHistory: [...currentHistory, errorMsg] });
+          setIsStreaming(false);
+          setStreamingText('');
+        }
+        return;
+      }
+
       await runAgent({
         agent: {
           ...agent,
@@ -568,6 +636,22 @@ export function AgentChatView({
               >
                 <Trash2 size={12} className="text-rose-400" />
                 Clear Chat History
+              </button>
+              <div className="border-t border-[var(--theme-border)] my-1" />
+              <button
+                onClick={() => {
+                  setUsePiAgent(!usePiAgent);
+                  setPiAgentInstance(null); // Reset instance when toggling
+                  setShowOptions(false);
+                }}
+                className={`flex items-center gap-2 w-full text-left px-3 py-2 text-[11px] transition-colors cursor-pointer ${
+                  usePiAgent 
+                    ? 'text-emerald-400 hover:bg-emerald-950/20' 
+                    : 'text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]'
+                }`}
+              >
+                <Bot size={12} className={usePiAgent ? 'text-emerald-400' : ''} />
+                {usePiAgent ? '✓ Pi Agent Mode' : 'Use Pi Agent Mode'}
               </button>
             </motion.div>
           )}

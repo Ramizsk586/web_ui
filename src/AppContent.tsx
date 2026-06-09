@@ -811,6 +811,13 @@ export default function AppContent({
     return activeChat ? activeChat.messages : [];
   }, [chats, currentChatId]);
 
+  const activeSourcesMessage = useMemo(() => {
+    if (!sourcesPanelMessageId) return null;
+    return messages.find((message: Message) => message.id === sourcesPanelMessageId) || null;
+  }, [messages, sourcesPanelMessageId]);
+
+  const activeSources = activeSourcesMessage?.sources || [];
+
   const activeModelList = useMemo(() => {
     const list = useLocalModelsOnly
       ? downloadedModels.length > 0
@@ -1109,49 +1116,81 @@ export default function AppContent({
 
   const buildActiveTools = useCallback(() => {
     const active: any[] = [];
+    const seenToolNames = new Set<string>();
+
+    const pushTool = (toolName: string, description: string, parameters: any = { type: 'object', properties: {}, required: [] }) => {
+      if (seenToolNames.has(toolName)) return;
+      seenToolNames.add(toolName);
+      active.push({
+        type: 'function',
+        function: {
+          name: toolName,
+          description,
+          parameters
+        }
+      });
+    };
+
     luminaTools.forEach((tool: Tool) => {
       if (tool.enabled) {
-        active.push({
-          type: 'function',
-          function: {
-            name: tool.id,
-            description: tool.description,
-            parameters: tool.parameters || { type: 'object', properties: {}, required: [] }
-          }
-        });
+        pushTool(
+          tool.id,
+          tool.description,
+          tool.parameters || { type: 'object', properties: {}, required: [] }
+        );
       }
     });
 
     composioTools.forEach((tool: any) => {
       if (tool.enabled) {
-        active.push({
-          type: 'function',
-          function: {
-            name: tool.id,
-            description: tool.description,
-            parameters: { type: 'object', properties: {}, required: [] }
-          }
-        });
+        pushTool(tool.id, tool.description, { type: 'object', properties: {}, required: [] });
       }
     });
 
     if (useBridgeTools) {
       bridgeTools.forEach((tool: Tool) => {
         if (tool.enabled) {
-          active.push({
-            type: 'function',
-            function: {
-              name: tool.id,
-              description: tool.description,
-              parameters: tool.parameters || { type: 'object', properties: {}, required: [] }
-            }
-          });
+          pushTool(
+            tool.id,
+            tool.description,
+            tool.parameters || { type: 'object', properties: {}, required: [] }
+          );
         }
       });
     }
 
+    // Search/research toggles should always expose the core web tools, even if the
+    // manual Lumina tool toggles were left off.
+    if (isWebSearchEnabled || isDeepSearchEnabled) {
+      pushTool(
+        'web_search',
+        'Search the web for current information.',
+        {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Search query.' },
+            maxResults: { type: 'number', description: 'Max results (default 5).' }
+          },
+          required: ['query']
+        }
+      );
+
+      pushTool(
+        'fetch_url',
+        'Fetch and scrape a webpage. Prioritize scraping high-quality articles, primary databases, and reputable resources.',
+        {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'The exact target URL to fetch.' },
+            outputFormat: { type: 'string', enum: ['markdown', 'text', 'html'], description: 'Output format (default: markdown).' }
+          },
+          required: ['url']
+        }
+      );
+    }
+
     return active;
-  }, [luminaTools, composioTools, useBridgeTools, bridgeTools]);
+  }, [luminaTools, composioTools, useBridgeTools, bridgeTools, isWebSearchEnabled, isDeepSearchEnabled]);
 
   const renderActiveQuestionContent = () => {
     const activeQuestion = askAiQuestions[currentQuestionIndex];
@@ -2998,39 +3037,83 @@ const startCoderPreview = useCallback(async () => {
                           </>
                         ) : (
                           <>
-                            <motion.div 
-                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                              title={isSidebarOpen ? "Collapse Lumina Sidebar" : "Expand Lumina Sidebar"}
-                              animate={{ scale: [1, 1.05, 1] }}
-                              transition={{ duration: 4, repeat: Infinity }}
-                              className="w-16 h-16 bg-gray-50 border border-gray-100 dark:border-white/5 rounded-full flex items-center justify-center text-black dark:text-white dark:bg-zinc-900 mb-6 shadow-sm overflow-hidden animate-active-ring cursor-pointer hover:border-blue-500 hover:ring-2 hover:ring-blue-500/20 dark:hover:border-blue-500 transition-all duration-300"
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
+                              className="mb-2"
                             >
-                              {userProfile.avatar ? (
-                                <img src={userProfile.avatar} alt={userProfile.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                              ) : (
-                                <span className="font-bold text-lg font-display">{userProfile.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}</span>
-                              )}
+                              <div className="relative inline-block">
+                                <motion.div
+                                  className="absolute -inset-1 rounded-full bg-gradient-to-br from-blue-500/20 via-purple-500/10 to-pink-500/20 blur-sm"
+                                  animate={{ opacity: [0.4, 0.7, 0.4] }}
+                                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                                />
+                                <div className="relative w-20 h-20 rounded-full border border-white/10 dark:border-white/10 bg-gradient-to-br from-white/80 to-white/40 dark:from-zinc-800 dark:to-zinc-900 flex items-center justify-center text-black dark:text-white shadow-lg overflow-hidden cursor-default">
+                                  {userProfile.avatar ? (
+                                    <img src={userProfile.avatar} alt={userProfile.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <span className="font-bold text-xl font-display">{userProfile.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}</span>
+                                  )}
+                                </div>
+                              </div>
                             </motion.div>
-                            <h1 className="text-4xl font-display font-medium text-gray-900 dark:text-white mb-3 tracking-tight">
-                              Welcome back, {userProfile.name}
-                            </h1>
-                            <p className="text-gray-500 dark:text-gray-400 max-w-sm mb-6">
-                              Modern intelligence, refined interface.
-                            </p>
-                            <button
-                              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                              className="flex items-center gap-2.5 px-4.5 py-2.5 bg-white dark:bg-zinc-900 hover:bg-gray-50 dark:hover:bg-zinc-800/80 text-gray-700 dark:text-zinc-200 rounded-xl text-xs font-semibold border border-gray-200 dark:border-white/10 shadow-sm cursor-pointer transition-all active:scale-[0.98] animate-focus-target"
-                              id="slidepanel-toggle-option" style={{ display: 'none' }}
-                              title={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+                            <motion.h1
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.5, delay: 0.1, ease: [0.23, 1, 0.32, 1] }}
+                              className="text-3xl sm:text-4xl font-display font-semibold text-gray-900 dark:text-white mb-2 tracking-tight"
                             >
-                              <SidebarIcon size={14} className={isSidebarOpen ? "text-blue-500" : "text-gray-400"} />
-                              <span>{isSidebarOpen ? "Collapse Sidebar Menu" : "Expand Sidebar Menu"}</span>
-                            </button>
+                              Welcome back, {userProfile.name}
+                            </motion.h1>
+                            <motion.p
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.5, delay: 0.15, ease: [0.23, 1, 0.32, 1] }}
+                              className="text-gray-400 dark:text-zinc-500 text-sm sm:text-base mb-10 max-w-md"
+                            >
+                              How can I help you today?
+                            </motion.p>
+                            <motion.div
+                              initial={{ opacity: 0, y: 16 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.6, delay: 0.25, ease: [0.23, 1, 0.32, 1] }}
+                              className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-2xl"
+                            >
+                              {[
+                                { icon: Globe, label: "Search the web", prompt: "Search the web for " },
+                                { icon: Code, label: "Write code", prompt: "Help me write code for " },
+                                { icon: FileText, label: "Summarize text", prompt: "Summarize the following: " },
+                                { icon: Lightbulb, label: "Brainstorm ideas", prompt: "Help me brainstorm ideas for " },
+                              ].map((card, i) => (
+                                <motion.button
+                                  key={card.label}
+                                  initial={{ opacity: 0, y: 12 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ duration: 0.4, delay: 0.3 + i * 0.06, ease: [0.23, 1, 0.32, 1] }}
+                                  whileHover={{ y: -2, scale: 1.02 }}
+                                  whileTap={{ scale: 0.97 }}
+                                  onClick={() => {
+                                    setInput(card.prompt);
+                                    setTimeout(() => {
+                                      const ta = document.querySelector<HTMLTextAreaElement>('#chat-input');
+                                      if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = card.prompt.length; }
+                                    }, 50);
+                                  }}
+                                  className="group flex flex-col items-start gap-2.5 p-4 rounded-2xl border border-gray-200/70 dark:border-white/[0.06] bg-white/60 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] hover:border-gray-300 dark:hover:border-white/[0.1] transition-all duration-200 text-left cursor-pointer shadow-sm hover:shadow-md"
+                                >
+                                  <div className="w-8 h-8 rounded-xl bg-gray-100 dark:bg-white/[0.06] flex items-center justify-center group-hover:bg-gray-200 dark:group-hover:bg-white/[0.1] transition-colors duration-200">
+                                    <card.icon size={16} className="text-gray-500 dark:text-zinc-400 group-hover:text-gray-700 dark:group-hover:text-zinc-200 transition-colors duration-200" />
+                                  </div>
+                                  <span className="text-xs font-medium text-gray-600 dark:text-zinc-400 group-hover:text-gray-900 dark:group-hover:text-zinc-100 transition-colors duration-200 leading-snug">{card.label}</span>
+                                </motion.button>
+                              ))}
+                            </motion.div>
                           </>
                         )}
                       </motion.div>
                     ) : (
-                      messages.map((message: Message) => (
+                      messages.map((message: Message, idx: number) => (
                         <MessageItem
                           key={message.id}
                           message={message}
@@ -3038,9 +3121,10 @@ const startCoderPreview = useCallback(async () => {
                           userProfile={userProfile}
                           persona={persona}
                           isCoderMode={isCoderMode}
-                          isSourcesPanelOpen={false}
-                          setIsSourcesPanelOpen={STABLE_NOOP}
-                          setSourcesPanelMessageId={STABLE_NOOP}
+                          isGeneratingTodos={idx === messages.length - 1 && isGeneratingTodos && message.role === 'assistant'}
+                          isSourcesPanelOpen={isSourcesPanelOpen && sourcesPanelMessageId === message.id}
+                          setIsSourcesPanelOpen={setIsSourcesPanelOpen}
+                          setSourcesPanelMessageId={setSourcesPanelMessageId}
                           setActiveArtifact={handleSetActiveArtifact}
                           setIsCanvasOpen={handleSetIsCanvasOpen}
                           setCanvasView={handleSetCanvasView}
@@ -3094,6 +3178,7 @@ const startCoderPreview = useCallback(async () => {
                   />
                 </div>
               )}
+
             </div>
 
             <div className={`pb-6 pt-2 z-30 shrink-0 select-none bg-transparent border-transparent ${isSidebarOpen ? 'px-4 md:px-6 xl:px-8' : 'px-6'}`}>
@@ -3141,6 +3226,91 @@ const startCoderPreview = useCallback(async () => {
                   onSetView={setCanvasView}
                   allArtifacts={chats.find((c: Chat) => c.id === currentChatId)?.messages.flatMap((m: Message) => m.artifacts || []) || []}
                 />
+              </div>
+            )}
+
+            {!isCoderMode && !isCanvasOpen && isSourcesPanelOpen && activeSourcesMessage && (
+              <div className="w-full md:w-[380px] xl:w-[430px] h-full shrink-0 border-l border-[var(--theme-border)] bg-[var(--theme-surface)] relative z-30 flex flex-col">
+                <div className="px-5 py-5 border-b border-[var(--theme-border)] flex items-center justify-between gap-4 shrink-0">
+                  <div className="min-w-0">
+                    <div className="text-[15px] font-semibold text-[var(--theme-primary)]">Search results</div>
+                    <div className="text-[11px] text-[var(--theme-secondary)] mt-1 truncate">
+                      {activeSourcesMessage.searchQuery || activeSourcesMessage.content?.slice(0, 80) || `${activeSources.length} sources`}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSourcesPanelOpen(false);
+                      setSourcesPanelMessageId(null);
+                    }}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-3">
+                  {activeSources.map((source: any, index: number) => {
+                    let domain = source.url || '';
+                    try {
+                      domain = new URL(source.url).hostname.replace(/^www\./, '');
+                    } catch {}
+
+                    const favicon = source.url
+                      ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
+                      : null;
+
+                    return (
+                      <a
+                        key={`${source.url}-${index}`}
+                        href={source.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block rounded-2xl border px-4 py-4 transition-all"
+                        style={{
+                          borderColor: 'var(--theme-border)',
+                          background: 'var(--theme-surface-alt)',
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className="w-5 h-5 rounded-full flex items-center justify-center overflow-hidden shrink-0"
+                              style={{ background: 'var(--theme-hover-bg)', border: '1px solid var(--theme-border)' }}
+                            >
+                              {favicon ? (
+                                <img
+                                  src={favicon}
+                                  alt=""
+                                  className="w-4 h-4 object-contain"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <Globe size={12} className="text-[var(--theme-secondary)]" />
+                              )}
+                            </div>
+                            <span className="text-[12px] text-[var(--theme-secondary)] font-medium truncate">{domain || 'Source'}</span>
+                          </div>
+                          <span
+                            className="w-6 h-6 rounded-full text-[11px] font-semibold flex items-center justify-center shrink-0"
+                            style={{ background: 'var(--theme-hover-bg)', color: 'var(--theme-primary)' }}
+                          >
+                            {index + 1}
+                          </span>
+                        </div>
+                        <div className="mt-3 text-[15px] leading-8 font-semibold text-[var(--theme-primary)]">
+                          {source.title || source.url}
+                        </div>
+                        {source.snippet && (
+                          <div className="mt-2 text-[13px] leading-7 text-[var(--theme-secondary)]">
+                            {source.snippet}
+                          </div>
+                        )}
+                      </a>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

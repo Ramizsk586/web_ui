@@ -28,16 +28,22 @@ export type OpenCodeWorkspaceContext = {
 };
 
 const COMMAND_DIRS = [
+  [".lumina_opencode", "command"],
+  [".lumina_opencode", "commands"],
   [".opencode", "command"],
   [".opencode", "commands"],
 ];
 
 const AGENT_DIRS = [
+  [".lumina_opencode", "agent"],
+  [".lumina_opencode", "agents"],
   [".opencode", "agent"],
   [".opencode", "agents"],
 ];
 
 const TOOL_DIRS = [
+  [".lumina_opencode", "tool"],
+  [".lumina_opencode", "tools"],
   [".opencode", "tool"],
   [".opencode", "tools"],
 ];
@@ -196,6 +202,8 @@ const resolveConfigPath = (workspaceRoot: string) => {
   const candidates = [
     path.join(workspaceRoot, "opencode.jsonc"),
     path.join(workspaceRoot, "opencode.json"),
+    path.join(workspaceRoot, ".lumina_opencode", "opencode.jsonc"),
+    path.join(workspaceRoot, ".lumina_opencode", "opencode.json"),
     path.join(workspaceRoot, ".opencode", "opencode.jsonc"),
     path.join(workspaceRoot, ".opencode", "opencode.json"),
   ];

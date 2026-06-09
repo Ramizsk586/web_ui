@@ -24,3 +24,7 @@ declare module '*.jpg' {
   const content: string;
   export default content;
 }
+
+declare module 'playwright-core';
+declare module '@lightpanda/browser';
+declare module 'crawlee';

@@ -19,10 +19,15 @@ export function useLuminaTools() {
         type: 'object',
         properties: {
           url: { type: 'string', description: 'The target URL to scrape. MUST be a valid direct content page, NOT a social media network profile, login page, document download, or tracking link. If you got this link from a search engine, ensure it is the fully resolved target URL and not a generic utility page like a privacy policy or contact form.' },
+          strategy: { type: 'string', enum: ['static', 'dynamic', 'crawl'], description: 'Scraping strategy to use.' },
+          browserEngine: { type: 'string', enum: ['puppeteer', 'playwright'], description: 'Browser engine for dynamic scraping.' },
           selectors: { type: 'object', description: 'Optional CSS selectors to extract specific data' },
-          usePuppeteer: { type: 'boolean', description: 'Set to true if page requires JavaScript execution' },
+          useJavaScript: { type: 'boolean', description: 'Set to true if the page requires JavaScript execution' },
+          waitForSelector: { type: 'string', description: 'Optional selector to wait for during dynamic scraping' },
           extractLinks: { type: 'boolean', description: 'Whether to extract outgoing links' },
+          extractImages: { type: 'boolean', description: 'Whether to extract image URLs' },
           extractTables: { type: 'boolean', description: 'Whether to extract HTML tables' },
+          maxPages: { type: 'number', description: 'Maximum pages to crawl when using crawl strategy' },
           outputFormat: { type: 'string', enum: ['json', 'markdown', 'html'], description: 'Output format' }
         },
         required: ['url']

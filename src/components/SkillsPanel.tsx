@@ -112,7 +112,7 @@ Use this skill when the task is specifically about opencode's own configuration 
 ## Scope
 
 - \`opencode.json\` / \`opencode.jsonc\`
-- files under \`.opencode/\`
+- files under \`.lumina_opencode/\` or \`.opencode/\`
 - agents, subagents, skills, plugins, MCP servers
 - permission rules and config troubleshooting
 
