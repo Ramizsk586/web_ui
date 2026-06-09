@@ -22,7 +22,7 @@ export const CanvasBlock = React.memo(({ language, code, isStreaming }: CanvasBl
 
   return (
     <div
-      className={`border rounded-2xl overflow-hidden shadow-sm my-3 transition-all duration-300 text-left ${
+      className={`w-full max-w-full min-w-0 border rounded-2xl overflow-hidden shadow-sm my-3 transition-all duration-300 text-left ${
         isStreaming
           ? 'ring-1 ring-blue-500/15 shadow-md shadow-blue-500/5'
           : ''
@@ -79,7 +79,7 @@ export const CanvasBlock = React.memo(({ language, code, isStreaming }: CanvasBl
           className="overflow-hidden"
         >
           <div
-            className="overflow-x-auto px-4 py-3 custom-scrollbar"
+          className="w-full max-w-full min-w-0 overflow-x-auto px-4 py-3 custom-scrollbar"
             style={{ background: 'var(--theme-surface-alt)' }}
           >
             {typeof SyntaxHighlighter === 'function' ? (

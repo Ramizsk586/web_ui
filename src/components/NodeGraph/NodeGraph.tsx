@@ -229,6 +229,11 @@ const getInlineSummary = (node: ToolCallNode, status: ToolCallNode['status']) =>
 
   if (node.toolName === 'web_search') return status === 'active' ? 'Searching web' : 'Searched web';
   if (node.toolName === 'web_scrape' || node.toolName === 'fetch_url') return status === 'active' ? 'Fetching page' : 'Fetched page';
+  if (node.toolName === 'wiki_research') {
+    const subCount = node.subNodes?.length || 0;
+    if (status === 'active') return subCount > 1 ? `Researching Wikipedia (${subCount} steps)` : 'Reading Wikipedia';
+    return subCount > 1 ? `Researched Wikipedia (${subCount} steps)` : 'Read Wikipedia';
+  }
   if (node.toolName?.startsWith('wiki_')) return status === 'active' ? 'Reading Wikipedia' : 'Read Wikipedia';
   if (node.toolName?.startsWith('composio_')) return status === 'active' ? 'Calling integration' : 'Called integration';
   if (node.toolName === 'run_skill') return status === 'active' ? 'Reading skill documentation' : 'Read skill documentation';
@@ -481,6 +486,30 @@ const renderToolBody = (
 ) => {
   if (node.toolName === 'web_scrape' || node.toolName === 'fetch_url') {
     return null;
+  }
+
+  if (node.toolName === 'wiki_research') {
+    if (effectiveStatus === 'complete') {
+      return (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {(node.subNodes || []).map(sub => {
+            const wikiRes = wikiResults.get(sub.id);
+            if (!wikiRes) return null;
+            return (
+              <div key={sub.id} className="w-full">
+                <WikiArticleArtifact
+                  data={wikiRes.data}
+                  wikiType={wikiRes.wikiType as any}
+                  onFetchPage={(pageId) => onSendMessage?.(`Fetch Wikipedia page details for ID: ${pageId}`)}
+                  onSearch={(query) => onSendMessage?.(`Search Wikipedia for: ${query}`)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    return <WikiToolCallIndicator node={node} />;
   }
 
   if (node.toolName?.startsWith('wiki_')) {
@@ -845,6 +874,7 @@ export const InlineToolCallCard = React.memo(({
     : (node.result || node.status === 'complete')
       ? 'complete'
       : node.status;
+  const isWikiNode = node.toolName === 'wiki_research' || node.toolName?.startsWith('wiki_');
   const [isCollapsed, setIsCollapsed] = useState(true);
   const accent = getToolAccentClasses(effectiveStatus);
   const inlineSummary = getInlineSummary(node, effectiveStatus);
@@ -853,6 +883,18 @@ export const InlineToolCallCard = React.memo(({
   const isEditNode = node.toolName === 'write_file' || node.toolName === 'edit_file';
   const isScriptNode = node.toolName === 'verify_changes' || node.toolName === 'run_command' || node.toolName?.includes('script') || node.toolName?.includes('compile') || node.toolName?.includes('terminal') || node.toolName?.includes('shell');
   const hasSubPipeline = Array.isArray(node.subNodes) && node.subNodes.length > 0;
+
+  if (isWikiNode) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full"
+      >
+        {renderToolBody(node, effectiveStatus, scrapingResults, wikiResults, onSendMessage)}
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

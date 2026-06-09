@@ -2516,11 +2516,11 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       const bodyContent = $('body').html();
       if (bodyContent) {
         let convertedMarkdown = turndownService.turndown(bodyContent);
-        if (convertedMarkdown.length > 50000) convertedMarkdown = convertedMarkdown.slice(0, 50000) + '\n\n... [Content Truncated due to size limit of 50K chars] ...';
+        if (convertedMarkdown.length > 100000) convertedMarkdown = convertedMarkdown.slice(0, 100000) + '\n\n... [Content Truncated due to size limit] ...';
         result.rawText = convertedMarkdown;
       }
     } catch {
-      result.rawText = $('body').text().slice(0, 50000);
+      result.rawText = $('body').text().slice(0, 100000);
     }
 
     if (outputFormat === 'markdown') result.formattedOutput = result.rawText;
@@ -2539,19 +2539,36 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     return resultsList[0].url;
   };
 
-  const scrapeStaticPage = async (targetUrl: string) => {
-    const response = await axios.get(targetUrl, {
-      timeout: 15000,
-      headers: getScraperHeaders(),
-      maxRedirects: 5,
-      responseType: 'arraybuffer'
-    });
-    const rawData = response.data?.length > 5 * 1024 * 1024 ? response.data.slice(0, 100 * 1024) : response.data;
-    return {
-      html: rawData.toString('utf8'),
-      statusCode: response.status,
-      finalUrl: response.request?.res?.responseUrl || targetUrl
-    };
+  const SCRAPER_UA_POOL = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+    'Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0',
+  ];
+
+  const scrapeStaticPage = async (targetUrl: string, retries = 2) => {
+    let lastError: any;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const ua = SCRAPER_UA_POOL[attempt % SCRAPER_UA_POOL.length];
+        const response = await axios.get(targetUrl, {
+          timeout: 20000,
+          headers: { ...getScraperHeaders(), 'User-Agent': ua, 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+          maxRedirects: 10,
+          responseType: 'arraybuffer'
+        });
+        const rawData = response.data?.length > 5 * 1024 * 1024 ? response.data.slice(0, 500 * 1024) : response.data;
+        return {
+          html: rawData.toString('utf8'),
+          statusCode: response.status,
+          finalUrl: response.request?.res?.responseUrl || targetUrl
+        };
+      } catch (err: any) {
+        lastError = err;
+        if (err?.response?.status === 404 || err?.response?.status === 410) break;
+        if (attempt < retries) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+    throw lastError;
   };
 
   const buildLightpandaCloudCdpUrl = (cloud?: LightpandaCloudConfig) => {
@@ -2757,11 +2774,8 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       outputFormat = 'markdown',
       strategy,
       mode,
-      browserEngine,
       waitForSelector,
       useJavaScript,
-      maxPages,
-      maxDepth,
       lightpanda
     } = req.body;
 
@@ -2776,25 +2790,11 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       const scrapeTargetUrl = await resolveScrapeTargetUrl(url);
       const robotsCheck = await checkRobotsTxt(scrapeTargetUrl);
       const selectedStrategy: ScrapeStrategy =
-        strategy || mode || (maxPages || maxDepth ? 'crawl' : (useJavaScript ? 'dynamic' : 'static'));
-      const selectedEngine: BrowserEngine = 'lightpanda';
+        strategy || mode || (useJavaScript ? 'dynamic' : 'static');
       const lightpandaCloudConfig = lightpanda?.cloud;
-
-      if (selectedStrategy === 'crawl') {
-        const crawlResult = await scrapeWithCrawler(
-          scrapeTargetUrl,
-          Boolean(useJavaScript),
-          Number(maxPages || maxDepth || 3),
-          selectors,
-          lightpandaCloudConfig
-        );
-        if (robotsCheck.warning) crawlResult.robotsWarning = robotsCheck.warning;
-        return res.json(crawlResult);
-      }
-
       const source: { html: string; statusCode: number; finalUrl: string; engineLabel?: string } =
         selectedStrategy === 'dynamic'
-          ? await scrapeDynamicPage(scrapeTargetUrl, selectedEngine, waitForSelector, lightpandaCloudConfig)
+          ? await scrapeDynamicPage(scrapeTargetUrl, 'lightpanda', waitForSelector, lightpandaCloudConfig)
           : await scrapeStaticPage(scrapeTargetUrl);
 
       const result = buildScrapeResultFromHtml({
@@ -2809,7 +2809,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         outputFormat,
         robotsWarning: robotsCheck.warning,
         strategy: selectedStrategy,
-        engine: selectedStrategy === 'static' ? 'axios+cheerio' : (source.engineLabel || selectedEngine)
+        engine: selectedStrategy === 'dynamic' ? (source.engineLabel || 'lightpanda-cloud') : 'axios+cheerio'
       });
 
       return res.json(result);

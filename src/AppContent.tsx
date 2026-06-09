@@ -768,6 +768,7 @@ export default function AppContent({
   const [loadedLocalModelId, setLoadedLocalModelId] = useState<string | null>(() => {
     return localStorage.getItem('lumina_active_loaded_local_model') || null;
   });
+  const LARGE_PROVIDER_VISIBLE_COUNT = 20;
   const [localModelLoadingId, setLocalModelLoadingId] = useState<string | null>(null);
   const [localModelLoadingProgress, setLocalModelLoadingProgress] = useState(0);
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(() => {
@@ -863,6 +864,12 @@ export default function AppContent({
     return activeModelList.filter(model => model.name.toLowerCase().includes(query) || model.id.toLowerCase().includes(query));
   }, [activeModelList, modelSearchQuery]);
 
+  const normalizedModelSearchQuery = useMemo(
+    () => modelSearchQuery.trim().toLowerCase(),
+    [modelSearchQuery],
+  );
+  const hasModelSearch = normalizedModelSearchQuery.length > 0;
+
   useEffect(() => {
     localStorage.setItem('lumina_favorite_models', JSON.stringify(favoriteModelIds.slice(0, 20)));
   }, [favoriteModelIds]);
@@ -881,13 +888,13 @@ export default function AppContent({
   }, [showToast]);
 
   const favoriteModels = useMemo(() => {
-    const byId = new Map(filteredModelList.map(model => [model.id, model]));
+    const byId = new Map(activeModelList.map(model => [model.id, model]));
     return favoriteModelIds.map(id => byId.get(id)).filter(Boolean);
-  }, [favoriteModelIds, filteredModelList]);
+  }, [favoriteModelIds, activeModelList]);
 
   const providerModelCategories = useMemo(() => {
     const groups = new Map<string, { id: string; label: string; models: any[] }>();
-    for (const model of filteredModelList) {
+    for (const model of activeModelList) {
       const categoryId = model.providerProfileId || model.providerProfileName || 'default-provider';
       const label = model.providerProfileName || model.provider || 'Available Models';
       if (!groups.has(categoryId)) {
@@ -896,7 +903,40 @@ export default function AppContent({
       groups.get(categoryId)!.models.push(model);
     }
     return Array.from(groups.values());
-  }, [filteredModelList]);
+  }, [activeModelList]);
+
+  const preparedDrawerProviderCategories = useMemo(() => {
+    return providerModelCategories.map(category => {
+      const allModels = Array.isArray(category.models) ? category.models : [];
+      const matchingModels = hasModelSearch
+        ? allModels.filter((model: any) => {
+            const id = String(model?.id || '').toLowerCase();
+            const name = String(model?.name || '').toLowerCase();
+            const author = String(model?.author || model?.providerProfileName || '').toLowerCase();
+            return (
+              id.includes(normalizedModelSearchQuery) ||
+              name.includes(normalizedModelSearchQuery) ||
+              author.includes(normalizedModelSearchQuery)
+            );
+          })
+        : allModels.slice(0, LARGE_PROVIDER_VISIBLE_COUNT);
+
+      return {
+        ...category,
+        visibleModels: matchingModels,
+        totalModels: allModels.length,
+        hiddenCount: Math.max(0, allModels.length - matchingModels.length),
+        collapsed: collapsedModelCategories[category.id] ?? false,
+      };
+    });
+  }, [
+    providerModelCategories,
+    hasModelSearch,
+    normalizedModelSearchQuery,
+    collapsedModelCategories,
+  ]);
+
+  const favoriteModelIdSet = useMemo(() => new Set(favoriteModelIds), [favoriteModelIds]);
 
   const toggleModelCategory = useCallback((categoryId: string) => {
     setCollapsedModelCategories(prev => ({ ...prev, [categoryId]: !prev[categoryId] }));
@@ -1923,6 +1963,7 @@ const startCoderPreview = useCallback(async () => {
   const renderChatBox = (isCenteredState: boolean = false) => {
     return (
       <ChatBoxPanel
+        activeModelId={activeModelId}
         researchState={researchMode}
         isCenteredState={isCenteredState}
         theme={theme}
@@ -2068,9 +2109,12 @@ const startCoderPreview = useCallback(async () => {
     ? (isSidebarOpen ? 'max-w-xl md:max-w-[44rem]' : 'max-w-xl md:max-w-2xl')
     : (isSidebarOpen ? 'max-w-4xl xl:max-w-[1020px]' : 'max-w-4xl xl:max-w-[1100px]');
 
-  const chatColumnGutterClass = isSidebarOpen
+  const chatColumnShellClass = isSidebarOpen
     ? 'px-4 md:px-6 xl:px-8'
-    : 'px-4 md:px-0';
+    : 'px-4 md:px-6';
+
+  const hasRightWorkspacePanel = (!isCoderMode && isCanvasOpen) || (!isCoderMode && isSourcesPanelOpen && !!activeSourcesMessage);
+  const chatSplitGapClass = hasRightWorkspacePanel ? 'px-3 md:px-4 xl:px-5' : '';
 
   if (showLogin) {
     return (
@@ -2977,6 +3021,7 @@ const startCoderPreview = useCallback(async () => {
                 <LuminaMemoryPanel
                   onClose={() => setIsLuminaMemoryOpen(false)}
                   agents={agents}
+                  convex={luminaConvex}
                   isSidebarOpen={isSidebarOpen}
                   onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
                 />
@@ -3010,7 +3055,7 @@ const startCoderPreview = useCallback(async () => {
                 <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
               <div 
                 ref={scrollRef}
-                className={`flex-1 overflow-y-auto py-8 custom-scrollbar scroll-smooth ${chatColumnGutterClass}`}
+                className={`flex-1 overflow-y-auto py-8 custom-scrollbar scroll-smooth ${chatColumnShellClass} ${chatSplitGapClass}`}
               >
                 <div className={`mx-auto space-y-8 pb-24 w-full ${chatColumnWidthClass}`}>
                   <AnimatePresence initial={false}>
@@ -3181,7 +3226,7 @@ const startCoderPreview = useCallback(async () => {
 
             </div>
 
-            <div className={`pb-6 pt-2 z-30 shrink-0 select-none bg-transparent border-transparent ${isSidebarOpen ? 'px-4 md:px-6 xl:px-8' : 'px-6'}`}>
+            <div className={`pb-6 pt-2 z-30 shrink-0 select-none bg-transparent border-transparent ${chatColumnShellClass} ${chatSplitGapClass}`}>
               <div className={`mx-auto relative flex flex-col gap-2 transition-all duration-300 w-full ${chatColumnWidthClass}`}>
                 {renderChatBox(messages.length === 0)}
                 <div className="text-center">
@@ -3377,7 +3422,7 @@ const startCoderPreview = useCallback(async () => {
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
-                {filteredModelList.length > 0 ? (
+                {activeModelList.length > 0 ? (
                   <>
                     <div className="flex items-center justify-between px-1">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--theme-muted)]">Categories</span>
@@ -3420,21 +3465,20 @@ const startCoderPreview = useCallback(async () => {
                       )}
                     </div>
 
-                    {providerModelCategories.map(category => {
-                      const collapsed = collapsedModelCategories[category.id];
+                    {preparedDrawerProviderCategories.map(category => {
                       return (
                         <div key={category.id} className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
                           <button
                             onClick={() => toggleModelCategory(category.id)}
                             className="w-full h-9 px-3 flex items-center gap-2 text-xs font-semibold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]"
                           >
-                            {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            {category.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                             <span className="flex-1 text-left truncate">{category.label}</span>
-                            <span className="text-[10px] text-[var(--theme-secondary)]">{category.models.length}</span>
+                            <span className="text-[10px] text-[var(--theme-secondary)]">{category.totalModels}</span>
                           </button>
-                          {!collapsed && (
+                          {!category.collapsed && (
                             <div className="p-1.5 space-y-1">
-                              {category.models.map(model => (
+                              {category.visibleModels.map((model: any) => (
                                 <div key={`${category.id}-${model.id}`} className={`group w-full min-h-[46px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                                   activeModelId === model.id ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
                                 }`}>
@@ -3448,15 +3492,25 @@ const startCoderPreview = useCallback(async () => {
                                   <button
                                     onClick={() => toggleFavoriteModel(model.id)}
                                     className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                                      favoriteModelIds.includes(model.id) ? 'text-[var(--theme-accent)] bg-[var(--theme-accent)]/10' : 'text-[var(--theme-muted)] hover:text-[var(--theme-accent)] hover:bg-[var(--theme-hover-bg)]'
+                                      favoriteModelIdSet.has(model.id) ? 'text-[var(--theme-accent)] bg-[var(--theme-accent)]/10' : 'text-[var(--theme-muted)] hover:text-[var(--theme-accent)] hover:bg-[var(--theme-hover-bg)]'
                                     }`}
-                                    title={favoriteModelIds.includes(model.id) ? 'Remove favorite' : 'Add favorite'}
+                                    title={favoriteModelIdSet.has(model.id) ? 'Remove favorite' : 'Add favorite'}
                                   >
                                     <Sparkles size={13} />
                                   </button>
                                   {activeModelId === model.id && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
                                 </div>
                               ))}
+                              {hasModelSearch && category.visibleModels.length === 0 && (
+                                <div className="px-3 py-4 text-center text-[11px] text-[var(--theme-secondary)]">
+                                  No models in this provider match "{modelSearchQuery.trim()}".
+                                </div>
+                              )}
+                              {!hasModelSearch && category.hiddenCount > 0 && (
+                                <div className="px-3 py-3 text-center text-[11px] text-[var(--theme-secondary)] border border-dashed border-[var(--theme-border)] rounded-lg bg-[var(--theme-hover-bg)]/40">
+                                  Showing {category.visibleModels.length} of {category.totalModels}. Search to reveal hidden models.
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

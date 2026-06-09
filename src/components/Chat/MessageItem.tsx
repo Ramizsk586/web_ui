@@ -212,6 +212,7 @@ function MessageItemComponent({
   wikiResults = EMPTY_WIKI_RESULTS,
   onSendMessage
 }: MessageItemProps) {
+  const toolCalls = message.toolCalls ?? [];
   const [copied, setCopied] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [textAnswer, setTextAnswer] = useState("");
@@ -267,7 +268,7 @@ function MessageItemComponent({
     };
 
     updateElapsed();
-    const interval = window.setInterval(updateElapsed, 100);
+    const interval = window.setInterval(updateElapsed, 500);
     return () => window.clearInterval(interval);
   }, [message.isThinking, message.startedAt, message.timestamp]);
 
@@ -297,13 +298,16 @@ function MessageItemComponent({
     return name === 'web_scrape' || name === 'fetch_url' || name.includes('scrape');
   };
 
+  const toolCallsById = useMemo(() => {
+    return new Map(toolCalls.map((node) => [node.id, node]));
+  }, [toolCalls]);
+
   const toolCallsForSummary = useMemo(() => {
-    if (!message.toolCalls) return [];
-    return message.toolCalls
+    return toolCalls
       .filter(node => node.id !== 'thinking-node')
       .filter(node => !isScrapeTool(node.toolName || ''))
       .filter(node => shouldShowTool(node.toolName || ''));
-  }, [message.toolCalls]);
+  }, [toolCalls]);
 
   const shouldShowWorkedSummary = useMemo(() => {
     return toolCallsForSummary.length > 0 && !message.isStreaming;
@@ -326,20 +330,18 @@ function MessageItemComponent({
 
   // Filter non-inline tool calls to only show allowed tools
   const nonInlineToolCalls = useMemo(() => {
-    if (!message.toolCalls) return [];
-    return message.toolCalls
+    return toolCalls
       .filter(node => node.id !== 'thinking-node')
       .filter(node => !message.content?.includes(`[[tool_call:${node.id}]]`))
       .filter(node => !isScrapeTool(node.toolName || ''))
       .filter(node => shouldShowTool(node.toolName || ''));
-  }, [message.toolCalls, message.content]);
+  }, [toolCalls, message.content]);
 
   const scrapeNodes = useMemo(() => {
-    if (!message.toolCalls) return [];
-    return message.toolCalls
+    return toolCalls
       .filter(node => node.id !== 'thinking-node')
       .filter(node => isScrapeTool(node.toolName || ''));
-  }, [message.toolCalls]);
+  }, [toolCalls]);
 
   const activeScrapeNode = useMemo(() => {
     if (scrapeNodes.length === 0) return null;
@@ -425,11 +427,10 @@ function MessageItemComponent({
       }));
     }
 
-    const previewImages = (scrapeResult?.images || []).slice(0, 4);
-    const previewText = String(scrapeResult?.rawText || '').replace(/\s+/g, ' ').trim();
-    const previewLines = previewText
-      ? previewText.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 3)
-      : [];
+    const visibleStep =
+      activeScrapeNode.status === 'complete' || scrapeResult
+        ? null
+        : steps.find((step) => step.status === 'active' || step.status === 'failed') || null;
 
     return {
       node: activeScrapeNode,
@@ -439,8 +440,7 @@ function MessageItemComponent({
       resolvedUrl,
       requestedUrl,
       steps,
-      previewImages,
-      previewLines,
+      visibleStep,
       linksFound: scrapeResult?.links?.length || 0
     };
   }, [activeScrapeNode, scrapingResults, message.startedAt, message.timestamp, scrapeElapsedMs]);
@@ -465,81 +465,9 @@ function MessageItemComponent({
     };
 
     updateElapsed();
-    const interval = window.setInterval(updateElapsed, 140);
+    const interval = window.setInterval(updateElapsed, 400);
     return () => window.clearInterval(interval);
   }, [activeScrapeNode?.status, message.startedAt, message.timestamp]);
-
-  const renderInlineContent = (content: string, isStreaming: boolean) => {
-    if (!content) return null;
-    const parts = content.split(/(\[\[tool_call:[a-zA-Z0-9_-]+\]\])/g);
-    const isLastPartToolCall = parts.length > 0 && !!parts[parts.length - 1].match(/^\[\[tool_call:[a-zA-Z0-9_-]+\]\]$/);
-    
-    return (
-      <>
-        {parts.map((part, idx) => {
-          const match = part.match(/^\[\[tool_call:([a-zA-Z0-9_-]+)\]\]$/);
-          if (match) {
-            const toolCallId = match[1];
-            const node = message.toolCalls?.find(n => n.id === toolCallId);
-            if (!isStreaming && shouldShowWorkedSummary) {
-              return null;
-            }
-            if (!node) {
-              return (
-                <div key={idx} className="my-2 p-3 border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl flex items-center gap-2">
-                  <Loader2 size={12} className="animate-spin text-emerald-500" />
-                  <span className="text-xs text-zinc-550 font-mono">Initializing tool execution...</span>
-                </div>
-              );
-            }
-            if (isScrapeTool(node.toolName || '')) {
-              return null;
-            }
-            
-            return (
-              <div key={idx} className="my-3 w-full">
-                <InlineToolCallCard 
-                  node={node}
-                  scrapingResults={scrapingResults}
-                  wikiResults={wikiResults}
-                  onSendMessage={onSendMessage}
-                />
-              </div>
-            );
-          }
-          
-          if (!part.trim()) return null;
-          
-          const isLastPart = idx === parts.length - 1;
-          
-          return (
-            <span key={idx} className="block text-left">
-              <Markdown 
-                remarkPlugins={[remarkGfm]} 
-                components={messageComponents}
-              >
-                {part}
-              </Markdown>
-              {isStreaming && isLastPart && !isLastPartToolCall && (
-                <motion.span
-                  animate={{ opacity: [1, 0] }}
-                  transition={{ repeat: Infinity, duration: 0.6 }}
-                  className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle"
-                />
-              )}
-            </span>
-          );
-        })}
-        {isStreaming && isLastPartToolCall && (
-          <motion.span
-            animate={{ opacity: [1, 0] }}
-            transition={{ repeat: Infinity, duration: 0.6 }}
-            className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle mt-1"
-          />
-        )}
-      </>
-    );
-  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -709,6 +637,89 @@ function MessageItemComponent({
     };
   }, [markdownComponents, message.sources, message.isStreaming]);
 
+  const renderedInlineContent = useMemo(() => {
+    if (!message.content) return null;
+
+    const parts = message.content.split(/(\[\[tool_call:[a-zA-Z0-9_-]+\]\])/g);
+    const isLastPartToolCall =
+      parts.length > 0 && !!parts[parts.length - 1].match(/^\[\[tool_call:[a-zA-Z0-9_-]+\]\]$/);
+
+    return (
+      <>
+        {parts.map((part, idx) => {
+          const match = part.match(/^\[\[tool_call:([a-zA-Z0-9_-]+)\]\]$/);
+          if (match) {
+            const toolCallId = match[1];
+            const node = toolCallsById.get(toolCallId);
+            if (!message.isStreaming && shouldShowWorkedSummary) {
+              return null;
+            }
+            if (!node) {
+              return (
+                <div key={idx} className="my-2 p-3 border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl flex items-center gap-2">
+                  <Loader2 size={12} className="animate-spin text-emerald-500" />
+                  <span className="text-xs text-zinc-550 font-mono">Initializing tool execution...</span>
+                </div>
+              );
+            }
+            if (isScrapeTool(node.toolName || '')) {
+              return null;
+            }
+
+            return (
+              <div key={idx} className="my-3 w-full">
+                <InlineToolCallCard
+                  node={node}
+                  scrapingResults={scrapingResults}
+                  wikiResults={wikiResults}
+                  onSendMessage={onSendMessage}
+                />
+              </div>
+            );
+          }
+
+          if (!part.trim()) return null;
+
+          const isLastPart = idx === parts.length - 1;
+
+          return (
+            <span key={idx} className="block text-left">
+              <Markdown
+                remarkPlugins={[remarkGfm]}
+                components={messageComponents}
+              >
+                {part}
+              </Markdown>
+              {message.isStreaming && isLastPart && !isLastPartToolCall && (
+                <motion.span
+                  animate={{ opacity: [1, 0] }}
+                  transition={{ repeat: Infinity, duration: 0.6 }}
+                  className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle"
+                />
+              )}
+            </span>
+          );
+        })}
+        {message.isStreaming && isLastPartToolCall && (
+          <motion.span
+            animate={{ opacity: [1, 0] }}
+            transition={{ repeat: Infinity, duration: 0.6 }}
+            className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle mt-1"
+          />
+        )}
+      </>
+    );
+  }, [
+    message.content,
+    message.isStreaming,
+    messageComponents,
+    onSendMessage,
+    scrapingResults,
+    shouldShowWorkedSummary,
+    toolCallsById,
+    wikiResults,
+  ]);
+
   return (
     <motion.div
       layout
@@ -865,7 +876,7 @@ function MessageItemComponent({
           </div>
         </motion.div>
       ) : (
-        <motion.div layout={message.isStreaming ? "position" : false} className="w-full space-y-4 max-w-4xl xl:max-w-[1100px]">
+        <motion.div layout={message.isStreaming ? "position" : false} className="w-full min-w-0 space-y-4">
           {((nonInlineToolCalls && nonInlineToolCalls.length > 0) ||
             message.searchQuery ||
             message.isSearching) && (
@@ -992,98 +1003,75 @@ function MessageItemComponent({
                       <div className="mt-1 text-[12px] text-zinc-500 break-words">
                         {scrapeProgressState.domain}
                       </div>
-                      {scrapeProgressState.requestedUrl && scrapeProgressState.resolvedUrl && scrapeProgressState.requestedUrl !== scrapeProgressState.resolvedUrl && (
-                        <div className="mt-2 text-[11px] text-zinc-500 break-words">
-                          Resolved from {scrapeProgressState.requestedUrl} to {scrapeProgressState.resolvedUrl}
-                        </div>
-                      )}
-                      <div className="mt-4 space-y-3">
-                        {scrapeProgressState.steps.map((step, idx) => (
-                          <div key={`${step.label}-${idx}`} className="space-y-1.5">
-                            <div className="flex items-center justify-between gap-3 text-[12px]">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span
-                                  className={`w-2 h-2 rounded-full shrink-0 ${
-                                    step.status === 'complete'
-                                      ? 'bg-emerald-400'
-                                      : step.status === 'failed'
+                      <div className="mt-4">
+                        <AnimatePresence mode="wait" initial={false}>
+                          {scrapeProgressState.visibleStep && (
+                            <motion.div
+                              key={`${scrapeProgressState.visibleStep.label}-${scrapeProgressState.visibleStep.status}`}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -10 }}
+                              transition={{ duration: 0.2, ease: 'easeOut' }}
+                              className="space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between gap-3 text-[12px]">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span
+                                    className={`w-2 h-2 rounded-full shrink-0 ${
+                                      scrapeProgressState.visibleStep.status === 'failed'
                                         ? 'bg-rose-400'
-                                        : step.status === 'active'
-                                          ? 'bg-sky-400 animate-pulse'
-                                          : 'bg-zinc-600'
-                                  }`}
-                                />
-                                <span
-                                  className={`truncate ${
-                                    step.status === 'complete'
-                                      ? 'text-zinc-300'
-                                      : step.status === 'failed'
+                                        : 'bg-sky-400 animate-pulse'
+                                    }`}
+                                  />
+                                  <span
+                                    className={`truncate ${
+                                      scrapeProgressState.visibleStep.status === 'failed'
                                         ? 'text-rose-400'
-                                        : step.status === 'active'
-                                          ? 'text-sky-300'
-                                          : 'text-zinc-500'
-                                  }`}
-                                >
-                                  {step.label}
+                                        : 'text-sky-300'
+                                    }`}
+                                  >
+                                    {scrapeProgressState.visibleStep.label}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-zinc-500 shrink-0">
+                                  {scrapeProgressState.visibleStep.progress}%
                                 </span>
                               </div>
-                              <span className="text-[11px] text-zinc-500 shrink-0">{step.progress}%</span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-zinc-800/90 overflow-hidden">
-                              <motion.div
-                                initial={false}
-                                animate={{ width: `${step.progress}%` }}
-                                transition={{ duration: 0.45, ease: 'easeOut' }}
-                                className={`h-full rounded-full ${
-                                  step.status === 'complete'
-                                    ? 'bg-emerald-400'
-                                    : step.status === 'failed'
+                              <div className="h-1.5 rounded-full bg-zinc-800/90 overflow-hidden">
+                                <motion.div
+                                  initial={false}
+                                  animate={{ width: `${scrapeProgressState.visibleStep.progress}%` }}
+                                  transition={{ duration: 0.45, ease: 'easeOut' }}
+                                  className={`h-full rounded-full ${
+                                    scrapeProgressState.visibleStep.status === 'failed'
                                       ? 'bg-rose-400'
-                                      : step.status === 'active'
-                                        ? 'bg-sky-400'
-                                        : 'bg-zinc-700'
-                                }`}
-                              />
-                            </div>
-                          </div>
-                        ))}
+                                      : 'bg-sky-400'
+                                  }`}
+                                />
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
 
                       {(scrapeProgressState.node.status === 'complete' || scrapeProgressState.scrapeResult) && (
-                        <div className="mt-5 space-y-3">
-                          <div className="text-[12px] text-zinc-300 font-medium">Collected data</div>
-                          {scrapeProgressState.previewImages.length > 0 && (
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                              {scrapeProgressState.previewImages.map((imgUrl, idx) => (
-                                <a
-                                  key={`${imgUrl}-${idx}`}
-                                  href={imgUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900/70"
-                                >
-                                  <img
-                                    src={imgUrl}
-                                    alt={`Scraped asset ${idx + 1}`}
-                                    className="w-full h-20 object-cover"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                </a>
-                              ))}
+                        <div className="mt-5">
+                          <a
+                            href={scrapeProgressState.resolvedUrl || scrapeProgressState.requestedUrl || '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-3 hover:bg-zinc-900/70 transition-colors"
+                          >
+                            <Globe size={14} className="text-sky-400 shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[12px] text-zinc-200 truncate">
+                                {scrapeProgressState.title}
+                              </div>
+                              <div className="mt-1 text-[11px] text-zinc-500 truncate">
+                                {scrapeProgressState.domain}
+                              </div>
                             </div>
-                          )}
-                          {scrapeProgressState.previewLines.length > 0 && (
-                            <div className="space-y-2">
-                              {scrapeProgressState.previewLines.map((line, idx) => (
-                                <div key={`${line.slice(0, 40)}-${idx}`} className="text-[12px] text-zinc-400 leading-6 break-words">
-                                  {line}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <div className="text-[11px] text-zinc-500">
-                            {scrapeProgressState.linksFound} links discovered
-                          </div>
+                          </a>
                         </div>
                       )}
                     </div>
@@ -1170,10 +1158,8 @@ function MessageItemComponent({
               </AnimatePresence>
             </div>
           )}
-          <div className="markdown-body prose-lg max-w-none px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined, paddingLeft: '-1px' }}>
-            {message.content ? (
-              renderInlineContent(message.content, message.isStreaming ?? false)
-            ) : null}
+          <div className="markdown-body prose-lg max-w-none min-w-0 px-1" style={{ minHeight: message.isStreaming ? '1.5rem' : undefined }}>
+            {renderedInlineContent}
           </div>
 
 

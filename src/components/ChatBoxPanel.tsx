@@ -338,9 +338,12 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   isVoicePanelOpen,
   setIsVoicePanelOpen,
 }) => {
-  const LARGE_PROVIDER_THRESHOLD = 50;
-  const LARGE_PROVIDER_VISIBLE_COUNT = 30;
-  const normalizedModelSearchQuery = modelSearchQuery.trim().toLowerCase();
+  const LARGE_PROVIDER_THRESHOLD = 20;
+  const LARGE_PROVIDER_VISIBLE_COUNT = 20;
+  const normalizedModelSearchQuery = React.useMemo(
+    () => modelSearchQuery.trim().toLowerCase(),
+    [modelSearchQuery],
+  );
   const hasModelSearch = normalizedModelSearchQuery.length > 0;
 
   const [isRagSelectorOpen, setIsRagSelectorOpen] = React.useState(false);
@@ -356,6 +359,25 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   const [ragEnabled, setRagEnabled] = React.useState(() => {
     return localStorage.getItem('lumina_rag_enabled') !== 'false';
   });
+  const [isStoppingLlamaServer, setIsStoppingLlamaServer] = React.useState(false);
+  const [isLlamaServerRunning, setIsLlamaServerRunning] = React.useState(false);
+
+  const handleStopLlamaServer = async () => {
+    if (isStoppingLlamaServer || !isLlamaServerRunning) return;
+    setIsStoppingLlamaServer(true);
+    try {
+      const response = await fetch('/api/llama/stop', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error('Failed to stop llama-server');
+      }
+      setIsLlamaServerRunning(false);
+      showToast('llama-server stopped');
+    } catch {
+      showToast('Failed to stop llama-server');
+    } finally {
+      setIsStoppingLlamaServer(false);
+    }
+  };
   const [selectedDocIds, setSelectedDocIds] = React.useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('lumina_rag_doc_ids') || '[]');
@@ -382,6 +404,87 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
       return false;
     }
   }, [activeModelId]);
+
+  const selectedActiveModel = React.useMemo(
+    () => activeModelList.find((model) => model.id === activeModelId) ?? null,
+    [activeModelId, activeModelList],
+  );
+  const selectedActiveModelName = selectedActiveModel?.name || activeModelId || 'Select model';
+  const selectedActiveModelShortId = activeModelId
+    ? activeModelId.split("/").slice(-1)[0]
+    : "model selector";
+  const favoriteModelIdSet = React.useMemo(
+    () => new Set(favoriteModelIds),
+    [favoriteModelIds],
+  );
+  const preparedProviderCategories = React.useMemo(() => {
+    return providerModelCategories.map((category) => {
+      const categoryModels = Array.isArray(category.models) ? category.models : [];
+      const matchingModels = hasModelSearch
+        ? categoryModels.filter((model) => {
+            const id = String(model?.id || '').toLowerCase();
+            const name = String(model?.name || '').toLowerCase();
+            const author = String(model?.author || model?.providerProfileName || '').toLowerCase();
+            return (
+              id.includes(normalizedModelSearchQuery) ||
+              name.includes(normalizedModelSearchQuery) ||
+              author.includes(normalizedModelSearchQuery)
+            );
+          })
+        : categoryModels;
+      const visibleModels = !hasModelSearch && categoryModels.length > LARGE_PROVIDER_THRESHOLD
+        ? matchingModels.slice(0, LARGE_PROVIDER_VISIBLE_COUNT)
+        : matchingModels;
+
+      return {
+        ...category,
+        categoryModels,
+        visibleModels,
+        hiddenCount: Math.max(0, categoryModels.length - visibleModels.length),
+        collapsed: collapsedModelCategories[category.id],
+      };
+    });
+  }, [
+    providerModelCategories,
+    hasModelSearch,
+    normalizedModelSearchQuery,
+    collapsedModelCategories,
+  ]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const refreshLlamaStatus = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      try {
+        const response = await fetch('/api/llama/status');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled) {
+          setIsLlamaServerRunning(Boolean(data?.running));
+        }
+      } catch {
+        if (!cancelled) {
+          setIsLlamaServerRunning(false);
+        }
+      }
+    };
+
+    refreshLlamaStatus();
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        refreshLlamaStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const interval = window.setInterval(refreshLlamaStatus, 10000);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(interval);
+    };
+  }, []);
 
   React.useEffect(() => {
     try {
@@ -504,39 +607,20 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
         )}
       </div>
 
-      {providerModelCategories.map(category => {
-        const collapsed = collapsedModelCategories[category.id];
-        const categoryModels = Array.isArray(category.models) ? category.models : [];
-        const matchingModels = hasModelSearch
-          ? categoryModels.filter((model) => {
-              const id = String(model?.id || '').toLowerCase();
-              const name = String(model?.name || '').toLowerCase();
-              const author = String(model?.author || model?.providerProfileName || '').toLowerCase();
-              return (
-                id.includes(normalizedModelSearchQuery) ||
-                name.includes(normalizedModelSearchQuery) ||
-                author.includes(normalizedModelSearchQuery)
-              );
-            })
-          : categoryModels;
-        const visibleModels = !hasModelSearch && categoryModels.length > LARGE_PROVIDER_THRESHOLD
-          ? matchingModels.slice(0, LARGE_PROVIDER_VISIBLE_COUNT)
-          : matchingModels;
-        const hiddenCount = Math.max(0, categoryModels.length - visibleModels.length);
-
+      {preparedProviderCategories.map(category => {
         return (
           <div key={category.id} className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
             <button onClick={() => toggleModelCategory(category.id)} className="w-full h-8 px-2.5 flex items-center gap-2 text-[10px] font-bold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]">
-              {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              {category.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
               <span className="flex-1 text-left truncate">{category.label}</span>
-              <span className="text-[8px] text-[var(--theme-secondary)]">{categoryModels.length}</span>
+              <span className="text-[8px] text-[var(--theme-secondary)]">{category.categoryModels.length}</span>
             </button>
-            {!collapsed && (
+            {!category.collapsed && (
               <div className="p-1 space-y-1">
-                {visibleModels.map((model) => {
+                {category.visibleModels.map((model) => {
                   const isSelected = activeModelId === model.id;
                   const isLocal = model.id.toLowerCase().includes("gguf");
-                  const isFavorite = favoriteModelIds.includes(model.id);
+                  const isFavorite = favoriteModelIdSet.has(model.id);
                   return (
                     <div key={`${category.id}-${model.id}`} className={`w-full min-h-[40px] flex items-center gap-2 px-2 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 border-l-[3px] ${isSelected ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] border-[var(--theme-accent)] shadow-sm" : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)]/60 hover:text-[var(--theme-primary)] border-transparent"}`}>
                       <button onClick={() => handleModelSelect(model.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left">
@@ -555,14 +639,14 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     </div>
                   );
                 })}
-                {hasModelSearch && visibleModels.length === 0 && (
+                {hasModelSearch && category.visibleModels.length === 0 && (
                   <div className="py-3 px-2 text-center text-[10px] text-[var(--theme-muted)]">
                     No models in this provider match "{modelSearchQuery.trim()}".
                   </div>
                 )}
-                {!hasModelSearch && hiddenCount > 0 && (
+                {!hasModelSearch && category.hiddenCount > 0 && (
                   <div className="px-2 py-2 text-[10px] text-center text-[var(--theme-muted)] border border-dashed border-[var(--theme-border)] rounded-lg bg-[var(--theme-surface-alt)]/60">
-                    Showing {visibleModels.length} of {categoryModels.length} models. Search a model name to reveal the rest.
+                    Showing {category.visibleModels.length} of {category.categoryModels.length} models. Search a model name to reveal the rest.
                   </div>
                 )}
               </div>
@@ -2904,6 +2988,22 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
             )}
 
             {/* Mic and send buttons */}
+            {isLlamaServerRunning && (
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                transition={{ duration: 0.08 }}
+                onClick={handleStopLlamaServer}
+                disabled={isStoppingLlamaServer}
+                className="p-2 rounded-2xl transition-all cursor-pointer mr-0.5 flex items-center justify-center shrink-0 border border-transparent text-orange-400 hover:text-orange-300 hover:bg-[var(--theme-hover-bg)] disabled:opacity-50"
+                title="Stop llama-server"
+              >
+                <StopCircle
+                  size={18}
+                  className={isStoppingLlamaServer ? "animate-pulse" : ""}
+                />
+              </motion.button>
+            )}
+
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={() => {

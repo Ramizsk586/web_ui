@@ -221,6 +221,28 @@ interface LuminaAgentPanelProps {
   onToggleSidebar?: () => void;
 }
 
+interface SharedMemoryRecord {
+  memoryId: string;
+  content: string;
+  tier: 'short' | 'long' | 'permanent';
+  segment: 'identity' | 'preference' | 'correction' | 'relationship' | 'project' | 'knowledge' | 'context';
+  importance: number;
+  accessCount: number;
+  lastAccessedAt: number;
+  lifecycle: 'active' | 'archived' | 'pruned';
+  source: string;
+  agentId?: string;
+  createdAt: number;
+}
+
+interface SharedMemoryApi {
+  memories: SharedMemoryRecord[];
+  addMemory: (memory: SharedMemoryRecord) => Promise<void>;
+  patchMemory: (memoryId: string, patch: Partial<SharedMemoryRecord>) => Promise<void>;
+  deleteMemory: (memoryId: string) => Promise<void>;
+  recallMemory: (memoryId: string) => Promise<void>;
+}
+
 // ─── Helper Functions ───────────────────────────────────────────────────────────
 function timeAgo(ts: number | null): string {
   if (!ts) return 'never';
@@ -1013,8 +1035,14 @@ const computePanelDecayStep = (memory: MemoryRecord, elapsedMs: number) => {
 };
 
 // ─── Memory Panel ───────────────────────────────────────────────────────────────
-export function MemorySubPanel({ agents }: { agents: Agent[] }) {
-  const [memories, setMemories] = useState<MemoryRecord[]>(() => {
+export function MemorySubPanel({
+  agents,
+  memoryApi,
+}: {
+  agents: Agent[];
+  memoryApi?: SharedMemoryApi;
+}) {
+  const [localMemories, setLocalMemories] = useState<MemoryRecord[]>(() => {
     const loaded = loadMemoryRecords();
     return loaded;
   });
@@ -1035,14 +1063,36 @@ export function MemorySubPanel({ agents }: { agents: Agent[] }) {
   const [formSource, setFormSource] = useState('conversation');
   const [formAgentId, setFormAgentId] = useState<string | null>(null);
 
+  const memories = useMemo<MemoryRecord[]>(() => {
+    if (!memoryApi) {
+      return localMemories;
+    }
+
+    return memoryApi.memories.map((mem) => ({
+      id: mem.memoryId,
+      content: mem.content,
+      tier: mem.tier,
+      segment: mem.segment,
+      decay: Math.max(0, Math.min(1, mem.importance ?? 0)),
+      memoryId: mem.memoryId,
+      lastAccessed: mem.lastAccessedAt ?? mem.createdAt,
+      createdAt: mem.createdAt,
+      source: mem.source,
+      agentId: mem.agentId ?? null,
+    }));
+  }, [localMemories, memoryApi]);
+
   useEffect(() => {
-    saveMemoryRecords(memories);
-  }, [memories]);
+    if (!memoryApi) {
+      saveMemoryRecords(localMemories);
+    }
+  }, [localMemories, memoryApi]);
 
   // Apply decay over time (simulated)
   useEffect(() => {
+    if (memoryApi) return;
     const interval = setInterval(() => {
-      setMemories(prev => prev.map(m => {
+      setLocalMemories(prev => prev.map(m => {
         const decayDelta = computePanelDecayStep(m, 10_000);
         const newDecay = clampMemoryValue(m.decay - decayDelta);
         const nextTier =
@@ -1053,7 +1103,7 @@ export function MemorySubPanel({ agents }: { agents: Agent[] }) {
       }));
     }, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [memoryApi]);
 
   const filtered = useMemo(() => {
     let result = memories;
@@ -1131,14 +1181,36 @@ export function MemorySubPanel({ agents }: { agents: Agent[] }) {
     setShowCreate(true);
   }, []);
 
-  const saveMemory = useCallback(() => {
+  const saveMemory = useCallback(async () => {
     if (!formContent.trim()) return;
 
-    if (editingId) {
-      setMemories(prev => prev.map(m => {
+    if (editingId && memoryApi) {
+      await memoryApi.patchMemory(editingId, {
+        content: formContent.trim(),
+        tier: formTier,
+        segment: formSegment,
+        source: formSource,
+        agentId: formAgentId ?? undefined,
+      });
+    } else if (editingId) {
+      setLocalMemories(prev => prev.map(m => {
         if (m.id !== editingId) return m;
         return { ...m, content: formContent.trim(), tier: formTier, segment: formSegment, source: formSource, agentId: formAgentId };
       }));
+    } else if (memoryApi) {
+      await memoryApi.addMemory({
+        memoryId: generateUUID(),
+        content: formContent.trim(),
+        tier: formTier,
+        segment: formSegment,
+        importance: formTier === 'permanent' ? 0.99 : formTier === 'long' ? 0.85 : 0.6,
+        accessCount: 0,
+        lastAccessedAt: Date.now(),
+        lifecycle: 'active',
+        source: formSource,
+        agentId: formAgentId ?? undefined,
+        createdAt: Date.now(),
+      });
     } else {
       const newMem: MemoryRecord = {
         id: generateMemoryId(),
@@ -1152,22 +1224,30 @@ export function MemorySubPanel({ agents }: { agents: Agent[] }) {
         source: formSource,
         agentId: formAgentId,
       };
-      setMemories(prev => [newMem, ...prev]);
+      setLocalMemories(prev => [newMem, ...prev]);
     }
     resetForm();
-  }, [formContent, formTier, formSegment, formSource, formAgentId, editingId, resetForm]);
+  }, [editingId, formAgentId, formContent, formSegment, formSource, formTier, memoryApi, resetForm]);
 
-  const deleteMemory = useCallback((id: string) => {
-    setMemories(prev => prev.filter(m => m.id !== id));
-  }, []);
+  const deleteMemory = useCallback(async (id: string) => {
+    if (memoryApi) {
+      await memoryApi.deleteMemory(id);
+      return;
+    }
+    setLocalMemories(prev => prev.filter(m => m.id !== id));
+  }, [memoryApi]);
 
-  const recallMemory = useCallback((id: string) => {
-    setMemories(prev => prev.map(m => {
+  const recallMemory = useCallback(async (id: string) => {
+    if (memoryApi) {
+      await memoryApi.recallMemory(id);
+      return;
+    }
+    setLocalMemories(prev => prev.map(m => {
       if (m.id !== id) return m;
       const boost = Math.min(1, m.decay + 0.1);
       return { ...m, decay: boost, lastAccessed: Date.now() };
     }));
-  }, []);
+  }, [memoryApi]);
 
   const maxSegmentCount = useMemo(() => Math.max(1, ...Object.values(stats.segmentCounts)), [stats.segmentCounts]);
   const maxTierCount = useMemo(() => Math.max(1, ...Object.values(stats.tierCounts)), [stats.tierCounts]);
@@ -4771,6 +4851,7 @@ export function LuminaAgentPanel({
 interface LuminaMemoryPanelProps {
   onClose: () => void;
   agents: Agent[];
+  convex?: SharedMemoryApi;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
 }
@@ -4778,6 +4859,7 @@ interface LuminaMemoryPanelProps {
 export function LuminaMemoryPanel({
   onClose,
   agents,
+  convex,
   isSidebarOpen,
   onToggleSidebar
 }: LuminaMemoryPanelProps) {
@@ -4809,7 +4891,7 @@ export function LuminaMemoryPanel({
 
       <div className="flex-1 overflow-auto bg-[var(--theme-bg)]">
         <div className="mx-auto w-full max-w-[1600px] px-5 py-5">
-          <MemorySubPanel agents={agents} />
+          <MemorySubPanel agents={agents} memoryApi={convex} />
         </div>
       </div>
     </div>

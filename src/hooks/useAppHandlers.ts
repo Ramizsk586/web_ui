@@ -44,8 +44,43 @@ import {
 } from '../services/wikiService';
 
 const compressToolResultForApi = (name: string, result: any): string => {
-  if (!result) return '';
-  const str = typeof result === 'string' ? result : JSON.stringify(result);
+  if (result === undefined) {
+    return JSON.stringify({
+      status: 'no_result',
+      message: `Tool "${name}" completed without returning a payload.`
+    });
+  }
+
+  if (result === null) {
+    return JSON.stringify({
+      status: 'null_result',
+      message: `Tool "${name}" returned null.`
+    });
+  }
+
+  const str = typeof result === 'string'
+    ? result
+    : (() => {
+        try {
+          const serialized = JSON.stringify(result);
+          if (typeof serialized === 'string') {
+            return serialized;
+          }
+        } catch {}
+
+        return JSON.stringify({
+          status: 'serialization_fallback',
+          message: `Tool "${name}" returned a non-serializable payload.`,
+          preview: String(result)
+        });
+      })();
+
+  if (!str.trim()) {
+    return JSON.stringify({
+      status: 'empty_result',
+      message: `Tool "${name}" returned an empty payload.`
+    });
+  }
   
   if (str.length <= 2500) {
     return str;
@@ -1530,7 +1565,7 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
         }
         return chat;
       }));
-      activeChatForTurn = { ...activeChatForTurn, isCoderMode: true };
+      activeChatForTurn = { id: chatId, title: '', messages: [], updatedAt: new Date(), isCoderMode: true };
     }
     
     const effectiveCoderMode =
@@ -3057,6 +3092,51 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             toolCallNodes.push(node);
           }
 
+          // Group consecutive wiki tool calls into a single wiki_research parent node with animated sub-nodes
+          {
+            const groupedCallNodes: ToolCallNode[] = [];
+            let i = 0;
+            while (i < currentCallNodes.length) {
+              const node = currentCallNodes[i];
+              if (node.toolName?.startsWith('wiki_')) {
+                // Collect consecutive wiki tool nodes
+                const wikiGroup: ToolCallNode[] = [];
+                while (i < currentCallNodes.length && currentCallNodes[i].toolName?.startsWith('wiki_')) {
+                  wikiGroup.push(currentCallNodes[i]);
+                  i++;
+                }
+                if (wikiGroup.length === 1) {
+                  // Single wiki tool — keep as-is
+                  groupedCallNodes.push(wikiGroup[0]);
+                } else {
+                  // Multiple consecutive wiki tools — create parent with animated sub-nodes
+                  const firstArgs = wikiGroup[0].label?.match(/\[([^\]]+)\]/)?.[1] || '';
+                  const parentNode: ToolCallNode = {
+                    id: `wiki-group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    type: 'tool',
+                    label: firstArgs ? `Wiki research (${firstArgs})` : 'Wiki research',
+                    status: 'active',
+                    toolName: 'wiki_research',
+                    toolCategory: 'web',
+                    argsCount: wikiGroup.length,
+                    icon: 'globe',
+                    subNodes: wikiGroup.map(sub => ({ ...sub, id: sub.id })),
+                  };
+                  groupedCallNodes.push(parentNode);
+                }
+              } else {
+                groupedCallNodes.push(node);
+                i++;
+              }
+            }
+            currentCallNodes.length = 0;
+            currentCallNodes.push(...groupedCallNodes);
+            // Also update toolCallNodes to match — replace wiki nodes with parent
+            const existingIds = new Set(groupedCallNodes.map(n => n.id));
+            toolCallNodes.length = 0;
+            toolCallNodes.push(...groupedCallNodes);
+          }
+
           const currentPlaceholders = currentCallNodes.map(node => `[[tool_call:${node.id}]]`).join('\n\n');
           agentTraceContent += `${agentTraceContent ? '\n\n' : ''}${currentPlaceholders}`;
 
@@ -3099,7 +3179,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   cachedNode.label = `${cachedNode.label} [cached]`;
                 }
                 showToast(`Reused cached result for ${name}`);
-              } else if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'glob_tool', 'grep_tool', 'analyze_file', 'run_skill', 'manage_todos', 'fetch_url', 'web_search', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
+              } else if (!isCoderMode && ['write_file', 'edit_file', 'read_file', 'glob_tool', 'grep_tool', 'analyze_file', 'run_skill', 'manage_todos', 'ask_user', 'create_file', 'delete_file', 'rename_file', 'run_command'].includes(name)) {
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               } else {
                 const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
@@ -3675,8 +3755,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     successfulScrapesCount++;
                     const rawText = normalizedScrapeResult.rawText || '';
                     const processedText = useTurboQuant
-                      ? turboQuantCompress(rawText, 4000, 'medium')
-                      : rawText.substring(0, 3000) + (rawText.length > 3000 ? '...' : '');
+                      ? turboQuantCompress(rawText, 8000, 'medium')
+                      : rawText.substring(0, 6000) + (rawText.length > 6000 ? '\n\n...[truncated]' : '');
                     resultValue = {
                       title: normalizedScrapeResult.title,
                       url: normalizedScrapeResult.url,
@@ -3693,19 +3773,20 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 if (!searchQueryVal) throw new Error("Websearch requires query");
                 showToast(`Searching: ${searchQueryVal.substring(0, 40)}`);
                 const key = searchProvider === 'serpapi' ? serpApiKey : tavilyApiKey;
-                if (key && key.trim()) {
-                  const searchRes = await fetch('/api/search', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: searchQueryVal, tavilyKey: tavilyApiKey, serpKey: serpApiKey, provider: searchProvider }),
-                    signal
-                  });
-                  const searchData = await searchRes.json();
-                  const sliced = (searchData.results || []).slice(0, maxRes);
-                  resultValue = { query: searchQueryVal, provider: searchData.provider, count: sliced.length, results: sliced };
-                } else {
-                  resultValue = { error: 'No search API key configured. Configure Tavily or SerpAPI in Settings.' };
-                }
+                const searchRes = await fetch('/api/search', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    query: searchQueryVal,
+                    tavilyKey: tavilyApiKey,
+                    serpKey: serpApiKey,
+                    provider: key && key.trim() ? searchProvider : 'duckduckgo'
+                  }),
+                  signal
+                });
+                const searchData = await searchRes.json();
+                const sliced = (searchData.results || []).slice(0, maxRes);
+                resultValue = { query: searchQueryVal, provider: searchData.provider, count: sliced.length, results: sliced };
               } else if (name === 'deep_search') {
                 const searchQueryVal = String(args.query || '');
                 const depthPresetVal = String(args.depth || 'standard');
@@ -4307,7 +4388,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   resultValue = {
                     title: normalizedScrapeResult.title,
                     url: normalizedScrapeResult.url,
-                    requestedUrl: normalizedScrapeResult.requestedUrl,
                     statusCode: normalizedScrapeResult.statusCode,
                     scrapedAt: normalizedScrapeResult.scrapedAt,
                     dataExcerpt: normalizedScrapeResult.data,
@@ -4317,6 +4397,12 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   };
                   successfulScrapesCount++;
                   showToast(`Successfully scraped "${normalizedScrapeResult.title || 'Page'}"`);
+                }
+
+                if (!resultValue) {
+                  resultValue = {
+                    error: 'web_scrape completed without a usable payload'
+                  };
                 }
               } else if (name === 'wiki_search') {
                 const { query, limit = 10, language = 'en' } = args;
