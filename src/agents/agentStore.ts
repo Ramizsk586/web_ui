@@ -49,13 +49,3 @@ export function deleteAgent(id: string): Agent[] {
   saveAgents(updated);
   return updated;
 }
-
-export function appendAgentMessage(agentId: string, message: AgentMessage): Agent[] {
-  const current = loadAgents();
-  const updated = current.map(a => {
-    if (a.id !== agentId) return a;
-    return { ...a, chatHistory: [...a.chatHistory, message], updatedAt: Date.now() };
-  });
-  saveAgents(updated);
-  return updated;
-}

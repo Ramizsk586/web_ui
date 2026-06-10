@@ -1,17 +1,4 @@
 import React, { useCallback, useEffect } from 'react';
-import { 
-  Globe, 
-  Sparkles, 
-  Check, 
-  Search, 
-  FileText, 
-  PenTool, 
-  Code, 
-  Wrench, 
-  Terminal, 
-  Box, 
-  CloudMoon 
-} from 'lucide-react';
 import { computeLineDiff } from '../components/NodeGraph/FileDiffNode';
 import { parseThinkTags, turboQuantCompress } from '../utils/textUtils';
 import { extractArtifacts } from '../utils/artifactUtils';
@@ -31,7 +18,7 @@ import { Chat, Message, ToolCallNode } from '../types';
 import { CoderPermissionMode } from '../types';
 import { scrapeUrl, ScrapeResult } from '../services/scrapingService';
 import { explainCommandRestriction, shouldRequestCommandPermission } from '../utils/permissionUtils';
-import { executeViaTerminal, isTerminalRegistered } from '../utils/terminalService';
+import { executeViaTerminal } from '../utils/terminalService';
 import {
   wikiSearch,
   wikiGetPage,
@@ -821,9 +808,6 @@ const shouldActivateOrchestration = (msg: string): boolean => {
   return ORCHESTRATION_TRIGGERS.some(trigger => lower.includes(trigger));
 };
 
-const dummysum = () => {
-};
-
 const loadCustomSkillsFromStorage = () => {
   try {
     const saved = localStorage.getItem('lumina_custom_skills');
@@ -1198,7 +1182,14 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       ];
 
       const res = await callLlamaBridge(extractionPrompt, []);
-      const text = res?.choices?.[0]?.message?.content || '';
+      let text = res?.choices?.[0]?.message?.content || '';
+      // Clean XML tool call artifacts from minimax-style models
+      text = text
+        .replace(/minimax:tool_call\s*/gi, '')
+        .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
+        .replace(/^\s*text\s*$/gm, '')
+        .replace(/^\s*Copy\s*$/gm, '')
+        .trim();
       const match = text.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);
@@ -1734,7 +1725,14 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             }
           ];
           const planRes = await callLlamaBridge(planPromptMessage, [], signal);
-          const textResponse = planRes?.choices?.[0]?.message?.content || '';
+          let textResponse = planRes?.choices?.[0]?.message?.content || '';
+          // Clean any XML tool call artifacts that minimax-style models may inject
+          textResponse = textResponse
+            .replace(/minimax:tool_call\s*/gi, '')
+            .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
+            .replace(/^\s*text\s*$/gm, '')
+            .replace(/^\s*Copy\s*$/gm, '')
+            .trim();
           const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);

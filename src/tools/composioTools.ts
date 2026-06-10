@@ -334,10 +334,3 @@ export const COMPOSIO_TOOLKITS: ComposioToolkitDef[] = [
   },
 ];
 
-export function getComposioToolkitBySlug(slug: string): ComposioToolkitDef | undefined {
-  return COMPOSIO_TOOLKITS.find(t => t.slug === slug);
-}
-
-export function getAllComposioToolDefinitions(): ToolDefinition[] {
-  return COMPOSIO_TOOLKITS.flatMap(t => t.tools);
-}

@@ -103,34 +103,3 @@ export async function scrapeUrl(options: ScrapeOptions): Promise<ScrapeResult> {
   }
 }
 
-/**
- * Scrapes a batch of URLs sequentially or in parallel
- */
-export async function scrapeBatch(urls: string[], options?: Partial<ScrapeOptions>): Promise<ScrapeResult[]> {
-  const results: ScrapeResult[] = [];
-  for (const url of urls) {
-    const singleRes = await scrapeUrl({ ...options, url });
-    results.push(singleRes);
-  }
-  return results;
-}
-
-/**
- * Helper to turn html into basic markdown (fallback in case server doesn't do it)
- */
-export function htmlToMarkdown(html: string): string {
-  if (!html) return '';
-  // Basic strip tags and parse representation
-  let text = html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, '\n\n# $1\n')
-    .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, '\n\n$1\n')
-    .replace(/<br[^>]*>/gi, '\n')
-    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, '\n- $1')
-    .replace(/<[^>]*>/g, '');
-  
-  // Clean double whitespaces
-  text = text.replace(/\n\s*\n/g, '\n\n').trim();
-  return text;
-}

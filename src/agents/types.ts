@@ -118,13 +118,6 @@ export interface AgentMessage {
   thinkContent?: string;
 }
 
-export interface AgentCreationDraft {
-  userDescription: string;       // raw user input e.g. "a coach who helps me with fitness"
-  isGenerating: boolean;
-  generatedAgent: Partial<Agent> | null;
-  error: string | null;
-}
-
 export interface AgentRunToolEvent {
   id: string;
   type: 'tool';

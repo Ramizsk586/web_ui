@@ -8,7 +8,7 @@ import axios from 'axios';
 import { search } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
-import { spawn, spawnSync, type ChildProcessByStdio, type ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "child_process";
 import si from 'systeminformation';
 
 import { createRequire } from "module";
@@ -107,6 +107,69 @@ async function startServer() {
 
   const writeAgentEvent = (res: express.Response, payload: Record<string, any>) => {
     res.write(`${JSON.stringify(payload)}\n`);
+  };
+
+  const parseXmlToolCalls = (content: string): { cleanedContent: string; toolCalls: any[] } | null => {
+    if (!content || typeof content !== 'string') return null;
+    const invokeRegex = /<invoke\s+name=["']([^"']+)["']>\s*[\s\S]*?<\/invoke>/gi;
+    const matches = [...content.matchAll(invokeRegex)];
+    if (matches.length === 0) return null;
+    const toolCalls: any[] = [];
+    let cleanedContent = content;
+    for (const match of matches) {
+      const fullMatch = match[0];
+      const toolName = match[1];
+      const paramsBlock = fullMatch.slice(fullMatch.indexOf('>') + 1, fullMatch.lastIndexOf('<'));
+      const params: Record<string, any> = {};
+      const paramRegex = /<parameter\s+name=["']([^"']+)["']>\s*([\s\S]*?)\s*<\/parameter>/gi;
+      let paramMatch;
+      while ((paramMatch = paramRegex.exec(paramsBlock)) !== null) {
+        const key = paramMatch[1];
+        let value: any = paramMatch[2].trim();
+        if (value.startsWith('{') || value.startsWith('[')) {
+          try { value = JSON.parse(value); } catch {}
+        } else if (value === 'true') { value = true; }
+        else if (value === 'false') { value = false; }
+        else if (/^\d+$/.test(value)) { value = parseInt(value, 10); }
+        else if (/^\d+\.\d+$/.test(value)) { value = parseFloat(value); }
+        params[key] = value;
+      }
+      toolCalls.push({
+        id: `tool_call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: 'function',
+        function: {
+          name: toolName,
+          arguments: JSON.stringify(params)
+        }
+      });
+      cleanedContent = cleanedContent.replace(fullMatch, '');
+    }
+    cleanedContent = cleanedContent
+      .replace(/minimax:tool_call\s*/gi, '')
+      .replace(/^\s*text\s*$/gm, '')
+      .replace(/^\s*Copy\s*$/gm, '')
+      .trim();
+    if (toolCalls.length === 0) return null;
+    return { cleanedContent, toolCalls };
+  };
+
+  const normalizeLlmResponse = (responseData: any): any => {
+    if (!responseData?.choices?.[0]?.message) return responseData;
+    const message = responseData.choices[0].message;
+    if (message.tool_calls && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      return responseData;
+    }
+    if (message.content && typeof message.content === 'string') {
+      const parsed = parseXmlToolCalls(message.content);
+      if (parsed && parsed.toolCalls.length > 0) {
+        console.log(`[LUMINA_DEBUG] Parsed ${parsed.toolCalls.length} XML tool call(s) from model content`);
+        message.tool_calls = parsed.toolCalls;
+        if (parsed.cleanedContent) {
+          message.content = parsed.cleanedContent;
+        }
+      }
+    }
+    return responseData;
   };
 
   const mapRuntimeToolSchema = (tool: RuntimeTool) => ({
@@ -2250,7 +2313,6 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
   });
 
   type ScrapeStrategy = 'static' | 'dynamic' | 'crawl';
-  type BrowserEngine = 'lightpanda';
   type LightpandaCloudConfig = {
     region?: 'euwest' | 'uswest' | 'useast';
     token?: string;
@@ -2619,7 +2681,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
   const scrapeDynamicPage = async (
     targetUrl: string,
-    _engine: BrowserEngine,
+    _engine: string,
     waitForSelector?: string,
     lightpandaCloudConfig?: LightpandaCloudConfig
   ): Promise<{ html: string; statusCode: number; finalUrl: string; cdpUrl: string; engineLabel: string }> =>
@@ -3095,7 +3157,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         delete retryBody.tool_choice;
         response = await axios.post(`${bridgeUrl}/v1/chat/completions`, retryBody, { headers, timeout: 30000 });
       }
-      res.json(response.data);
+      res.json(normalizeLlmResponse(response.data));
     } catch (e: any) {
       const detail = getUpstreamErrorDetail(e);
       res.status(getUpstreamErrorStatus(e)).json({ error: 'Bridge chat failed', detail });
@@ -3839,15 +3901,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       res.json({ success: true, folderPath: demoDir.replace(/\\/g, '/') });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to create demo workspace", detail: err.message });
-    }
-  });
-
-  // Dummy wrapper to match final closing brackets safely
-  app.get("/api/dummy-placeholder", (req, res) => {
-    try {
-      console.log();
-    } catch (e: any) {
-      res.status(500).json({ error: "Failed to get git diff", detail: e.message });
     }
   });
 
@@ -5950,7 +6003,7 @@ ${contextStr}`;
         }
 
         if (!response) throw lastError || new Error('Chat completion failed after retries');
-        return res.json(response.data);
+        return res.json(normalizeLlmResponse(response.data));
       }
 
       let response;
@@ -5991,6 +6044,7 @@ ${contextStr}`;
       res.setHeader('Connection', 'keep-alive');
 
       const decoder = new TextDecoder();
+      let streamToolCalls: any[] = [];
       response.data.on('data', (chunk: Buffer) => {
         const text = decoder.decode(chunk, { stream: true });
         const lines = text.split('\n').filter((l: string) => l.trim());
@@ -5998,14 +6052,42 @@ ${contextStr}`;
           if (line.startsWith('data: ')) {
             const dataStr = line.slice(6);
             if (dataStr === '[DONE]') {
+              if (streamToolCalls.length > 0) {
+                res.write(JSON.stringify({ type: 'tool_calls', tool_calls: streamToolCalls }) + '\n');
+              }
+              res.write('data: [DONE]\n\n');
               res.end();
               return;
             }
             try {
               const data = JSON.parse(dataStr);
-              const content = data.choices?.[0]?.delta?.content || '';
+              const delta = data.choices?.[0]?.delta;
+              const content = delta?.content || '';
               if (content) {
                 res.write(content);
+                // Parse XML tool calls from content (for minimax-style models)
+                if (content.includes('<invoke')) {
+                  const parsed = parseXmlToolCalls(content);
+                  if (parsed && parsed.toolCalls.length > 0) {
+                    streamToolCalls.push(...parsed.toolCalls);
+                  }
+                }
+              }
+              // Accumulate proper OpenAI tool_call deltas
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index ?? streamToolCalls.length;
+                  if (!streamToolCalls[idx]) {
+                    streamToolCalls[idx] = {
+                      id: tc.id || '',
+                      type: 'function',
+                      function: { name: '', arguments: '' }
+                    };
+                  }
+                  if (tc.id) streamToolCalls[idx].id = tc.id;
+                  if (tc.function?.name) streamToolCalls[idx].function.name += tc.function.name;
+                  if (tc.function?.arguments) streamToolCalls[idx].function.arguments += tc.function.arguments;
+                }
               }
             } catch {}
           }

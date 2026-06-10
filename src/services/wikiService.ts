@@ -30,36 +30,6 @@ export interface WikiPage {
   thumbnail?: { url: string; width: number; height: number };
 }
 
-export interface WikiSection {
-  index: number;
-  title: string;
-  anchor: string;            // URL anchor (e.g. "Early_life")
-  level: number;             // 1 = H2, 2 = H3, etc.
-  content: string;           // Plain text content of section
-  byteOffset: number;
-}
-
-export interface WikiReference {
-  index: number;
-  text: string;
-  urls: string[];
-}
-
-export interface WikiImage {
-  name: string;              // File name on Wikimedia
-  url: string;               // Direct URL (may need Wikimedia API to resolve)
-  thumbnail?: string;
-  width?: number;
-  height?: number;
-  description?: string;
-}
-
-export interface WikiCategory {
-  title: string;             // e.g. "Category:American astronauts"
-  name: string;              // e.g. "American astronauts" (stripped)
-  url: string;
-}
-
 export interface WikiSummary {
   pageId: number;
   title: string;

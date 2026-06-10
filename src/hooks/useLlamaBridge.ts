@@ -37,9 +37,71 @@ function isRateLimitError(msg: string, status?: number): boolean {
     lower.includes('quota exceeded');
 }
 
-function getRateLimitRetryMs(msg: string): number {
-  // Disabled automatic retry - model works properly
-  return 0;
+// Parse XML-style tool calls from models like minimax
+function parseXmlToolCalls(content: string): { cleanedContent: string; toolCalls: any[] } | null {
+  if (!content || typeof content !== 'string') return null;
+  const invokeRegex = /<invoke\s+name=["']([^"']+)["']>\s*[\s\S]*?<\/invoke>/gi;
+  const matches = [...content.matchAll(invokeRegex)];
+  if (matches.length === 0) return null;
+  const toolCalls: any[] = [];
+  let cleanedContent = content;
+  for (const match of matches) {
+    const fullMatch = match[0];
+    const toolName = match[1];
+    const paramsBlock = fullMatch.slice(fullMatch.indexOf('>') + 1, fullMatch.lastIndexOf('<'));
+    const params: Record<string, any> = {};
+    const paramRegex = /<parameter\s+name=["']([^"']+)["']>\s*([\s\S]*?)\s*<\/parameter>/gi;
+    let paramMatch;
+    while ((paramMatch = paramRegex.exec(paramsBlock)) !== null) {
+      const key = paramMatch[1];
+      let value: any = paramMatch[2].trim();
+      if (value.startsWith('{') || value.startsWith('[')) {
+        try { value = JSON.parse(value); } catch {}
+      } else if (value === 'true') { value = true; }
+      else if (value === 'false') { value = false; }
+      else if (/^\d+$/.test(value)) { value = parseInt(value, 10); }
+      else if (/^\d+\.\d+$/.test(value)) { value = parseFloat(value); }
+      params[key] = value;
+    }
+    toolCalls.push({
+      id: `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: 'function',
+      function: {
+        name: toolName,
+        arguments: JSON.stringify(params)
+      }
+    });
+    cleanedContent = cleanedContent.replace(fullMatch, '');
+  }
+  cleanedContent = cleanedContent
+    .replace(/minimax:tool_call\s*/gi, '')
+    .replace(/^\s*text\s*$/gm, '')
+    .replace(/^\s*Copy\s*$/gm, '')
+    .trim();
+  if (toolCalls.length === 0) return null;
+  return { cleanedContent, toolCalls };
+}
+
+// Normalize LLM response: if tool_calls are missing but content has XML tool calls, extract them
+function normalizeLlmResponse(responseData: any): any {
+  if (!responseData?.choices?.[0]?.message) return responseData;
+  const message = responseData.choices[0].message;
+  // If proper tool_calls already exist, return as-is
+  if (message.tool_calls && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+    return responseData;
+  }
+  // Try to parse XML tool calls from content
+  if (message.content && typeof message.content === 'string') {
+    const parsed = parseXmlToolCalls(message.content);
+    if (parsed && parsed.toolCalls.length > 0) {
+      console.log(`[LUMINA_DEBUG] Client parsed ${parsed.toolCalls.length} XML tool call(s) from content`);
+      message.tool_calls = parsed.toolCalls;
+      if (parsed.cleanedContent) {
+        message.content = parsed.cleanedContent;
+      }
+    }
+  }
+  return responseData;
 }
 
 function summarizeContentForLog(content: any): any {
@@ -354,7 +416,7 @@ export function useLlamaBridge({
 
       const text = await response.text();
       try {
-        return JSON.parse(text);
+        return normalizeLlmResponse(JSON.parse(text));
       } catch {
         throw new Error(`Failed to parse response: ${text.substring(0, 100)}`);
       }
@@ -563,7 +625,7 @@ export function useLlamaBridge({
           throw new Error(`[llama-server ${response.status}] ${serverError}`);
         }
 
-        return await response.json();
+        return normalizeLlmResponse(await response.json());
       };
 
       try {
@@ -684,7 +746,7 @@ export function useLlamaBridge({
       throw new Error(errorMsg);
     }
 
-    return response.json();
+    return normalizeLlmResponse(await response.json());
   };
 
   return {

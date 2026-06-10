@@ -12,22 +12,17 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 
-const STABLE_NOOP = () => {};
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Send, 
-  Cloud,
   Plus, 
   Sparkles, 
   ArrowUp,
   Sidebar as SidebarIcon,
-  Wrench,
-  Hammer,
   User,
   Search,
   Bot,
   Layers,
-  Bug,
   MoreVertical,
   Settings,
   Trash2,
@@ -36,7 +31,6 @@ import {
   Brain,
   Globe,
   Loader2,
-  Newspaper,
   Play,
   ExternalLink,
   Maximize2,
@@ -44,79 +38,30 @@ import {
   SquareTerminal,
   RefreshCw,
   X,
-  Languages,
   Layout,
   MessageSquare,
-  StopCircle,
-  Download,
-  FileUp,
-  FileJson,
-  Camera,
-  FolderPlus,
   Folder,
-  Box,
-  MapPin,
-  CloudSun,
-  Book,
   Database,
-  Image as ImageIcon,
-  Library,
-  Link as LinkIcon,
   Check,
   ChevronRight,
   ChevronLeft,
   ArrowRight,
   Palette,
   Terminal,
-  Calendar,
-  CloudMoon,
-  Video,
   Copy,
-  PenTool,
-  History,
-  FileText,
   Code,
-  Type as TypeIcon,
-  Music,
-  Mail,
-  Coffee,
   Lightbulb,
   BookOpen,
   Activity,
-  Beaker,
   Compass,
-  Flower2,
-  Mic,
-  MicOff,
-  Smartphone,
-  Tablet,
-  Monitor,
-  Grid,
-  Sliders,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  MousePointerClick,
-  Zap
+  MousePointerClick
 } from 'lucide-react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-import { fetchBridgeTools, callLlamaBridge as bridgeCall, checkBridgeHealth } from './bridgeClient';
-import { useTheme } from './themes';
-import { CustomCodeBlockVisualizer, renderTextWithMath, InteractiveTableVisualizer } from './components/LuminaVisualizer';
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
 import ResearchWorkspacePanel from './components/ResearchWorkspacePanel';
-import { CoderLeftExplorer } from './components/CoderLeftExplorer';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
 import Whiteboard from './components/Whiteboard';
 import { ChatsManagerPanel } from './components/ChatsManagerPanel';
-
-import { scrapeUrl, ScrapeResult, ScrapeOptions } from './services/scrapingService';
-import { ScrapingResultArtifact } from './components/ScrapingResultArtifact';
-import { ScrapingProgressIndicator } from './components/ScrapingProgressIndicator';
 
 const clampContextMenuPosition = (
   x: number,
@@ -134,72 +79,23 @@ const clampContextMenuPosition = (
   };
 };
 
-import { WikiArticleArtifact } from './components/WikiArticleArtifact';
-import { WikiSearchResultList } from './components/WikiSearchResultList';
-import { WikiToolCallIndicator } from './components/WikiToolCallIndicator';
-import { ALL_WIKI_TOOLS } from './tools/wikiTools';
-import { webScrapeTool } from './tools/webScrapeTool';
-import {
-  wikiSearch,
-  wikiGetPage,
-  wikiGetSummary,
-  wikiGetSections,
-  wikiGetCategories,
-  wikiGetLinks,
-  wikiGetImages,
-  wikiGetRelated
-} from './services/wikiService';
-
 import { useSmartPopupPosition } from './hooks/useSmartPopupPosition';
 
-import { useAskAi } from './hooks/useAskAi';
-import { useCoderMode } from './hooks/useCoderMode';
-import { useRightPanel } from './hooks/useRightPanel';
 import { useAppHandlers } from './hooks/useAppHandlers';
 
 import {
-  ToolCallNode,
-  Artifact,
   Message,
   Chat,
-  Tool,
-  ToolDefinition,
-  Skill
 } from './types';
-
-import {
-  DEFAULT_SERVER_URL,
-  DEFAULT_MCP_URL,
-  DEFAULT_API_KEY,
-  AVAILABLE_AVATARS,
-  CLOUD_PROVIDERS,
-  WRITING_STYLES,
-  SKILLS,
-  SLASH_COMMANDS,
-  SUPPORTED_VOICE_LANGUAGES
-} from './constants';
 
 import { SidebarContent } from './components/Sidebar/SidebarContent';
 import { ChatBoxPanel } from './components/ChatBoxPanel';
 import { VoiceAssistantPanel } from './components/VoiceAssistantPanel';
 import { CoderPermissionMode, PendingCommandPermission } from './types';
 
-import {
-  RealtimeEditCounter,
-  computeLineDiff,
-  getFileNameOnly
-} from './components/NodeGraph/FileDiffNode';
-
-import { CanvasBlock } from './components/Chat/CanvasBlock';
-
-import { SearchResultsUI } from './components/Chat/SearchResultsUI';
-
-import { ArtifactCard } from './components/Chat/ArtifactCard';
-
 import { MessageItem } from './components/Chat/MessageItem';
 
 import { Agent } from './agents/types';
-import { loadAgents, addAgent, updateAgent, deleteAgent } from './agents/agentStore';
 import { AgentSidebarSection } from './components/Agents/AgentSidebarSection';
 import { AgentCreationModal } from './components/Agents/AgentCreationModal';
 import { AgentChatView } from './components/Agents/AgentChatView';
@@ -207,12 +103,6 @@ import { LocalModelConfigModal } from './components/LocalModelConfigModal';
 
 import { Canvas } from './components/Canvas/Canvas';
 
-import { DevPerfCanvas } from './components/ui/DevPerfCanvas';
-
-import { parseThinkTags, turboQuantCompress } from './utils/textUtils';
-import { safeGetItem } from './utils/storageUtils';
-import { extractArtifacts } from './utils/artifactUtils';
-import { extractYouTubeId, fetchYouTubeTranscript } from './utils/youtubeUtils';
 import { invokeTauri, isTauriDesktop, listenTauriEvent } from './utils/tauriDesktop';
 import { OnboardingModal } from './components/OnboardingModal';
 import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
@@ -220,7 +110,6 @@ import { SettingsModal } from './components/SettingsModal';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
-import { LivePreviewPanel } from './components/LivePreviewPanel';
 import { ThemeCustomizerPanel } from './components/ThemeCustomizerPanel';
 import { LuminaAgentPanel, LuminaMemoryPanel } from './components/LuminaAgentPanel';
 

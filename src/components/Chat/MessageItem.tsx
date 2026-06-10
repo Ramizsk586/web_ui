@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   History, 
   Copy, 
-  ArrowUp,
   Layout, 
   ImageIcon, 
   Play, 
@@ -11,8 +10,6 @@ import {
   Code, 
   ChevronDown, 
   Check, 
-  Trash2,
-  Plus,
   FileText,
   FolderOpen,
   MousePointerClick,
@@ -21,10 +18,8 @@ import {
   ThumbsDown,
   Terminal,
   RotateCcw,
-  Volume2,
   VolumeX,
   Clock3,
-  ListChecks,
   Sparkles,
   Globe
 } from 'lucide-react';
@@ -40,10 +35,6 @@ import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
 import { ThinkingAnimation } from '../ui/Animations';
 
-
-interface SpeechStateListener {
-  (speakingId: string | null): void;
-}
 
 const getDisplayFileName = (filePath?: string) => {
   if (!filePath) return 'workspace file';
@@ -129,10 +120,10 @@ const StreamingDiffCount = ({
       return;
     }
 
-    setDisplayValue(prev => Math.min(prev, Math.max(1, target)));
+    setDisplayValue(prev => Math.min(prev, Math.max(0, target)));
     const interval = window.setInterval(() => {
       setDisplayValue(prev => {
-        if (target <= 0) return prev === 0 ? 1 : 0;
+        if (target <= 0) return 0;
         if (prev >= target) return target;
         const remaining = target - prev;
         const step = Math.max(1, Math.ceil(remaining / 5));
@@ -144,6 +135,7 @@ const StreamingDiffCount = ({
   }, [isStreaming, target]);
 
   if (target <= 0 && !isStreaming) return null;
+  if (target <= 0 && isStreaming && prefix === '-') return null;
 
   return (
     <motion.span

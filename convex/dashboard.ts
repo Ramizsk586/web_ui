@@ -2,12 +2,11 @@ import { query } from "./_generated/server";
 
 export const metrics = query({
   handler: async (ctx) => {
-    const [messages, memories, agents, automationRuns, events] = await Promise.all([
+    const [events, memories, agents, automationRuns] = await Promise.all([
       ctx.db.query("activityEvents").order("desc").take(5000),
       ctx.db.query("memoryRecords").order("desc").take(5000),
       ctx.db.query("executionAgents").order("desc").take(5000),
       ctx.db.query("automationRuns").order("desc").take(5000),
-      ctx.db.query("activityEvents").order("desc").take(5000),
     ]);
 
     const activeMemories = memories.filter((m) => m.lifecycle === "active");
