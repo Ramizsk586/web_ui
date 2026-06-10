@@ -2709,6 +2709,21 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   ? `${att.lineRangeStart}-${att.lineRangeEnd}`
                   : (att.lineNumber || att.lineRangeStart || '');
                 text += `\n- File Name: ${att.fileName}\n- File Path: ${att.filePath}\n${lineInfo ? `- Line Reference: ${lineInfo}\n` : ''}- Code Subsection:\n\`\`\`\n${att.specificCode}\n\`\`\`\n- Functional Role: ${att.elementWork}\n`;
+                if (att.connections && att.connections.length > 0) {
+                  text += `- Connected File Sections:\n`;
+                  att.connections.forEach((connection: any) => {
+                    const connectionLineInfo = connection.lineRangeStart && connection.lineRangeEnd && connection.lineRangeStart !== connection.lineRangeEnd
+                      ? `${connection.lineRangeStart}-${connection.lineRangeEnd}`
+                      : (connection.lineNumber || connection.lineRangeStart || '');
+                    const connectionCode = connection.specificCode || connection.code || connection.snippet || connection.content || '';
+                    text += `  - File Name: ${connection.fileName || connection.name || 'Connected file'}\n`;
+                    text += `    File Path: ${connection.filePath || connection.name || ''}\n`;
+                    if (connectionLineInfo) text += `    Line Reference: ${connectionLineInfo}\n`;
+                    if (connectionCode) {
+                      text += `    Code Section:\n\`\`\`\n${connectionCode}\n\`\`\`\n`;
+                    }
+                  });
+                }
               });
             }
             return {
@@ -3091,6 +3106,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             currentCallNodes.push(node);
             toolCallNodes.push(node);
           }
+          const currentRawNodeIds = new Set(currentCallNodes.map(node => node.id));
 
           // Group consecutive wiki tool calls into a single wiki_research parent node with animated sub-nodes
           {
@@ -3131,10 +3147,10 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             }
             currentCallNodes.length = 0;
             currentCallNodes.push(...groupedCallNodes);
-            // Also update toolCallNodes to match — replace wiki nodes with parent
-            const existingIds = new Set(groupedCallNodes.map(n => n.id));
+            // Also update toolCallNodes to match the grouped current batch.
+            const previousNodes = toolCallNodes.filter(node => !currentRawNodeIds.has(node.id));
             toolCallNodes.length = 0;
-            toolCallNodes.push(...groupedCallNodes);
+            toolCallNodes.push(...previousNodes, ...groupedCallNodes);
           }
 
           const currentPlaceholders = currentCallNodes.map(node => `[[tool_call:${node.id}]]`).join('\n\n');
@@ -4807,7 +4823,48 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
       
       const thinkTagMatch = finalContent.match(/<think>[\s\S]*?<\/think>/);
       const finalThinkContent = thinkTagMatch ? thinkTagMatch[0] : '';
-      const finalDisplayContent = finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      const finalDisplayContent = isCoderMode
+        ? finalContent.trim()
+        : finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+      if (isCoderMode) {
+        try {
+          triggerBackgroundMemoryExtraction(content, finalDisplayContent || finalContent.trim());
+        } catch (err) {
+          console.warn('Memory extraction invocation failed:', err);
+        }
+
+        setChats(prev => prev.map(chat => {
+          if (chat.id === chatId) {
+            return {
+              ...chat,
+              messages: chat.messages.map(m =>
+                m.id === thinkingId
+                  ? {
+                      ...m,
+                      content: finalDisplayContent || finalContent.trim(),
+                      thinkContent: undefined,
+                      isThinking: false,
+                      streamPos: undefined,
+                      thinking: undefined,
+                      toolCalls: finalToolNodes,
+                      isStreaming: false,
+                      sources: searchResults.length > 0 ? searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) : undefined,
+                      images: imagesToAttach.length > 0 ? imagesToAttach : undefined,
+                      searchQuery: isWebSearchEnabled ? userMessage.content : undefined,
+                      isSearching: false,
+                      timestamp: new Date(),
+                      artifacts: undefined
+                    }
+                  : m
+              ),
+              updatedAt: new Date(),
+            };
+          }
+          return chat;
+        }));
+        return;
+      }
 
       // Detect the size of the largest code block to dynamically scale up typing streaming speed
       const codeBlockThreshold = 50;
@@ -4875,7 +4932,9 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
           // Smoothly update state without loading main thread excessively
           if (now - lastRenderTime > RENDER_INTERVAL || currentPos === totalLength) {
             lastRenderTime = now;
-            const parsed = parseThinkTags(partial);
+            const parsed = isCoderMode
+              ? { before: partial, after: '', think: null as string | null, isThinking: false }
+              : parseThinkTags(partial);
             const displayContent = (parsed.before + parsed.after).trim();
             setChats(prev => prev.map(chat => {
               if (chat.id === chatId) {
@@ -4884,8 +4943,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   messages: chat.messages.map(m => m.id === thinkingId ? {
                     ...m,
                     content: parsed.isThinking ? displayContent : (displayContent || partial),
-                    thinkContent: parsed.think || undefined,
-                    isThinking: parsed.isThinking,
+                    thinkContent: isCoderMode ? undefined : (parsed.think || undefined),
+                    isThinking: isCoderMode ? false : parsed.isThinking,
                     streamPos: currentPos,
                     toolCalls: activeToolNodes
                   } : m),
@@ -4945,7 +5004,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 ? {
                     ...m,
                     content: finalDisplayContent || finalContent.trim(),
-                    thinkContent: finalThinkContent.replace(/<\/?think>/g, '').trim() || undefined,
+                    thinkContent: isCoderMode ? undefined : (finalThinkContent.replace(/<\/?think>/g, '').trim() || undefined),
                     isThinking: false,
                     streamPos: undefined,
                     thinking: undefined,

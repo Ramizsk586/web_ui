@@ -82,6 +82,8 @@ interface CoderWorkspaceViewProps {
   activeModelList: any[];
   availableModels: any[];
   handleModelSelect: (id: string) => void;
+  modelSelectorMode: 'popup' | 'drawer';
+  setIsModelDrawerOpen: (open: boolean) => void;
 }
 
 export default function CoderWorkspaceView({
@@ -139,6 +141,8 @@ export default function CoderWorkspaceView({
   activeModelList,
   availableModels,
   handleModelSelect,
+  modelSelectorMode,
+  setIsModelDrawerOpen,
 }: CoderWorkspaceViewProps) {
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
   const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
@@ -159,6 +163,12 @@ export default function CoderWorkspaceView({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  React.useEffect(() => {
+    if (modelSelectorMode === 'drawer') {
+      setIsDropdownOpen(false);
+    }
+  }, [modelSelectorMode]);
 
   React.useEffect(() => {
     (window as any).openFileInPreview = (filePath: string) => {
@@ -358,6 +368,11 @@ export default function CoderWorkspaceView({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (modelSelectorMode === 'drawer') {
+                    setIsDropdownOpen(false);
+                    setIsModelDrawerOpen(true);
+                    return;
+                  }
                   setIsDropdownOpen(!isDropdownOpen);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0E0C0B]/70 hover:bg-[#1D1917] border border-[#2C241E] rounded-full transition-all text-[11px] font-semibold text-[#EDE6DD] cursor-pointer select-none max-w-[210px] shadow-sm font-sans"
@@ -382,12 +397,12 @@ export default function CoderWorkspaceView({
                 </span>
                 <ChevronDown
                   size={11}
-                  className={`text-[#9B8C7D] shrink-0 transition-transform duration-150 ${isDropdownOpen ? "rotate-180" : ""}`}
+                  className={`text-[#9B8C7D] shrink-0 transition-transform duration-150 ${isDropdownOpen && modelSelectorMode !== 'drawer' ? "rotate-180" : ""}`}
                 />
               </button>
 
               <AnimatePresence>
-                {isDropdownOpen && (
+                {isDropdownOpen && modelSelectorMode !== 'drawer' && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.95, y: 10 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}

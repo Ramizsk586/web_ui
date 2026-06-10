@@ -11,13 +11,15 @@ import {
   Code, 
   ChevronDown, 
   Check, 
-  Loader2, 
   Trash2,
   Plus,
   FileText,
+  FolderOpen,
   MousePointerClick,
+  Search,
   ThumbsUp,
   ThumbsDown,
+  Terminal,
   RotateCcw,
   Volume2,
   VolumeX,
@@ -28,18 +30,318 @@ import {
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Message, Artifact } from '../../types';
+import { Message, Artifact, ToolCallNode } from '../../types';
 import { ScrapeResult } from '../../services/scrapingService';
 import { CustomCodeBlockVisualizer, renderTextWithMath } from '../LuminaVisualizer';
 import { NodeGraph, InlineToolCallCard } from '../NodeGraph/NodeGraph';
+import { InlineFileDiffPreview } from '../NodeGraph/FileDiffNode';
 import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
+import { ThinkingAnimation } from '../ui/Animations';
 
 
 interface SpeechStateListener {
   (speakingId: string | null): void;
 }
+
+const getDisplayFileName = (filePath?: string) => {
+  if (!filePath) return 'workspace file';
+  const normalized = filePath.replace(/\\/g, '/');
+  return normalized.split('/').filter(Boolean).pop() || normalized || 'workspace file';
+};
+
+const getCoderToolAction = (node: ToolCallNode) => {
+  const name = (node.toolName || '').toLowerCase();
+  if (name.includes('web') || name.includes('search') || name.includes('wiki') || name.includes('scrape')) {
+    return node.status === 'active' ? 'Searching' : 'Searched';
+  }
+  if (name.includes('list_dir') || name.includes('list') || name.includes('glob')) {
+    return node.status === 'active' ? 'Listing files' : 'Listed files';
+  }
+  if (name.includes('read')) return node.status === 'active' ? 'Reading file' : 'Read file';
+  if (name.includes('delete')) return node.status === 'active' ? 'Deleting file' : 'Deleted file';
+  if (name.includes('rename') || name.includes('move')) return node.status === 'active' ? 'Renaming file' : 'Renamed file';
+  if (name.includes('command') || name.includes('shell') || name.includes('terminal') || name.includes('bash') || name.includes('verify')) {
+    return node.status === 'active' ? 'Running command' : 'Ran command';
+  }
+  if (name.includes('write') || name.includes('edit') || name.includes('create') || node.filePath) {
+    return node.status === 'active' ? 'Editing file' : 'Edited file';
+  }
+  return node.status === 'active' ? 'Working' : 'Completed';
+};
+
+const getCoderToolIcon = (node: ToolCallNode) => {
+  const name = (node.toolName || '').toLowerCase();
+  if (name.includes('command') || name.includes('shell') || name.includes('terminal') || name.includes('bash') || name.includes('verify')) {
+    return <Terminal size={14} className="shrink-0 text-zinc-500" />;
+  }
+  if (name.includes('web') || name.includes('search') || name.includes('grep') || name.includes('wiki') || name.includes('scrape')) {
+    return <Search size={14} className="shrink-0 text-zinc-500" />;
+  }
+  if (name.includes('list') || name.includes('glob')) {
+    return <FolderOpen size={14} className="shrink-0 text-zinc-500" />;
+  }
+  if (name.includes('read')) {
+    return <FileText size={14} className="shrink-0 text-zinc-500" />;
+  }
+  return <Code size={14} className="shrink-0 text-zinc-500" />;
+};
+
+const getCoderStatusDotClass = (status: ToolCallNode['status']) => {
+  if (status === 'failed') return 'bg-rose-500';
+  if (status === 'active' || status === 'pending') return 'bg-sky-500';
+  return 'border border-zinc-500/60 bg-transparent';
+};
+
+const getCoderToolSummary = (node: ToolCallNode) => {
+  if (node.filePath) return node.filePath.replace(/\\/g, '/');
+  const name = (node.toolName || '').toLowerCase();
+  if (name.includes('command') || name.includes('shell') || name.includes('terminal') || name.includes('bash')) {
+    const commandMatch = node.label?.match(/\(([\s\S]*)\)$/);
+    return commandMatch?.[1] || node.resultSummary || node.label || '';
+  }
+  return node.resultSummary || node.label || '';
+};
+
+const isReadFileNode = (node: ToolCallNode) => {
+  const name = (node.toolName || '').toLowerCase();
+  return name.includes('read') && !!node.filePath;
+};
+
+const StreamingDiffCount = ({
+  value,
+  prefix,
+  className,
+  isStreaming
+}: {
+  value?: number;
+  prefix: '+' | '-';
+  className: string;
+  isStreaming: boolean;
+}) => {
+  const target = Math.max(0, value ?? 0);
+  const [displayValue, setDisplayValue] = useState(isStreaming ? 0 : target);
+
+  useEffect(() => {
+    if (!isStreaming) {
+      setDisplayValue(target);
+      return;
+    }
+
+    setDisplayValue(prev => Math.min(prev, Math.max(1, target)));
+    const interval = window.setInterval(() => {
+      setDisplayValue(prev => {
+        if (target <= 0) return prev === 0 ? 1 : 0;
+        if (prev >= target) return target;
+        const remaining = target - prev;
+        const step = Math.max(1, Math.ceil(remaining / 5));
+        return Math.min(target, prev + step);
+      });
+    }, 120);
+
+    return () => window.clearInterval(interval);
+  }, [isStreaming, target]);
+
+  if (target <= 0 && !isStreaming) return null;
+
+  return (
+    <motion.span
+      key={`${prefix}-${displayValue}`}
+      initial={isStreaming ? { opacity: 0.45, y: 2 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.12 }}
+      className={className}
+    >
+      {prefix}{displayValue}
+    </motion.span>
+  );
+};
+
+const CoderToolActivity = ({
+  nodes,
+  onOpenInEditor,
+  isStreaming = false
+}: {
+  nodes: ToolCallNode[];
+  onOpenInEditor?: (filePath: string) => void;
+  isStreaming?: boolean;
+}) => {
+  const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
+  const visibleNodes = nodes.filter(node => node.id !== 'thinking-node');
+  if (!visibleNodes.length) return null;
+
+  const groupedItems = visibleNodes.reduce<Array<{ type: 'reads'; nodes: ToolCallNode[] } | { type: 'tool'; node: ToolCallNode }>>((items, node) => {
+    const last = items[items.length - 1];
+    if (isReadFileNode(node) && last?.type === 'reads') {
+      last.nodes.push(node);
+      return items;
+    }
+    if (isReadFileNode(node)) {
+      items.push({ type: 'reads', nodes: [node] });
+      return items;
+    }
+    items.push({ type: 'tool', node });
+    return items;
+  }, []);
+
+  return (
+    <div className="space-y-2 px-1 text-left select-none">
+      {groupedItems.map((item) => {
+        if (item.type === 'reads') {
+          const groupKey = item.nodes.map(node => node.id).join(':');
+          const isExpanded = expandedNodeId === groupKey;
+          const paths = item.nodes.map(node => node.filePath || '').filter(Boolean);
+          const preview = paths.map(path => getDisplayFileName(path)).join(', ');
+
+          return (
+            <div key={groupKey} className="not-prose">
+              <button
+                type="button"
+                onClick={() => setExpandedNodeId(isExpanded ? null : groupKey)}
+                className="group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[0.03] cursor-pointer"
+              >
+                <ChevronDown
+                  size={13}
+                  className={`shrink-0 text-zinc-600 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
+                />
+                <span className={`size-1.5 shrink-0 rounded-full ${item.nodes.some(node => node.status === 'failed') ? 'bg-rose-500' : 'border border-zinc-500/60 bg-transparent'}`} />
+                <FileText size={14} className="shrink-0 text-zinc-500" />
+                <span className="shrink-0 font-medium text-zinc-300">Read</span>
+                <span className="shrink-0 text-[12px] text-zinc-500">
+                  {item.nodes.length} file{item.nodes.length === 1 ? '' : 's'}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
+                  {preview}
+                </span>
+              </button>
+              {isExpanded && (
+                <div className="ml-7 border-l border-zinc-800/80 pl-3 py-1.5 space-y-1">
+                  {paths.map(path => (
+                    <button
+                      key={path}
+                      type="button"
+                      onClick={() => onOpenInEditor?.(path)}
+                      className="flex w-full min-w-0 items-center gap-2 border-none bg-transparent p-0 text-left font-mono text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                      title={path}
+                    >
+                      <FileText size={11} className="shrink-0 opacity-70" />
+                      <span className="shrink-0 text-zinc-350">{getDisplayFileName(path)}</span>
+                      <span className="min-w-0 truncate opacity-70">{path}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        const node = item.node;
+        const fileName = getDisplayFileName(node.filePath);
+        const summary = getCoderToolSummary(node);
+        const hasDiff = Boolean(node.oldContent || node.newContent);
+        const hasResult = Boolean(node.result && !hasDiff);
+        const isExpanded = expandedNodeId === node.id;
+        const action = getCoderToolAction(node);
+        const canExpand = hasDiff || hasResult;
+        const isLockedDiff = isStreaming && hasDiff;
+
+        return (
+          <div key={node.id} className="not-prose">
+            <button
+              type="button"
+              onClick={() => {
+                if (isLockedDiff) return;
+                if (canExpand) {
+                  setExpandedNodeId(isExpanded ? null : node.id);
+                  return;
+                }
+                if (node.filePath) onOpenInEditor?.(node.filePath);
+              }}
+              className={`group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors ${isLockedDiff ? 'cursor-default' : 'hover:bg-white/[0.03] cursor-pointer'}`}
+              title={isLockedDiff ? 'Diff opens when streaming finishes' : undefined}
+            >
+              {canExpand ? (
+                <ChevronDown
+                  size={13}
+                  className={`shrink-0 text-zinc-600 transition-transform ${isExpanded && !isLockedDiff ? 'rotate-0' : '-rotate-90'} ${isLockedDiff ? 'opacity-40' : ''}`}
+                />
+              ) : (
+                <span className="w-[13px] shrink-0" />
+              )}
+              <span className={`size-1.5 shrink-0 rounded-full ${getCoderStatusDotClass(node.status)}`} />
+              {getCoderToolIcon(node)}
+              <span className="shrink-0 font-medium text-zinc-300">{action.replace(' file', '')}</span>
+              {node.filePath ? (
+                <span className="min-w-0 truncate font-mono text-[11px] text-sky-400" title={node.filePath || fileName}>
+                  {fileName}
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500" title={summary}>
+                  {summary}
+                </span>
+              )}
+              <StreamingDiffCount
+                value={node.addedCount}
+                prefix="+"
+                isStreaming={isStreaming && hasDiff}
+                className="shrink-0 font-mono text-[12px] font-semibold text-emerald-400"
+              />
+              <StreamingDiffCount
+                value={node.removedCount}
+                prefix="-"
+                isStreaming={isStreaming && hasDiff}
+                className="shrink-0 font-mono text-[12px] font-semibold text-rose-400"
+              />
+              {node.status === 'failed' && (
+                <span className="shrink-0 text-[10px] font-medium text-rose-400">failed</span>
+              )}
+            </button>
+
+            {hasDiff && isExpanded && !isLockedDiff && (
+              <div className="ml-7 mt-1 max-w-2xl border-l border-zinc-800/80 pl-3">
+                <InlineFileDiffPreview node={node} />
+              </div>
+            )}
+            {hasResult && isExpanded && (
+              <div className="ml-7 mt-1 border-l border-zinc-800/80 pl-3">
+                <pre className="max-h-60 overflow-auto rounded-md bg-black/25 p-2 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap custom-scrollbar">
+                  {node.result}
+                </pre>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const CoderThinkingBlock = ({ content, isStreaming = false }: { content: string; isStreaming?: boolean }) => {
+  const clean = content.replace(/^<think>/i, '').replace(/<\/think>$/i, '').trim();
+  if (!clean) return null;
+
+  return (
+    <div className="px-1 text-left">
+      <div className="mb-2 flex w-fit items-center gap-2 text-[14px] text-zinc-500">
+        <Sparkles size={14} className="text-zinc-600" />
+        <span>Thinking</span>
+      </div>
+      <div className="border-l border-zinc-700/80 pl-4 ml-1">
+        <div className="text-[15px] leading-7 text-zinc-300 whitespace-pre-wrap break-words">
+          {clean}
+          {isStreaming && (
+            <motion.span
+              animate={{ opacity: [1, 0] }}
+              transition={{ repeat: Infinity, duration: 0.6 }}
+              className="inline-block w-1.5 h-4 bg-current ml-1 rounded-sm align-middle"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 class SpeechController {
   private activeId: string | null = null;
@@ -640,6 +942,59 @@ function MessageItemComponent({
   const renderedInlineContent = useMemo(() => {
     if (!message.content) return null;
 
+    if (isCoderMode) {
+      const parts = message.content.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*$|\[\[tool_call:[a-zA-Z0-9_-]+\]\])/gi);
+
+      return (
+        <>
+          {parts.map((part, idx) => {
+            if (!part || !part.trim()) return null;
+
+            const toolMatch = part.match(/^\[\[tool_call:([a-zA-Z0-9_-]+)\]\]$/);
+            if (toolMatch) {
+              const node = toolCallsById.get(toolMatch[1]);
+              if (!node || isScrapeTool(node.toolName || '')) return null;
+              return (
+                <div key={idx} className="my-4">
+                  <CoderToolActivity
+                    nodes={[node]}
+                    onOpenInEditor={onOpenInEditor}
+                    isStreaming={message.isStreaming}
+                  />
+                </div>
+              );
+            }
+
+            if (/^<think>/i.test(part)) {
+              const isOpenThinking = /^<think>[\s\S]*$/i.test(part) && !/<\/think>$/i.test(part);
+              const isLatestPart = idx === parts.length - 1;
+              return (
+                <CoderThinkingBlock
+                  key={idx}
+                  content={part}
+                  isStreaming={message.isStreaming && (isOpenThinking || isLatestPart)}
+                />
+              );
+            }
+
+            const cleanPart = part.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            if (!cleanPart) return null;
+
+            return (
+              <span key={idx} className="block text-left">
+                <Markdown
+                  remarkPlugins={[remarkGfm]}
+                  components={messageComponents}
+                >
+                  {cleanPart}
+                </Markdown>
+              </span>
+            );
+          })}
+        </>
+      );
+    }
+
     const parts = message.content.split(/(\[\[tool_call:[a-zA-Z0-9_-]+\]\])/g);
     const isLastPartToolCall =
       parts.length > 0 && !!parts[parts.length - 1].match(/^\[\[tool_call:[a-zA-Z0-9_-]+\]\]$/);
@@ -655,12 +1010,7 @@ function MessageItemComponent({
               return null;
             }
             if (!node) {
-              return (
-                <div key={idx} className="my-2 p-3 border border-zinc-200/10 dark:border-zinc-800/50 bg-zinc-550/[0.03] dark:bg-zinc-950/20 rounded-xl flex items-center gap-2">
-                  <Loader2 size={12} className="animate-spin text-emerald-500" />
-                  <span className="text-xs text-zinc-550 font-mono">Initializing tool execution...</span>
-                </div>
-              );
+              return null;
             }
             if (isScrapeTool(node.toolName || '')) {
               return null;
@@ -712,7 +1062,9 @@ function MessageItemComponent({
   }, [
     message.content,
     message.isStreaming,
+    isCoderMode,
     messageComponents,
+    onOpenInEditor,
     onSendMessage,
     scrapingResults,
     shouldShowWorkedSummary,
@@ -844,21 +1196,39 @@ function MessageItemComponent({
                       className="flex flex-col gap-1.5"
                     >
                       <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">File Connections</span>
-                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      <div className="flex flex-col gap-2 pt-0.5">
                         {att.connections.map((c: any, index: number) => (
-                          <button
+                          <div
                             key={index}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenInEditor?.(c.filePath || c.name || '');
-                            }}
-                            className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900 border border-[#2D241E] hover:border-teal-500/40 text-xs text-zinc-400 hover:text-teal-400 rounded-lg transition-all cursor-pointer font-sans"
-                            title={`Open ${c.fileName} in editor`}
+                            className="rounded-lg border border-[#2D241E] bg-[#14110F] overflow-hidden"
                           >
-                            <FileText size={11} className="text-zinc-650 shrink-0" />
-                            <span className="font-semibold truncate">{c.fileName}</span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenInEditor?.(c.filePath || c.name || '');
+                              }}
+                              className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 bg-zinc-900/70 hover:bg-zinc-900 border-none text-xs text-zinc-400 hover:text-teal-400 transition-all cursor-pointer font-sans"
+                              title={`Open ${c.fileName} in editor`}
+                            >
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <FileText size={11} className="text-zinc-650 shrink-0" />
+                                <span className="font-semibold truncate">{c.fileName}</span>
+                              </span>
+                              {(c.lineNumber || c.lineRangeStart) && (
+                                <span className="text-[10px] text-teal-400 font-mono shrink-0">
+                                  {c.lineRangeStart && c.lineRangeEnd && c.lineRangeStart !== c.lineRangeEnd
+                                    ? `Lines ${c.lineRangeStart}-${c.lineRangeEnd}`
+                                    : `Line ${c.lineNumber || c.lineRangeStart}`}
+                                </span>
+                              )}
+                            </button>
+                            {(c.specificCode || c.code || c.snippet || c.content) && (
+                              <pre className="max-h-44 overflow-y-auto p-3 text-xs text-zinc-350 custom-scrollbar whitespace-pre-wrap word-break tab-4 font-mono select-text leading-tight bg-[#0f0d0c] border-t border-[#2D241E]">
+                                {c.specificCode || c.code || c.snippet || c.content}
+                              </pre>
+                            )}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -877,7 +1247,15 @@ function MessageItemComponent({
         </motion.div>
       ) : (
         <motion.div layout={message.isStreaming ? "position" : false} className="w-full min-w-0 space-y-4">
-          {((nonInlineToolCalls && nonInlineToolCalls.length > 0) ||
+          {isCoderMode && nonInlineToolCalls.length > 0 && !message.content?.includes('[[tool_call:') && (
+            <CoderToolActivity
+              nodes={nonInlineToolCalls}
+              onOpenInEditor={onOpenInEditor}
+              isStreaming={message.isStreaming}
+            />
+          )}
+
+          {!isCoderMode && ((nonInlineToolCalls && nonInlineToolCalls.length > 0) ||
             message.searchQuery ||
             message.isSearching) && (
             <NodeGraph
@@ -919,7 +1297,7 @@ function MessageItemComponent({
               </div>
             </div>
           )}
-          {shouldShowWorkedSummary && (
+          {!isCoderMode && shouldShowWorkedSummary && (
             <div className="border-t border-white/6 pt-1">
               <button
                 type="button"
@@ -1089,7 +1467,7 @@ function MessageItemComponent({
               </AnimatePresence>
             </div>
           )}
-          {message.thinking && !message.thinkContent && !message.isThinking && (
+          {!isCoderMode && message.thinking && !message.thinkContent && !message.isThinking && (
             <div className="px-1 w-full max-w-full overflow-hidden">
               <div className="flex items-center gap-2 text-[12px] text-zinc-300 font-medium mb-3 w-fit max-w-full">
                 <span>Processing request</span>
@@ -1108,7 +1486,10 @@ function MessageItemComponent({
               </div>
             </div>
           )}
-          {(message.thinkContent || message.isThinking) && (
+          {isCoderMode && message.thinkContent && (
+            <CoderThinkingBlock content={message.thinkContent} />
+          )}
+          {!isCoderMode && (message.thinkContent || message.isThinking) && (
             <div className="px-1 w-full max-w-full overflow-hidden">
               <button
                 type="button"
@@ -1144,12 +1525,12 @@ function MessageItemComponent({
                         </div>
                       </div>
                       {message.isThinking && (
-                        <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-400">
-                          <span className="relative flex h-3 w-3 shrink-0">
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400/40 animate-ping" />
-                            <span className="relative inline-flex h-3 w-3 rounded-full bg-indigo-400" />
-                          </span>
-                          <span>Working...</span>
+                        <div className="mt-4">
+                          <ThinkingAnimation
+                            size="sm"
+                            label={isCoderMode ? 'Coder thinking' : 'Thinking'}
+                            subLabel="Reading reasoning stream..."
+                          />
                         </div>
                       )}
                     </div>

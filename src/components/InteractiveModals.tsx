@@ -483,7 +483,18 @@ interface ElementAnalysisModalProps {
     lineNumber?: number;
     lineRangeStart?: number;
     lineRangeEnd?: number;
-    connections?: Array<{ fileName: string; filePath?: string; name?: string }>;
+    connections?: Array<{
+      fileName: string;
+      filePath?: string;
+      name?: string;
+      specificCode?: string;
+      code?: string;
+      snippet?: string;
+      content?: string;
+      lineNumber?: number;
+      lineRangeStart?: number;
+      lineRangeEnd?: number;
+    }>;
   } | null;
   onClose: () => void;
   onEditFile: (path: string) => void;
@@ -588,20 +599,36 @@ export function ElementAnalysisModal({
               {attachment.connections && attachment.connections.length > 0 && (
                 <div className="flex flex-col gap-1.5 font-sans">
                   <span className="text-[10px] font-black uppercase tracking-widest text-[#D97756] font-mono">4. Module Connections</span>
-                  <div className="flex flex-wrap gap-2 pt-0.5">
+                  <div className="flex flex-col gap-2 pt-0.5">
                     {attachment.connections.map((c: any, id: number) => (
-                      <button
-                        key={id}
-                        onClick={() => {
-                          onEditFile(c.filePath || c.name || '');
-                          onClose();
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 border border-[#2D241E] hover:border-teal-500/40 text-xs text-zinc-150 hover:text-teal-400 rounded-lg transition-all cursor-pointer shadow-sm font-sans"
-                        title={`Open ${c.fileName} in editor`}
-                      >
-                        <FileText size={12} className="text-zinc-550" />
-                        <span className="font-semibold">{c.fileName}</span>
-                      </button>
+                      <div key={id} className="rounded-xl border border-[#2D241E] bg-[#14110F] overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onEditFile(c.filePath || c.name || '');
+                            onClose();
+                          }}
+                          className="w-full flex items-center justify-between gap-3 px-3 py-2 bg-[#1C1816] hover:bg-[#211c1a] text-xs text-zinc-150 hover:text-teal-400 transition-all cursor-pointer shadow-sm font-sans"
+                          title={`Open ${c.fileName} in editor`}
+                        >
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <FileText size={12} className="text-zinc-550 shrink-0" />
+                            <span className="font-semibold truncate">{c.fileName}</span>
+                          </span>
+                          {(c.lineNumber || c.lineRangeStart) && (
+                            <span className="text-[10px] text-[#D97756] font-mono shrink-0">
+                              {c.lineRangeStart && c.lineRangeEnd && c.lineRangeStart !== c.lineRangeEnd
+                                ? `Lines ${c.lineRangeStart}-${c.lineRangeEnd}`
+                                : `Line ${c.lineNumber || c.lineRangeStart}`}
+                            </span>
+                          )}
+                        </button>
+                        {(c.specificCode || c.code || c.snippet || c.content) && (
+                          <pre className="p-3 text-xs text-zinc-350 custom-scrollbar max-h-44 overflow-y-auto whitespace-pre-wrap word-break select-text leading-relaxed font-mono bg-[#0f0d0c]">
+                            {c.specificCode || c.code || c.snippet || c.content}
+                          </pre>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>

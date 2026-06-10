@@ -330,6 +330,20 @@ export const InteractiveChart: React.FC<{ data: ChartData | string }> = ({ data 
   const [showDataSummary, setShowDataSummary] = useState(false);
 
   const seriesColors = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
+  const categoryColors = [
+    '#3b82f6',
+    '#ef4444',
+    '#10b981',
+    '#f59e0b',
+    '#8b5cf6',
+    '#06b6d4',
+    '#ec4899',
+    '#84cc16',
+    '#f97316',
+    '#14b8a6',
+    '#a855f7',
+    '#eab308'
+  ];
 
   const visibleDatasets = useMemo(() => {
     return chartData.datasets.map((ds, idx) => ({
@@ -337,6 +351,23 @@ export const InteractiveChart: React.FC<{ data: ChartData | string }> = ({ data 
       color: ds.color || seriesColors[idx % seriesColors.length]
     })).filter(ds => !hiddenDatasets[ds.label]);
   }, [chartData.datasets, hiddenDatasets]);
+
+  const pieSlices = useMemo(() => {
+    const singleSeries = visibleDatasets.length === 1;
+    return visibleDatasets.flatMap((ds, dIdx) =>
+      ds.data.map((value, pointIdx) => ({
+        key: `${ds.label}-${pointIdx}`,
+        label: singleSeries
+          ? chartData.xAxis[pointIdx] || ds.label
+          : `${chartData.xAxis[pointIdx] || `Item ${pointIdx + 1}`} - ${ds.label}`,
+        value: Math.max(0, Number(value) || 0),
+        color: singleSeries ? categoryColors[pointIdx % categoryColors.length] : ds.color,
+        datasetLabel: ds.label,
+        pointIndex: pointIdx,
+        datasetIndex: dIdx
+      }))
+    ).filter(slice => slice.value > 0);
+  }, [chartData.xAxis, visibleDatasets]);
 
   // Aggregate stats
   const stats = useMemo(() => {
@@ -428,13 +459,12 @@ export const InteractiveChart: React.FC<{ data: ChartData | string }> = ({ data 
           <div className="flex flex-col md:flex-row items-center justify-center p-6 gap-8 min-h-[220px]">
             <svg width={220} height={220} className="transform rotate-[-90deg]">
               {(() => {
-                const total = visibleDatasets.reduce((sum, ds) => sum + ds.data.reduce((a, b) => a + b, 0), 0);
+                const total = pieSlices.reduce((sum, slice) => sum + slice.value, 0);
                 if (total === 0) return <text x="110" y="110" textAnchor="middle" fill="#888">No data visible</text>;
                 
                 let accumulatedAngle = 0;
-                return visibleDatasets.flatMap((ds, dIdx) => {
-                  const dsVal = ds.data.reduce((a, b) => a + b, 0);
-                  const share = dsVal / total;
+                return pieSlices.map((slice, sliceIdx) => {
+                  const share = slice.value / total;
                   const angle = share * 360;
                   
                   const r = 85;
@@ -454,11 +484,11 @@ export const InteractiveChart: React.FC<{ data: ChartData | string }> = ({ data 
                   
                   return (
                     <path
-                      key={dIdx}
+                      key={slice.key}
                       d={pathData}
-                      fill={ds.color}
-                      opacity={hoverIndex === dIdx ? 0.9 : 0.75}
-                      onMouseEnter={() => setHoverIndex(dIdx)}
+                      fill={slice.color}
+                      opacity={hoverIndex === sliceIdx ? 0.95 : 0.82}
+                      onMouseEnter={() => setHoverIndex(sliceIdx)}
                       onMouseLeave={() => setHoverIndex(null)}
                       className="transition-all duration-150 cursor-pointer stroke-white dark:stroke-zinc-950"
                       strokeWidth={2}
@@ -470,23 +500,22 @@ export const InteractiveChart: React.FC<{ data: ChartData | string }> = ({ data 
             </svg>
 
             {/* Pie Legends with shares */}
-            <div className="flex flex-col gap-2 font-mono">
-              {visibleDatasets.map((ds, dIdx) => {
-                const total = chartData.datasets.reduce((sum, d) => sum + d.data.reduce((a, b) => a + b, 0), 0);
-                const dsVal = ds.data.reduce((a, b) => a + b, 0);
-                const pct = total > 0 ? Math.round((dsVal / total) * 100) : 0;
+            <div className="flex max-h-[220px] flex-col gap-2 overflow-y-auto pr-1 font-mono custom-scrollbar">
+              {pieSlices.map((slice, sliceIdx) => {
+                const total = pieSlices.reduce((sum, item) => sum + item.value, 0);
+                const pct = total > 0 ? Math.round((slice.value / total) * 100) : 0;
                 return (
                   <div 
-                    key={ds.label}
+                    key={slice.key}
                     className={`flex items-center gap-3 text-xs p-2 rounded-lg cursor-pointer transition-colors ${
-                      hoverIndex === dIdx ? 'bg-zinc-100 dark:bg-white/5' : ''
+                      hoverIndex === sliceIdx ? 'bg-zinc-100 dark:bg-white/5' : ''
                     }`}
-                    onMouseEnter={() => setHoverIndex(dIdx)}
+                    onMouseEnter={() => setHoverIndex(sliceIdx)}
                     onMouseLeave={() => setHoverIndex(null)}
                   >
-                    <div className="w-3 h-3 rounded-md" style={{ backgroundColor: ds.color }} />
-                    <span className="font-semibold text-zinc-700 dark:text-zinc-350">{ds.label}:</span>
-                    <span className="text-zinc-500 font-bold">{dsVal.toLocaleString()}</span>
+                    <div className="w-3 h-3 rounded-md shrink-0" style={{ backgroundColor: slice.color }} />
+                    <span className="min-w-0 max-w-40 truncate font-semibold text-zinc-700 dark:text-zinc-350" title={slice.label}>{slice.label}:</span>
+                    <span className="text-zinc-500 font-bold">{slice.value.toLocaleString()}</span>
                     <span className="text-blue-500 font-bold text-[11px] bg-blue-50 dark:bg-blue-900/20 px-1.5 py-0.5 rounded">
                       {pct}%
                     </span>
@@ -584,6 +613,9 @@ export const InteractiveChart: React.FC<{ data: ChartData | string }> = ({ data 
                           const barHeight = ((val - minVal) / valRange) * chartHeight;
                           const barX = groupX + dIdx * (singleBarWidth + spacing);
                           const barY = getY(val);
+                          const barColor = visibleDatasets.length === 1
+                            ? categoryColors[idx % categoryColors.length]
+                            : ds.color;
 
                           return (
                             <rect
@@ -592,7 +624,7 @@ export const InteractiveChart: React.FC<{ data: ChartData | string }> = ({ data 
                               y={barY}
                               width={Math.max(singleBarWidth, 3)}
                               height={Math.max(barHeight, 2)}
-                              fill={ds.color}
+                              fill={barColor}
                               rx={2}
                               opacity={hoverIndex === idx ? 0.95 : 0.8}
                               onMouseEnter={() => setHoverIndex(idx)}

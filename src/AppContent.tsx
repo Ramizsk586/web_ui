@@ -2069,7 +2069,6 @@ const startCoderPreview = useCallback(async () => {
         modelSelectorMode={modelSelectorMode}
         setIsModelDrawerOpen={setIsModelDrawerOpen}
         activeModelList={activeModelList}
-        activeModelId={activeModelId}
         availableModels={availableModels}
         modelSearchQuery={modelSearchQuery}
         setModelSearchQuery={setModelSearchQuery}
@@ -2809,6 +2808,8 @@ const startCoderPreview = useCallback(async () => {
             activeModelList={activeModelList}
             availableModels={availableModels}
             handleModelSelect={handleModelSelect}
+            modelSelectorMode={modelSelectorMode}
+            setIsModelDrawerOpen={setIsModelDrawerOpen}
           />) : (
           <>
             {showAgentCreation ? (

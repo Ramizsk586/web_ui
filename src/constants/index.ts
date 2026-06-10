@@ -38,6 +38,7 @@ export const AVAILABLE_AVATARS = [
 export const CLOUD_PROVIDERS = [
   { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: React.createElement(Terminal, { size: 13 }) },
   { id: 'openprovider', label: 'OpenProvider', endpoint: 'https://openprovider.mimika.in/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
+  { id: 'kimchi', label: 'Kimchi', endpoint: 'https://llm.kimchi.dev/openai/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'anthropic', label: 'Anthropic', endpoint: 'https://api.anthropic.com/v1', key: '', icon: React.createElement(Brain, { size: 13 }) },
   { id: 'groq', label: 'Groq', endpoint: 'https://api.groq.com/openai/v1', key: '', icon: React.createElement(Terminal, { size: 13 }) },

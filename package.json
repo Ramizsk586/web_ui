@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server.ts",
     "dev:server": "cross-env NODE_ENV=development tsx server.ts",
-    "build:server": "node -e \"const fs=require('fs');if(!fs.existsSync('dist'))fs.mkdirSync('dist')\" && esbuild server.ts --bundle --platform=node --format=esm --sourcemap --outfile=dist/server.mjs --external:playwright-core --external:crawlee --external:chromium-bidi --external:chromium-bidi/*",
+    "build:server": "node -e \"const fs=require('fs');if(!fs.existsSync('dist'))fs.mkdirSync('dist')\" && esbuild server.ts --bundle --platform=node --format=esm --sourcemap --outfile=dist/server.mjs --external:vite --external:playwright-core --external:crawlee --external:chromium-bidi --external:chromium-bidi/*",
     "build": "vite build && npm run build:server",
     "start": "node dist/server.mjs",
     "preview": "vite preview",

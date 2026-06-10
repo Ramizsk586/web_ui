@@ -55,6 +55,7 @@ const PROVIDERS = [
   { id: 'groq', label: 'Groq Llama / Mixtral' },
   { id: 'opencode', label: 'OpenCode Zen' },
   { id: 'openprovider', label: 'OpenProvider' },
+  { id: 'kimchi', label: 'Kimchi' },
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'together', label: 'Together AI' },
   { id: 'mistral', label: 'Mistral' },
@@ -110,6 +111,9 @@ const PROVIDER_MODELS: Record<string, { label: string; value: string }[]> = {
   'openprovider': [
     { label: 'OpenProvider Standard', value: 'gpt-4o' },
     { label: 'OpenProvider Smart', value: 'claude-3-5-sonnet' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'kimchi': [
     { label: 'Custom Model ID...', value: 'custom' }
   ],
   'openrouter': [
@@ -180,6 +184,7 @@ const editModelProvider = (modelVal: string, providerVal?: string): string => {
   if (modelLower.includes('llama') || modelLower.includes('groq')) return 'groq';
   if (modelLower.includes('opencode')) return 'opencode';
   if (modelLower.includes('openprovider')) return 'openprovider';
+  if (modelLower.includes('kimchi')) return 'kimchi';
   if (modelLower.includes('openrouter')) return 'openrouter';
   if (modelLower.includes('together')) return 'together';
   if (modelLower.includes('mistral')) return 'mistral';
@@ -422,6 +427,7 @@ Available tools: Web Search, Code Runner, and Workspace Access.
     else if (provId === 'groq') setBaseUrl('https://api.groq.com/openai/v1');
     else if (provId === 'opencode') setBaseUrl('https://opencode.ai/zen/v1');
     else if (provId === 'openprovider') setBaseUrl('https://openprovider.mimika.in/v1');
+    else if (provId === 'kimchi') setBaseUrl('https://llm.kimchi.dev/openai/v1');
     else if (provId === 'openrouter') setBaseUrl('https://openrouter.ai/api/v1');
     else if (provId === 'together') setBaseUrl('https://api.together.xyz/v1');
     else if (provId === 'mistral') setBaseUrl('https://api.mistral.ai/v1');

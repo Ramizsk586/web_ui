@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from 'url';
 import os from 'os';
 import 'dotenv/config';
@@ -5128,7 +5127,125 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     let matchIndex = typeof targetFile.matchIndex === 'number' ? targetFile.matchIndex : -1;
     if (matchIndex === -1) matchIndex = findNeedleIndex(fileContent);
 
-    let relatedConnections: Array<{ fileName: string; filePath: string; name?: string }> = [];
+    type RelatedConnection = {
+      fileName: string;
+      filePath: string;
+      name?: string;
+      specificCode?: string;
+      lineNumber?: number;
+      lineRangeStart?: number;
+      lineRangeEnd?: number;
+    };
+
+    const extractCssConnectionSnippet = (content: string) => {
+      const targets = [
+        id ? `#${id}` : '',
+        ...selectedClasses.map((cls) => `.${cls}`),
+        tag ? String(tag).toLowerCase() : ''
+      ].filter(Boolean);
+
+      const blocks: Array<{ snippet: string; index: number }> = [];
+      for (const target of targets) {
+        let searchFrom = 0;
+        while (searchFrom < content.length && blocks.length < 3) {
+          const index = content.toLowerCase().indexOf(target.toLowerCase(), searchFrom);
+          if (index === -1) break;
+          const openBrace = content.indexOf('{', index);
+          const nextClose = openBrace === -1 ? -1 : content.indexOf('}', openBrace);
+          const prevClose = content.lastIndexOf('}', index);
+          if (openBrace !== -1 && nextClose !== -1) {
+            const start = Math.max(0, prevClose + 1);
+            const snippet = content.slice(start, nextClose + 1).trim();
+            if (snippet && !blocks.some((block) => block.snippet === snippet)) {
+              blocks.push({ snippet, index: start });
+            }
+          }
+          searchFrom = index + target.length;
+        }
+      }
+
+      if (blocks.length > 0) {
+        const snippet = blocks.map((block) => block.snippet).join('\n\n');
+        return {
+          snippet,
+          index: blocks[0].index
+        };
+      }
+
+      return null;
+    };
+
+    const extractConnectionSnippet = (content: string, fileName: string) => {
+      const lowerName = fileName.toLowerCase();
+      if (/\.(css|scss|less)$/i.test(lowerName)) {
+        const cssSnippet = extractCssConnectionSnippet(content);
+        if (cssSnippet) {
+          return {
+            snippet: cssSnippet.snippet,
+            ...getLineRangeForSnippet(content, cssSnippet.snippet.split('\n\n')[0], cssSnippet.index)
+          };
+        }
+      }
+
+      let connectionMatchIndex = findNeedleIndex(content);
+      if (connectionMatchIndex === -1) {
+        const classMatch = selectedClasses.find((cls) => content.includes(cls));
+        if (classMatch) connectionMatchIndex = content.indexOf(classMatch);
+      }
+      if (connectionMatchIndex === -1) {
+        const hintTerm = runtimeHintTerms.find((term) => content.toLowerCase().includes(term));
+        if (hintTerm) connectionMatchIndex = content.toLowerCase().indexOf(hintTerm);
+      }
+
+      const extracted = extractBalancedSnippet(content, connectionMatchIndex);
+      const snippet = typeof extracted === 'string' ? extracted : extracted.snippet;
+      const trimmedSnippet = snippet.substring(0, 1200);
+      const lineMetadata = typeof extracted === 'string'
+        ? getLineRangeForSnippet(content, trimmedSnippet, connectionMatchIndex)
+        : {
+            lineNumber: extracted.lineNumber,
+            lineRangeStart: extracted.lineRangeStart,
+            lineRangeEnd: extracted.lineRangeEnd
+          };
+
+      return {
+        snippet: trimmedSnippet,
+        ...lineMetadata
+      };
+    };
+
+    const resolveConnectionPath = (filePathValue?: string) => {
+      if (!filePathValue) return '';
+      const normalized = normalizePath(filePathValue);
+      if (path.isAbsolute(filePathValue) && fs.existsSync(filePathValue)) return filePathValue;
+      const fromPreviewRoot = path.resolve(previewRoot, normalized.replace(/^\/+/, ''));
+      if (fs.existsSync(fromPreviewRoot)) return fromPreviewRoot;
+      const basename = path.basename(normalized);
+      const match = getFilesRecursively(previewRoot).find((file) => !file.isDirectory && file.name === basename);
+      return match?.path || filePathValue;
+    };
+
+    const enrichConnectionSnippets = (connections: RelatedConnection[]) =>
+      connections.map((connection) => {
+        if (connection.specificCode) return connection;
+        try {
+          const resolvedConnectionPath = resolveConnectionPath(connection.filePath);
+          const content = fs.readFileSync(resolvedConnectionPath, 'utf8');
+          const snippetData = extractConnectionSnippet(content, connection.fileName || path.basename(resolvedConnectionPath));
+          return {
+            ...connection,
+            filePath: normalizePath(resolvedConnectionPath),
+            specificCode: snippetData.snippet,
+            lineNumber: snippetData.lineNumber,
+            lineRangeStart: snippetData.lineRangeStart,
+            lineRangeEnd: snippetData.lineRangeEnd
+          };
+        } catch {
+          return connection;
+        }
+      });
+
+    let relatedConnections: RelatedConnection[] = [];
     const htmlReferenceFile =
       /\.(html?|htm)$/i.test(targetFile.name)
         ? targetFile
@@ -5136,11 +5253,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
     if (htmlReferenceFile?.content) {
       const linkedAssets = extractStaticLinkedAssets(htmlReferenceFile.content);
-      relatedConnections = linkedAssets.map((asset) => ({
+      relatedConnections = enrichConnectionSnippets(linkedAssets.map((asset) => ({
         fileName: path.basename(asset.path),
         filePath: normalizePath(asset.path),
         name: asset.kind === 'script' ? 'Linked script' : 'Linked stylesheet'
-      }));
+      })));
 
       if (/\.(html?|htm)$/i.test(targetFile.name) && linkedAssets.length > 0) {
         let promotedAsset: { name: string; path: string; content: string; score: number; matchIndex: number } | null = null;
@@ -5303,7 +5420,17 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
           lineRangeStart: parsed.lineRangeStart || lineMetadata.lineRangeStart || parsed.lineNumber || sourceHint?.lineNumber,
           lineRangeEnd: parsed.lineRangeEnd || lineMetadata.lineRangeEnd || parsed.lineNumber || sourceHint?.lineNumber,
           specificCode: parsed.specificCode || fileContentWindow.substring(0, 1000),
-          connections: Array.isArray(parsed.connections) && parsed.connections.length > 0 ? parsed.connections : relatedConnections,
+          connections: Array.isArray(parsed.connections) && parsed.connections.length > 0
+            ? enrichConnectionSnippets(parsed.connections.map((connection: any) => ({
+                fileName: connection.fileName || path.basename(connection.filePath || connection.name || ''),
+                filePath: connection.filePath || connection.name || '',
+                name: connection.name,
+                specificCode: connection.specificCode || connection.code || connection.snippet || connection.content,
+                lineNumber: connection.lineNumber,
+                lineRangeStart: connection.lineRangeStart,
+                lineRangeEnd: connection.lineRangeEnd
+              })))
+            : relatedConnections,
           elementWork: parsed.elementWork || `Controls interaction and state updates for this selected <${tag}> element.`
         }
       });
@@ -7075,6 +7202,7 @@ ${contextStr}`;
   if (isDev) {
     try {
       console.log('⚡ Starting Vite middleware...');
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",
