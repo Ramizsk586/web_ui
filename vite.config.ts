@@ -89,8 +89,6 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-        // Pi agent module (from "src - pi" directory)
-        '@pi-agent': path.resolve(__dirname, 'src - pi'),
       },
     },
     server: {

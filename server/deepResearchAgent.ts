@@ -6,7 +6,7 @@ import { load as loadHtml } from "cheerio";
 import TurndownService from "turndown";
 import { search as ddgSearch } from "duck-duck-scrape";
 import { Type, type Model } from "@earendil-works/pi-ai";
-import { Agent as PiAgent, type AgentEvent as PiAgentEvent, type AgentTool as PiAgentTool } from "../src - pi/index.ts";
+import { Agent as PiAgent, type AgentEvent as PiAgentEvent, type AgentTool as PiAgentTool } from "@earendil-works/pi-agent-core";
 import { DEEP_RESEARCH_SYSTEM_PROMPT, getDeepResearchMinimums, getDeepResearchPresetPrompt } from "../src/utils/deepResearchWorkflow";
 import {
   wikiSearch,

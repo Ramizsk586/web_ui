@@ -305,6 +305,7 @@ export function useAppSettings({
   const [isSearchSaved, setIsSearchSaved] = useState(false);
   const [isMcpSaved, setIsMcpSaved] = useState(false);
   const [writingStyle, setWritingStyle] = useState('default');
+  const [isWritingCanvasOpen, setIsWritingCanvasOpen] = useState(false);
   const [aiProviderProfiles, setAiProviderProfiles] = useState<AiProviderProfile[]>(() => {
     try {
       return normalizeProviderProfiles(JSON.parse(localStorage.getItem('lumina_ai_provider_profiles') || '[]'));
@@ -781,6 +782,7 @@ export function useAppSettings({
     isSearchSaved, setIsSearchSaved,
     isMcpSaved, setIsMcpSaved,
     writingStyle, setWritingStyle,
+    isWritingCanvasOpen, setIsWritingCanvasOpen,
     selectedProvider, setSelectedProvider,
     aiProviderProfiles,
     editingAiProfileId,

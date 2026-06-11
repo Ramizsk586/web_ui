@@ -3,7 +3,7 @@ import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, B
 import { motion, AnimatePresence } from 'motion/react';
 import { Agent, AgentMessage } from '../../agents/types';
 import { runAgent } from '../../agents/agentRunner';
-import { createPiAgent, runPiAgent, type PiAgentEventHandler } from '../../services/piAgentService';
+import { createPiAgent, runPiAgent, type PiAgentEventHandler, type PiAgentInstance } from '../../services/piAgentService';
 import { MessageItem } from '../Chat/MessageItem';
 import { AgentToolBadge } from './AgentToolBadge';
 import { AgentAvatar } from './AgentAvatar';
@@ -45,7 +45,7 @@ export const AgentChatView = React.memo(function AgentChatViewComponent({
   const [activeSkillFileIdx, setActiveSkillFileIdx] = useState(0);
   const [isInspectSkillsOpen, setIsInspectSkillsOpen] = useState(false);
   const [usePiAgent, setUsePiAgent] = useState(false);
-  const [piAgentInstance, setPiAgentInstance] = useState<ReturnType<typeof createPiAgent> | null>(null);
+  const [piAgentInstance, setPiAgentInstance] = useState<PiAgentInstance | null>(null);
 
   const handleOpenSystemPromptInEditor = async () => {
     setShowOptions(false);
@@ -407,12 +407,12 @@ export const AgentChatView = React.memo(function AgentChatViewComponent({
       // Use pi agent if enabled
       if (usePiAgent) {
         const currentHistory = updatedHistory;
-        
+
         // Create pi agent instance if not exists
         let agentInstance = piAgentInstance;
         if (!agentInstance) {
           const apiKey = agent.bridgeApiKey || agent.apiKey;
-          agentInstance = createPiAgent({
+          agentInstance = await createPiAgent({
             model: {
               id: agent.bridgeModel || agent.model || 'anthropic/claude-sonnet-4-20250514',
               name: agent.model || 'claude-sonnet-4',
@@ -432,7 +432,7 @@ export const AgentChatView = React.memo(function AgentChatViewComponent({
           });
           setPiAgentInstance(agentInstance);
         }
-        
+
         const handlePiEvent: PiAgentEventHandler = (event) => {
           if (event.type === 'text') {
             setStreamingText(prev => prev + event.content);
@@ -442,7 +442,7 @@ export const AgentChatView = React.memo(function AgentChatViewComponent({
             // Handle thinking for display
           }
         };
-        
+
         try {
           const result = await runPiAgent(agentInstance, combinedContent, currentHistory, handlePiEvent);
           const assistantMsg: AgentMessage = {

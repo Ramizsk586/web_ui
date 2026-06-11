@@ -29,6 +29,7 @@ import {
   wikiGetImages,
   wikiGetRelated
 } from '../services/wikiService';
+import { createCoderPiAgent, runCoderPiAgent, type PiAgentInstance, type PiAgentEvent } from '../services/piAgentService';
 
 const compressToolResultForApi = (name: string, result: any): string => {
   if (result === undefined) {
