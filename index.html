@@ -37,6 +37,15 @@
       #root {
         isolation: isolate;
       }
+
+      /* Loading screen CSS variables — overridden by theme in ThemeProvider */
+      :root, body {
+        --splash-bg: #09090b;
+        --splash-accent: #6366f1;
+        --splash-glow-color: rgba(99, 102, 241, 0.12);
+        --splash-text: #f4f4f5;
+        --splash-muted: rgba(161, 161, 170, 0.7);
+      }
     </style>
   </head>
   <body>

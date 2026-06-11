@@ -60,6 +60,7 @@ import {
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
 import ResearchWorkspacePanel from './components/ResearchWorkspacePanel';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
+import { FloatingWritingCanvas } from './components/FloatingWritingCanvas';
 import Whiteboard from './components/Whiteboard';
 import { ChatsManagerPanel } from './components/ChatsManagerPanel';
 
@@ -212,6 +213,7 @@ export default function AppContent({
     isSearchSaved, setIsSearchSaved,
     isMcpSaved, setIsMcpSaved,
     writingStyle, setWritingStyle,
+    isWritingCanvasOpen, setIsWritingCanvasOpen,
     selectedProvider, setSelectedProvider,
     aiProviderProfiles,
     editingAiProfileId,
@@ -368,7 +370,6 @@ export default function AppContent({
   const [isLuminaAgentOpen, setIsLuminaAgentOpen] = useState(false);
   const [isLuminaMemoryOpen, setIsLuminaMemoryOpen] = useState(false);
   const [isCustomThemeOpen, setIsCustomThemeOpen] = useState(false);
-  const [isClearChatConfirmOpen, setIsClearChatConfirmOpen] = useState(false);
 
   const [selectedProjectForChats, setSelectedProjectForChats] = useState<any | null>(null);
   const [selectedAgentForChats, setSelectedAgentForChats] = useState<any | null>(null);
@@ -920,25 +921,25 @@ export default function AppContent({
     // DevTools panel removed; keep as a no-op for existing llama/server diagnostics.
   }, []);
 
-  const insertAttachedContent = (content: string) => {
+  const insertAttachedContent = useCallback((content: string) => {
     setInput((prev: string) => prev ? prev + '\n' + content : content);
     showToast("Attachment content inserted to compose box!");
-  };
+  }, [setInput, showToast]);
 
-  const handleSetActiveArtifact = (art: any) => {
+  const handleSetActiveArtifact = useCallback((art: any) => {
     setActiveArtifact(art);
     setIsCanvasOpen(true);
-  };
+  }, [setActiveArtifact, setIsCanvasOpen]);
 
-  const handleSetIsCanvasOpen = (open: boolean) => {
+  const handleSetIsCanvasOpen = useCallback((open: boolean) => {
     setIsCanvasOpen(open);
-  };
+  }, [setIsCanvasOpen]);
 
-  const handleSetCanvasView = (view: 'code' | 'preview') => {
+  const handleSetCanvasView = useCallback((view: 'code' | 'preview') => {
     setCanvasView(view);
-  };
+  }, [setCanvasView]);
 
-  const handleUpdateMessage = (messageId: string, updatedFields: Partial<Message>) => {
+  const handleUpdateMessage = useCallback((messageId: string, updatedFields: Partial<Message>) => {
     setChats((prev: Chat[]) => prev.map((chat: Chat) => {
       if (chat.id === currentChatId) {
         return {
@@ -956,9 +957,9 @@ export default function AppContent({
       }
       return chat;
     }));
-  };
+  }, [setChats, currentChatId]);
 
-  const handleUpdateTodoPlan = (messageId: string, updatedPlan: any) => {
+  const handleUpdateTodoPlan = useCallback((messageId: string, updatedPlan: any) => {
     setChats((prev: Chat[]) => prev.map((chat: Chat) => {
       if (chat.id === currentChatId) {
         return {
@@ -976,7 +977,7 @@ export default function AppContent({
       }
       return chat;
     }));
-  };
+  }, [setChats, currentChatId]);
 
   const handleStartBuilding = (chatId: string, messageId: string, todos: any[]) => {
     // Dynamically write TODO.md checklist to the project workspace
@@ -1526,20 +1527,7 @@ const startCoderPreview = useCallback(async () => {
     isEditable: boolean;
     selectedText: string;
   }>({ visible: false, x: 0, y: 0, isEditable: false, selectedText: '' });
-  const [rewriteSelectionState, setRewriteSelectionState] = useState<{
-    open: boolean;
-    sourceText: string;
-    resultText: string;
-    loading: boolean;
-    error: string | null;
-  }>({
-    open: false,
-    sourceText: '',
-    resultText: '',
-    loading: false,
-    error: null,
-  });
-  const isDesktopShell = isTauriDesktop();
+    const isDesktopShell = isTauriDesktop();
 
   useEffect(() => {
     if (!desktopContextMenu.visible || !desktopContextMenuRef.current) return;
@@ -1627,7 +1615,7 @@ const startCoderPreview = useCallback(async () => {
   }, [isDesktopShell]);
 
   const handleDesktopContextAction = useCallback(async (
-    action: 'zoom_in' | 'zoom_out' | 'zoom_reset' | 'inspect' | 'reload' | 'copy' | 'paste' | 'cut' | 'rewrite'
+    action: 'zoom_in' | 'zoom_out' | 'zoom_reset' | 'inspect' | 'reload' | 'copy' | 'paste' | 'cut'
   ) => {
     const selectedText = desktopContextMenu.selectedText;
     setDesktopContextMenu({ visible: false, x: 0, y: 0, isEditable: false, selectedText: '' });
@@ -1663,64 +1651,13 @@ const startCoderPreview = useCallback(async () => {
       return;
     }
 
-    if (action === 'rewrite') {
-      if (!selectedText) {
-        showToast('Select some text first, then use Rewrite.');
-        return;
-      }
-
-      setRewriteSelectionState({
-        open: true,
-        sourceText: selectedText,
-        resultText: '',
-        loading: true,
-        error: null,
-      });
-
-      try {
-        const response = await callLlamaBridge(
-          [
-            {
-              role: 'system',
-              content: 'Rewrite the user text so it reads better, with stronger clarity, grammar, and flow, while preserving the original intent. Return only the rewritten text.',
-            },
-            {
-              role: 'user',
-              content: selectedText,
-            },
-          ],
-          []
-        );
-
-        const resultText = response?.choices?.[0]?.message?.content?.trim() || '';
-        if (!resultText) {
-          throw new Error('No rewritten text returned.');
-        }
-
-        setRewriteSelectionState((prev) => ({
-          ...prev,
-          loading: false,
-          resultText,
-        }));
-      } catch (error: any) {
-        console.error('Rewrite selection failed:', error);
-        setRewriteSelectionState((prev) => ({
-          ...prev,
-          loading: false,
-          error: error?.message || 'Failed to rewrite the selected text.',
-        }));
-      }
-
-      return;
-    }
-
     if (!isDesktopShell) return;
     try {
       await invokeTauri(action);
     } catch (error) {
       console.error(`Desktop context action failed: ${action}`, error);
     }
-  }, [callLlamaBridge, desktopContextMenu.selectedText, isDesktopShell, showToast]);
+  }, [desktopContextMenu.selectedText, isDesktopShell, showToast]);
 
   // Scan models directory on startup to discover downloaded models
   useEffect(() => {
@@ -1857,6 +1794,8 @@ const startCoderPreview = useCallback(async () => {
         isCenteredState={isCenteredState}
         theme={theme}
         writingStyle={writingStyle}
+        isWritingCanvasOpen={isWritingCanvasOpen}
+        setIsWritingCanvasOpen={setIsWritingCanvasOpen}
         isWebSearchEnabled={isWebSearchEnabled} isDeepSearchEnabled={isDeepSearchEnabled} setIsDeepSearchEnabled={setIsDeepSearchEnabled}
         setIsWebSearchEnabled={setIsWebSearchEnabled}
         activeSkills={activeSkills}
@@ -3743,146 +3682,61 @@ const startCoderPreview = useCallback(async () => {
       {desktopContextMenu.visible && (
         <div
           ref={desktopContextMenuRef}
-          className="fixed z-[320] w-[228px] select-none overflow-hidden rounded-[22px] border border-[#2A221E] bg-[linear-gradient(180deg,rgba(20,17,16,0.985)_0%,rgba(15,13,12,0.995)_100%)] px-3 py-3 shadow-[0_26px_72px_rgba(0,0,0,0.46)] backdrop-blur-xl"
+          className="fixed z-[320] w-[228px] select-none overflow-hidden rounded-2xl border border-[#2A221E] bg-[linear-gradient(180deg,rgba(20,17,16,0.985)_0%,rgba(15,13,12,0.995)_100%)] px-3 py-2 shadow-[0_26px_72px_rgba(0,0,0,0.46)] backdrop-blur-xl"
           style={{ top: desktopContextMenu.y, left: desktopContextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-2 pb-2 text-[9px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
+          <div className="px-2 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
             Quick Actions
           </div>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <button
               onClick={() => handleDesktopContextAction('copy')}
-              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+              className="w-full rounded-lg px-3 py-1.5 text-left text-[12px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
             >
               Copy
             </button>
             <button
               onClick={() => handleDesktopContextAction('paste')}
-              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+              className="w-full rounded-lg px-3 py-1.5 text-left text-[12px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
             >
               Paste
             </button>
             <button
               onClick={() => handleDesktopContextAction('cut')}
-              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+              className="w-full rounded-lg px-3 py-1.5 text-left text-[12px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
             >
               Cut
             </button>
-            <button
-              onClick={() => handleDesktopContextAction('rewrite')}
-              disabled={!desktopContextMenu.selectedText}
-              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white disabled:cursor-not-allowed disabled:text-[#6F645D] disabled:hover:bg-transparent"
-            >
-              Rewrite
-            </button>
           </div>
 
-          <div className="mx-1 my-3 h-px bg-[#2A221E]" />
+          <div className="mx-1 my-2 h-px bg-[#2A221E]" />
 
-          <div className="px-2 pb-2 text-[9px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
+          <div className="px-2 pb-1.5 text-[9px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
             Window
           </div>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <button
               onClick={() => handleDesktopContextAction('zoom_in')}
-              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+              className="w-full rounded-lg px-3 py-1.5 text-left text-[12px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
             >
               Zoom In
             </button>
             <button
               onClick={() => handleDesktopContextAction('zoom_out')}
-              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+              className="w-full rounded-lg px-3 py-1.5 text-left text-[12px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
             >
               Zoom Out
             </button>
             <button
               onClick={() => handleDesktopContextAction('reload')}
-              className="w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
+              className="w-full rounded-lg px-3 py-1.5 text-left text-[12px] font-semibold text-[#F3EDE6] transition-all hover:bg-[#2A211D] hover:text-white"
             >
               Reload
             </button>
           </div>
         </div>
       )}
-
-      <AnimatePresence>
-        {rewriteSelectionState.open && (
-          <div
-            className="fixed inset-0 z-[330] flex items-center justify-center bg-[#0F0D0C]/80 px-4 backdrop-blur-md"
-            onClick={() => setRewriteSelectionState({ open: false, sourceText: '', resultText: '', loading: false, error: null })}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 14 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 14 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="relative w-full max-w-3xl overflow-hidden rounded-[28px] border border-[#342A24] bg-[linear-gradient(180deg,rgba(25,20,18,0.985)_0%,rgba(17,14,13,0.992)_100%)] shadow-[0_38px_100px_rgba(0,0,0,0.55)]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="absolute left-0 top-0 h-32 w-32 rounded-full bg-[#D97756]/10 blur-3xl" />
-              <div className="absolute bottom-0 right-0 h-32 w-32 rounded-full bg-[#E8B179]/8 blur-3xl" />
-              <div className="relative border-b border-[#2B221D] px-6 py-5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#8C7A70]">
-                  AI Rewrite
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-[#F5EFE7]">Rewritten selection preview</h3>
-                    <p className="mt-1 text-sm text-[#9F9187]">Reworked for clarity, grammar, and smoother flow.</p>
-                  </div>
-                  <button
-                    onClick={() => setRewriteSelectionState({ open: false, sourceText: '', resultText: '', loading: false, error: null })}
-                    className="rounded-xl border border-[#342A24] bg-[#191413]/80 px-3 py-2 text-[12px] font-medium text-[#C9BCB1] transition-all hover:border-[#4A3B33] hover:text-white"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              <div className="relative grid gap-4 px-6 py-5 md:grid-cols-2">
-                <div className="rounded-2xl border border-[#2D241E] bg-[#141110]/88 p-4">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#8C7A70]">Original</div>
-                  <div className="mt-3 max-h-[320px] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#D7CCC2]">
-                    {rewriteSelectionState.sourceText}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-[#3A2D26] bg-[#171210]/92 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#B59A87]">Improved</div>
-                    <button
-                      onClick={async () => {
-                        if (!rewriteSelectionState.resultText) return;
-                        try {
-                          await navigator.clipboard.writeText(rewriteSelectionState.resultText);
-                          showToast('Rewritten text copied.');
-                        } catch (error) {
-                          console.error('Copy rewritten text failed:', error);
-                          showToast('Could not copy the rewritten text.');
-                        }
-                      }}
-                      disabled={!rewriteSelectionState.resultText}
-                      className="rounded-lg border border-[#3C2E27] bg-[#1E1714]/85 px-2.5 py-1.5 text-[11px] font-medium text-[#E7DBD0] transition-all hover:border-[#5A463B] hover:text-white disabled:cursor-not-allowed disabled:text-[#6F645D]"
-                    >
-                      Copy Result
-                    </button>
-                  </div>
-                  <div className="mt-3 max-h-[320px] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-[#F5EFE7]">
-                    {rewriteSelectionState.loading && (
-                      <div className="text-[#BFAFA2]">Rewriting your selected text...</div>
-                    )}
-                    {!rewriteSelectionState.loading && rewriteSelectionState.error && (
-                      <div className="text-rose-300">{rewriteSelectionState.error}</div>
-                    )}
-                    {!rewriteSelectionState.loading && !rewriteSelectionState.error && rewriteSelectionState.resultText}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Transcription Option selector Popup Modal */}
       <TranscriptionOptionsModal
@@ -3896,13 +3750,23 @@ const startCoderPreview = useCallback(async () => {
 
       {/* Floating manual code editor in non-coder mode */}
       {!isCoderMode && floatingEditFile && (
-        <FloatingCodeEditor 
+        <FloatingCodeEditor
           filePath={floatingEditFile}
           onClose={() => setFloatingEditFile(null)}
           showToast={showToast}
           triggerWorkspaceRefresh={triggerWorkspaceRefresh}
         />
       )}
+
+      {/* AI Writing Canvas - shown when writing style is not default */}
+      <AnimatePresence>
+        {isWritingCanvasOpen && (
+          <FloatingWritingCanvas
+            writingStyle={writingStyle}
+            onClose={() => setIsWritingCanvasOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Global & Connected Whiteboard popup panel */}
       <AnimatePresence>

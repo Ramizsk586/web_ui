@@ -57,6 +57,8 @@ export interface ChatBoxPanelProps {
   isCenteredState?: boolean;
   theme: { id: string };
   writingStyle: string;
+  isWritingCanvasOpen: boolean;
+  setIsWritingCanvasOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isWebSearchEnabled: boolean;
   setIsWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   isDeepSearchEnabled: boolean;
@@ -204,6 +206,8 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
   setIsWhiteboardOpen,
   researchState,
   writingStyle,
+  isWritingCanvasOpen,
+  setIsWritingCanvasOpen,
   isWebSearchEnabled,
   setIsWebSearchEnabled,
   isDeepSearchEnabled,
@@ -680,8 +684,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsPlusMenuOpen(true);
-                  setActivePlusSubMenu("style");
+                  setIsWritingCanvasOpen(!isWritingCanvasOpen);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-500/10 text-orange-500 border border-orange-500/20 shadow-sm cursor-pointer hover:bg-orange-500/15 text-xs font-semibold"
               >

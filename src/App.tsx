@@ -28,114 +28,185 @@ function StartupSplash({ isVisible }: { isVisible: boolean }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background:
-          'radial-gradient(circle at top, rgba(125, 211, 252, 0.18), transparent 36%), linear-gradient(180deg, #050816 0%, #09090b 48%, #05070f 100%)',
+        background: 'var(--splash-bg, #09090b)',
         opacity: isVisible ? 1 : 0,
         visibility: isVisible ? 'visible' : 'hidden',
         pointerEvents: 'none',
-        transition: 'opacity 320ms ease, visibility 320ms ease',
+        transition: 'opacity 600ms cubic-bezier(0.16, 1, 0.3, 1), visibility 600ms ease',
         zIndex: 9999,
+        userSelect: 'none',
       }}
     >
+      <style>{`
+        @keyframes splash-ring {
+          0%   { transform: scale(0.8); opacity: 0; }
+          40%  { opacity: 1; }
+          100% { transform: scale(1.6); opacity: 0; }
+        }
+        @keyframes splash-ring-2 {
+          0%   { transform: scale(0.8); opacity: 0; }
+          40%  { opacity: 0.6; }
+          100% { transform: scale(2.2); opacity: 0; }
+        }
+        @keyframes splash-glow {
+          0%, 100% { opacity: 0.5; }
+          50%       { opacity: 1; }
+        }
+        @keyframes splash-logo-in {
+          0%   { opacity: 0; transform: translateY(10px) scale(0.97); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes splash-text-in {
+          0%   { opacity: 0; transform: translateY(6px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes splash-fade-out {
+          0%   { opacity: 1; }
+          100% { opacity: 0; }
+        }
+      `}</style>
+
+      {/* Ambient background radial */}
       <div
         style={{
-          width: 'min(88vw, 420px)',
-          padding: '32px 28px',
-          borderRadius: 24,
-          border: '1px solid rgba(255,255,255,0.08)',
-          background: 'rgba(8, 11, 21, 0.78)',
-          boxShadow: '0 24px 80px rgba(0, 0, 0, 0.45)',
-          backdropFilter: 'blur(22px)',
-          textAlign: 'center',
+          position: 'absolute',
+          inset: 0,
+          background:
+            'radial-gradient(ellipse 60% 50% at 50% 50%, var(--splash-glow-color, rgba(99,102,241,0.12)) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Centered content */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 0,
+          animation: isVisible ? 'splash-logo-in 600ms cubic-bezier(0.16, 1, 0.3, 1) both' : 'none',
         }}
       >
+        {/* Logo mark + ring effect */}
         <div
           style={{
+            position: 'relative',
             width: 72,
             height: 72,
-            margin: '0 auto 18px',
-            borderRadius: 22,
-            background:
-              'linear-gradient(135deg, rgba(56, 189, 248, 0.95), rgba(14, 165, 233, 0.2))',
-            display: 'grid',
-            placeItems: 'center',
-            boxShadow: '0 10px 30px rgba(14, 165, 233, 0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
+          {/* Expanding ring 1 */}
           <div
             style={{
-              width: 34,
-              height: 34,
-              borderRadius: 14,
-              border: '2px solid rgba(255,255,255,0.95)',
-              borderTopColor: 'transparent',
-              animation: 'lumina-spin 1s linear infinite',
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '50%',
+              border: '1px solid var(--splash-accent, #6366f1)',
+              animation: 'splash-ring 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite',
             }}
           />
+          {/* Expanding ring 2 (offset) */}
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: '50%',
+              border: '1px solid var(--splash-accent, #6366f1)',
+              opacity: 0.5,
+              animation: 'splash-ring-2 2.4s cubic-bezier(0.16, 1, 0.3, 1) 1.2s infinite',
+            }}
+          />
+          {/* Glow halo */}
+          <div
+            style={{
+              position: 'absolute',
+              inset: '20%',
+              borderRadius: '50%',
+              background: 'var(--splash-accent, #6366f1)',
+              filter: 'blur(12px)',
+              animation: 'splash-glow 2.4s ease-in-out infinite',
+            }}
+          />
+          {/* Logo SVG */}
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            style={{ position: 'relative', zIndex: 1 }}
+          >
+            <path
+              d="M12 2L13.5 8.5H20L14.5 12L16 19L12 15L8 19L9.5 12L4 8.5H10.5L12 2Z"
+              fill="white"
+              fillOpacity="0.95"
+            />
+          </svg>
         </div>
 
+        {/* Wordmark */}
         <div
           style={{
-            fontSize: 30,
+            marginTop: 24,
+            fontSize: 36,
             fontWeight: 600,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: '#f8fafc',
+            letterSpacing: '-0.02em',
+            color: 'var(--splash-text, #f4f4f5)',
+            fontFamily: "'Outfit', 'Inter', system-ui, sans-serif",
+            animation: 'splash-text-in 500ms cubic-bezier(0.16, 1, 0.3, 1) 200ms both',
           }}
         >
           Lumina
         </div>
 
+        {/* Subtle divider line */}
         <div
           style={{
-            marginTop: 10,
-            fontSize: 14,
-            lineHeight: 1.6,
-            color: 'rgba(226, 232, 240, 0.76)',
+            marginTop: 12,
+            width: 32,
+            height: 1,
+            background: 'var(--splash-accent, #6366f1)',
+            borderRadius: 1,
+            animation: 'splash-text-in 400ms cubic-bezier(0.16, 1, 0.3, 1) 380ms both',
+          }}
+        />
+
+        {/* Tagline */}
+        <div
+          style={{
+            marginTop: 12,
+            fontSize: 13,
+            fontWeight: 400,
+            color: 'var(--splash-muted, rgba(161,161,170,0.7))',
+            letterSpacing: '0.04em',
+            fontFamily: "'Inter', system-ui, sans-serif",
+            animation: 'splash-text-in 400ms cubic-bezier(0.16, 1, 0.3, 1) 480ms both',
           }}
         >
-          Loading your workspace and preparing the app...
+          Preparing your workspace
         </div>
 
+        {/* Subtle loading dots */}
         <div
           style={{
-            marginTop: 24,
-            height: 6,
-            width: '100%',
-            borderRadius: 999,
-            background: 'rgba(148, 163, 184, 0.14)',
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              height: '100%',
-              width: '42%',
-              borderRadius: 'inherit',
-              background:
-                'linear-gradient(90deg, rgba(56,189,248,0.4), rgba(125,211,252,1), rgba(56,189,248,0.4))',
-              animation: 'lumina-loading-bar 1.5s ease-in-out infinite',
-            }}
-          />
-        </div>
-
-        <div
-          style={{
-            marginTop: 14,
+            marginTop: 32,
             display: 'flex',
-            justifyContent: 'center',
-            gap: 8,
+            gap: 6,
+            animation: 'splash-text-in 400ms cubic-bezier(0.16, 1, 0.3, 1) 600ms both',
           }}
         >
-          {[0, 1, 2].map(index => (
-            <span
-              key={index}
+          {[0, 1, 2].map(i => (
+            <div
+              key={i}
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: 999,
-                background: 'rgba(125, 211, 252, 0.95)',
-                animation: `lumina-pulse 1.2s ease-in-out ${index * 0.15}s infinite`,
+                width: 5,
+                height: 5,
+                borderRadius: '50%',
+                background: 'var(--splash-accent, #6366f1)',
+                animation: `splash-dot 1.4s ease-in-out ${i * 0.2}s infinite`,
               }}
             />
           ))}
@@ -143,18 +214,9 @@ function StartupSplash({ isVisible }: { isVisible: boolean }) {
       </div>
 
       <style>{`
-        @keyframes lumina-spin {
-          to { transform: rotate(360deg); }
-        }
-
-        @keyframes lumina-loading-bar {
-          0% { transform: translateX(-140%); }
-          100% { transform: translateX(320%); }
-        }
-
-        @keyframes lumina-pulse {
-          0%, 100% { opacity: 0.28; transform: translateY(0); }
-          50% { opacity: 1; transform: translateY(-3px); }
+        @keyframes splash-dot {
+          0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+          40%            { transform: scale(1);   opacity: 1;   }
         }
       `}</style>
     </div>

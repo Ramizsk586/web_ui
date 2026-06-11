@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, Box, HardDrive, BookOpen, Link, Image, ChevronDown, Wand2, Plus, ArrowUp, X, Mic } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, Box, HardDrive, BookOpen, Link, Image, ChevronDown, Plus, ArrowUp, X, Mic } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Agent, AgentMessage } from '../../agents/types';
 import { runAgent } from '../../agents/agentRunner';
@@ -24,7 +24,7 @@ interface AgentChatViewProps {
   onOpenInEditor?: (filePath: string | null) => void;
 }
 
-export function AgentChatView({
+export const AgentChatView = React.memo(function AgentChatViewComponent({
   agent,
   onBack,
   onUpdateAgent,
@@ -111,17 +111,6 @@ export function AgentChatView({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const optionsRef = useRef<HTMLDivElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
-
-  const skillIcons: Record<string, React.ReactNode> = {
-    web_browsing: <Globe size={11} />,
-    memory: <Brain size={11} />,
-    artifacts: <Box size={11} />,
-    code_execution: <Terminal size={11} />,
-    image_generation: <Image size={11} />,
-    file_read_write: <HardDrive size={11} />,
-    wiki_search: <BookOpen size={11} />,
-    web_scraper: <Link size={11} />,
-  };
 
   // Auto scroll to bottom
   const scrollToBottom = () => {
@@ -549,23 +538,6 @@ export function AgentChatView({
       textInputRef.current.style.height = 'auto';
       textInputRef.current.style.height = `${Math.min(textInputRef.current.scrollHeight, 200)}px`;
     }
-  };
-
-  const renderSkillBadges = () => {
-    const activeSkills = agent.skills.filter(s => s.enabled);
-    if (activeSkills.length === 0) return null;
-
-    return (
-      <div className="flex flex-wrap gap-1.5 items-center">
-        {activeSkills.map(sk => (
-          <AgentToolBadge
-            key={sk.id}
-            label={sk.name}
-            icon={skillIcons[sk.id] || <Wand2 size={9} />}
-          />
-        ))}
-      </div>
-    );
   };
 
   return (
@@ -1033,4 +1005,4 @@ export function AgentChatView({
       </AnimatePresence>
     </div>
   );
-}
+});

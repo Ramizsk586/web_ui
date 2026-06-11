@@ -1,9 +1,5 @@
-import React, { useState } from 'react';
-import { Bot, ChevronDown, Plus } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import React from 'react';
 import { Agent } from '../../agents/types';
-import { AgentCard } from './AgentCard';
-import { AgentHubModal } from './AgentHubModal';
 
 interface AgentSidebarSectionProps {
   agents: Agent[];

@@ -1488,9 +1488,7 @@ function MessageItemComponent({
                 onClick={() => setIsThinkingPanelCollapsed(!isThinkingPanelCollapsed)}
                 className="group flex items-center gap-2.5 text-[13px] text-zinc-200 font-medium cursor-pointer mb-3 w-fit max-w-full transition-colors hover:text-white"
               >
-                <span className="flex items-center justify-center w-5 h-5 rounded-full border border-blue-500/30 bg-blue-500/8 text-blue-400 shrink-0">
-                  <Sparkles size={11} />
-                </span>
+                <Sparkles size={11} className="text-blue-400 shrink-0" />
                 <span>
                   {message.isThinking
                     ? `Thought for ${Math.max(1, Math.round(thinkingElapsedMs / 1000))} seconds`
@@ -1521,7 +1519,6 @@ function MessageItemComponent({
                           <ThinkingAnimation
                             size="sm"
                             label={isCoderMode ? 'Coder thinking' : 'Thinking'}
-                            subLabel="Reading reasoning stream..."
                           />
                         </div>
                       )}

@@ -391,13 +391,11 @@ export const ComposioToolCallingAnimation = () => (
  * A premium DeepSeek-GUI style thinking indicator with pulsing brain animation,
  * orbiting particles, and streaming dots - mimics the reasoning display
  */
-export const ThinkingAnimation = ({ 
+export const ThinkingAnimation = ({
   label = 'Thinking',
-  subLabel = 'Generating reasoning...',
   size = 'md' as 'sm' | 'md' | 'lg'
-}: { 
+}: {
   label?: string;
-  subLabel?: string;
   size?: 'sm' | 'md' | 'lg';
 }) => {
   const sizeClasses = {
@@ -412,77 +410,20 @@ export const ThinkingAnimation = ({
     <div className="flex items-center gap-3 select-none">
       {/* Main thinking orb */}
       <div className={`relative flex items-center justify-center ${sizes.container}`}>
-        {/* Outer expanding ripple */}
+        {/* Calm glow circle */}
         <motion.div
-          initial={{ scale: 0.8, opacity: 0.7 }}
-          animate={{ scale: 2.2, opacity: 0 }}
-          transition={{
-            repeat: Infinity,
-            duration: 2.0,
-            ease: 'easeOut'
-          }}
-          className="absolute inset-0 rounded-full border border-violet-500/40"
+          animate={{ opacity: [0.4, 0.7, 0.4] }}
+          transition={{ repeat: Infinity, duration: 2.5, ease: 'easeInOut' }}
+          className="absolute inset-0 rounded-full bg-blue-400/20 shadow-[0_0_12px_rgba(96,165,250,0.4)]"
         />
-        
-        {/* Second ripple */}
+
+        {/* Central dot */}
         <motion.div
-          initial={{ scale: 0.8, opacity: 0.5 }}
-          animate={{ scale: 2.8, opacity: 0 }}
-          transition={{
-            repeat: Infinity,
-            duration: 2.0,
-            delay: 0.6,
-            ease: 'easeOut'
-          }}
-          className="absolute inset-0 rounded-full border border-indigo-400/25"
-        />
-        
-        {/* Ambient glow */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-violet-500/20 via-purple-500/15 to-indigo-500/20 blur-xl rounded-full" />
-        
-        {/* Rotating dashed orbit */}
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 8, ease: 'linear' }}
-          className="absolute -inset-1 rounded-full border border-dashed border-violet-500/30 dark:border-violet-400/20"
-        />
-        
-        {/* Inner rotating ring */}
-        <motion.div
-          animate={{ rotate: -360 }}
-          transition={{ repeat: Infinity, duration: 4, ease: 'linear' }}
-          className="absolute inset-1 rounded-full border border-violet-500/20"
+          animate={{ scale: [1, 1.05, 1] }}
+          transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
+          className="relative z-10 flex items-center justify-center"
         >
-          {/* Orbiting dot */}
-          <motion.div
-            animate={{ 
-              rotate: 360,
-              scale: [0.8, 1.2, 0.8]
-            }}
-            transition={{ 
-              repeat: Infinity, 
-              duration: 2,
-              ease: 'linear'
-            }}
-            className="absolute -top-0.5 left-1/2 -ml-0.5 w-1.5 h-1.5 bg-violet-400 rounded-full shadow-[0_0_10px_rgba(139,92,246,0.9)]"
-          />
-        </motion.div>
-        
-        {/* Central brain/core icon */}
-        <motion.div
-          animate={{ 
-            scale: [1, 1.08, 1],
-            rotate: [0, 3, -3, 0]
-          }}
-          transition={{ 
-            repeat: Infinity, 
-            duration: 2.2, 
-            ease: 'easeInOut' 
-          }}
-          className="relative z-10 flex items-center justify-center text-violet-400 bg-violet-950/30 border border-violet-500/50 rounded-full shadow-[0_0_15px_rgba(139,92,246,0.25)]"
-          style={{ width: sizes.icon + 8, height: sizes.icon + 8 }}
-        >
-          <Brain size={sizes.icon} strokeWidth={2.2} />
+          <div className="w-2 h-2 bg-blue-400 rounded-full shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
         </motion.div>
       </div>
       
@@ -512,11 +453,6 @@ export const ThinkingAnimation = ({
             ))}
           </div>
         </div>
-        {subLabel && (
-          <span className="text-[10px] text-violet-300/60 dark:text-violet-400/50 font-mono">
-            {subLabel}
-          </span>
-        )}
       </div>
     </div>
   );

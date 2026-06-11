@@ -158,6 +158,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     root.classList.toggle('dark', theme.isDark);
     root.setAttribute('data-theme', theme.id);
+
+    // Sync loading screen accent to theme accent
+    root.style.setProperty('--splash-accent', c.accent);
+    root.style.setProperty('--splash-bg', c.background);
+    root.style.setProperty('--splash-text', c.primary);
+    root.style.setProperty('--splash-muted', c.muted);
+    root.style.setProperty('--splash-glow-color', c.accent + '22');
   }, [theme]);
 
   if (!mounted) {
