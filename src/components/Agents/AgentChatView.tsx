@@ -8,6 +8,7 @@ import { MessageItem } from '../Chat/MessageItem';
 import { AgentToolBadge } from './AgentToolBadge';
 import { AgentAvatar } from './AgentAvatar';
 import { parseThinkTags } from '../../utils/textUtils';
+import { safeConfirm } from '../../utils/tauriDesktop';
 
 const createAgentMessageId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -519,7 +520,7 @@ export const AgentChatView = React.memo(function AgentChatViewComponent({
   };
 
   const handleClearHistory = () => {
-    if (window.confirm('Are you sure you want to clear the conversation history with this agent?')) {
+    if (safeConfirm('Are you sure you want to clear the conversation history with this agent?')) {
       onUpdateAgent({ chatHistory: [] });
       setShowOptions(false);
     }

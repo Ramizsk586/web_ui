@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { computeLineDiff } from '../components/NodeGraph/FileDiffNode';
 import { parseThinkTags, turboQuantCompress } from '../utils/textUtils';
 import { extractArtifacts } from '../utils/artifactUtils';
@@ -1011,6 +1011,7 @@ export function useAppHandlers(params: UseAppHandlersParams) {
 
   const coderPermissionModeRef = React.useRef(coderPermissionMode);
   const alwaysAllowedCommandsRef = React.useRef(alwaysAllowedCommands);
+  const piAgentCacheRef = useRef<Map<string, PiAgentInstance>>(new Map());
 
   useEffect(() => {
     coderPermissionModeRef.current = coderPermissionMode;
@@ -1284,6 +1285,331 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       return chat;
     }));
     showToast("Chat cleared successfully!");
+  };
+
+  /**
+   * Run a coder task using the pi agent SDK
+   * This replaces the manual callLlamaBridge + tool execution loop
+   */
+  const runCoderTaskWithPiAgent = async (params: {
+    chatId: string;
+    thinkingId: string;
+    task: string;
+    systemPrompt: string;
+    coderWorkspacePath: string;
+    apiKey?: string;
+    modelId?: string;
+    provider?: string;
+    baseUrl?: string;
+    signal?: AbortSignal;
+  }) => {
+    const {
+      chatId,
+      thinkingId,
+      task,
+      systemPrompt,
+      coderWorkspacePath,
+      apiKey,
+      modelId,
+      provider,
+      baseUrl,
+      signal,
+    } = params;
+
+    // Create or reuse pi agent instance
+    const cachedAgentKey = `${coderWorkspacePath}:${modelId || 'default'}:${provider || 'anthropic'}`;
+    let agentInstance = piAgentCacheRef.current.get(cachedAgentKey);
+
+    if (!agentInstance) {
+      try {
+        agentInstance = await createCoderPiAgent({
+          workspacePath: coderWorkspacePath,
+          apiKey,
+          model: {
+            id: modelId || 'anthropic/claude-sonnet-4-20250514',
+            provider: provider || 'anthropic',
+            baseUrl: baseUrl || 'https://api.anthropic.com',
+          },
+          systemPrompt,
+          thinkingLevel: 'high',
+        });
+        piAgentCacheRef.current.set(cachedAgentKey, agentInstance);
+      } catch (error) {
+        console.error('[PiAgent] Failed to create coder agent:', error);
+        throw error;
+      }
+    }
+
+    const toolCallNodes: ToolCallNode[] = [];
+    let loopCount = 0;
+    const maxLoops = 20;
+
+    // Helper to get tool category
+    const getToolCategory = (name: string): ToolCallNode['toolCategory'] => {
+      if (name === 'read_file' || name === 'glob_tool' || name === 'grep_tool' || name === 'analyze_file' || name === 'list_directory') return 'read';
+      if (name === 'write_file' || name === 'edit_file' || name === 'create_file' || name === 'delete_file' || name === 'rename_file') return 'write';
+      if (name === 'run_command' || name === 'run_build' || name === 'run_test') return 'execute';
+      if (name === 'analyze_file' || name === 'inspect_code') return 'discovery';
+      if (name === 'spawn_subagent' || name === 'delegate_task') return 'delegate';
+      if (name === 'web_scrape' || name === 'web_search' || name === 'search' || name === 'visit') return 'web';
+      if (name === 'ask_user' || name === 'manage_todos') return 'workflow';
+      if (name.startsWith('wiki_')) return 'web';
+      return 'read';
+    };
+
+    // Helper to get icon for tool
+    const getToolIcon = (name: string): string => {
+      if (name === 'web_scrape' || name === 'search' || name === 'web_search') return 'globe';
+      if (name === 'glob_tool' || name === 'list_directory') return 'file';
+      if (name === 'grep_tool') return 'search';
+      if (name === 'read_file') return 'file';
+      if (name === 'write_file' || name === 'create_file') return 'write';
+      if (name === 'edit_file') return 'edit';
+      if (name === 'analyze_file') return 'code';
+      if (name === 'run_command' || name === 'run_build' || name === 'run_test') return 'terminal';
+      if (name === 'delete_file') return 'terminal';
+      if (name === 'rename_file') return 'edit';
+      if (name === 'spawn_subagent' || name.startsWith('composio_')) return 'puzzle';
+      if (name.includes('grep') || name.includes('search') || name.includes('subtask')) return 'search';
+      if (name.includes('read') || name.includes('file')) return 'file';
+      if (name.includes('edit') || name.includes('create')) return 'edit';
+      return 'sparkles';
+    };
+
+    // Event handler for pi agent
+    const handlePiEvent = async (event: PiAgentEvent) => {
+      switch (event.type) {
+        case 'tool_call_start': {
+          loopCount++;
+          const toolName = event.toolName;
+          const normalizedArgPath = event.args?.filePath || '';
+
+          const displayLabel =
+            toolName === 'run_command' ? `Run command (${String(event.args?.command || '').trim() || 'shell'})` :
+            toolName === 'read_file' ? `Read file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+            toolName === 'write_file' ? `Write file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+            toolName === 'create_file' ? `Create file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+            toolName === 'delete_file' ? `Delete file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+            toolName === 'rename_file' ? `Rename file` :
+            toolName === 'glob_tool' ? `Find files (${String(event.args?.fileGlob || '*').trim()})` :
+            toolName === 'grep_tool' ? `Search code (${String(event.args?.query || '').trim()})` :
+            toolName === 'analyze_file' ? `Analyze file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
+            toolName === 'web_scrape' ? `Web scrape (${event.args?.url || 'url'})` :
+            toolName === 'search' ? `Web search` :
+            toolName === 'current_time' ? 'Get current time' :
+            toolName;
+
+          const node: ToolCallNode = {
+            id: event.toolCallId || `pi-${loopCount}-${Date.now().toString(36)}`,
+            type: 'tool',
+            label: displayLabel,
+            status: 'active',
+            toolName,
+            toolCategory: getToolCategory(toolName),
+            icon: getToolIcon(toolName),
+            filePath: normalizedArgPath,
+          };
+
+          toolCallNodes.push(node);
+
+          // Update UI with new tool node
+          setChats(prev => prev.map(chat => {
+            if (chat.id !== chatId) return chat;
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === thinkingId ? {
+                ...m,
+                content: `${m.content || ''}${m.content ? '\n\n' : ''}[[tool_call:${node.id}]]`,
+                toolCalls: [...toolCallNodes],
+              } : m)
+            };
+          }));
+
+          // Advance TODOs based on tool type
+          const toolNameLower = toolName.toLowerCase();
+          if (toolNameLower.includes('read') || toolNameLower.includes('glob') || toolNameLower.includes('grep') || toolNameLower.includes('analyze')) {
+            setCoderTodos(prev => {
+              if (prev.length > 0) {
+                return prev.map((item, idx) => {
+                  if (idx === 0) return { ...item, status: 'complete' };
+                  if (idx === 1 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+          if (toolNameLower.includes('write') || toolNameLower.includes('create') || toolNameLower.includes('edit')) {
+            setCoderTodos(prev => {
+              if (prev.length > 1) {
+                return prev.map((item, idx) => {
+                  if (idx <= 1) return { ...item, status: 'complete' };
+                  if (idx === 2 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+          if (loopCount >= 2) {
+            setCoderTodos(prev => {
+              if (prev.length > 2) {
+                return prev.map((item, idx) => {
+                  if (idx <= 2) return { ...item, status: 'complete' };
+                  if (idx === 3 && item.status === 'pending') return { ...item, status: 'in_progress' };
+                  return item;
+                });
+              }
+              return prev;
+            });
+          }
+          break;
+        }
+
+        case 'tool_call_end': {
+          const node = toolCallNodes.find(n => n.id === event.toolCallId) || 
+                       toolCallNodes.find(n => n.id.startsWith('pi-') && n.status === 'active') || 
+                       toolCallNodes[toolCallNodes.length - 1];
+          if (node) {
+            node.status = event.result?.error ? 'failed' : 'complete';
+
+            // Handle result
+            const result = event.result;
+            if (result) {
+              node.result = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+              if (result.filePath && (result.action === 'created_file' || result.action === 'updated_file' || result.action === 'written' || result.oldContent !== undefined || result.newContent !== undefined)) {
+                node.filePath = result.filePath;
+                if (result.addedCount !== undefined) {
+                  node.addedCount = result.addedCount;
+                  node.removedCount = result.removedCount;
+                }
+                if (result.oldContent !== undefined) {
+                  node.oldContent = result.oldContent;
+                }
+                if (result.newContent !== undefined) {
+                  node.newContent = result.newContent;
+                }
+                triggerWorkspaceRefresh();
+              }
+              if (result.success) {
+                node.resultSummary = result.action || 'Success';
+              } else if (result.error) {
+                node.resultSummary = result.error;
+              } else {
+                node.resultSummary = typeof result === 'string' ? result.slice(0, 100) : JSON.stringify(result).slice(0, 100);
+              }
+            }
+
+            // Update UI
+            setChats(prev => prev.map(chat => {
+              if (chat.id !== chatId) return chat;
+              return {
+                ...chat,
+                messages: chat.messages.map(m => m.id === thinkingId ? {
+                  ...m,
+                  toolCalls: [...toolCallNodes],
+                } : m)
+              };
+            }));
+          }
+          break;
+        }
+
+        case 'text': {
+          // Update streaming text
+          setChats(prev => prev.map(chat => {
+            if (chat.id !== chatId) return chat;
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === thinkingId ? {
+                ...m,
+                content: `${m.content || ''}${event.content}`,
+                thinking: undefined,
+              } : m)
+            };
+          }));
+          break;
+        }
+
+        case 'thinking': {
+          // Show thinking state
+          setChats(prev => prev.map(chat => {
+            if (chat.id !== chatId) return chat;
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === thinkingId ? {
+                ...m,
+                thinking: `Planning step ${loopCount}...`,
+              } : m)
+            };
+          }));
+          break;
+        }
+
+        case 'done': {
+          const finalText = event.result?.text;
+          console.log('[PiAgent UI] Done event received. result.text length:', finalText?.length ?? 0, '| current m.content length will be used if empty');
+          // Finalize the response
+          setChats(prev => prev.map(chat => {
+            if (chat.id !== chatId) return chat;
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === thinkingId ? {
+                ...m,
+                // Priority: streaming text from UI state (which has tool call markers) > result text from accumulation
+                // If both are empty, leave content as-is (already streamed) to avoid wiping content
+                content: m.content || finalText || '',
+                isThinking: false,
+                isStreaming: false,
+                toolCalls: toolCallNodes,
+                timestamp: new Date(),
+              } : m),
+              updatedAt: new Date(),
+            };
+          }));
+          triggerWorkspaceRefresh();
+          break;
+        }
+
+        case 'error': {
+          // Handle error
+          setChats(prev => prev.map(chat => {
+            if (chat.id !== chatId) return chat;
+            return {
+              ...chat,
+              messages: chat.messages.map(m => m.id === thinkingId ? {
+                ...m,
+                content: `${m.content || ''}\n\n❌ **Error**: ${event.error}`,
+                isThinking: false,
+                isStreaming: false,
+                toolCalls: toolCallNodes,
+              } : m)
+            };
+          }));
+          break;
+        }
+      }
+    };
+
+    try {
+      await runCoderPiAgent(agentInstance, task, handlePiEvent, signal);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      setChats(prev => prev.map(chat => {
+        if (chat.id !== chatId) return chat;
+        return {
+          ...chat,
+          messages: chat.messages.map(m => m.id === thinkingId ? {
+            ...m,
+            content: `${m.content || ''}\n\n❌ **Agent Error**: ${errorMsg}`,
+            isThinking: false,
+            isStreaming: false,
+            toolCalls: toolCallNodes,
+          } : m)
+        };
+      }));
+      throw error;
+    }
   };
 
   const handleSend = async (contentOverride?: string) => {
@@ -2961,7 +3287,34 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         return;
       }
       
-      // Direct call to Llama Bridge
+      // Coder Mode: delegate all heavy lifting to the Pi Agent
+      // The UI is just a wrapper — pi agent handles tool execution, streaming, and finalization
+      if (effectiveCoderMode && !orchestrationState.awaitingUserConfirmation) {
+        // Ensure typing state is managed by this function's finally block
+        try {
+          await runCoderTaskWithPiAgent({
+            chatId: chatId!,
+            thinkingId,
+            task: content,
+            systemPrompt: '',
+            coderWorkspacePath,
+            apiKey: apiKey,
+            modelId: activeModelId,
+            provider: selectedProvider,
+            baseUrl: serverUrl,
+            signal,
+          });
+        } catch (err) {
+          // runCoderTaskWithPiAgent handles its own state updates; surface a toast
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!signal.aborted) {
+            showToast(`Agent error: ${msg}`);
+          }
+        }
+        return;
+      }
+
+      // Non-coder or orchestrator-pending: use the bridge as before
       let rawResponse: any = await callLlamaBridge(apiMessages, activeTools, signal);
 
       const data = rawResponse;

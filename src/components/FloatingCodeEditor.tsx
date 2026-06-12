@@ -29,6 +29,7 @@ interface FloatingCodeEditorProps {
   onClose: () => void;
   showToast: (msg: string) => void;
   triggerWorkspaceRefresh: () => void;
+  workspaceRootPath?: string;
 }
 
 interface TabFile {
@@ -56,7 +57,8 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
   filePath,
   onClose,
   showToast,
-  triggerWorkspaceRefresh
+  triggerWorkspaceRefresh,
+  workspaceRootPath
 }) => {
   const [openFiles, setOpenFiles] = useState<TabFile[]>([]);
   const [activePath, setActivePath] = useState<string>('');
@@ -146,7 +148,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
       const response = await fetch('/api/fs/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: path })
+        body: JSON.stringify({ filePath: path, workspaceRoot: workspaceRootPath })
       });
       if (response.ok) {
         const data = await response.json();
@@ -171,7 +173,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [openFiles, showToast]);
+  }, [openFiles, showToast, workspaceRootPath]);
 
   useEffect(() => {
     if (filePath) {
@@ -187,7 +189,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
       const response = await fetch('/api/fs/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath: activeFile.path, content: activeFile.editedCode })
+        body: JSON.stringify({ filePath: activeFile.path, content: activeFile.editedCode, workspaceRoot: workspaceRootPath })
       });
       if (response.ok) {
         setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? { 

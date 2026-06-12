@@ -316,8 +316,7 @@ export function useAppSettings({
   const [editingAiProfileId, setEditingAiProfileId] = useState<string | null>(null);
 
   const applyActiveProviderModels = useCallback((profiles: AiProviderProfile[]) => {
-    const activeProfiles = profiles.filter(profile => profile.active);
-    const profileModels = activeProfiles.flatMap(profile =>
+    const profileModels = profiles.flatMap(profile =>
       profile.models
         .filter(model => profile.selectedModelIds.includes(model.id))
         .map(model => ({
@@ -327,6 +326,7 @@ export function useAppSettings({
           color: model.color || 'text-blue-500',
           providerProfileId: profile.id,
           providerProfileName: profile.name,
+          providerProfileActive: profile.active,
         }))
     );
 
@@ -338,7 +338,9 @@ export function useAppSettings({
       setAvailableModels(deduped);
       setSelectedModel(prev => {
         const existing = deduped.find(model => model.id === prev);
-        return existing ? prev : deduped[0].id;
+        if (existing) return prev;
+        const firstActive = deduped.find(model => model.providerProfileActive !== false);
+        return firstActive ? firstActive.id : deduped[0].id;
       });
     } else {
       setAvailableModels([
@@ -688,6 +690,14 @@ export function useAppSettings({
   const handleSelectAiProfileModel = useCallback((modelId: string, profileId: string) => {
     const profile = aiProviderProfiles.find(item => item.id === profileId);
     if (!profile) return;
+    
+    // Set this profile as active, and set others to inactive
+    const updatedProfiles = aiProviderProfiles.map(p => ({
+      ...p,
+      active: p.id === profileId
+    }));
+    persistAiProviderProfiles(updatedProfiles);
+
     setSelectedProvider(profile.provider);
     setServerUrl(profile.endpoint);
     setApiKey(profile.apiKey);
@@ -695,7 +705,7 @@ export function useAppSettings({
     localStorage.setItem('lumina_api_key', profile.apiKey);
     localStorage.setItem('lumina_provider', profile.provider);
     setSelectedModel(modelId);
-  }, [aiProviderProfiles, setSelectedModel]);
+  }, [aiProviderProfiles, persistAiProviderProfiles, setSelectedModel]);
 
   const handleSaveSearch = () => {
     localStorage.setItem('lumina_tavily_key', tavilyApiKey);

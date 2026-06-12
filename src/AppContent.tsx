@@ -104,7 +104,7 @@ import { LocalModelConfigModal } from './components/LocalModelConfigModal';
 
 import { Canvas } from './components/Canvas/Canvas';
 
-import { invokeTauri, isTauriDesktop, listenTauriEvent } from './utils/tauriDesktop';
+import { invokeTauri, isTauriDesktop, listenTauriEvent, safeConfirm } from './utils/tauriDesktop';
 import { OnboardingModal } from './components/OnboardingModal';
 import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
 import { SettingsModal } from './components/SettingsModal';
@@ -739,13 +739,35 @@ export default function AppContent({
     });
   }, [availableModels, useLocalModelsOnly, downloadedModels]);
 
-  const setActiveModelId = (id: string) => {
+  const setActiveModelId = (id: string, providerProfileId?: string) => {
+    if (providerProfileId && handleSelectAiProfileModel) {
+      handleSelectAiProfileModel(id, providerProfileId);
+      return;
+    }
+
     const profileModel = availableModels.find(model => model.id === id && model.providerProfileId);
     if (profileModel?.providerProfileId && handleSelectAiProfileModel) {
       handleSelectAiProfileModel(id, profileModel.providerProfileId);
       return;
     }
+    
+    // Scan all provider profiles (active or inactive) to find the correct matching profile
+    const matchedProfile = aiProviderProfiles.find(profile =>
+      (profile.models || []).some((model: any) => model.id === id)
+    );
+    if (matchedProfile && handleSelectAiProfileModel) {
+      handleSelectAiProfileModel(id, matchedProfile.id);
+      return;
+    }
+
     setSelectedModel(id);
+  };
+
+  const isModelSelected = (model: any) => {
+    return activeModelId === model.id && (
+      !model.providerProfileId || 
+      aiProviderProfiles.find(p => p.active)?.id === model.providerProfileId
+    );
   };
 
   const filteredModelList = useMemo(() => {
@@ -783,12 +805,13 @@ export default function AppContent({
   }, [favoriteModelIds, activeModelList]);
 
   const providerModelCategories = useMemo(() => {
-    const groups = new Map<string, { id: string; label: string; models: any[] }>();
+    const groups = new Map<string, { id: string; label: string; active: boolean; models: any[] }>();
     for (const model of activeModelList) {
       const categoryId = model.providerProfileId || model.providerProfileName || 'default-provider';
       const label = model.providerProfileName || model.provider || 'Available Models';
+      const active = model.providerProfileActive !== false;
       if (!groups.has(categoryId)) {
-        groups.set(categoryId, { id: categoryId, label, models: [] });
+        groups.set(categoryId, { id: categoryId, label, active, models: [] });
       }
       groups.get(categoryId)!.models.push(model);
     }
@@ -816,7 +839,7 @@ export default function AppContent({
         visibleModels: matchingModels,
         totalModels: allModels.length,
         hiddenCount: Math.max(0, allModels.length - matchingModels.length),
-        collapsed: collapsedModelCategories[category.id] ?? false,
+        collapsed: collapsedModelCategories[category.id] ?? !category.active,
       };
     });
   }, [
@@ -829,8 +852,16 @@ export default function AppContent({
   const favoriteModelIdSet = useMemo(() => new Set(favoriteModelIds), [favoriteModelIds]);
 
   const toggleModelCategory = useCallback((categoryId: string) => {
+    const profile = aiProviderProfiles.find(p => p.id === categoryId);
+    if (profile && !profile.active) {
+      if (profile.models?.[0] && handleSelectAiProfileModel) {
+        handleSelectAiProfileModel(profile.models[0].id, categoryId);
+        setCollapsedModelCategories(prev => ({ ...prev, [categoryId]: false }));
+        return;
+      }
+    }
     setCollapsedModelCategories(prev => ({ ...prev, [categoryId]: !prev[categoryId] }));
-  }, []);
+  }, [aiProviderProfiles, handleSelectAiProfileModel]);
 
   const handleOpenLocalModelConfig = (id: string) => {
     const modelObj = activeModelList.find(m => m.id === id) || { id, name: id };
@@ -848,24 +879,13 @@ export default function AppContent({
     setLocalModelLoadingProgress(0);
     
     // Append real compilation output to console logs
-    addDevLog(`[llama.cpp] Initializing local model: ${modelId}`, 'info');
-    addDevLog(`[llama.cpp] Configured Port: ${config.localPort} | Host: ${config.localHost}`, 'info');
-    addDevLog(`[llama.cpp] Selected Path: C:/Users/${config.osUser}/.lumina/models/${config.modelPublisher}/${config.modelFolder}/${config.modelFile}`, 'info');
-    addDevLog(`[llama.cpp] GPU Offload Layers (ngl): ${config.gpuOffload}`, 'info');
-    
-    showToast(`Loading llama.cpp configurations for ${localModelConfigModel.name}...`);
-    
-    let currentProgress = 0;
-    const interval = setInterval(() => {
-      const step = 25;
-      currentProgress = Math.min(currentProgress + step, 100);
-      setLocalModelLoadingProgress(currentProgress);
-      
-      if (currentProgress >= 100) {
-        clearInterval(interval);
+    setLocalModelLoadingProgress(10);
+    setTimeout(() => {
+      setLocalModelLoadingProgress(40);
+      setTimeout(() => {
+        setLocalModelLoadingProgress(70);
         setTimeout(() => {
-          setLoadedLocalModelId(modelId);
-          localStorage.setItem('lumina_active_loaded_local_model', modelId);
+          setLocalModelLoadingProgress(100);
           setLocalModelLoadingId(null);
           setLocalModelLoadingProgress(0);
           
@@ -878,13 +898,14 @@ export default function AppContent({
           showToast(`Lumina is now connected to ${localModelConfigModel.name}!`);
         }, 300);
       }
+      , 150);
     }, 150);
   };
 
-  const handleModelSelect = (id: string) => {
+  const handleModelSelect = (id: string, providerProfileId?: string) => {
     // Check ifSelected model is local model (GGUF etc)
     const isLocal = useLocalModelsOnly || id.toLowerCase().includes('gguf');
-    setActiveModelId(id);
+    setActiveModelId(id, providerProfileId);
     setIsModelDropdownOpen(false);
     setIsModelDrawerOpen(false);
     setModelSearchQuery('');
@@ -2438,7 +2459,7 @@ const startCoderPreview = useCallback(async () => {
                         showToast("No active conversation to clear.");
                         return;
                       }
-                      if (window.confirm("Are you sure you want to clear all messages on the screen?")) {
+                      if (safeConfirm("Are you sure you want to clear all messages on the screen?")) {
                         handleClearChat();
                       }
                     }}
@@ -3309,9 +3330,9 @@ const startCoderPreview = useCallback(async () => {
                             <div className="p-1.5 space-y-1">
                               {category.visibleModels.map((model: any) => (
                                 <div key={`${category.id}-${model.id}`} className={`group w-full min-h-[46px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                                  activeModelId === model.id ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
+                                  isModelSelected(model) ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold' : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
                                 }`}>
-                                  <button onClick={() => handleModelSelect(model.id)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                                  <button onClick={() => handleModelSelect(model.id, model.providerProfileId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
                                     <div>{renderAppModelLogo(model.author || model.providerProfileName || model.id.split('/')[0] || '', model.id, model.icon)}</div>
                                     <span className="flex-1 min-w-0">
                                       <span className="block truncate">{model.name}</span>
@@ -3327,7 +3348,7 @@ const startCoderPreview = useCallback(async () => {
                                   >
                                     <Sparkles size={13} />
                                   </button>
-                                  {activeModelId === model.id && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
+                                  {isModelSelected(model) && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
                                 </div>
                               ))}
                               {hasModelSearch && category.visibleModels.length === 0 && (
@@ -3755,6 +3776,7 @@ const startCoderPreview = useCallback(async () => {
           onClose={() => setFloatingEditFile(null)}
           showToast={showToast}
           triggerWorkspaceRefresh={triggerWorkspaceRefresh}
+          workspaceRootPath={coderWorkspacePath}
         />
       )}
 

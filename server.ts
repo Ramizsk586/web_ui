@@ -611,6 +611,401 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     return finalText.trim();
   };
 
+  // ─── Custom LLM Bridge API ─────────────────────────────────────────────────
+  // This endpoint allows any internal service (like Pi agent) to use the app's configured providers
+  // The app stores provider profiles in localStorage, we read them here
+  const getLlmConfig = () => {
+    try {
+      const profilesJson = localStorage.getItem('lumina_ai_provider_profiles');
+      if (profilesJson) {
+        return JSON.parse(profilesJson);
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  // Get list of available models from app profiles
+  app.get("/api/llm/models", async (req, res) => {
+    try {
+      const profiles = getLlmConfig();
+      if (!profiles || !Array.isArray(profiles) || profiles.length === 0) {
+        // Fallback to environment defaults
+        return res.json([
+          { id: 'openprovider/auto-free', name: 'Auto Free', provider: 'openprovider', endpoint: process.env.AI_BASE_URL || 'http://localhost:11434/v1' },
+          { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', endpoint: 'https://api.anthropic.com' },
+        ]);
+      }
+      
+      const models = profiles.flatMap((profile: any) => 
+        (profile.models || []).map((model: any) => ({
+          id: model.id,
+          name: model.name,
+          provider: profile.provider,
+          endpoint: profile.endpoint,
+          apiKey: profile.apiKey,
+        }))
+      );
+      res.json(models);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Chat completion endpoint using app's configured providers
+  app.post("/api/llm/chat", async (req, res) => {
+    const { model, messages, tools, stream, modelId } = req.body;
+    
+    if (!messages) {
+      return res.status(400).json({ error: "messages are required" });
+    }
+
+    res.setHeader('Content-Type', stream ? 'application/x-ndjson' : 'application/json');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    try {
+      // Get model config - prefer modelId, then model
+      const modelConfig = modelId || model;
+      let endpoint = '';
+      let apiKey = '';
+      let modelName = modelConfig;
+
+      // Check if it's a stored profile model
+      const profiles = getLlmConfig();
+      if (profiles && Array.isArray(profiles)) {
+        for (const profile of profiles) {
+          const foundModel = (profile.models || []).find((m: any) => m.id === modelConfig);
+          if (foundModel) {
+            endpoint = profile.endpoint;
+            apiKey = profile.apiKey;
+            modelName = foundModel.id;
+            break;
+          }
+        }
+      }
+
+      // Fallback to environment variables
+      if (!endpoint) {
+        endpoint = process.env.AI_BASE_URL || 'http://localhost:11434/v1';
+        apiKey = process.env.AI_API_KEY || '';
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) {
+        // Check if it's Anthropic
+        if (endpoint.includes('anthropic')) {
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+      }
+
+      const body: Record<string, any> = {
+        model: modelName,
+        messages,
+        stream: !!stream,
+      };
+
+      if (tools && tools.length > 0) {
+        body.tools = tools;
+        body.tool_choice = 'auto';
+      }
+
+      // Determine API path based on provider
+      let apiPath = '/chat/completions';
+      if (endpoint.includes('anthropic')) {
+        apiPath = '/v1/messages';
+      }
+
+      const fullUrl = `${endpoint.replace(/\/$/, '')}${apiPath}`;
+      console.log('[LLM Bridge] Calling:', fullUrl, 'model:', modelName);
+
+      if (stream) {
+        // Handle streaming response
+        const response = await axios.post(fullUrl, body, { 
+          headers, 
+          timeout: 120000,
+          responseType: 'stream' 
+        });
+
+        response.data.on('data', (chunk: Buffer) => {
+          res.write(chunk);
+        });
+        response.data.on('end', () => {
+          res.end();
+        });
+        response.data.on('error', (err: Error) => {
+          console.error('[LLM Bridge] Stream error:', err.message);
+          res.end();
+        });
+      } else {
+        const response = await axios.post(fullUrl, body, { headers, timeout: 120000 });
+        res.json(response.data);
+      }
+    } catch (e: any) {
+      console.error('[LLM Bridge] Error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Llama Bridge Compatible API ──────────────────────────────────────────────
+  // These endpoints make Lumina act as an OpenAI-compatible bridge
+  // Allowing external apps to use Lumina's configured providers
+  
+  // Health check
+  app.get("/health", async (req, res) => {
+    res.json({ status: 'ok', service: 'lumina-bridge' });
+  });
+
+  // List available models
+  app.get("/v1/models", async (req, res) => {
+    try {
+      const profiles = getLlmConfig();
+      const models: any[] = [];
+      
+      if (profiles && Array.isArray(profiles)) {
+        for (const profile of profiles) {
+          for (const model of profile.models || []) {
+            models.push({
+              id: model.id,
+              object: 'model',
+              created: Date.now() / 1000,
+              owned_by: profile.provider,
+              provider: profile.provider,
+              endpoint: profile.endpoint,
+            });
+          }
+        }
+      }
+      
+      // Add fallback models
+      if (models.length === 0) {
+        models.push(
+          { id: 'openprovider/auto-free', object: 'model', created: Date.now() / 1000, owned_by: 'openprovider' },
+          { id: 'claude-sonnet-4-20250514', object: 'model', created: Date.now() / 1000, owned_by: 'anthropic' }
+        );
+      }
+      
+      res.json({ object: 'list', data: models });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Get specific model info
+  app.get("/v1/models/:model_id", async (req, res) => {
+    const { model_id } = req.params;
+    const profiles = getLlmConfig();
+    
+    if (profiles && Array.isArray(profiles)) {
+      for (const profile of profiles) {
+        const model = (profile.models || []).find((m: any) => m.id === model_id);
+        if (model) {
+          return res.json({
+            id: model.id,
+            object: 'model',
+            created: Date.now() / 1000,
+            owned_by: profile.provider,
+            provider: profile.provider,
+            endpoint: profile.endpoint,
+          });
+        }
+      }
+    }
+    
+    res.json({
+      id: model_id,
+      object: 'model',
+      created: Date.now() / 1000,
+      owned_by: 'unknown',
+    });
+  });
+
+  // Chat completions
+  app.post("/v1/chat/completions", async (req, res) => {
+    const { model, messages, tools, stream, temperature, max_tokens, ...otherParams } = req.body;
+    
+    if (!messages) {
+      return res.status(400).json({ error: 'messages are required' });
+    }
+
+    const isStream = stream === true;
+    res.setHeader('Content-Type', isStream ? 'application/x-ndjson' : 'application/json');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    try {
+      let endpoint = '';
+      let apiKey = '';
+      let modelName = model;
+
+      const profiles = getLlmConfig();
+      if (profiles && Array.isArray(profiles)) {
+        for (const profile of profiles) {
+          const foundModel = (profile.models || []).find((m: any) => m.id === model);
+          if (foundModel) {
+            endpoint = profile.endpoint;
+            apiKey = profile.apiKey;
+            modelName = foundModel.id;
+            break;
+          }
+        }
+      }
+
+      if (!endpoint) {
+        endpoint = process.env.AI_BASE_URL || 'http://localhost:11434/v1';
+        apiKey = process.env.AI_API_KEY || '';
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) {
+        if (endpoint.includes('anthropic')) {
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+      }
+
+      const body: Record<string, any> = {
+        model: modelName,
+        messages,
+        stream: isStream,
+      };
+      
+      if (temperature !== undefined) body.temperature = temperature;
+      if (max_tokens !== undefined) body.max_tokens = max_tokens;
+      if (tools && tools.length > 0) {
+        body.tools = tools;
+        body.tool_choice = 'auto';
+      }
+      // Copy other params
+      Object.assign(body, otherParams);
+
+      let apiPath = '/chat/completions';
+      if (endpoint.includes('anthropic')) apiPath = '/v1/messages';
+
+      const fullUrl = `${endpoint.replace(/\/$/, '')}${apiPath}`;
+      console.log('[Bridge] POST', fullUrl);
+
+      if (isStream) {
+        const response = await axios.post(fullUrl, body, { headers, timeout: 120000, responseType: 'stream' });
+        response.data.on('data', (chunk: Buffer) => res.write(chunk));
+        response.data.on('end', () => res.end());
+        response.data.on('error', (err: Error) => { console.error('[Bridge] Stream error:', err.message); res.end(); });
+      } else {
+        const response = await axios.post(fullUrl, body, { headers, timeout: 120000 });
+        res.json(response.data);
+      }
+    } catch (e: any) {
+      console.error('[Bridge] Error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Text completions
+  app.post("/v1/completions", async (req, res) => {
+    const { model, prompt, stream, temperature, max_tokens, ...otherParams } = req.body;
+    
+    if (!prompt) {
+      return res.status(400).json({ error: 'prompt is required' });
+    }
+
+    const isStream = stream === true;
+    res.setHeader('Content-Type', isStream ? 'application/x-ndjson' : 'application/json');
+    res.setHeader('Cache-Control', 'no-cache');
+
+    try {
+      let endpoint = process.env.AI_BASE_URL || 'http://localhost:11434/v1';
+      let apiKey = process.env.AI_API_KEY || '';
+      let modelName = model || 'text-davinci-003';
+
+      const profiles = getLlmConfig();
+      if (profiles && Array.isArray(profiles)) {
+        for (const profile of profiles) {
+          const foundModel = (profile.models || []).find((m: any) => m.id === model);
+          if (foundModel) {
+            endpoint = profile.endpoint;
+            apiKey = profile.apiKey;
+            modelName = foundModel.id;
+            break;
+          }
+        }
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const body: Record<string, any> = {
+        model: modelName,
+        prompt,
+        stream: isStream,
+      };
+      if (temperature !== undefined) body.temperature = temperature;
+      if (max_tokens !== undefined) body.max_tokens = max_tokens;
+      Object.assign(body, otherParams);
+
+      const fullUrl = `${endpoint.replace(/\/$/, '')}/completions`;
+      console.log('[Bridge] POST', fullUrl);
+
+      if (isStream) {
+        const response = await axios.post(fullUrl, body, { headers, timeout: 120000, responseType: 'stream' });
+        response.data.on('data', (chunk: Buffer) => res.write(chunk));
+        response.data.on('end', () => res.end());
+      } else {
+        const response = await axios.post(fullUrl, body, { headers, timeout: 120000 });
+        res.json(response.data);
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Embeddings
+  app.post("/v1/embeddings", async (req, res) => {
+    const { model, input } = req.body;
+    
+    if (!input) {
+      return res.status(400).json({ error: 'input is required' });
+    }
+
+    try {
+      let endpoint = process.env.AI_BASE_URL || 'http://localhost:11434/v1';
+      let apiKey = process.env.AI_API_KEY || '';
+      let modelName = model || 'text-embedding-3-small';
+
+      const profiles = getLlmConfig();
+      if (profiles && Array.isArray(profiles)) {
+        for (const profile of profiles) {
+          const foundModel = (profile.models || []).find((m: any) => m.id === model);
+          if (foundModel) {
+            endpoint = profile.endpoint;
+            apiKey = profile.apiKey;
+            modelName = foundModel.id;
+            break;
+          }
+        }
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const body = {
+        model: modelName,
+        input: Array.isArray(input) ? input : [input],
+      };
+
+      const fullUrl = `${endpoint.replace(/\/$/, '')}/embeddings`;
+      console.log('[Bridge] POST', fullUrl);
+
+      const response = await axios.post(fullUrl, body, { headers, timeout: 60000 });
+      res.json(response.data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Health check endpoint
   app.get("/api/health", async (req, res) => {
     res.json({
@@ -748,6 +1143,509 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       res.end();
     }
   });
+
+  // Pi Agent endpoint - runs the coding agent SDK server-side and streams events
+  app.post("/api/pi-agent/run", async (req: express.Request, res: express.Response) => {
+    const { task, workspacePath, apiKey: _apiKey, model, modelId, thinkingLevel, providerProfile } = req.body as {
+      task: string;
+      workspacePath?: string;
+      apiKey?: string;
+      model?: { id?: string; provider?: string; baseUrl?: string };
+      modelId?: string;
+      thinkingLevel?: string;
+      providerProfile?: { provider: string; endpoint: string; apiKey: string; models?: any[] };
+    };
+
+    if (!task) {
+      return res.status(400).json({ error: 'task is required' });
+    }
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    // ─── Helper: write a newline-delimited JSON event to the response ───────────
+    const writeEvent = (payload: Record<string, any>) => {
+      try { res.write(JSON.stringify(payload) + '\n'); } catch {}
+    };
+
+    try {
+      // ── Shared tool definitions ──────────────────────────────────────────────
+      const { defineTool } = await import('@earendil-works/pi-coding-agent');
+      const { Type }       = await import('@earendil-works/pi-ai');
+
+      const toolResult = (details: any) => ({
+        content: [{ type: 'text' as const, text: typeof details === 'string' ? details : JSON.stringify(details) }],
+        details,
+      });
+
+      const normalizePath = (p: string, wp?: string) => {
+        const cleaned = p.replace(/^\.?\/?/, '');
+        return wp ? `${wp.replace(/\\/g, '/')}/${cleaned}` : `./${cleaned}`;
+      };
+      const normalizeRelPath = (p: string, wp?: string) => {
+        if (!wp) return p;
+        const n = p.replace(/\\/g, '/');
+        const wn = wp.replace(/\\/g, '/');
+        return n.startsWith(wn) ? n.slice(wn.length).replace(/^\//, '') : p;
+      };
+      const compressResult = (name: string, result: any): any => {
+        if (result === undefined) return { status: 'no_result' };
+        if (result === null)      return { status: 'null_result' };
+        const str = typeof result === 'string' ? result : JSON.stringify(result);
+        if (!str.trim()) return { status: 'empty_result' };
+        if (str.length <= 2500) return result;
+        if (name === 'read_file') return `${str.substring(0, 2000)}\n\n... [truncated, ${str.length} chars total]`;
+        return str;
+      };
+
+      // ── Tool schemas ──────────────────────────────────────────────────────────
+      const ReadFileSchema    = Type.Object({ filePath: Type.String(), offset: Type.Optional(Type.Number()), limit: Type.Optional(Type.Number()) });
+      const WriteFileSchema   = Type.Object({ filePath: Type.String(), content: Type.String() });
+      const CreateFileSchema  = Type.Object({ filePath: Type.String(), isDirectory: Type.Optional(Type.Boolean()), content: Type.Optional(Type.String()) });
+      const DeleteFileSchema  = Type.Object({ filePath: Type.String() });
+      const RenameFileSchema  = Type.Object({ filePath: Type.String(), newPath: Type.String() });
+      const GlobToolSchema    = Type.Object({ fileGlob: Type.Optional(Type.String()), maxResults: Type.Optional(Type.Number()) });
+      const GrepToolSchema    = Type.Object({ query: Type.String(), fileGlob: Type.Optional(Type.String()), maxResults: Type.Optional(Type.Number()) });
+      const RunCommandSchema  = Type.Object({ command: Type.String(), cwd: Type.Optional(Type.String()) });
+      const WebScrapeSchema   = Type.Object({ url: Type.String() });
+      const WebSearchSchema   = Type.Object({ query: Type.Array(Type.String()) });
+      const AnalyzeFileSchema = Type.Object({ filePath: Type.String() });
+
+      const tools = [
+        defineTool({ name: 'read_file',    label: 'Read File',    description: 'Read file contents', parameters: ReadFileSchema,
+          execute: async (_tcId: any, params: any) => {
+            const fp = normalizePath(params.filePath, workspacePath);
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: fp }) })).json().catch(() => ({ error: 'Read failed' }));
+            return toolResult(compressResult('read_file', { ...data, filePath: normalizeRelPath(params.filePath, workspacePath) }));
+          }
+        }),
+        defineTool({ name: 'write_file',   label: 'Write File',   description: 'Write content to a file', parameters: WriteFileSchema,
+          execute: async (_tcId: any, params: any) => {
+            const fp = normalizePath(params.filePath, workspacePath);
+            const cp = normalizeRelPath(params.filePath, workspacePath);
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/write`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: fp, content: params.content }) })).json().catch(() => ({}));
+            return toolResult({ ...data, filePath: cp, action: 'written' });
+          }
+        }),
+        defineTool({ name: 'create_file',  label: 'Create File',  description: 'Create a new file or directory', parameters: CreateFileSchema,
+          execute: async (_tcId: any, params: any) => {
+            const fp = normalizePath(params.filePath, workspacePath);
+            const cp = normalizeRelPath(params.filePath, workspacePath);
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: fp, isDirectory: !!params.isDirectory, content: params.content || '' }) })).json().catch(() => ({}));
+            return toolResult({ ...data, filePath: cp, action: params.isDirectory ? 'created_directory' : 'created_file' });
+          }
+        }),
+        defineTool({ name: 'delete_file',  label: 'Delete File',  description: 'Delete a file or directory', parameters: DeleteFileSchema,
+          execute: async (_tcId: any, params: any) => {
+            const fp = normalizePath(params.filePath, workspacePath);
+            const cp = normalizeRelPath(params.filePath, workspacePath);
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: fp }) })).json().catch(() => ({}));
+            return toolResult({ ...data, filePath: cp, action: 'deleted_file' });
+          }
+        }),
+        defineTool({ name: 'rename_file',  label: 'Rename File',  description: 'Rename or move a file', parameters: RenameFileSchema,
+          execute: async (_tcId: any, params: any) => {
+            const ofp = normalizePath(params.filePath, workspacePath);
+            const nfp = normalizePath(params.newPath, workspacePath);
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPath: ofp, newPath: nfp }) })).json().catch(() => ({}));
+            return toolResult({ ...data, action: 'renamed_file' });
+          }
+        }),
+        defineTool({ name: 'glob_tool',    label: 'Find Files',   description: 'Find files matching a glob pattern', parameters: GlobToolSchema,
+          execute: async (_tcId: any, params: any) => {
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/list`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderPath: workspacePath || '.' }) })).json().catch(() => ({ files: [] }));
+            let files = (data.files || []).filter((f: any) => !f.isDirectory);
+            const fg = String(params.fileGlob || '').toLowerCase();
+            if (fg) files = files.filter((f: any) => (f.relativePath || f.path || '').toLowerCase().includes(fg.replace(/\*/g, '')));
+            const max = Math.max(1, Math.min(Number(params.maxResults || 30), 80));
+            return toolResult({ count: files.length, files: files.slice(0, max).map((f: any) => ({ filePath: f.relativePath || f.path })) });
+          }
+        }),
+        defineTool({ name: 'grep_tool',    label: 'Search Code',  description: 'Search text patterns in files', parameters: GrepToolSchema,
+          execute: async (_tcId: any, params: any) => {
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/list`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderPath: workspacePath || '.' }) })).json().catch(() => ({ files: [] }));
+            let files = (data.files || []).filter((f: any) => !f.isDirectory);
+            const max = Math.max(1, Math.min(Number(params.maxResults || 30), 80));
+            const matches: any[] = [];
+            for (const f of files) {
+              if (matches.length >= max) break;
+              const fp = f.relativePath || f.path;
+              const rd = await (await fetch(`http://localhost:${PORT}/api/fs/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: fp }) })).json().catch(() => ({ content: '' }));
+              const lines = String(rd.content || '').split('\n');
+              try { const re = new RegExp(params.query, 'gi'); lines.forEach((line, idx) => { if (re.test(line) && matches.length < max) matches.push({ filePath: fp, line: idx + 1, text: line.trim().slice(0, 240) }); }); } catch {}
+            }
+            return toolResult({ query: params.query, count: matches.length, matches });
+          }
+        }),
+        defineTool({ name: 'run_command',  label: 'Run Command',  description: 'Execute a shell command in the workspace', parameters: RunCommandSchema,
+          execute: async (_tcId: any, params: any) => {
+            const cwd = params.cwd || workspacePath || '.';
+            const data = await (await fetch(`http://localhost:${PORT}/api/bash`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: params.command, cwd }) })).json().catch(() => ({ error: 'Command failed' }));
+            return toolResult(data);
+          }
+        }),
+        defineTool({ name: 'current_time', label: 'Current Time', description: 'Get current date and time', parameters: Type.Object({}),
+          execute: async () => { const now = new Date(); return toolResult({ iso: now.toISOString(), timestamp: now.getTime(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }); }
+        }),
+        defineTool({ name: 'web_scrape',   label: 'Web Scrape',   description: 'Fetch web page content', parameters: WebScrapeSchema,
+          execute: async (_tcId: any, params: any) => {
+            const data = await (await fetch(`http://localhost:${PORT}/api/scrape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: params.url }) })).json().catch(() => ({ error: 'Scrape failed' }));
+            return toolResult(compressResult('web_scrape', data));
+          }
+        }),
+        defineTool({ name: 'search',       label: 'Web Search',   description: 'Search the web', parameters: WebSearchSchema,
+          execute: async (_tcId: any, params: any) => {
+            const results = await Promise.all((params.query || []).map(async (q: string) => {
+              const data = await (await fetch(`http://localhost:${PORT}/api/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) })).json().catch(() => ({ results: [] }));
+              return { query: q, results: data.results || [] };
+            }));
+            return toolResult(results);
+          }
+        }),
+        defineTool({ name: 'analyze_file', label: 'Analyze File', description: 'Analyze file structure and content', parameters: AnalyzeFileSchema,
+          execute: async (_tcId: any, params: any) => {
+            const fp = normalizePath(params.filePath, workspacePath);
+            const cp = normalizeRelPath(params.filePath, workspacePath);
+            const data = await (await fetch(`http://localhost:${PORT}/api/fs/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath: fp }) })).json().catch(() => ({}));
+            if (data.error || !data.content) return toolResult({ error: data.error || 'Failed to read file', filePath: cp });
+            const lines = data.content.split('\n');
+            const ext = cp.split('.').pop()?.toLowerCase() || '';
+            return toolResult({ filePath: cp, language: ext, lineCount: lines.length, charCount: data.content.length, preview: lines.slice(0, 20).join('\n') });
+          }
+        }),
+      ];
+
+      // ── Resolve provider config from request ─────────────────────────────────
+      const selectedModelId = modelId || model?.id || 'openprovider/auto-free';
+      let profileConfig = { endpoint: 'https://openprovider.mimika.in/v1', apiKey: '', modelId: selectedModelId };
+
+      if (providerProfile?.endpoint) {
+        profileConfig = { endpoint: providerProfile.endpoint, apiKey: providerProfile.apiKey || '', modelId: selectedModelId };
+      } else if (model?.baseUrl) {
+        profileConfig = { endpoint: model.baseUrl, apiKey: _apiKey || '', modelId: selectedModelId };
+      }
+
+      console.log('[Pi Agent] Model:', profileConfig.modelId, '| Endpoint:', profileConfig.endpoint);
+      console.log('[Pi Agent] Provider from frontend:', providerProfile?.provider || model?.provider || '(none)');
+
+      // ── Detect provider (endpoint-based only) ─────────────────────────────────
+      const detectProvider = (endpoint: string): string => {
+        const ep = endpoint.toLowerCase();
+        if (ep.includes('anthropic') || ep.includes('claude.ai')) return 'anthropic';
+        if (ep.includes('openai.com')) return 'openai';
+        if (ep.includes('groq')) return 'groq';
+        if (ep.includes('openrouter')) return 'openrouter';
+        if (ep.includes('together') || ep.includes('together.xyz')) return 'together';
+        if (ep.includes('mistral')) return 'mistral';
+        if (ep.includes('ollama.com') || ep.includes('/ollama/')) return 'ollama_cloud';
+        if (ep.includes('localhost:11434') || ep.includes('127.0.0.1:11434')) return 'ollama_local';
+        if (ep.includes('localhost:1234')  || ep.includes('127.0.0.1:1234'))  return 'lm_studio';
+        if (ep.includes('nvidia') || ep.includes('integrate.api.nvidia')) return 'nvidia_nim';
+        if (ep.includes('generativelanguage') || ep.includes('gemini')) return 'gemini';
+        if (ep.includes('cohere')) return 'cohere';
+        if (ep.includes('deepseek')) return 'deepseek';
+        if (ep.includes('azure') || ep.includes('azurewebsites')) return 'azure';
+        if (ep.includes('amazon') || ep.includes('bedrock')) return 'amazon-bedrock';
+        // All other endpoints are treated as OpenAI-compatible
+        return 'openai-compatible';
+      };
+
+      const requestedProvider = providerProfile?.provider || model?.provider || '';
+      const detectedProvider  = requestedProvider || detectProvider(profileConfig.endpoint);
+      console.log('[Pi Agent] Resolved provider:', detectedProvider);
+
+      // ── Decide which execution path to use ────────────────────────────────────
+      // Providers that the pi-ai SDK handles natively with full streaming support.
+      // Everything else goes through the universal OpenAI-compatible agent loop.
+      const SDK_NATIVE_PROVIDERS = new Set([
+        'openai', 'anthropic', 'groq', 'openrouter', 'mistral', 'together',
+        'ollama_local', 'ollama_cloud', 'nvidia_nim', 'gemini', 'cohere',
+        'deepseek', 'azure', 'amazon-bedrock',
+      ]);
+      const useSDK = SDK_NATIVE_PROVIDERS.has(detectedProvider);
+      console.log('[Pi Agent] Execution path:', useSDK ? 'pi-ai SDK' : 'universal agent loop');
+
+      // ════════════════════════════════════════════════════════════════════════
+      // PATH A: Universal OpenAI-compatible agent loop (for ALL custom providers)
+      // Uses /api/chat directly — the same route normal chat uses, guaranteed to
+      // work with kimchi, openprovider, kilo, sarvamai, lm_studio, and any other
+      // OpenAI-compatible provider the user configured in the AI Service panel.
+      // ════════════════════════════════════════════════════════════════════════
+      if (!useSDK) {
+        console.log('[Pi Agent] Running universal agent loop for provider:', detectedProvider);
+
+        // Convert pi-coding-agent tools to OpenAI function-calling format
+        const openaiTools = tools.map((t: any) => {
+          // TypeBox schemas are valid JSON Schema — extract only what OpenAI needs
+          const schema = t.parameters || {};
+          const cleanSchema: any = { type: 'object', properties: {}, required: [] };
+          if (schema.properties) cleanSchema.properties = schema.properties;
+          if (Array.isArray(schema.required)) cleanSchema.required = schema.required;
+          return {
+            type: 'function',
+            function: {
+              name: t.name,
+              description: t.description || t.label || t.name,
+              parameters: cleanSchema,
+            },
+          };
+        });
+
+        // Build a lookup map for fast tool execution
+        const toolMap: Record<string, (tcId: string, params: any) => Promise<any>> = {};
+        for (const t of tools as any[]) {
+          toolMap[t.name] = t.execute;
+        }
+
+        const CODER_SYSTEM_INSTRUCTION = `You are a professional software engineering agent.
+Your workspace path is: ${workspacePath || '.'}.
+
+CRITICAL DIRECTIVE ON TOOL USAGE:
+1. Always prefer using the highly optimized built-in tools for normal tasks:
+   - Use 'glob_tool' to find files/list directories.
+   - Use 'grep_tool' to search code or find patterns/symbols.
+   - Use 'read_file' to view file contents.
+   - Use 'write_file' or 'edit_file' to create/modify files.
+   - Use 'search' to search the web for external info.
+2. DO NOT use the terminal command ('run_command') to list files, check current directory, or search text (e.g. do not run 'ls', 'pwd', 'find', 'grep', 'cat', etc.). These shell commands fail in many sandboxed/unprivileged environments, return unformatted output, and consume unnecessary terminal processes.
+3. Use the terminal command ('run_command') ONLY when there are no built-in tools available for your task (e.g. running build scripts, executing test suites, running git commands, or starting local dev servers).
+4. Always prioritize built-in tools. Run terminal commands only as a last resort.`;
+
+        const messages: any[] = [
+          { role: 'system', content: CODER_SYSTEM_INSTRUCTION },
+          { role: 'user', content: task }
+        ];
+        const MAX_LOOPS = 20;
+        let loopCount  = 0;
+        let totalText  = '';
+
+        while (loopCount < MAX_LOOPS) {
+          loopCount++;
+
+          // Call the provider via /api/chat (supports all providers)
+          const chatRes = await fetch(`http://localhost:${PORT}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages,
+              model: profileConfig.modelId,
+              config: {
+                provider: detectedProvider,
+                baseUrl: profileConfig.endpoint,
+                apiKey:  profileConfig.apiKey,
+              },
+              tools: openaiTools,
+              stream: false,
+            }),
+          });
+
+          if (!chatRes.ok) {
+            const errText = await chatRes.text().catch(() => '');
+            throw new Error(`Provider API error ${chatRes.status}: ${errText.slice(0, 300)}`);
+          }
+
+          const chatData = await chatRes.json();
+          const choice   = chatData?.choices?.[0];
+          const message  = choice?.message;
+
+          if (!message) {
+            console.warn('[Pi Agent] No message in response, stopping loop');
+            break;
+          }
+
+          // Emit any text content the model returned
+          const textContent = typeof message.content === 'string'
+            ? message.content
+            : Array.isArray(message.content)
+              ? message.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+              : '';
+
+          if (textContent) {
+            totalText += textContent;
+            writeEvent({ type: 'token', text: textContent });
+          }
+
+          // No tool calls → model is done
+          const toolCalls: any[] = message.tool_calls || [];
+          if (toolCalls.length === 0) break;
+
+          // Add assistant message (with tool calls) to history
+          messages.push({ role: 'assistant', content: message.content || null, tool_calls: toolCalls });
+
+          // Execute each tool call sequentially and collect results
+          for (const tc of toolCalls) {
+            const tcId   = tc.id || `tc_${Date.now()}_${loopCount}`;
+            const tcName = tc.function?.name || '';
+            let   tcArgs: any = {};
+            try { tcArgs = JSON.parse(tc.function?.arguments || '{}'); } catch {}
+
+            writeEvent({ type: 'tool_call_start', toolName: tcName, toolCallId: tcId, args: tcArgs });
+            console.log(`[Pi Agent] Executing tool: ${tcName}`, tcArgs);
+
+            let tcResult: any;
+            try {
+              const execFn = toolMap[tcName];
+              if (execFn) {
+                tcResult = await execFn(tcId, tcArgs);
+              } else {
+                tcResult = { error: `Tool "${tcName}" not found` };
+              }
+            } catch (toolErr: any) {
+              tcResult = { error: toolErr?.message || 'Tool execution failed' };
+            }
+
+            // Extract the serialisable details from the pi-coding-agent toolResult wrapper
+            const resultDetails = tcResult?.details ?? tcResult;
+            writeEvent({ type: 'tool_call_end', toolName: tcName, toolCallId: tcId, result: resultDetails });
+
+            // Add tool result message to history
+            const resultText = typeof resultDetails === 'string'
+              ? resultDetails
+              : JSON.stringify(resultDetails);
+
+            messages.push({ role: 'tool', tool_call_id: tcId, name: tcName, content: resultText });
+          }
+        }
+
+        console.log('[Pi Agent] Universal loop finished. Total text length:', totalText.length, '| Loops:', loopCount);
+        writeEvent({ type: 'done' });
+        res.end();
+        return;
+      }
+
+      // ════════════════════════════════════════════════════════════════════════
+      // PATH B: pi-ai SDK path for natively supported providers
+      // ════════════════════════════════════════════════════════════════════════
+      const { AuthStorage, createAgentSession, SessionManager } = await import('@earendil-works/pi-coding-agent');
+      const { getModel } = await import('@earendil-works/pi-ai');
+
+      const authStorage = AuthStorage.create();
+      authStorage.setRuntimeApiKey(detectedProvider, profileConfig.apiKey);
+      authStorage.setRuntimeApiKey('openai', profileConfig.apiKey);
+      authStorage.setFallbackResolver((_p: string) => profileConfig.apiKey);
+
+      let modelObj: any;
+      try {
+        modelObj = getModel(detectedProvider as any, profileConfig.modelId as any);
+        if (modelObj) {
+          modelObj.baseUrl = profileConfig.endpoint;
+          modelObj.id      = profileConfig.modelId;
+        }
+      } catch {
+        let api = 'openai-completions';
+        if (detectedProvider === 'anthropic')     api = 'anthropic-messages';
+        if (detectedProvider === 'gemini')        api = 'google-generative-ai';
+        if (detectedProvider === 'amazon-bedrock') api = 'bedrock-converse-stream';
+        modelObj = {
+          id: profileConfig.modelId, name: profileConfig.modelId,
+          api, provider: detectedProvider, baseUrl: profileConfig.endpoint,
+          reasoning: false, input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000, maxTokens: 4096,
+        };
+      }
+
+      // Only enable thinking for Anthropic (only provider supporting it natively)
+      const THINKING_SUPPORTED = ['anthropic'];
+      const validLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+      const requestedThinking = validLevels.includes(thinkingLevel as any) ? thinkingLevel : 'high';
+      const thinking = THINKING_SUPPORTED.includes(detectedProvider) ? requestedThinking : 'off';
+
+      const { session } = await createAgentSession({
+        authStorage,
+        sessionManager: SessionManager.inMemory(),
+        customTools: tools,
+        cwd: workspacePath || process.cwd(),
+        model: modelObj,
+      });
+      session.setThinkingLevel(thinking as any);
+
+      let sdkText = '';
+      session.subscribe((event: any) => {
+        switch (event.type) {
+          case 'message_update':
+            if (event.assistantMessageEvent?.type === 'text_delta') {
+              const d = event.assistantMessageEvent.delta || '';
+              sdkText += d;
+              writeEvent({ type: 'token', text: d });
+            }
+            if (event.assistantMessageEvent?.type === 'thinking_delta') {
+              writeEvent({ type: 'thinking', content: event.assistantMessageEvent.delta });
+            }
+            if (event.assistantMessageEvent?.type === 'content_block_delta') {
+              const d = event.assistantMessageEvent.delta?.text || event.assistantMessageEvent.delta || '';
+              if (d) { sdkText += d; writeEvent({ type: 'token', text: d }); }
+            }
+            break;
+          case 'message_complete': case 'assistant_message':
+            if (event.message?.content && !sdkText) {
+              const txt = typeof event.message.content === 'string'
+                ? event.message.content
+                : Array.isArray(event.message.content)
+                  ? event.message.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('')
+                  : '';
+              if (txt) { sdkText += txt; writeEvent({ type: 'token', text: txt }); }
+            }
+            break;
+          case 'tool_execution_start':
+            writeEvent({ type: 'tool_call_start', toolName: event.toolName, toolCallId: event.toolCallId || '', args: event.args || {} });
+            break;
+          case 'tool_execution_end':
+            writeEvent({ type: 'tool_call_end', toolName: event.toolName, toolCallId: event.toolCallId || '', result: event.result });
+            break;
+        }
+      });
+
+      const CODER_SYSTEM_INSTRUCTION = `[SYSTEM DIRECTIVE - PREFER BUILT-IN TOOLS]
+1. Always prefer using the highly optimized built-in tools for normal tasks:
+   - Use 'glob_tool' to find files/list directories.
+   - Use 'grep_tool' to search code or find patterns/symbols.
+   - Use 'read_file' to view file contents.
+   - Use 'write_file' or 'edit_file' to create/modify files.
+   - Use 'search' to search the web for external info.
+2. DO NOT use the terminal command ('run_command') to list files, check current directory, or search text (e.g. do not run 'ls', 'pwd', 'find', 'grep', 'cat', etc.).
+3. Use the terminal command ('run_command') ONLY when there are no built-in tools available for your task (e.g. running build scripts, executing test suites, running git commands, or starting local dev servers).
+4. Always prioritize built-in tools. Run terminal commands only as a last resort.
+[END DIRECTIVE]
+
+Task to execute:
+${task}`;
+
+      await session.prompt(CODER_SYSTEM_INSTRUCTION);
+
+      // Safety net: if SDK produced nothing, fall back to universal loop
+      if (!sdkText) {
+        console.log('[Pi Agent] SDK produced no text — running universal fallback');
+        const fbRes = await fetch(`http://localhost:${PORT}/api/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: CODER_SYSTEM_INSTRUCTION },
+              { role: 'user', content: task }
+            ],
+            model: profileConfig.modelId,
+            config: { provider: detectedProvider, baseUrl: profileConfig.endpoint, apiKey: profileConfig.apiKey },
+            stream: false,
+          }),
+        });
+        if (fbRes.ok) {
+          const fbData = await fbRes.json();
+          const fbText = fbData?.choices?.[0]?.message?.content || '';
+          if (fbText) writeEvent({ type: 'token', text: fbText });
+        }
+      }
+
+      writeEvent({ type: 'done' });
+      res.end();
+
+    } catch (error: any) {
+      console.error('[pi-agent] run error:', error);
+      writeEvent({ type: 'error', error: error?.message || 'Pi agent failed' });
+      res.end();
+    }
+  });
+
 
   app.get("/api/agents/status", (req, res) => {
     const { agentId } = req.query;
@@ -1123,6 +2021,10 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                 }
               } else if (toolName === 'write_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
+                const cp = toWorkspaceRelativePath(fileRes, resolvedWorkspace);
+                const existed = fs.existsSync(fileRes) && fs.statSync(fileRes).isFile();
+                const oldContent = existed ? fs.readFileSync(fileRes, 'utf8') : '';
+                
                 fs.mkdirSync(path.dirname(fileRes), { recursive: true });
                 const writeOffset = args.offset ? Math.max(0, Number(args.offset) - 1) : 0;
                 const writeLimit = args.limit ? Math.max(1, Number(args.limit)) : undefined;
@@ -1136,17 +2038,26 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                   const limitedLines = writeLimit ? contentLines.slice(0, writeLimit) : contentLines;
                   const finalLines = [...existingLines.slice(0, writeOffset), ...limitedLines];
                   fs.writeFileSync(fileRes, finalLines.join('\n'), 'utf8');
-                  toolOutput = { success: true, appended: true, atLine: writeOffset, linesWritten: limitedLines.length };
                 } else if (writeLimit) {
                   // Limit mode: only write specified number of lines
                   const contentLines = newContent.split('\n');
                   const limitedLines = contentLines.slice(0, writeLimit);
                   fs.writeFileSync(fileRes, limitedLines.join('\n'), 'utf8');
-                  toolOutput = { success: true, linesWritten: limitedLines.length, totalContentLines: contentLines.length };
                 } else {
                   fs.writeFileSync(fileRes, newContent, 'utf8');
-                  toolOutput = { success: true };
                 }
+
+                const writtenContent = fs.readFileSync(fileRes, 'utf8');
+                const changed = countChangedLines(oldContent, writtenContent);
+                toolOutput = {
+                  success: true,
+                  filePath: cp,
+                  action: existed ? 'updated_file' : 'created_file',
+                  oldContent,
+                  newContent: writtenContent,
+                  addedCount: changed.added,
+                  removedCount: changed.removed
+                };
               } else if (toolName === 'edit_file') {
                 const fileRes = resolveCoderPath(args.filePath, resolvedWorkspace);
                 if (!fs.existsSync(fileRes)) {
@@ -1299,6 +2210,21 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
                         toolOutput = buildSearchError('even after whitespace normalization', closest);
                       }
                     }
+                  }
+
+                  if (toolOutput && toolOutput.success) {
+                    const finalContent = fs.readFileSync(fileRes, 'utf8');
+                    const changed = countChangedLines(rawContent, finalContent);
+                    const cp = toWorkspaceRelativePath(fileRes, resolvedWorkspace);
+                    toolOutput = {
+                      ...toolOutput,
+                      filePath: cp,
+                      action: 'updated_file',
+                      oldContent: rawContent,
+                      newContent: finalContent,
+                      addedCount: changed.added,
+                      removedCount: changed.removed
+                    };
                   }
                 }
               } else if (toolName === 'delete_file') {
@@ -3518,7 +4444,16 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
       fs.writeFileSync(resolvedPath, content, 'utf8');
       recordWorkspaceChange(resolvedPath, workspaceRoot, oldContent, String(content), existed ? 'modified' : 'added');
-      res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
+      
+      const changed = countChangedLines(oldContent, String(content));
+      res.json({
+        success: true,
+        filePath: resolvedPath.replace(/\\/g, '/'),
+        oldContent,
+        newContent: String(content),
+        addedCount: changed.added,
+        removedCount: changed.removed
+      });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to write file", detail: e.message });
     }
@@ -3534,15 +4469,25 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     try {
       if (isDirectory) {
         fs.mkdirSync(resolvedPath, { recursive: true });
-       } else {
+        res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
+      } else {
         const existed = fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isFile();
         const oldContent = existed ? fs.readFileSync(resolvedPath, 'utf8') : '';
         const nextContent = content !== undefined ? String(content) : '';
         fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
         fs.writeFileSync(resolvedPath, nextContent, 'utf8');
         recordWorkspaceChange(resolvedPath, workspaceRoot, oldContent, nextContent, existed ? 'modified' : 'added');
+        
+        const changed = countChangedLines(oldContent, nextContent);
+        res.json({
+          success: true,
+          filePath: resolvedPath.replace(/\\/g, '/'),
+          oldContent,
+          newContent: nextContent,
+          addedCount: changed.added,
+          removedCount: changed.removed
+        });
       }
-      res.json({ success: true, filePath: resolvedPath.replace(/\\/g, '/') });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to create", detail: e.message });
     }
@@ -5716,6 +6661,8 @@ ${contextStr}`;
 
     // Resolve endpoint based on the selected model/provider from agentApiKeys
     // If no config provided, try to infer from the model name
+    console.log('[Chat API] Received - provider:', provider, 'baseUrl:', baseUrl, 'model:', model);
+    
     if (!config || !config.baseUrl) {
       const modelLower = (model || '').toLowerCase();
       
@@ -5783,6 +6730,52 @@ ${contextStr}`;
       else if (modelLower.includes('cline')) {
         provider = 'openai-compatible';
         baseUrl = 'https://api.cline.bot';
+      }
+      // Kimchi models (kimi-*)
+      else if (modelLower.includes('kimi') || modelLower.includes('kimchi')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://llm.kimchi.dev/openai/v1';
+        apiKey = process.env.KIMCHI_API_KEY || '';
+      }
+      // OpenProvider
+      else if (modelLower.includes('openprovider') || modelLower.includes('auto-free')) {
+        provider = 'openai-compatible';
+        baseUrl = process.env.AI_BASE_URL || 'https://openprovider.mimika.in/v1';
+        apiKey = process.env.AI_API_KEY || '';
+      }
+      // NVIDIA NIM
+      else if (modelLower.includes('nvidia') || modelLower.includes('nemotron')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://integrate.api.nvidia.com/v1';
+        apiKey = process.env.NVIDIA_API_KEY || '';
+      }
+      // Together AI
+      else if (modelLower.includes('together')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://api.together.xyz/v1';
+        apiKey = process.env.TOGETHER_API_KEY || '';
+      }
+      // Mistral
+      else if (modelLower.includes('mistral') || modelLower.includes('mixtral')) {
+        provider = 'openai-compatible';
+        baseUrl = 'https://api.mistral.ai/v1';
+        apiKey = process.env.MISTRAL_API_KEY || '';
+      }
+      // Cohere
+      else if (modelLower.includes('cohere') || modelLower.includes('command')) {
+        provider = 'cohere';
+        baseUrl = 'https://api.cohere.com/compatibility/v1';
+        apiKey = process.env.COHERE_API_KEY || '';
+      }
+      // OpenRouter
+      else if (modelLower.includes('openrouter') || modelLower.includes('anthropic') === false && modelLower.includes('/')) {
+        // Generic provider/model format like "provider/model" - use as OpenAI compatible
+        // If it's not a known provider, treat as OpenAI compatible
+        const parts = modelLower.split('/');
+        if (parts.length >= 2) {
+          // Check if we can infer the endpoint from config
+          provider = 'openai-compatible';
+        }
         apiKey = process.env.CLINE_API_KEY || '';
       }
       // Default fallback to environment variable

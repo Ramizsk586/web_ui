@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronDown, 
+  ChevronRight,
   Globe, 
   Check, 
   X,
@@ -969,13 +970,21 @@ export const InlineToolCallCard = React.memo(({
               return null;
             })()}
           </div>
-          {effectiveStatus === 'complete' && node.toolName && ['web_scrape', 'fetch_url'].includes(node.toolName) && (() => {
-            const scrapeResult = scrapingResults.get(node.id);
-            if (scrapeResult && (scrapeResult.error || (scrapeResult.statusCode && scrapeResult.statusCode >= 400))) {
-              return <X size={12} className="text-rose-500 shrink-0 mt-1" strokeWidth={3} />;
-            }
-            return null;
-          })()}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Collapse/Expand Icon - clearly visible > indicator */}
+            <ChevronRight 
+              size={18} 
+              className={`text-zinc-400 font-bold transition-transform duration-200 ${!isCollapsed ? 'rotate-90' : ''}`}
+              strokeWidth={3}
+            />
+            {effectiveStatus === 'complete' && node.toolName && ['web_scrape', 'fetch_url'].includes(node.toolName) && (() => {
+              const scrapeResult = scrapingResults.get(node.id);
+              if (scrapeResult && (scrapeResult.error || (scrapeResult.statusCode && scrapeResult.statusCode >= 400))) {
+                return <X size={12} className="text-rose-500 shrink-0" strokeWidth={3} />;
+              }
+              return null;
+            })()}
+          </div>
         </div>
         <motion.div
           animate={{ rotate: isCollapsed ? -90 : 0 }}

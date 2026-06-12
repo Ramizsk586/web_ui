@@ -44,22 +44,36 @@ const getDisplayFileName = (filePath?: string) => {
 
 const getCoderToolAction = (node: ToolCallNode) => {
   const name = (node.toolName || '').toLowerCase();
+  const isActive = node.status === 'active' || node.status === 'pending';
+  
   if (name.includes('web') || name.includes('search') || name.includes('wiki') || name.includes('scrape')) {
-    return node.status === 'active' ? 'Searching' : 'Searched';
+    return isActive ? 'Searching' : 'Searched';
   }
   if (name.includes('list_dir') || name.includes('list') || name.includes('glob')) {
-    return node.status === 'active' ? 'Listing files' : 'Listed files';
+    return isActive ? 'Finding' : 'Found';
   }
-  if (name.includes('read')) return node.status === 'active' ? 'Reading file' : 'Read file';
-  if (name.includes('delete')) return node.status === 'active' ? 'Deleting file' : 'Deleted file';
-  if (name.includes('rename') || name.includes('move')) return node.status === 'active' ? 'Renaming file' : 'Renamed file';
+  if (name.includes('grep') || name.includes('search_code')) {
+    return isActive ? 'Searching' : 'Searched';
+  }
+  if (name.includes('read')) {
+    return isActive ? 'Reading' : 'Read';
+  }
+  if (name.includes('delete')) {
+    return isActive ? 'Deleting' : 'Deleted';
+  }
+  if (name.includes('rename') || name.includes('move')) {
+    return isActive ? 'Renaming' : 'Renamed';
+  }
   if (name.includes('command') || name.includes('shell') || name.includes('terminal') || name.includes('bash') || name.includes('verify')) {
-    return node.status === 'active' ? 'Running command' : 'Ran command';
+    return isActive ? 'Running' : 'Ran';
+  }
+  if (name.includes('analyze')) {
+    return isActive ? 'Analyzing' : 'Analyzed';
   }
   if (name.includes('write') || name.includes('edit') || name.includes('create') || node.filePath) {
-    return node.status === 'active' ? 'Editing file' : 'Edited file';
+    return isActive ? 'Editing' : 'Edited';
   }
-  return node.status === 'active' ? 'Working' : 'Completed';
+  return isActive ? 'Working' : 'Completed';
 };
 
 const getCoderToolIcon = (node: ToolCallNode) => {
@@ -90,9 +104,13 @@ const getCoderToolSummary = (node: ToolCallNode) => {
   const name = (node.toolName || '').toLowerCase();
   if (name.includes('command') || name.includes('shell') || name.includes('terminal') || name.includes('bash')) {
     const commandMatch = node.label?.match(/\(([\s\S]*)\)$/);
-    return commandMatch?.[1] || node.resultSummary || node.label || '';
+    return commandMatch?.[1] || node.label || node.resultSummary || '';
   }
-  return node.resultSummary || node.label || '';
+  const argMatch = node.label?.match(/\(([\s\S]*)\)$/);
+  if (argMatch) {
+    return argMatch[1];
+  }
+  return node.label || node.resultSummary || '';
 };
 
 const isReadFileNode = (node: ToolCallNode) => {
@@ -263,7 +281,7 @@ const CoderToolActivity = ({
               )}
               <span className={`size-1.5 shrink-0 rounded-full ${getCoderStatusDotClass(node.status)}`} />
               {getCoderToolIcon(node)}
-              <span className="shrink-0 font-medium text-zinc-300">{action.replace(' file', '')}</span>
+              <span className="shrink-0 font-medium text-zinc-300">{action}</span>
               {node.filePath ? (
                 <span className="min-w-0 truncate font-mono text-[11px] text-sky-400" title={node.filePath || fileName}>
                   {fileName}
@@ -574,7 +592,9 @@ function MessageItemComponent({
            name.includes('write') || name.includes('file') || name.includes('terminal') ||
            name.includes('bash') || name.includes('memory') || name.includes('list_dir') ||
            name.includes('str_replace') || name.includes('insert_content') || name.includes('create_file') ||
-           name.includes('read_multiple') || name.includes('browser') || name.includes('puppeteer');
+           name.includes('read_multiple') || name.includes('browser') || name.includes('puppeteer') ||
+           name.includes('command') || name.includes('glob') || name.includes('grep') ||
+           name.includes('run') || name.includes('execute') || name.includes('build') || name.includes('test');
   };
 
   const isWebSearchTool = (toolName: string) => {
@@ -935,7 +955,26 @@ function MessageItemComponent({
     if (!message.content) return null;
 
     if (isCoderMode) {
-      const parts = message.content.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*$|\[\[tool_call:[a-zA-Z0-9_-]+\]\])/gi);
+      let contentToProcess = message.content;
+      if (!contentToProcess.includes('[[tool_call:') && toolCalls && toolCalls.length > 0) {
+        let toolIdx = 0;
+        const filteredTools = toolCalls.filter(node => node.id !== 'thinking-node' && !isScrapeTool(node.toolName || ''));
+        const thinkParts = contentToProcess.split(/(<\/think>)/gi);
+        const newParts: string[] = [];
+        for (const part of thinkParts) {
+          newParts.push(part);
+          if (part.toLowerCase() === '</think>' && toolIdx < filteredTools.length) {
+            newParts.push(`\n\n[[tool_call:${filteredTools[toolIdx].id}]]`);
+            toolIdx++;
+          }
+        }
+        contentToProcess = newParts.join('');
+        if (toolIdx < filteredTools.length) {
+          contentToProcess += '\n\n' + filteredTools.slice(toolIdx).map(t => `[[tool_call:${t.id}]]`).join('\n\n');
+        }
+      }
+
+      const parts = contentToProcess.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*$|\[\[tool_call:[a-zA-Z0-9_-]+\]\])/gi);
 
       return (
         <>
@@ -1060,6 +1099,7 @@ function MessageItemComponent({
     onSendMessage,
     scrapingResults,
     shouldShowWorkedSummary,
+    toolCalls,
     toolCallsById,
     wikiResults,
   ]);
@@ -1239,13 +1279,7 @@ function MessageItemComponent({
         </motion.div>
       ) : (
         <motion.div layout={message.isStreaming ? "position" : false} className="w-full min-w-0 space-y-4">
-          {isCoderMode && nonInlineToolCalls.length > 0 && !message.content?.includes('[[tool_call:') && (
-            <CoderToolActivity
-              nodes={nonInlineToolCalls}
-              onOpenInEditor={onOpenInEditor}
-              isStreaming={message.isStreaming}
-            />
-          )}
+          {/* Tool calls are automatically interleaved inline during isCoderMode, no need to render at the top */}
 
           {!isCoderMode && ((nonInlineToolCalls && nonInlineToolCalls.length > 0) ||
             message.searchQuery ||

@@ -21,7 +21,7 @@ import { CoderLeftExplorer } from '../CoderLeftExplorer';
 import { MessageItem } from '../Chat/MessageItem';
 import { LivePreviewPanel } from '../LivePreviewPanel';
 import { FloatingCodeEditor } from '../FloatingCodeEditor';
-import { invokeTauri, isTauriDesktop } from '../../utils/tauriDesktop';
+import { invokeTauri, isTauriDesktop, safeConfirm } from '../../utils/tauriDesktop';
 
 import { Message, Chat } from '../../types';
 
@@ -348,7 +348,7 @@ export default function CoderWorkspaceView({
                     showToast("No active conversation to clear.");
                     return;
                   }
-                  if (window.confirm("Are you sure you want to clear all messages on the screen?")) {
+                  if (safeConfirm("Are you sure you want to clear all messages on the screen?")) {
                     handleClearChat();
                   }
                 }}
@@ -644,13 +644,13 @@ export default function CoderWorkspaceView({
         />
       </AnimatePresence>
 
-      {/* Floating manual code editor */}
       {floatingEditFile && (
         <FloatingCodeEditor 
           filePath={floatingEditFile}
           onClose={() => setFloatingEditFile(null)}
           showToast={showToast}
           triggerWorkspaceRefresh={triggerWorkspaceRefresh}
+          workspaceRootPath={coderWorkspacePath}
         />
       )}
     </div>

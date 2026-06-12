@@ -86,6 +86,7 @@ export default defineConfig(({mode}) => {
       // Tree shaking
       legalComments: 'none',
     },
+
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
