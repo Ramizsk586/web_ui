@@ -13,6 +13,36 @@ export interface WikiSearchResult {
   url: string;               // Full Wikipedia URL
 }
 
+export interface WikiSection {
+  index: number;
+  title: string;
+  anchor: string;
+  level: number;
+  content: string;
+  byteOffset: number;
+}
+
+export interface WikiCategory {
+  title: string;
+  name: string;
+  url: string;
+}
+
+export interface WikiReference {
+  index: number;
+  text: string;
+  urls: string[];
+}
+
+export interface WikiImage {
+  name: string;
+  url: string;
+  thumbnail: string;
+  width: number;
+  height: number;
+  description?: string;
+}
+
 export interface WikiPage {
   pageId: number;
   title: string;

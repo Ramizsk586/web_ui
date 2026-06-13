@@ -1642,7 +1642,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
                     style={plusMenuPopupPosition.style}
-                    className="fixed w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl overflow-hidden z-[180] p-1.5 flex flex-col"
+                    className={`fixed ${activePlusSubMenu === "composio" ? "w-80 sm:w-[380px] max-h-[75vh]" : "w-64 max-h-[70vh]"} bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl overflow-hidden z-[180] p-1.5 flex flex-col`}
                   >
                     {activePlusSubMenu === "main" ? (
                       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-0.5 p-0.5">
@@ -1941,13 +1941,18 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                           )}
                         </div>
                         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
-                          {composioEnabled ? (
+                          {composioEnabled && composioConnections.some((c: any) => c.connected) ? (
                             <div className="space-y-2">
-                              {Array.from(new Set(composioTools.map((t: any) => t.toolkit))).map((slug) => {
-                                const toolkitTools = composioTools.filter((t: any) => t.toolkit === slug);
-                                const toolkitDisplay = toolkitTools[0]?.toolkitDisplayName || slug;
-                                const anyEnabled = toolkitTools.some((t: any) => t.enabled);
-                                const conn = composioConnections.find((c: any) => c.slug === slug);
+                              {Array.from(new Set(composioTools.map((t: any) => t.toolkit)))
+                                .filter((slug) => {
+                                  const conn = composioConnections.find((c: any) => c.slug === slug);
+                                  return conn?.connected;
+                                })
+                                .map((slug) => {
+                                  const toolkitTools = composioTools.filter((t: any) => t.toolkit === slug);
+                                  const toolkitDisplay = toolkitTools[0]?.toolkitDisplayName || slug;
+                                  const anyEnabled = toolkitTools.some((t: any) => t.enabled);
+                                  const conn = composioConnections.find((c: any) => c.slug === slug);
                                 return (
                                   <div key={slug} className="border border-[var(--theme-border)] rounded-xl overflow-hidden">
                                     <button
@@ -1977,31 +1982,6 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                                         />
                                       </div>
                                     </button>
-                                    {anyEnabled && (
-                                      <div className="px-3 pb-2 space-y-1">
-                                        {toolkitTools.map((tool: any) => (
-                                          <button
-                                            key={tool.id}
-                                            onClick={() => toggleComposioTool(tool.id)}
-                                            className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
-                                          >
-                                            <div className="flex items-center gap-2 truncate">
-                                              <div
-                                                className={`w-1.5 h-1.5 rounded-full transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-muted)]"}`}
-                                              />
-                                              <span className="truncate">{tool.name}</span>
-                                            </div>
-                                            <div
-                                              className={`w-6 h-3 rounded-full transition-colors relative flex-shrink-0 ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
-                                            >
-                                              <div
-                                                className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
-                                              />
-                                            </div>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
                                   </div>
                                 );
                               })}
@@ -2247,7 +2227,7 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
                     style={gridMenuPopupPosition.style}
-                    className="fixed w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl overflow-hidden z-[180] p-1.5 flex flex-col"
+                    className={`fixed ${activeGridSubMenu === "composio" ? "w-80 sm:w-[380px] max-h-[75vh]" : "w-64 max-h-[70vh]"} bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl overflow-hidden z-[180] p-1.5 flex flex-col`}
                   >
                     {activeGridSubMenu === "main" ? (
                       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-0.5 p-0.5">
@@ -2545,70 +2525,50 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
                           </span>
                         </div>
                         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-0.5 animate-fade-in animate-duration-200">
-                          {composioEnabled ? (
+                          {composioEnabled && composioConnections.some((c: any) => c.connected) ? (
                             <div className="space-y-2">
-                              {Array.from(new Set(composioTools.map((t: any) => t.toolkit))).map((slug) => {
-                                const toolkitTools = composioTools.filter((t: any) => t.toolkit === slug);
-                                const toolkitDisplay = toolkitTools[0]?.toolkitDisplayName || slug;
-                                const anyEnabled = toolkitTools.some((t: any) => t.enabled);
-                                const conn = composioConnections.find((c: any) => c.slug === slug);
-                                return (
-                                  <div key={slug} className="border border-[var(--theme-border)] rounded-xl overflow-hidden">
-                                    <button
-                                      onClick={() => toggleAllToolsForToolkit(slug, !anyEnabled)}
-                                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
-                                    >
-                                      <div className="flex items-center gap-3">
-                                        <div
-                                          className={`p-1.5 rounded-lg transition-colors ${anyEnabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
-                                        >
-                                          <Puzzle size={14} />
-                                        </div>
-                                        <div className="text-left">
-                                          <div className={`transition-colors ${anyEnabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}>
-                                            {toolkitDisplay}
-                                          </div>
-                                          <div className="text-[10px] text-[var(--theme-muted)]">
-                                            {conn?.connected ? "Connected" : "Not connected"} · {toolkitTools.length} tools
-                                          </div>
-                                        </div>
-                                      </div>
-                                      <div
-                                        className={`w-8 h-4 rounded-full transition-colors relative ${anyEnabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                              {Array.from(new Set(composioTools.map((t: any) => t.toolkit)))
+                                .filter((slug) => {
+                                  const conn = composioConnections.find((c: any) => c.slug === slug);
+                                  return conn?.connected;
+                                })
+                                .map((slug) => {
+                                  const toolkitTools = composioTools.filter((t: any) => t.toolkit === slug);
+                                  const toolkitDisplay = toolkitTools[0]?.toolkitDisplayName || slug;
+                                  const anyEnabled = toolkitTools.some((t: any) => t.enabled);
+                                  const conn = composioConnections.find((c: any) => c.slug === slug);
+                                  return (
+                                    <div key={slug} className="border border-[var(--theme-border)] rounded-xl overflow-hidden">
+                                      <button
+                                        onClick={() => toggleAllToolsForToolkit(slug, !anyEnabled)}
+                                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
                                       >
-                                        <div
-                                          className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${anyEnabled ? "right-0.5" : "left-0.5"}`}
-                                        />
-                                      </div>
-                                    </button>
-                                    {anyEnabled && (
-                                      <div className="px-3 pb-2 space-y-1">
-                                        {toolkitTools.map((tool: any) => (
-                                          <button
-                                            key={tool.id}
-                                            onClick={() => toggleComposioTool(tool.id)}
-                                            className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[11px] text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                                        <div className="flex items-center gap-3">
+                                          <div
+                                            className={`p-1.5 rounded-lg transition-colors ${anyEnabled ? "bg-[var(--theme-accent)]/10 text-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)]"}`}
                                           >
-                                            <div className="flex items-center gap-2 truncate">
-                                              <div
-                                                className={`w-1.5 h-1.5 rounded-full transition-colors ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-muted)]"}`}
-                                              />
-                                              <span className="truncate">{tool.name}</span>
+                                            <Puzzle size={14} />
+                                          </div>
+                                          <div className="text-left">
+                                            <div className={`transition-colors ${anyEnabled ? "text-[var(--theme-primary)]" : "text-[var(--theme-secondary)]"}`}>
+                                              {toolkitDisplay}
                                             </div>
-                                            <div
-                                              className={`w-6 h-3 rounded-full transition-colors relative flex-shrink-0 ${tool.enabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
-                                            >
-                                              <div
-                                                className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${tool.enabled ? "right-0.5" : "left-0.5"}`}
-                                              />
+                                            <div className="text-[10px] text-[var(--theme-muted)]">
+                                              {conn?.connected ? "Connected" : "Not connected"} · {toolkitTools.length} tools
                                             </div>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                                          </div>
+                                        </div>
+                                        <div
+                                          className={`w-8 h-4 rounded-full transition-colors relative ${anyEnabled ? "bg-[var(--theme-accent)]" : "bg-[var(--theme-hover-bg)]"}`}
+                                        >
+                                          <div
+                                            className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${anyEnabled ? "right-0.5" : "left-0.5"}`}
+                                          />
+                                        </div>
+                                      </button>
+                                    </div>
+                                  );
+                                })}
                             </div>
                           ) : (
                             <div className="flex flex-col items-center justify-center py-8 px-4 text-center">

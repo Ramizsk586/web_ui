@@ -31,6 +31,43 @@ import {
 } from '../services/wikiService';
 import { createCoderPiAgent, runCoderPiAgent, type PiAgentInstance, type PiAgentEvent } from '../services/piAgentService';
 
+// Maps our frontend composio tool names → actual Composio API tool slugs.
+// Composio slug format is always UPPERCASE_WITH_UNDERSCORES.
+const COMPOSIO_TOOL_SLUG_MAP: Record<string, string> = {
+  // Gmail
+  composio_gmail_send_email: 'GMAIL_SEND_EMAIL',
+  composio_gmail_search:     'GMAIL_SEARCH_EMAILS',
+  composio_gmail_read_email: 'GMAIL_GET_ATTACHMENT',
+  // GitHub
+  composio_github_list_repos:    'GITHUB_LIST_REPOSITORIES_FOR_AUTHENTICATED_USER',
+  composio_github_search_repos:  'GITHUB_SEARCH_REPOSITORIES',
+  composio_github_get_repo:      'GITHUB_GET_A_REPOSITORY',
+  composio_github_create_issue:  'GITHUB_CREATE_AN_ISSUE',
+  // Slack
+  composio_slack_send_message:        'SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL',
+  composio_slack_list_channels:       'SLACK_LISTS_ALL_CHANNELS_IN_A_SLACK_TEAM',
+  composio_slack_get_channel_history: 'SLACK_FETCH_MESSAGE_HISTORY_BY_CHANNEL',
+  // Google Drive
+  composio_gdrive_list_files: 'GOOGLEDRIVE_FIND_FILE',
+  composio_gdrive_search:     'GOOGLEDRIVE_FIND_FILE',
+  // Notion
+  composio_notion_search:      'NOTION_SEARCH',
+  composio_notion_create_page: 'NOTION_CREATE_PAGE',
+  // Google Calendar
+  composio_gcal_list_events:  'GOOGLECALENDAR_LIST_EVENTS',
+  composio_gcal_create_event: 'GOOGLECALENDAR_CREATE_EVENT',
+  // Linear
+  composio_linear_list_issues:  'LINEAR_LIST_LINEAR_ISSUES',
+  composio_linear_create_issue: 'LINEAR_CREATE_ISSUE',
+};
+
+// Convert a frontend composio tool name to the actual Composio API slug.
+// Falls back to a best-effort uppercase transformation if not in the map.
+const resolveComposioSlug = (name: string): string => {
+  if (COMPOSIO_TOOL_SLUG_MAP[name]) return COMPOSIO_TOOL_SLUG_MAP[name];
+  return name.replace(/^composio_/, '').toUpperCase().replace(/-/g, '_');
+};
+
 const compressToolResultForApi = (name: string, result: any): string => {
   if (result === undefined) {
     return JSON.stringify({
@@ -40,10 +77,7 @@ const compressToolResultForApi = (name: string, result: any): string => {
   }
 
   if (result === null) {
-    return JSON.stringify({
-      status: 'null_result',
-      message: `Tool "${name}" returned null.`
-    });
+    return "null";
   }
 
   const str = typeof result === 'string'
@@ -709,6 +743,8 @@ export interface UseAppHandlersParams {
   setUrlToolError: (v: string | null) => void;
   isTranscriptToolOpen: boolean;
   setIsTranscriptToolOpen: (v: boolean) => void;
+  isTranscriptToolMinimized: boolean;
+  setIsTranscriptToolMinimized: (v: boolean) => void;
   transcriptToolInput: string;
   setTranscriptToolInput: (v: string) => void;
   transcriptToolLoading: boolean;
@@ -1196,9 +1232,85 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
       if (match) {
         const parsed = JSON.parse(match[0]);
         if (Array.isArray(parsed.memories) && parsed.memories.length > 0) {
-          console.log('[LUMINA_DEBUG] Extracted memories from turn:', parsed.memories);
+          console.log('[LUMINA_DEBUG] Extracted memories from turn, running critique panel:', parsed.memories);
 
-          for (const rawMem of parsed.memories) {
+          // Build critique prompt
+          const critiquePrompt = [
+            {
+              role: 'system',
+              content: `You are the Cognitive Memory Critique Panel, consisting of two specialized agents:
+1. **Agent A (Proponent)**: Argues for saving the memory, explaining how it uniquely personalizes the agent, helps form its core persona, and provides long-term utility.
+2. **Agent B (Opponent/Critic)**: Challenges the memory, criticizing it if it is generic, a throwaway one-off detail, redundant, or a "one-liner" (too short/simple) that lacks enough rich descriptive context to actually shape the agent's personality.
+
+One-Liner Rule:
+- Opponent MUST veto any generic "one-liner" memories (e.g. "User likes JavaScript", "User prefers dark mode") unless it is a simple, indisputable atomic fact (like a user's nickname, location, or timezone). If it is a preference, correction, or project knowledge, it must be descriptive and contextualized (explaining *why* or *how* it applies) so the LLM can gain proper personality.
+
+You will analyze the candidate memories extracted from the conversation turn and output a JSON object indicating which memories are approved for saving.
+
+For each memory:
+- Print the discussion/arguments between Agent A and Agent B.
+- Provide a final consensus verdict: true (keep) or false (discard/critique failed). If approved, you may also output a "refinedContent" string with a richer, more descriptive version of the memory (incorporating context from the conversation to ensure it isn't a simple generic one-liner).
+
+Return EXACTLY JSON in this format (do not include any conversational text or markdown wrap, just the raw JSON):
+{
+  "critiques": [
+    {
+      "originalContent": "User prefers React.",
+      "discussion": "Agent A: Framework preference is useful. Agent B: Too generic. Refine to specify styling or project details. Verdict: Approved after refining.",
+      "approved": true,
+      "refinedContent": "User prefers React for frontend projects, particularly building custom UI layouts with Tailwind and Framer Motion."
+    }
+  ]
+}`
+            },
+            {
+              role: 'user',
+              content: `CONVERSATION TURN CONTEXT:
+[USER]: "${userContent.replace(/"/g, '\\"')}"
+[ASSISTANT]: "${assistantContent.substring(0, 1000).replace(/"/g, '\\"')}"
+
+CANDIDATE MEMORIES TO CRITIQUE:
+${JSON.stringify(parsed.memories, null, 2)}`
+            }
+          ];
+
+          const critiqueRes = await callLlamaBridge(critiquePrompt, []);
+          let critiqueText = critiqueRes?.choices?.[0]?.message?.content || '';
+          critiqueText = critiqueText
+            .replace(/minimax:tool_call\s*/gi, '')
+            .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
+            .replace(/^\s*text\s*$/gm, '')
+            .replace(/^\s*Copy\s*$/gm, '')
+            .trim();
+          
+          let approvedMemories = parsed.memories;
+          const critiqueMatch = critiqueText.match(/\{[\s\S]*\}/);
+          if (critiqueMatch) {
+            try {
+              const critiqueData = JSON.parse(critiqueMatch[0]);
+              if (Array.isArray(critiqueData.critiques)) {
+                approvedMemories = parsed.memories.map((rawMem: any) => {
+                  const crit = critiqueData.critiques.find((c: any) => c.originalContent === rawMem.content || c.originalContent?.trim() === rawMem.content?.trim());
+                  if (crit && !crit.approved) {
+                    console.log(`[LUMINA_DEBUG] Memory rejected by critique: "${rawMem.content}" - Discussion: ${crit.discussion}`);
+                    return null;
+                  }
+                  if (crit && crit.approved) {
+                    console.log(`[LUMINA_DEBUG] Memory approved/refined by critique: "${rawMem.content}" -> "${crit.refinedContent || rawMem.content}"`);
+                    return {
+                      ...rawMem,
+                      content: crit.refinedContent || rawMem.content
+                    };
+                  }
+                  return rawMem;
+                }).filter(Boolean);
+              }
+            } catch (err) {
+              console.warn('[LUMINA_DEBUG] Failed to parse critique response, falling back to original memories:', err);
+            }
+          }
+
+          for (const rawMem of approvedMemories) {
             if (!rawMem.content || !rawMem.content.trim()) continue;
 
             const generatedId = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1222,8 +1334,11 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
               content: rawMem.content.trim(),
               tier: tierVal,
               segment: segmentVal,
-              importance: Math.min(0.99, (importanceByTier[tierVal] || 0.78) + (segmentVal === 'identity' || segmentVal === 'correction' ? 0.03 : 0)),
-              decayRate: tierVal === 'short' ? 0.002 : tierVal === 'long' ? 0.0003 : 0.00001,
+              decayRate: tierVal === 'short'
+                ? 0.0005
+                : tierVal === 'long'
+                  ? 0.00015
+                  : (segmentVal === 'identity' ? 0.0000228 : 0.000114),
               accessCount: 0,
               lastAccessedAt: Date.now(),
               lifecycle: 'active',
@@ -1344,6 +1459,16 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
     let loopCount = 0;
     const maxLoops = 20;
 
+    let targetContent = '';
+    let displayedContent = '';
+    let targetThinkContent = '';
+    let displayedThinkContent = '';
+    let currentToolCalls: ToolCallNode[] = [];
+    let isDone = false;
+    let finalEventResultText: string | undefined = undefined;
+    let lastToolCallsJson = '';
+    let typingInterval: any;
+
     // Helper to get tool category
     const getToolCategory = (name: string): ToolCallNode['toolCategory'] => {
       if (name === 'read_file' || name === 'glob_tool' || name === 'grep_tool' || name === 'analyze_file' || name === 'list_directory') return 'read';
@@ -1408,61 +1533,29 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
             toolCategory: getToolCategory(toolName),
             icon: getToolIcon(toolName),
             filePath: normalizedArgPath,
+            args: event.args,
           };
 
           toolCallNodes.push(node);
+          currentToolCalls = [...toolCallNodes];
 
-          // Update UI with new tool node
-          setChats(prev => prev.map(chat => {
-            if (chat.id !== chatId) return chat;
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? {
-                ...m,
-                content: `${m.content || ''}${m.content ? '\n\n' : ''}[[tool_call:${node.id}]]`,
-                toolCalls: [...toolCallNodes],
-              } : m)
-            };
-          }));
+          // Append tool call marker immediately to targetContent
+          targetContent = targetContent + (targetContent ? '\n\n' : '') + `[[tool_call:${node.id}]]`;
 
-          // Advance TODOs based on tool type
-          const toolNameLower = toolName.toLowerCase();
-          if (toolNameLower.includes('read') || toolNameLower.includes('glob') || toolNameLower.includes('grep') || toolNameLower.includes('analyze')) {
-            setCoderTodos(prev => {
-              if (prev.length > 0) {
-                return prev.map((item, idx) => {
-                  if (idx === 0) return { ...item, status: 'complete' };
-                  if (idx === 1 && item.status === 'pending') return { ...item, status: 'in_progress' };
-                  return item;
-                });
+          // Sequential TODO advancement: on each tool call start, ensure
+          // the first pending task is activated (if none is in_progress yet).
+          setCoderTodos(prev => {
+            const hasInProgress = prev.some(t => t.status === 'in_progress');
+            if (!hasInProgress) {
+              const firstPendingIdx = prev.findIndex(t => t.status === 'pending');
+              if (firstPendingIdx !== -1) {
+                return prev.map((item, idx) =>
+                  idx === firstPendingIdx ? { ...item, status: 'in_progress' } : item
+                );
               }
-              return prev;
-            });
-          }
-          if (toolNameLower.includes('write') || toolNameLower.includes('create') || toolNameLower.includes('edit')) {
-            setCoderTodos(prev => {
-              if (prev.length > 1) {
-                return prev.map((item, idx) => {
-                  if (idx <= 1) return { ...item, status: 'complete' };
-                  if (idx === 2 && item.status === 'pending') return { ...item, status: 'in_progress' };
-                  return item;
-                });
-              }
-              return prev;
-            });
-          }
-          if (loopCount >= 2) {
-            setCoderTodos(prev => {
-              if (prev.length > 2) {
-                return prev.map((item, idx) => {
-                  if (idx <= 2) return { ...item, status: 'complete' };
-                  if (idx === 3 && item.status === 'pending') return { ...item, status: 'in_progress' };
-                  return item;
-                });
-              }
-              return prev;
-            });
-          }
+            }
+            return prev;
+          });
           break;
         }
 
@@ -1499,116 +1592,197 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
                 node.resultSummary = typeof result === 'string' ? result.slice(0, 100) : JSON.stringify(result).slice(0, 100);
               }
             }
+            currentToolCalls = [...toolCallNodes];
 
-            // Update UI
-            setChats(prev => prev.map(chat => {
-              if (chat.id !== chatId) return chat;
-              return {
-                ...chat,
-                messages: chat.messages.map(m => m.id === thinkingId ? {
-                  ...m,
-                  toolCalls: [...toolCallNodes],
-                } : m)
-              };
-            }));
+            // Sequential TODO advancement: when a tool call completes successfully,
+            // mark the current in_progress todo as complete and start the next pending one,
+            // then rewrite TODO.md with live [x]/[~]/[ ] checkboxes.
+            if (node.status === 'complete') {
+              setCoderTodos(prev => {
+                const inProgressIdx = prev.findIndex(t => t.status === 'in_progress');
+                if (inProgressIdx === -1) return prev;
+
+                const updated = prev.map((item, idx) => {
+                  if (idx === inProgressIdx) return { ...item, status: 'complete' as const };
+                  if (idx === inProgressIdx + 1 && item.status === 'pending') return { ...item, status: 'in_progress' as const };
+                  return item;
+                });
+
+                // Rewrite TODO.md with live status indicators
+                const todoContent =
+                  '# Tasks Checklist\n\n' +
+                  updated
+                    .map(t => {
+                      const prefix =
+                        t.status === 'complete' ? '[x]' :
+                        t.status === 'in_progress' ? '[~]' :
+                        t.status === 'failed' ? '[!]' : '[ ]';
+                      return `- ${prefix} ${t.text || (t as any).content || ''}`;
+                    })
+                    .join('\n') + '\n';
+
+                const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+                const fullPath = coderWorkspacePath
+                  ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md`
+                  : './TODO.md';
+
+                fetch('/api/fs/write', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, content: todoContent, ...workspaceArg }),
+                }).catch(err => console.warn('[TODO.md] Failed to update:', err));
+
+                return updated;
+              });
+            }
           }
           break;
         }
 
         case 'text': {
-          // Update streaming text
-          setChats(prev => prev.map(chat => {
-            if (chat.id !== chatId) return chat;
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? {
-                ...m,
-                content: `${m.content || ''}${event.content}`,
-                thinking: undefined,
-              } : m)
-            };
-          }));
+          targetContent += event.content || '';
           break;
         }
 
         case 'thinking': {
-          // Show thinking state
-          setChats(prev => prev.map(chat => {
-            if (chat.id !== chatId) return chat;
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? {
-                ...m,
-                thinking: `Planning step ${loopCount}...`,
-              } : m)
-            };
-          }));
+          targetThinkContent += event.content || '';
           break;
         }
 
         case 'done': {
-          const finalText = event.result?.text;
-          console.log('[PiAgent UI] Done event received. result.text length:', finalText?.length ?? 0, '| current m.content length will be used if empty');
-          // Finalize the response
-          setChats(prev => prev.map(chat => {
-            if (chat.id !== chatId) return chat;
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? {
-                ...m,
-                // Priority: streaming text from UI state (which has tool call markers) > result text from accumulation
-                // If both are empty, leave content as-is (already streamed) to avoid wiping content
-                content: m.content || finalText || '',
-                isThinking: false,
-                isStreaming: false,
-                toolCalls: toolCallNodes,
-                timestamp: new Date(),
-              } : m),
-              updatedAt: new Date(),
-            };
-          }));
+          finalEventResultText = event.result?.text;
+          isDone = true;
           triggerWorkspaceRefresh();
           break;
         }
 
         case 'error': {
-          // Handle error
+          targetContent = targetContent + (targetContent ? '\n\n' : '') + `❌ **Error**: ${event.error}`;
+          isDone = true;
+          break;
+        }
+      }
+    };
+
+    const getNextChunk = (displayed: string, target: string): string => {
+      if (displayed.length >= target.length) return '';
+
+      const diff = target.length - displayed.length;
+      const nextSlice = target.slice(displayed.length);
+
+      // Check if the next part is a tool call marker
+      const toolCallMatch = nextSlice.match(/^\[\[tool_call:[^\]]+\]\]/);
+      if (toolCallMatch) {
+        return toolCallMatch[0];
+      }
+
+      // Determine characters to add (proportional catch-up)
+      let charsToAdd = 1;
+      if (diff > 500) {
+        charsToAdd = Math.ceil(diff / 6);
+      } else if (diff > 100) {
+        charsToAdd = Math.ceil(diff / 10);
+      } else if (diff > 20) {
+        charsToAdd = Math.ceil(diff / 15);
+      }
+
+      let chunk = nextSlice.slice(0, charsToAdd);
+      const openBracketIndex = chunk.indexOf('[[');
+      if (openBracketIndex !== -1) {
+        if (openBracketIndex === 0) {
+          const closingIndex = nextSlice.indexOf(']]');
+          if (closingIndex !== -1) {
+            return nextSlice.slice(0, closingIndex + 2);
+          } else if (!isDone) {
+            return ''; // Wait for full marker
+          }
+          chunk = nextSlice.slice(0, charsToAdd);
+        } else {
+          chunk = chunk.slice(0, openBracketIndex);
+        }
+      }
+      return chunk;
+    };
+
+    const runPromise = new Promise<void>((resolve) => {
+      typingInterval = setInterval(() => {
+        let contentChanged = false;
+        let thinkContentChanged = false;
+
+        // 1. Catch up text content
+        if (displayedContent.length < targetContent.length) {
+          const chunk = getNextChunk(displayedContent, targetContent);
+          if (chunk) {
+            displayedContent += chunk;
+            contentChanged = true;
+          }
+        }
+
+        // 2. Catch up think content (thinking delta)
+        if (displayedThinkContent.length < targetThinkContent.length) {
+          const diff = targetThinkContent.length - displayedThinkContent.length;
+          const charsToAdd = diff > 100 ? Math.ceil(diff / 5) : (diff > 20 ? Math.ceil(diff / 10) : 1);
+          displayedThinkContent += targetThinkContent.slice(displayedThinkContent.length, displayedThinkContent.length + charsToAdd);
+          thinkContentChanged = true;
+        }
+
+        const currentToolCallsJson = JSON.stringify(currentToolCalls);
+        const toolCallsChanged = currentToolCallsJson !== lastToolCallsJson;
+
+        if (contentChanged || thinkContentChanged || toolCallsChanged || isDone) {
+          lastToolCallsJson = currentToolCallsJson;
+
           setChats(prev => prev.map(chat => {
             if (chat.id !== chatId) return chat;
             return {
               ...chat,
               messages: chat.messages.map(m => m.id === thinkingId ? {
                 ...m,
-                content: `${m.content || ''}\n\n❌ **Error**: ${event.error}`,
-                isThinking: false,
-                isStreaming: false,
-                toolCalls: toolCallNodes,
+                content: displayedContent,
+                thinkContent: displayedThinkContent || undefined,
+                isThinking: !isDone && (displayedThinkContent.length > 0 || m.isThinking),
+                isStreaming: !isDone,
+                toolCalls: [...currentToolCalls],
+                ...(isDone && displayedContent.length === targetContent.length && displayedThinkContent.length === targetThinkContent.length ? {
+                  content: displayedContent || finalEventResultText || '',
+                  isThinking: false,
+                  isStreaming: false,
+                  thinking: undefined,
+                  timestamp: new Date()
+                } : {})
               } : m)
             };
           }));
-          break;
         }
-      }
+
+        if (isDone && displayedContent.length === targetContent.length && displayedThinkContent.length === targetThinkContent.length) {
+          clearInterval(typingInterval);
+          resolve();
+        }
+      }, 25);
+    });
+
+    const abortHandler = () => {
+      clearInterval(typingInterval);
     };
+    if (signal) {
+      signal.addEventListener('abort', abortHandler);
+    }
 
     try {
       await runCoderPiAgent(agentInstance, task, handlePiEvent, signal);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      setChats(prev => prev.map(chat => {
-        if (chat.id !== chatId) return chat;
-        return {
-          ...chat,
-          messages: chat.messages.map(m => m.id === thinkingId ? {
-            ...m,
-            content: `${m.content || ''}\n\n❌ **Agent Error**: ${errorMsg}`,
-            isThinking: false,
-            isStreaming: false,
-            toolCalls: toolCallNodes,
-          } : m)
-        };
-      }));
+      targetContent = targetContent + (targetContent ? '\n\n' : '') + `❌ **Agent Error**: ${errorMsg}`;
+      isDone = true;
       throw error;
+    } finally {
+      isDone = true;
+      await runPromise;
+      clearInterval(typingInterval);
+      if (signal) {
+        signal.removeEventListener('abort', abortHandler);
+      }
     }
   };
 
@@ -2070,6 +2244,31 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
                 status: idx === 0 ? 'in_progress' : 'pending'
               }));
               setCoderTodos(mapped);
+
+              if (!shouldActivateOrchestration(content)) {
+                const todoContent = `# Tasks Checklist\n\n` + 
+                  mapped.map((t: any) => `- [ ] ${t.text || t.content || t.text}`).join('\n') + '\n';
+                
+                const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md` : `./TODO.md`;
+                
+                fetch('/api/fs/write', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filePath: fullPath, content: todoContent, ...workspaceArg })
+                }).then(() => {
+                  if (triggerWorkspaceRefresh) {
+                    triggerWorkspaceRefresh();
+                  }
+                  setTimeout(() => {
+                    if ((window as any).openFileInPreview) {
+                      (window as any).openFileInPreview('TODO.md');
+                    }
+                  }, 300);
+                }).catch(err => {
+                  console.error("Failed to write TODO.md:", err);
+                });
+              }
               setChats(prev => prev.map(chat => chat.id === chatId ? {
                 ...chat,
                 messages: chat.messages.map(m => m.id === thinkingId ? {
@@ -2111,11 +2310,37 @@ Return EXACTLY JSON in this format (do not include any conversational text or ma
           }
         } catch (err) {
           console.warn("Failed to generate dynamic todos via AI:", err);
-          setCoderTodos([
-            { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' },
-            { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' },
-            { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' }
-          ]);
+          const fallbackTodos = [
+            { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' as const },
+            { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' as const },
+            { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' as const }
+          ];
+          setCoderTodos(fallbackTodos);
+
+          if (!shouldActivateOrchestration(content)) {
+            const todoContent = `# Tasks Checklist\n\n` + 
+              fallbackTodos.map((t: any) => `- [ ] ${t.text}`).join('\n') + '\n';
+            
+            const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+            const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md` : `./TODO.md`;
+            
+            fetch('/api/fs/write', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filePath: fullPath, content: todoContent, ...workspaceArg })
+            }).then(() => {
+              if (triggerWorkspaceRefresh) {
+                triggerWorkspaceRefresh();
+              }
+              setTimeout(() => {
+                if ((window as any).openFileInPreview) {
+                  (window as any).openFileInPreview('TODO.md');
+                }
+              }, 300);
+            }).catch(writeErr => {
+              console.error("Failed to write fallback TODO.md:", writeErr);
+            });
+          }
           setChats(prev => prev.map(chat => chat.id === chatId ? {
             ...chat,
             messages: chat.messages.map(m => m.id === thinkingId ? {
@@ -4964,17 +5189,30 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   currentN.resultSummary = `Trajectory logged: ${relatedList.length} related pages found`;
                 }
                 } else if (name.startsWith('composio_')) {
-                  showToast(`Executing Composio tool: ${name}`);
+                  const composioSlug = resolveComposioSlug(name);
+                  showToast(`Executing: ${composioSlug.replace(/_/g, ' ').toLowerCase()}`);
                   try {
                     const execRes = await fetch('/api/composio/execute', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ toolSlug: name.replace('composio_', '').toUpperCase().replace(/ /g, '_'), args }),
+                      body: JSON.stringify({ toolSlug: composioSlug, args }),
                       signal
                     });
                     const execData = await execRes.json();
                     if (execRes.ok) {
-                      resultValue = execData.result || execData;
+                      // Server now returns { result: { successful, data, error? } }
+                      const inner = execData?.result ?? execData;
+                      if (inner && typeof inner === 'object' && 'successful' in inner) {
+                        if (inner.successful) {
+                          // data can be null/undefined for tools that return no data
+                          resultValue = inner.data ?? null;
+                        } else {
+                          resultValue = { error: inner.error || `Composio tool ${composioSlug} returned unsuccessful result` };
+                        }
+                      } else {
+                        // Legacy shape or unexpected — pass through
+                        resultValue = inner;
+                      }
                     } else {
                       resultValue = { error: execData.error || 'Composio tool execution failed' };
                     }
@@ -4983,13 +5221,20 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   }
                   const currentN = toolCallNodes.find(n => n.id === tc.id);
                   if (currentN) {
-                    currentN.resultSummary = resultValue?.error ? `Composio tool failed: ${resultValue.error}` : `Composio tool ${name} executed`;
+                    if (resultValue?.error) {
+                      currentN.resultSummary = `Failed: ${resultValue.error}`;
+                    } else if (resultValue === null || resultValue === undefined) {
+                      currentN.resultSummary = `Tool executed — no data returned`;
+                    } else {
+                      const preview = JSON.stringify(resultValue);
+                      currentN.resultSummary = preview.length > 120 ? preview.slice(0, 120) + '…' : preview;
+                    }
                   }
                 } else {
                   resultValue = { error: `Unsupported coder tool: ${name}` };
                 }
 
-                if (resultValue && !resultValue.error) {
+                if (resultValue !== undefined && !(resultValue && resultValue.error)) {
                   turnToolResultCache.set(cacheKey, resultValue);
                 }
               }
@@ -5431,8 +5676,29 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         setIsTyping(false);
       }
       setTypingMessageId(null);
-      setCoderTodos(prev => prev.map(t => ({ ...t, status: 'complete' })));
+      setCoderTodos(prev => {
+        const allDone = prev.map(t => ({ ...t, status: 'complete' as const }));
+        // Final rewrite of TODO.md — all tasks complete
+        if (allDone.length > 0) {
+          const todoContent =
+            '# Tasks Checklist\n\n' +
+            allDone
+              .map(t => `- [x] ${t.text || (t as any).content || ''}`)
+              .join('\n') + '\n';
+          const fullPath = coderWorkspacePath
+            ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md`
+            : './TODO.md';
+          const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
+          fetch('/api/fs/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filePath: fullPath, content: todoContent, ...workspaceArg }),
+          }).catch(() => {});
+        }
+        return allDone;
+      });
     }
+
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

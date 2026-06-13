@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   History, 
@@ -28,7 +28,7 @@ import remarkGfm from 'remark-gfm';
 import { Message, Artifact, ToolCallNode } from '../../types';
 import { ScrapeResult } from '../../services/scrapingService';
 import { CustomCodeBlockVisualizer, renderTextWithMath } from '../LuminaVisualizer';
-import { NodeGraph, InlineToolCallCard } from '../NodeGraph/NodeGraph';
+import { NodeGraph } from '../NodeGraph/NodeGraph';
 import { InlineFileDiffPreview } from '../NodeGraph/FileDiffNode';
 import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
@@ -118,6 +118,55 @@ const isReadFileNode = (node: ToolCallNode) => {
   return name.includes('read') && !!node.filePath;
 };
 
+// ── Slow typewriter streaming text ──────────────────────────────────────────
+// Reveals `text` character-by-character when isStreaming=true.
+// charsPerTick controls reveal speed (chars added per ~16ms animation frame).
+const SlowStreamText = ({
+  text,
+  isStreaming,
+  charsPerTick = 6,
+  className,
+}: {
+  text: string;
+  isStreaming: boolean;
+  charsPerTick?: number;
+  className?: string;
+}) => {
+  const [revealed, setRevealed] = useState(isStreaming ? '' : text);
+  const rafRef = useRef<number | null>(null);
+  const targetRef = useRef(text);
+
+  useEffect(() => {
+    targetRef.current = text;
+    if (!isStreaming) {
+      setRevealed(text);
+      return;
+    }
+    // Drain any queued animation frame before starting fresh
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+
+    const step = () => {
+      setRevealed(prev => {
+        const target = targetRef.current;
+        if (prev.length >= target.length) return prev;
+        return target.slice(0, prev.length + charsPerTick);
+      });
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [text, isStreaming, charsPerTick]);
+
+  // When streaming stops, snap to full text immediately
+  useEffect(() => {
+    if (!isStreaming) setRevealed(text);
+  }, [isStreaming, text]);
+
+  return <span className={className}>{revealed}</span>;
+};
+
 const StreamingDiffCount = ({
   value,
   prefix,
@@ -196,133 +245,273 @@ const CoderToolActivity = ({
   }, []);
 
   return (
-    <div className="space-y-2 px-1 text-left select-none">
-      {groupedItems.map((item) => {
-        if (item.type === 'reads') {
-          const groupKey = item.nodes.map(node => node.id).join(':');
-          const isExpanded = expandedNodeId === groupKey;
-          const paths = item.nodes.map(node => node.filePath || '').filter(Boolean);
-          const preview = paths.map(path => getDisplayFileName(path)).join(', ');
+    <div className="space-y-1.5 px-1 text-left select-none">
+      <AnimatePresence initial={false}>
+        {groupedItems.map((item, itemIndex) => {
+          if (item.type === 'reads') {
+            const groupKey = item.nodes.map(node => node.id).join(':');
+            const isExpanded = expandedNodeId === groupKey;
+            const paths = item.nodes.map(node => node.filePath || '').filter(Boolean);
+            const preview = paths.map(path => getDisplayFileName(path)).join(', ');
+
+            return (
+              <motion.div
+                key={groupKey}
+                className="not-prose"
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22, delay: itemIndex * 0.07, ease: 'easeOut' }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setExpandedNodeId(isExpanded ? null : groupKey)}
+                  className="group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[0.03] cursor-pointer"
+                >
+                  <ChevronDown
+                    size={13}
+                    className={`shrink-0 text-zinc-600 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
+                  />
+                  <span className={`size-1.5 shrink-0 rounded-full ${item.nodes.some(node => node.status === 'failed') ? 'bg-rose-500' : 'border border-zinc-500/60 bg-transparent'}`} />
+                  <FileText size={14} className="shrink-0 text-zinc-500" />
+                  <span className="shrink-0 font-medium text-zinc-300">Read</span>
+                  <span className="shrink-0 text-[12px] text-zinc-500">
+                    {item.nodes.length} file{item.nodes.length === 1 ? '' : 's'}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
+                    {preview}
+                  </span>
+                </button>
+                <AnimatePresence initial={false}>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18, ease: 'easeInOut' }}
+                      className="overflow-hidden ml-7 border-l border-zinc-800/80 pl-3 py-1.5 space-y-1"
+                    >
+                      {paths.map(path => (
+                        <button
+                          key={path}
+                          type="button"
+                          onClick={() => onOpenInEditor?.(path)}
+                          className="flex w-full min-w-0 items-center gap-2 border-none bg-transparent p-0 text-left font-mono text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                          title={path}
+                        >
+                          <FileText size={11} className="shrink-0 opacity-70" />
+                          <span className="shrink-0 text-zinc-350">{getDisplayFileName(path)}</span>
+                          <span className="min-w-0 truncate opacity-70">{path}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            );
+          }
+
+          const node = item.node;
+          const fileName = getDisplayFileName(node.filePath);
+          const summary = getCoderToolSummary(node);
+          const hasDiff = Boolean(node.oldContent || node.newContent);
+          const hasResult = Boolean(node.result && !hasDiff);
+          const isExpanded = expandedNodeId === node.id;
+          const action = getCoderToolAction(node);
+          const canExpand = hasDiff || hasResult;
+          const isLockedDiff = isStreaming && hasDiff;
 
           return (
-            <div key={groupKey} className="not-prose">
+            <motion.div
+              key={node.id}
+              className="not-prose"
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, delay: itemIndex * 0.07, ease: 'easeOut' }}
+            >
               <button
                 type="button"
-                onClick={() => setExpandedNodeId(isExpanded ? null : groupKey)}
-                className="group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[0.03] cursor-pointer"
+                onClick={() => {
+                  if (isLockedDiff) return;
+                  if (canExpand) {
+                    setExpandedNodeId(isExpanded ? null : node.id);
+                    return;
+                  }
+                  if (node.filePath) onOpenInEditor?.(node.filePath);
+                }}
+                className={`group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors ${isLockedDiff ? 'cursor-default' : 'hover:bg-white/[0.03] cursor-pointer'}`}
+                title={isLockedDiff ? 'Diff opens when streaming finishes' : undefined}
               >
-                <ChevronDown
-                  size={13}
-                  className={`shrink-0 text-zinc-600 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
+                {canExpand ? (
+                  <ChevronDown
+                    size={13}
+                    className={`shrink-0 text-zinc-600 transition-transform ${isExpanded && !isLockedDiff ? 'rotate-0' : '-rotate-90'} ${isLockedDiff ? 'opacity-40' : ''}`}
+                  />
+                ) : (
+                  <span className="w-[13px] shrink-0" />
+                )}
+                <span className={`size-1.5 shrink-0 rounded-full ${getCoderStatusDotClass(node.status)}`} />
+                {getCoderToolIcon(node)}
+                <span className="shrink-0 font-medium text-zinc-300">{action}</span>
+                {node.filePath ? (
+                  <span className="min-w-0 truncate font-mono text-[11px] text-sky-400" title={node.filePath || fileName}>
+                    {fileName}
+                  </span>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500" title={summary}>
+                    {summary}
+                  </span>
+                )}
+                <StreamingDiffCount
+                  value={node.addedCount}
+                  prefix="+"
+                  isStreaming={isStreaming && hasDiff}
+                  className="shrink-0 font-mono text-[12px] font-semibold text-emerald-400"
                 />
-                <span className={`size-1.5 shrink-0 rounded-full ${item.nodes.some(node => node.status === 'failed') ? 'bg-rose-500' : 'border border-zinc-500/60 bg-transparent'}`} />
-                <FileText size={14} className="shrink-0 text-zinc-500" />
-                <span className="shrink-0 font-medium text-zinc-300">Read</span>
-                <span className="shrink-0 text-[12px] text-zinc-500">
-                  {item.nodes.length} file{item.nodes.length === 1 ? '' : 's'}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
-                  {preview}
-                </span>
+                <StreamingDiffCount
+                  value={node.removedCount}
+                  prefix="-"
+                  isStreaming={isStreaming && hasDiff}
+                  className="shrink-0 font-mono text-[12px] font-semibold text-rose-400"
+                />
+                {node.status === 'failed' && (
+                  <span className="shrink-0 text-[10px] font-medium text-rose-400">failed</span>
+                )}
               </button>
-              {isExpanded && (
-                <div className="ml-7 border-l border-zinc-800/80 pl-3 py-1.5 space-y-1">
-                  {paths.map(path => (
-                    <button
-                      key={path}
-                      type="button"
-                      onClick={() => onOpenInEditor?.(path)}
-                      className="flex w-full min-w-0 items-center gap-2 border-none bg-transparent p-0 text-left font-mono text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                      title={path}
-                    >
-                      <FileText size={11} className="shrink-0 opacity-70" />
-                      <span className="shrink-0 text-zinc-350">{getDisplayFileName(path)}</span>
-                      <span className="min-w-0 truncate opacity-70">{path}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+
+              <AnimatePresence initial={false}>
+                {hasDiff && isExpanded && !isLockedDiff && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2, ease: 'easeInOut' }}
+                    className="overflow-hidden ml-7 mt-1 max-w-2xl border-l border-zinc-800/80 pl-3"
+                  >
+                    <AnimatedDiffPreview node={node} />
+                  </motion.div>
+                )}
+                {hasResult && isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18, ease: 'easeInOut' }}
+                    className="overflow-hidden ml-7 mt-1 border-l border-zinc-800/80 pl-3"
+                  >
+                    {node.toolName === 'run_command' ? (
+                      <TerminalOutputPreview node={node} />
+                    ) : (
+                      <pre className="max-h-60 overflow-auto rounded-md bg-black/25 p-2 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap custom-scrollbar">
+                        {node.result}
+                      </pre>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
           );
-        }
+        })}
+      </AnimatePresence>
+    </div>
+  );
+};
 
-        const node = item.node;
-        const fileName = getDisplayFileName(node.filePath);
-        const summary = getCoderToolSummary(node);
-        const hasDiff = Boolean(node.oldContent || node.newContent);
-        const hasResult = Boolean(node.result && !hasDiff);
-        const isExpanded = expandedNodeId === node.id;
-        const action = getCoderToolAction(node);
-        const canExpand = hasDiff || hasResult;
-        const isLockedDiff = isStreaming && hasDiff;
+// ── Terminal-style output preview for run_command results ──────────────────────
+const TerminalOutputPreview = ({ node }: { node: ToolCallNode }) => {
+  const cwd = node.args?.cwd || 'a:\\web_ui';
+  const command = node.args?.command || '';
+  
+  let stdout = '';
+  let stderr = '';
+  let code: number | null = null;
+  let error = '';
 
-        return (
-          <div key={node.id} className="not-prose">
-            <button
-              type="button"
-              onClick={() => {
-                if (isLockedDiff) return;
-                if (canExpand) {
-                  setExpandedNodeId(isExpanded ? null : node.id);
-                  return;
-                }
-                if (node.filePath) onOpenInEditor?.(node.filePath);
-              }}
-              className={`group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors ${isLockedDiff ? 'cursor-default' : 'hover:bg-white/[0.03] cursor-pointer'}`}
-              title={isLockedDiff ? 'Diff opens when streaming finishes' : undefined}
-            >
-              {canExpand ? (
-                <ChevronDown
-                  size={13}
-                  className={`shrink-0 text-zinc-600 transition-transform ${isExpanded && !isLockedDiff ? 'rotate-0' : '-rotate-90'} ${isLockedDiff ? 'opacity-40' : ''}`}
-                />
-              ) : (
-                <span className="w-[13px] shrink-0" />
-              )}
-              <span className={`size-1.5 shrink-0 rounded-full ${getCoderStatusDotClass(node.status)}`} />
-              {getCoderToolIcon(node)}
-              <span className="shrink-0 font-medium text-zinc-300">{action}</span>
-              {node.filePath ? (
-                <span className="min-w-0 truncate font-mono text-[11px] text-sky-400" title={node.filePath || fileName}>
-                  {fileName}
-                </span>
-              ) : (
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500" title={summary}>
-                  {summary}
-                </span>
-              )}
-              <StreamingDiffCount
-                value={node.addedCount}
-                prefix="+"
-                isStreaming={isStreaming && hasDiff}
-                className="shrink-0 font-mono text-[12px] font-semibold text-emerald-400"
-              />
-              <StreamingDiffCount
-                value={node.removedCount}
-                prefix="-"
-                isStreaming={isStreaming && hasDiff}
-                className="shrink-0 font-mono text-[12px] font-semibold text-rose-400"
-              />
-              {node.status === 'failed' && (
-                <span className="shrink-0 text-[10px] font-medium text-rose-400">failed</span>
-              )}
-            </button>
+  if (node.result) {
+    try {
+      const parsed = JSON.parse(node.result);
+      stdout = parsed.stdout ?? '';
+      stderr = parsed.stderr ?? '';
+      code = parsed.code ?? null;
+      error = parsed.error ?? '';
+    } catch {
+      stdout = node.result;
+    }
+  }
 
-            {hasDiff && isExpanded && !isLockedDiff && (
-              <div className="ml-7 mt-1 max-w-2xl border-l border-zinc-800/80 pl-3">
-                <InlineFileDiffPreview node={node} />
-              </div>
-            )}
-            {hasResult && isExpanded && (
-              <div className="ml-7 mt-1 border-l border-zinc-800/80 pl-3">
-                <pre className="max-h-60 overflow-auto rounded-md bg-black/25 p-2 font-mono text-[11px] leading-relaxed text-zinc-400 whitespace-pre-wrap custom-scrollbar">
-                  {node.result}
-                </pre>
-              </div>
-            )}
-          </div>
-        );
-      })}
+  const outputText = [stdout, stderr, error].filter(Boolean).join('\n');
+
+  return (
+    <div className="font-mono text-[11px] leading-relaxed max-w-2xl rounded-md bg-[#0c0c0c] border border-zinc-850 p-3 text-zinc-350 shadow-lg">
+      {/* Terminal Header Prompt */}
+      <div className="flex items-center gap-1.5 text-zinc-500 font-semibold mb-2 select-text">
+        <span className="text-emerald-500">{cwd}</span>
+        <span>&gt;</span>
+        <span className="text-zinc-150 font-normal">{command}</span>
+      </div>
+      {/* Terminal Output */}
+      {outputText ? (
+        <pre className="max-h-60 overflow-auto whitespace-pre-wrap select-text text-zinc-300 font-mono custom-scrollbar">
+          {outputText}
+        </pre>
+      ) : (
+        <div className="text-zinc-650 italic">No output returned</div>
+      )}
+      {code !== null && code !== 0 && (
+        <div className="mt-2 text-[10px] text-rose-400 font-bold">
+          Command exited with non-zero status code: {code}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Animated diff lines — reveals each diff line one-by-one with stagger ──────
+const AnimatedDiffPreview = ({ node }: { node: ToolCallNode }) => {
+  const newLines = (node.newContent || '').split('\n');
+  const oldLines = (node.oldContent || '').split('\n');
+
+  // Build a simple side-by-side diff: added lines (+), removed lines (-), context (=)
+  const diffLines: { type: 'add' | 'remove' | 'context'; text: string }[] = [];
+  const maxLen = Math.max(newLines.length, oldLines.length);
+  for (let i = 0; i < Math.min(maxLen, 120); i++) {
+    const oldLine = oldLines[i];
+    const newLine = newLines[i];
+    if (oldLine === undefined) {
+      diffLines.push({ type: 'add', text: newLine });
+    } else if (newLine === undefined) {
+      diffLines.push({ type: 'remove', text: oldLine });
+    } else if (oldLine !== newLine) {
+      if (oldLine) diffLines.push({ type: 'remove', text: oldLine });
+      if (newLine) diffLines.push({ type: 'add', text: newLine });
+    } else {
+      diffLines.push({ type: 'context', text: oldLine });
+    }
+  }
+
+  return (
+    <div className="font-mono text-[11px] leading-relaxed overflow-x-auto custom-scrollbar max-h-72 rounded-md bg-black/20 py-2">
+      {diffLines.map((line, i) => (
+        <motion.div
+          key={i}
+          initial={{ opacity: 0, x: -6 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.12, delay: i * 0.018, ease: 'easeOut' }}
+          className={`px-3 py-[1px] whitespace-pre ${
+            line.type === 'add'
+              ? 'bg-emerald-950/40 text-emerald-300'
+              : line.type === 'remove'
+              ? 'bg-rose-950/40 text-rose-300'
+              : 'text-zinc-500'
+          }`}
+        >
+          <span className={`mr-2 select-none ${
+            line.type === 'add' ? 'text-emerald-500' : line.type === 'remove' ? 'text-rose-500' : 'text-zinc-700'
+          }`}>
+            {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
+          </span>
+          {line.text}
+        </motion.div>
+      ))}
     </div>
   );
 };
@@ -334,17 +523,40 @@ const CoderThinkingBlock = ({ content, isStreaming = false }: { content: string;
   return (
     <div className="px-1 text-left">
       <div className="mb-2 flex w-fit items-center gap-2 text-[14px] text-zinc-500">
-        <Sparkles size={14} className="text-zinc-600" />
-        <span>Thinking</span>
+        <motion.div
+          animate={isStreaming ? { opacity: [0.5, 1, 0.5] } : {}}
+          transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+        >
+          <Sparkles size={14} className="text-zinc-500" />
+        </motion.div>
+        <span className="text-[13px] font-mono tracking-wide">
+          {isStreaming ? 'Thinking...' : 'Thought'}
+        </span>
+        {isStreaming && (
+          <span className="flex gap-[3px] items-center ml-1">
+            {[0, 1, 2].map(i => (
+              <motion.span
+                key={i}
+                className="inline-block w-1 h-1 rounded-full bg-zinc-500"
+                animate={{ opacity: [0.2, 1, 0.2], y: [0, -2, 0] }}
+                transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.18, ease: 'easeInOut' }}
+              />
+            ))}
+          </span>
+        )}
       </div>
-      <div className="border-l border-zinc-700/80 pl-4 ml-1">
-        <div className="text-[15px] leading-7 text-zinc-300 whitespace-pre-wrap break-words">
-          {clean}
+      <div className="border-l-2 border-zinc-700/60 pl-4 ml-1">
+        <div className="text-[14px] leading-[1.85] text-zinc-400 whitespace-pre-wrap break-words font-mono">
+          <SlowStreamText
+            text={clean}
+            isStreaming={isStreaming}
+            charsPerTick={isStreaming ? 4 : 999}
+          />
           {isStreaming && (
             <motion.span
               animate={{ opacity: [1, 0] }}
-              transition={{ repeat: Infinity, duration: 0.6 }}
-              className="inline-block w-1.5 h-4 bg-current ml-1 rounded-sm align-middle"
+              transition={{ repeat: Infinity, duration: 1.0 }}
+              className="inline-block w-[2px] h-[14px] bg-zinc-400 ml-0.5 rounded-sm align-middle"
             />
           )}
         </div>
@@ -352,6 +564,8 @@ const CoderThinkingBlock = ({ content, isStreaming = false }: { content: string;
     </div>
   );
 };
+
+type SpeechStateListener = (activeId: string | null) => void;
 
 class SpeechController {
   private activeId: string | null = null;
@@ -952,10 +1166,11 @@ function MessageItemComponent({
   }, [markdownComponents, message.sources, message.isStreaming]);
 
   const renderedInlineContent = useMemo(() => {
-    if (!message.content) return null;
+    if (!message.content && !isCoderMode) return null;
 
     if (isCoderMode) {
-      let contentToProcess = message.content;
+      let contentToProcess = message.content || '';
+      if (!contentToProcess && (!toolCalls || toolCalls.length === 0)) return null;
       if (!contentToProcess.includes('[[tool_call:') && toolCalls && toolCalls.length > 0) {
         let toolIdx = 0;
         const filteredTools = toolCalls.filter(node => node.id !== 'thinking-node' && !isScrapeTool(node.toolName || ''));
@@ -1011,6 +1226,9 @@ function MessageItemComponent({
             const cleanPart = part.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
             if (!cleanPart) return null;
 
+            const isLastPart = idx === parts.length - 1;
+            const isToolCall = toolMatch;
+
             return (
               <span key={idx} className="block text-left">
                 <Markdown
@@ -1019,6 +1237,13 @@ function MessageItemComponent({
                 >
                   {cleanPart}
                 </Markdown>
+                {message.isStreaming && isLastPart && !isToolCall && (
+                  <motion.span
+                    animate={{ opacity: [1, 0] }}
+                    transition={{ repeat: Infinity, duration: 1.0 }}
+                    className="inline-block w-[2px] h-4 bg-current ml-0.5 rounded-sm align-middle"
+                  />
+                )}
               </span>
             );
           })}
@@ -1049,11 +1274,10 @@ function MessageItemComponent({
 
             return (
               <div key={idx} className="my-3 w-full">
-                <InlineToolCallCard
-                  node={node}
-                  scrapingResults={scrapingResults}
-                  wikiResults={wikiResults}
-                  onSendMessage={onSendMessage}
+                <CoderToolActivity
+                  nodes={[node]}
+                  onOpenInEditor={onOpenInEditor}
+                  isStreaming={message.isStreaming}
                 />
               </div>
             );
@@ -1074,8 +1298,8 @@ function MessageItemComponent({
               {message.isStreaming && isLastPart && !isLastPartToolCall && (
                 <motion.span
                   animate={{ opacity: [1, 0] }}
-                  transition={{ repeat: Infinity, duration: 0.6 }}
-                  className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle"
+                  transition={{ repeat: Infinity, duration: 1.0 }}
+                  className="inline-block w-[2px] h-4 bg-current ml-0.5 rounded-sm align-middle"
                 />
               )}
             </span>
@@ -1084,8 +1308,8 @@ function MessageItemComponent({
         {message.isStreaming && isLastPartToolCall && (
           <motion.span
             animate={{ opacity: [1, 0] }}
-            transition={{ repeat: Infinity, duration: 0.6 }}
-            className="inline-block w-1.5 h-4 bg-current ml-0.5 rounded-sm align-middle mt-1"
+            transition={{ repeat: Infinity, duration: 1.0 }}
+            className="inline-block w-[2px] h-4 bg-current ml-0.5 rounded-sm align-middle mt-1"
           />
         )}
       </>
@@ -1348,17 +1572,11 @@ function MessageItemComponent({
                     transition={{ duration: 0.18, ease: 'easeInOut' }}
                     className="overflow-hidden"
                   >
-                    <div className="space-y-3 pb-2">
-                      {toolCallsForSummary.map((node) => (
-                        <InlineToolCallCard
-                          key={node.id}
-                          node={node}
-                          scrapingResults={scrapingResults}
-                          wikiResults={wikiResults}
-                          onSendMessage={onSendMessage}
-                        />
-                      ))}
-                    </div>
+                      <CoderToolActivity
+                        nodes={toolCallsForSummary}
+                        onOpenInEditor={onOpenInEditor}
+                        isStreaming={false}
+                      />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1513,7 +1731,7 @@ function MessageItemComponent({
             </div>
           )}
           {isCoderMode && message.thinkContent && (
-            <CoderThinkingBlock content={message.thinkContent} />
+            <CoderThinkingBlock content={message.thinkContent} isStreaming={message.isStreaming} />
           )}
           {!isCoderMode && (message.thinkContent || message.isThinking) && (
             <div className="px-1 w-full max-w-full overflow-hidden">

@@ -180,6 +180,36 @@ export async function runCoderPiAgent(
   console.log('[PiAgent Service] Provider profile found:', providerProfile?.provider, '- endpoint:', providerProfile?.endpoint);
   console.log('[PiAgent Service] Actual model ID to use:', actualModelId);
 
+  const subagentConfigs: Record<string, any> = {};
+  try {
+    const savedConfigsStr = localStorage.getItem('lumina_subagent_configs');
+    const profilesStr = localStorage.getItem('lumina_ai_provider_profiles');
+    if (savedConfigsStr && profilesStr) {
+      const configs = JSON.parse(savedConfigsStr);
+      const profiles = JSON.parse(profilesStr);
+      const agentIds = ['orchestrator', 'analyzer', 'coder', 'debugger', 'reviewer'];
+      for (const id of agentIds) {
+        if (configs[id]) {
+          const cfg = configs[id];
+          const modelId = cfg.modelId;
+          const matchingProfile = profiles.find((p: any) => p.id === cfg.providerProfileId || p.models.some((m: any) => m.id === modelId));
+          if (matchingProfile) {
+            subagentConfigs[id] = {
+              modelId,
+              endpoint: matchingProfile.endpoint,
+              apiKey: matchingProfile.apiKey,
+              provider: matchingProfile.provider,
+              systemPrompt: cfg.systemPrompt,
+              tools: cfg.tools
+            };
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[PiAgent Service] Failed to parse subagent configs:', e);
+  }
+
   const requestBody = {
     task,
     workspacePath: config.workspacePath,
@@ -192,6 +222,7 @@ export async function runCoderPiAgent(
     modelId: actualModelId,
     thinkingLevel: config.thinkingLevel || 'high',
     providerProfile: providerProfile || null,
+    subagentConfigs,
   };
 
   console.log('[PiAgent Service] Sending request to backend /api/pi-agent/run:', requestBody);

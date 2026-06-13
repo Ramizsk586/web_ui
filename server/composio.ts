@@ -1,5 +1,5 @@
 import { Composio } from "@composio/core";
-import type { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
+import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
 
 export type ToolkitAuthMode = "managed" | "byo";
 
@@ -34,7 +34,7 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
 ];
 
-let singleton: Composio<any> | null = null;
+let singleton: Composio<ClaudeAgentSDKProvider> | null = null;
 let overrideApiKey: string | null = null;
 
 export function setApiKey(key: string): void {
@@ -42,11 +42,14 @@ export function setApiKey(key: string): void {
   singleton = null;
 }
 
-export function getComposio(): Composio<any> | null {
+export function getComposio(): Composio<ClaudeAgentSDKProvider> | null {
   if (singleton) return singleton;
   const apiKey = overrideApiKey || process.env.COMPOSIO_API_KEY;
   if (!apiKey) return null;
-  singleton = new Composio({ apiKey });
+  singleton = new Composio<ClaudeAgentSDKProvider>({
+    apiKey,
+    provider: new ClaudeAgentSDKProvider(),
+  });
   return singleton;
 }
 
@@ -134,7 +137,10 @@ export async function renameConnection(connectionId: string, alias: string): Pro
 
 export async function verifyApiKey(apiKey: string): Promise<{ valid: boolean; error?: string }> {
   try {
-    const testComposio = new Composio({ apiKey });
+    const testComposio = new Composio<ClaudeAgentSDKProvider>({
+      apiKey,
+      provider: new ClaudeAgentSDKProvider(),
+    });
     await testComposio.connectedAccounts.list({ userIds: [luminaUserId()] });
     return { valid: true };
   } catch (err: any) {
@@ -167,7 +173,7 @@ export async function executeComposioTool(
   toolSlug: string,
   args: Record<string, any>,
   connectedAccountId?: string,
-): Promise<any> {
+): Promise<{ successful: boolean; data: any; error?: string }> {
   const composio = getComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
   try {
@@ -176,10 +182,19 @@ export async function executeComposioTool(
       arguments: args,
       ...(connectedAccountId ? { connectedAccountId } : {}),
       dangerouslySkipVersionCheck: true,
-    });
-    return result;
+    }) as any;
+
+    // Composio SDK returns: { successful: boolean, data: {...}, error?: string }
+    // Normalize into a consistent shape.
+    const successful = result?.successful ?? result?.success ?? true;
+    const data = result?.data ?? result?.result ?? result ?? null;
+    const error = result?.error ?? undefined;
+
+    console.log(`[composio] execute ${toolSlug} -> successful=${successful}, data keys=${data ? Object.keys(data).join(',') : 'null'}`);
+    return { successful, data, error };
   } catch (err: any) {
     const msg = err?.message ?? String(err);
+    console.error(`[composio] execute ${toolSlug} THREW:`, msg);
     throw new Error(`Composio tool execution failed: ${msg}`);
   }
 }

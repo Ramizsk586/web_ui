@@ -18,6 +18,7 @@ export interface ToolCallNode {
   oldContent?: string;
   newContent?: string;
   toolCategory?: 'discovery' | 'read' | 'write' | 'execute' | 'delegate' | 'web' | 'question' | 'workflow' | 'other';
+  args?: any;
 }
 
 export interface Artifact {

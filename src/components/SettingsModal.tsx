@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings,
   User,
@@ -41,7 +41,10 @@ import {
   Save,
   ToggleLeft,
   ToggleRight,
-  ChevronDown
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  ExternalLink
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
 import { SkillsPanel } from './SkillsPanel';
@@ -92,8 +95,8 @@ interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
   setUseLocalModelsOnly?: (val: boolean) => void;
-  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio';
-  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio') => void;
+  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio' | 'anthropic';
+  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio' | 'anthropic') => void;
   availableModels: any[];
   useBubbles: boolean;
   setUseBubbles: (val: boolean) => void;
@@ -1990,7 +1993,7 @@ export function SettingsModal({
               { id: 'skills', label: 'Skills', icon: <BookOpen size={16} /> },
               { id: 'llama_cpp', label: 'llama.cpp', icon: <Box size={16} /> },
               { id: 'models', label: 'Models', icon: <Brain size={16} /> },
-
+              { id: 'anthropic', label: 'Anthropic Proxy', icon: <Cpu size={16} /> },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -4432,6 +4435,10 @@ export function SettingsModal({
 
             {activeSettingsTab === 'composio' && <ComposioPanel />}
 
+            {activeSettingsTab === 'anthropic' && (
+              <AnthropicProxyPanel availableModels={availableModels} aiProviderProfiles={aiProviderProfiles} />
+            )}
+
             {activeSettingsTab === 'agents' && (
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 text-left font-sans">
                 <div>
@@ -5147,13 +5154,426 @@ function OldComposioPanel() {
                     </div>
                   );
                 })}
-              </div>
-            ) : (
-              <p className="text-xs text-zinc-500">No toolkits found. Make sure COMPOSIO_API_KEY is set in the server environment.</p>
-            )}
-          </div>
-        )}
+              </divinterface AnthropicProxyPanelProps {
+  availableModels: any[];
+  aiProviderProfiles: any[];
+}
+
+function AnthropicProxyPanel({ availableModels, aiProviderProfiles }: AnthropicProxyPanelProps) {
+  const [mappings, setMappings] = React.useState<Record<string, string>>({
+    opus: 'direct',
+    sonnet: 'direct',
+    haiku: 'direct',
+  });
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [status, setStatus] = React.useState<{ type: 'success' | 'error', message: string } | null>(null);
+  
+  // Slide drawer state
+  const [activeSelectTier, setActiveSelectTier] = React.useState<'opus' | 'sonnet' | 'haiku' | null>(null);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [collapsedCategories, setCollapsedCategories] = React.useState<Record<string, boolean>>({});
+
+  React.useEffect(() => {
+    let active = true;
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/anthropic/settings');
+        if (res.ok && active) {
+          const data = await res.json();
+          setMappings({
+            opus: data.opus ? `${data.opus.modelId}::${data.opus.providerProfileId}` : 'direct',
+            sonnet: data.sonnet ? `${data.sonnet.modelId}::${data.sonnet.providerProfileId}` : 'direct',
+            haiku: data.haiku ? `${data.haiku.modelId}::${data.haiku.providerProfileId}` : 'direct',
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load anthropic proxy settings', err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    loadSettings();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setStatus(null);
+    try {
+      const payload: any = {};
+      for (const tier of ['opus', 'sonnet', 'haiku'] as const) {
+        const val = mappings[tier];
+        if (val === 'direct') {
+          payload[tier] = null;
+        } else {
+          const [modelId, profileId] = val.split('::');
+          const profile = aiProviderProfiles.find(p => p.id === profileId);
+          if (profile) {
+            payload[tier] = {
+              modelId,
+              providerProfileId: profileId,
+              endpoint: profile.endpoint,
+              apiKey: profile.apiKey,
+              provider: profile.provider
+            };
+          } else {
+            payload[tier] = null;
+          }
+        }
+      }
+
+      const res = await fetch('/api/anthropic/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setStatus({ type: 'success', message: 'Anthropic proxy settings saved successfully!' });
+      } else {
+        setStatus({ type: 'error', message: 'Failed to save settings to the backend.' });
+      }
+    } catch (err: any) {
+      setStatus({ type: 'error', message: err.message || 'An error occurred while saving settings.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  const getMappedModelName = (value: string) => {
+    if (value === 'direct') return 'Direct (Pass-through)';
+    const [modelId, profileId] = value.split('::');
+    const matched = availableModels.find(m => m.id === modelId && m.providerProfileId === profileId);
+    return matched ? `${matched.name} (${matched.providerProfileName || matched.provider})` : modelId;
+  };
+
+  // Group availableModels by providerProfileId
+  const providerModelCategories = React.useMemo(() => {
+    const groups = new Map<string, { id: string; label: string; active: boolean; models: any[] }>();
+    for (const model of availableModels) {
+      const categoryId = model.providerProfileId || 'default-provider';
+      const label = model.providerProfileName || model.provider || 'Available Models';
+      const active = model.providerProfileActive !== false;
+      if (!groups.has(categoryId)) {
+        groups.set(categoryId, { id: categoryId, label, active, models: [] });
+      }
+      groups.get(categoryId)!.models.push(model);
+    }
+    return Array.from(groups.values());
+  }, [availableModels]);
+
+  const toggleCategory = (categoryId: string) => {
+    setCollapsedCategories(prev => ({
+      ...prev,
+      [categoryId]: prev[categoryId] === undefined ? false : !prev[categoryId]
+    }));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <RefreshCw size={24} className="animate-spin text-zinc-500" />
       </div>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 10 }}
+      animate={{ opacity: 1, x: 0 }}
+      className="space-y-8 text-left font-sans h-full flex flex-col relative"
+    >
+      <div className="flex-1 overflow-y-auto space-y-6 pr-2">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Anthropic API Proxy</h3>
+          <p className="text-xs text-gray-500">
+            Lumina can intercept incoming <code className="px-1 py-0.5 bg-zinc-800 rounded font-mono text-[11px] text-zinc-300">POST /v1/messages</code> calls made by external tools (e.g., Composio or Claude Agent SDK) and map them to your configured LLM profiles.
+          </p>
+        </div>
+
+        {/* Configuration instructions */}
+        <div className="p-4 rounded-xl border bg-zinc-950/20 border-zinc-800 space-y-3">
+          <h4 className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
+            <Globe size={14} className="text-blue-500" />
+            External SDK Setup Instructions
+          </h4>
+          <p className="text-xs text-zinc-400">
+            To route your external SDK completions through Lumina, point the ANTHROPIC_BASE_URL to your local Lumina server:
+          </p>
+          <div className="flex items-center gap-2 bg-zinc-950 p-2.5 rounded-lg border border-zinc-800/80 font-mono text-[11px] text-zinc-300">
+            <span className="flex-1 truncate">export ANTHROPIC_BASE_URL="http://localhost:3000/v1"</span>
+            <button
+              onClick={() => copyToClipboard('export ANTHROPIC_BASE_URL="http://localhost:3000/v1"')}
+              className="p-1 hover:bg-zinc-850 rounded text-zinc-500 hover:text-zinc-300 transition-colors"
+              title="Copy to clipboard"
+            >
+              <Copy size={12} />
+            </button>
+          </div>
+        </div>
+
+        {/* Grid for cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Claude Opus Card */}
+          <div className="p-4 rounded-xl border bg-zinc-950/10 border-zinc-850/60 hover:border-zinc-800 transition-all flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <h5 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                Claude Opus Proxy
+              </h5>
+              <p className="text-[11px] text-zinc-500">
+                Maps incoming <code className="px-1 bg-zinc-900 rounded font-mono text-[10px]">claude-3-opus</code> calls.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSelectTier('opus')}
+              className="w-full h-10 px-3 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 focus:outline-none rounded-xl text-xs text-zinc-200 flex items-center justify-between transition-all"
+            >
+              <span className="truncate font-medium text-left pr-2">
+                {getMappedModelName(mappings.opus)}
+              </span>
+              <ChevronDown size={13} className="text-zinc-500 shrink-0" />
+            </button>
+          </div>
+
+          {/* Claude Sonnet Card */}
+          <div className="p-4 rounded-xl border bg-zinc-950/10 border-zinc-850/60 hover:border-zinc-800 transition-all flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <h5 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-orange-500" />
+                Claude Sonnet Proxy
+              </h5>
+              <p className="text-[11px] text-zinc-500">
+                Maps incoming <code className="px-1 bg-zinc-900 rounded font-mono text-[10px]">claude-3-5-sonnet</code> calls.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSelectTier('sonnet')}
+              className="w-full h-10 px-3 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 focus:outline-none rounded-xl text-xs text-zinc-200 flex items-center justify-between transition-all"
+            >
+              <span className="truncate font-medium text-left pr-2">
+                {getMappedModelName(mappings.sonnet)}
+              </span>
+              <ChevronDown size={13} className="text-zinc-500 shrink-0" />
+            </button>
+          </div>
+
+          {/* Claude Haiku Card */}
+          <div className="p-4 rounded-xl border bg-zinc-950/10 border-zinc-855/60 hover:border-zinc-800 transition-all flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <h5 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-green-500" />
+                Claude Haiku Proxy
+              </h5>
+              <p className="text-[11px] text-zinc-500">
+                Maps incoming <code className="px-1 bg-zinc-900 rounded font-mono text-[10px]">claude-3-5-haiku</code> calls.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSelectTier('haiku')}
+              className="w-full h-10 px-3 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 focus:outline-none rounded-xl text-xs text-zinc-200 flex items-center justify-between transition-all"
+            >
+              <span className="truncate font-medium text-left pr-2">
+                {getMappedModelName(mappings.haiku)}
+              </span>
+              <ChevronDown size={13} className="text-zinc-500 shrink-0" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {status && (
+        <div className={`p-3.5 rounded-xl text-xs flex items-center gap-2 border ${
+          status.type === 'success'
+            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+            : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+        }`}>
+          <span className="flex-1">{status.message}</span>
+        </div>
+      )}
+
+      <div className="pt-4 border-t border-zinc-800/60 flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 rounded-xl text-white font-medium text-xs transition-all flex items-center gap-2 shadow-lg shadow-blue-500/10"
+        >
+          {saving ? (
+            <>
+              <RefreshCw size={12} className="animate-spin" />
+              Saving Settings...
+            </>
+          ) : (
+            'Save Settings'
+          )}
+        </button>
+      </div>
+
+      {/* Model Selector Slide Drawer */}
+      <AnimatePresence>
+        {activeSelectTier && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              onClick={() => {
+                setActiveSelectTier(null);
+                setSearchQuery('');
+              }}
+              className="fixed inset-0 z-[190] bg-black/25"
+            />
+            <motion.aside
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="fixed right-0 top-0 bottom-0 z-[191] w-full max-w-[380px] bg-[var(--theme-surface)] border-l border-[var(--theme-border)] shadow-2xl flex flex-col text-left font-sans"
+            >
+              <div className="h-16 px-5 border-b border-[var(--theme-border)] flex items-center justify-between shrink-0">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[var(--theme-primary)]">Select Model</div>
+                  <div className="text-xs text-[var(--theme-secondary)] truncate">
+                    Mapping for Claude {activeSelectTier.toUpperCase()}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setActiveSelectTier(null);
+                    setSearchQuery('');
+                  }}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-4 border-b border-[var(--theme-border)] shrink-0">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--theme-muted)]" />
+                  <input
+                    type="text"
+                    placeholder="Search models..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full h-10 pl-9 pr-3 bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] rounded-xl text-sm outline-none text-[var(--theme-primary)] placeholder:text-[var(--theme-muted)]"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--theme-muted)]">Categories</span>
+                </div>
+
+                {/* Direct Pass-through option */}
+                <div className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
+                  <button
+                    onClick={() => {
+                      setMappings({ ...mappings, [activeSelectTier]: 'direct' });
+                      setActiveSelectTier(null);
+                      setSearchQuery('');
+                    }}
+                    className={`w-full min-h-[46px] flex items-center gap-3 px-3 py-2 text-xs font-medium transition-colors text-left ${
+                      mappings[activeSelectTier] === 'direct'
+                        ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold'
+                        : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
+                    }`}
+                  >
+                    <Globe size={13} className="text-[var(--theme-muted)] shrink-0" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate">Direct Pass-through</span>
+                      <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">Pass requests directly to Anthropic</span>
+                    </span>
+                    {mappings[activeSelectTier] === 'direct' && <Check size={13} className="text-[var(--theme-accent)] shrink-0" />}
+                  </button>
+                </div>
+
+                {/* Categories */}
+                {providerModelCategories.map((category) => {
+                  const allModels = Array.isArray(category.models) ? category.models : [];
+                  const visibleModels = searchQuery
+                    ? allModels.filter((model: any) => {
+                        const id = String(model?.id || '').toLowerCase();
+                        const name = String(model?.name || '').toLowerCase();
+                        return id.includes(searchQuery.toLowerCase()) || name.includes(searchQuery.toLowerCase());
+                      })
+                    : allModels;
+
+                  if (visibleModels.length === 0) return null;
+                  const isCollapsed = collapsedCategories[category.id] ?? !category.active;
+
+                  return (
+                    <div key={category.id} className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
+                      <button
+                        onClick={() => toggleCategory(category.id)}
+                        className="w-full h-9 px-3 flex items-center gap-2 text-xs font-semibold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]"
+                      >
+                        {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                        <span className="flex-1 text-left truncate">{category.label}</span>
+                        <span className="text-[10px] text-[var(--theme-secondary)]">{visibleModels.length}</span>
+                      </button>
+                      {!isCollapsed && (
+                        <div className="p-1.5 space-y-1">
+                          {visibleModels.map((model: any) => {
+                            const value = `${model.id}::${model.providerProfileId}`;
+                            const isSelected = mappings[activeSelectTier] === value;
+                            return (
+                              <button
+                                key={`${category.id}-${model.id}`}
+                                onClick={() => {
+                                  setMappings({ ...mappings, [activeSelectTier]: value });
+                                  setActiveSelectTier(null);
+                                  setSearchQuery('');
+                                }}
+                                className={`w-full min-h-[42px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors text-left ${
+                                  isSelected
+                                    ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold'
+                                    : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
+                                }`}
+                              >
+                                <Brain size={13} className="text-[var(--theme-muted)] shrink-0" />
+                                <span className="flex-1 min-w-0">
+                                  <span className="block truncate">{model.name}</span>
+                                  <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</span>
+                                </span>
+                                {isSelected && <Check size={13} className="text-[var(--theme-accent)] shrink-0" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}-500" />}
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

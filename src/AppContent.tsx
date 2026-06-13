@@ -54,7 +54,8 @@ import {
   BookOpen,
   Activity,
   Compass,
-  MousePointerClick
+  MousePointerClick,
+  FileText
 } from 'lucide-react';
 
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
@@ -87,6 +88,7 @@ import { useAppHandlers } from './hooks/useAppHandlers';
 import {
   Message,
   Chat,
+  Tool,
 } from './types';
 
 import { SidebarContent } from './components/Sidebar/SidebarContent';
@@ -1094,7 +1096,10 @@ export default function AppContent({
 
     composioTools.forEach((tool: any) => {
       if (tool.enabled) {
-        pushTool(tool.id, tool.description, { type: 'object', properties: {}, required: [] });
+        const conn = composioConnections.find((c: any) => c.slug === tool.toolkit);
+        if (conn?.connected) {
+          pushTool(tool.id, tool.description, tool.parameters || { type: 'object', properties: {}, required: [] });
+        }
       }
     });
 
@@ -1141,7 +1146,7 @@ export default function AppContent({
     }
 
     return active;
-  }, [luminaTools, composioTools, useBridgeTools, bridgeTools, isWebSearchEnabled, isDeepSearchEnabled]);
+  }, [luminaTools, composioTools, useBridgeTools, bridgeTools, isWebSearchEnabled, isDeepSearchEnabled, composioConnections]);
 
   const renderActiveQuestionContent = () => {
     const activeQuestion = askAiQuestions[currentQuestionIndex];

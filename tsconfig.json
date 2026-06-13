@@ -27,6 +27,7 @@
     "coder",
     "dist",
     "node_modules",
-    "convex"
+    "convex",
+    "src-tauri"
   ]
 }

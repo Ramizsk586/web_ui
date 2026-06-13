@@ -15,7 +15,9 @@ export const create = mutation({
     agentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const decayRate = args.tier === "permanent" ? 0.00001 : args.tier === "long" ? 0.0003 : 0.002;
+    const decayRate = args.tier === "permanent"
+      ? (args.segment === "identity" ? 0.0000228 : 0.000114)
+      : args.tier === "long" ? 0.00015 : 0.0005;
     const importance = args.tier === "permanent" ? 0.99 : args.tier === "long" ? 0.85 : 0.6;
     return await ctx.db.insert("memoryRecords", {
       memoryId: args.memoryId,

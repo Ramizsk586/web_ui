@@ -129,12 +129,15 @@ const deriveMemoryTier = (
 const deriveDecayRate = (
   tier: MemoryRecord['tier'],
   accessCount: number,
-  importance: number
+  importance: number,
+  segment?: MemoryRecord['segment']
 ) => {
   const base =
-    tier === 'permanent' ? 0.00001 :
-    tier === 'long' ? 0.0003 :
-    0.002;
+    tier === 'permanent'
+      ? (segment === 'identity' ? 0.0000228 : 0.000114)
+      : tier === 'long'
+        ? 0.00015
+        : 0.0005;
 
   const reinforcement = Math.min(0.00018, accessCount * 0.00002 + importance * 0.00004);
   return Math.max(0.000005, base - reinforcement);
@@ -147,7 +150,7 @@ const applyMemoryAging = (memory: MemoryRecord, now: number): MemoryRecord => {
   const importance = clamp01(memory.importance || 0.5);
   const accessCount = Math.max(0, memory.accessCount || 0);
 
-  const baseDecayRate = deriveDecayRate(memory.tier, accessCount, importance);
+  const baseDecayRate = deriveDecayRate(memory.tier, accessCount, importance, memory.segment);
   const dormancyMultiplier =
     daysSinceTouch > 45 ? 2.6 :
     daysSinceTouch > 21 ? 1.9 :
@@ -178,7 +181,7 @@ const applyMemoryAging = (memory: MemoryRecord, now: number): MemoryRecord => {
     ...memory,
     tier: nextTier,
     importance: nextImportance,
-    decayRate: deriveDecayRate(nextTier, accessCount, nextImportance),
+    decayRate: deriveDecayRate(nextTier, accessCount, nextImportance, memory.segment),
     lifecycle: nextLifecycle,
   };
 };
@@ -207,7 +210,7 @@ const reinforceMemory = (
     importance: nextImportance,
     accessCount: nextAccessCount,
     lastAccessedAt: now,
-    decayRate: deriveDecayRate(nextTier, nextAccessCount, nextImportance),
+    decayRate: deriveDecayRate(nextTier, nextAccessCount, nextImportance, memory.segment),
     lifecycle: 'active',
   };
 };

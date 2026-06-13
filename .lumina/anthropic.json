@@ -1,0 +1,11 @@
+{
+  "opus": null,
+  "sonnet": {
+    "modelId": "mock-sonnet-model",
+    "providerProfileId": "mock-profile",
+    "endpoint": "http://127.0.0.1:3001",
+    "apiKey": "mock-key",
+    "provider": "openai"
+  },
+  "haiku": null
+}

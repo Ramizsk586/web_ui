@@ -21,6 +21,12 @@ import mammoth from "mammoth";
 import { RagBackendService } from "./src/services/ragBackendService";
 import { runDeepResearch } from "./server/deepResearchAgent";
 import { loadOpenCodeWorkspaceContext, resolveOpenCodeAgentProfile } from "./server/opencode";
+import {
+  anthropicToOpenAIRequest,
+  openAIToAnthropicResponse,
+  openAIToAnthropicStreamChunk,
+  createInitialStreamState
+} from "./server/anthropicConverter";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -822,6 +828,190 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     });
   });
 
+  // ─── Anthropic Proxy ──────────────────────────────────────────────────────────
+  const ANTHROPIC_CONFIG_PATH = path.join(process.cwd(), '.lumina', 'anthropic.json');
+
+  const getAnthropicConfig = () => {
+    try {
+      if (fs.existsSync(ANTHROPIC_CONFIG_PATH)) {
+        return JSON.parse(fs.readFileSync(ANTHROPIC_CONFIG_PATH, 'utf8'));
+      }
+    } catch (e) {
+      console.error("Failed to read anthropic config:", e);
+    }
+    return { opus: null, sonnet: null, haiku: null };
+  };
+
+  app.get("/api/anthropic/settings", (req, res) => {
+    res.json(getAnthropicConfig());
+  });
+
+  app.post("/api/anthropic/settings", (req, res) => {
+    try {
+      const configDir = path.dirname(ANTHROPIC_CONFIG_PATH);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+      fs.writeFileSync(ANTHROPIC_CONFIG_PATH, JSON.stringify(req.body, null, 2), 'utf8');
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/v1/messages", async (req, res) => {
+    const { model, stream } = req.body;
+    const isStream = stream === true;
+
+    const requestedModel = model || "";
+    let tier: 'opus' | 'sonnet' | 'haiku' | null = null;
+    if (requestedModel.toLowerCase().includes("opus")) {
+      tier = "opus";
+    } else if (requestedModel.toLowerCase().includes("sonnet")) {
+      tier = "sonnet";
+    } else if (requestedModel.toLowerCase().includes("haiku")) {
+      tier = "haiku";
+    }
+
+    const config = getAnthropicConfig();
+    const mapping = tier ? config[tier] : null;
+
+    let useDirectForward = false;
+    let targetUrl = "https://api.anthropic.com/v1/messages";
+    let apiKey = "";
+
+    if (mapping) {
+      if (mapping.provider === "anthropic" || mapping.endpoint?.includes("anthropic.com")) {
+        useDirectForward = true;
+        targetUrl = `${mapping.endpoint.replace(/\/+$/, "")}/v1/messages`;
+        apiKey = mapping.apiKey;
+      }
+    } else {
+      useDirectForward = true;
+    }
+
+    if (useDirectForward) {
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+      };
+      
+      const anthKey = apiKey || req.headers['x-api-key'] || req.headers['authorization'];
+      if (anthKey) {
+        headers['x-api-key'] = String(anthKey).replace(/^Bearer\s+/i, '');
+      }
+      if (req.headers['anthropic-version']) {
+        headers['anthropic-version'] = String(req.headers['anthropic-version']);
+      } else {
+        headers['anthropic-version'] = '2023-06-01';
+      }
+      if (req.headers['anthropic-beta']) {
+        headers['anthropic-beta'] = String(req.headers['anthropic-beta']);
+      }
+
+      try {
+        res.setHeader('Content-Type', isStream ? 'text/event-stream' : 'application/json');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        if (isStream) {
+          const response = await axios.post(targetUrl, req.body, { headers, timeout: 120000, responseType: 'stream' });
+          response.data.on('data', (chunk: Buffer) => res.write(chunk));
+          response.data.on('end', () => res.end());
+          response.data.on('error', (err: Error) => {
+            console.error('[Anthropic Proxy Direct] Stream error:', err.message);
+            res.end();
+          });
+        } else {
+          const response = await axios.post(targetUrl, req.body, { headers, timeout: 120000 });
+          res.json(response.data);
+        }
+      } catch (err: any) {
+        console.error('[Anthropic Proxy Direct] Error forwarding request:', err?.response?.data || err.message);
+        const status = err?.response?.status || 500;
+        const data = err?.response?.data || { error: { message: err.message } };
+        res.status(status).json(data);
+      }
+      return;
+    }
+
+    // OpenAI Compatible Forwarding
+    const openaiPayload = anthropicToOpenAIRequest(req.body, mapping.modelId);
+    const targetEndpoint = mapping.endpoint.replace(/\/+$/, "");
+    const fullUrl = `${targetEndpoint}/chat/completions`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (mapping.apiKey) {
+      headers['Authorization'] = `Bearer ${mapping.apiKey}`;
+    }
+
+    try {
+      if (isStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const response = await axios.post(fullUrl, openaiPayload, { headers, timeout: 120000, responseType: 'stream' });
+        
+        const streamState = createInitialStreamState();
+        let buffer = '';
+
+        response.data.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString('utf8');
+          let boundary = buffer.indexOf('\n');
+          while (boundary !== -1) {
+            const line = buffer.substring(0, boundary).trim();
+            buffer = buffer.substring(boundary + 1);
+            boundary = buffer.indexOf('\n');
+            
+            if (line.startsWith('data:')) {
+              const dataStr = line.substring(5).trim();
+              if (dataStr === '[DONE]') {
+                continue;
+              }
+              try {
+                const chunkData = JSON.parse(dataStr);
+                const anthEvents = openAIToAnthropicStreamChunk(chunkData, streamState, requestedModel);
+                for (const ev of anthEvents) {
+                  res.write(`event: ${ev.event}\n`);
+                  res.write(`data: ${JSON.stringify(ev.data)}\n\n`);
+                }
+              } catch (e) {
+                // ignore
+              }
+            }
+          }
+        });
+
+        response.data.on('end', () => {
+          if (!streamState.messageStopped) {
+            if (streamState.messageStarted && streamState.activeContentIndex >= 0) {
+              res.write(`event: content_block_stop\n`);
+              res.write(`data: ${JSON.stringify({ type: "content_block_stop", index: streamState.activeContentIndex })}\n\n`);
+            }
+            res.write(`event: message_stop\n`);
+            res.write(`data: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+            streamState.messageStopped = true;
+          }
+          res.end();
+        });
+
+        response.data.on('error', (err: Error) => {
+          console.error('[Anthropic Proxy OpenAI Stream] Stream error:', err.message);
+          res.end();
+        });
+
+      } else {
+        const response = await axios.post(fullUrl, openaiPayload, { headers, timeout: 120000 });
+        const anthResponse = openAIToAnthropicResponse(response.data, requestedModel);
+        res.json(anthResponse);
+      }
+    } catch (err: any) {
+      console.error('[Anthropic Proxy OpenAI] Error calling endpoint:', err?.response?.data || err.message);
+      const status = err?.response?.status || 500;
+      const data = err?.response?.data || { error: { message: err.message } };
+      res.status(status).json(data);
+    }
+  });
+
   // Chat completions
   app.post("/v1/chat/completions", async (req, res) => {
     const { model, messages, tools, stream, temperature, max_tokens, ...otherParams } = req.body;
@@ -1144,9 +1334,36 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     }
   });
 
+  const getWorkspaceSummary = (workspaceRoot?: string): string => {
+    if (!workspaceRoot) return '(none)';
+    try {
+      const resolved = path.resolve(workspaceRoot);
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+        const items = fs.readdirSync(resolved);
+        if (items.length === 0) {
+          return 'Empty workspace directory';
+        }
+        const lines = items.map(name => {
+          if (name === '.git' || name === 'node_modules' || name === '.lumina' || name === '.lumina_opencode') return null;
+          const full = path.join(resolved, name);
+          try {
+            const isDir = fs.statSync(full).isDirectory();
+            return `- ${name}${isDir ? '/' : ''}`;
+          } catch {
+            return `- ${name}`;
+          }
+        }).filter(Boolean);
+        return lines.length > 0 ? lines.join('\n') : 'No user files present';
+      }
+    } catch (e) {
+      return 'Could not read directory';
+    }
+    return 'Directory does not exist';
+  };
+
   // Pi Agent endpoint - runs the coding agent SDK server-side and streams events
   app.post("/api/pi-agent/run", async (req: express.Request, res: express.Response) => {
-    const { task, workspacePath, apiKey: _apiKey, model, modelId, thinkingLevel, providerProfile } = req.body as {
+    const { task, workspacePath, apiKey: _apiKey, model, modelId, thinkingLevel, providerProfile, subagentConfigs } = req.body as {
       task: string;
       workspacePath?: string;
       apiKey?: string;
@@ -1154,6 +1371,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       modelId?: string;
       thinkingLevel?: string;
       providerProfile?: { provider: string; endpoint: string; apiKey: string; models?: any[] };
+      subagentConfigs?: Record<string, any>;
     };
 
     if (!task) {
@@ -1161,10 +1379,13 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     }
 
     res.setHeader('Content-Type', 'application/x-ndjson');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
-    // ─── Helper: write a newline-delimited JSON event to the response ───────────
+    // ── Helper: write a newline-delimited JSON event to the response ───────────
     const writeEvent = (payload: Record<string, any>) => {
       try { res.write(JSON.stringify(payload) + '\n'); } catch {}
     };
@@ -1200,17 +1421,113 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       };
 
       // ── Tool schemas ──────────────────────────────────────────────────────────
-      const ReadFileSchema    = Type.Object({ filePath: Type.String(), offset: Type.Optional(Type.Number()), limit: Type.Optional(Type.Number()) });
-      const WriteFileSchema   = Type.Object({ filePath: Type.String(), content: Type.String() });
-      const CreateFileSchema  = Type.Object({ filePath: Type.String(), isDirectory: Type.Optional(Type.Boolean()), content: Type.Optional(Type.String()) });
-      const DeleteFileSchema  = Type.Object({ filePath: Type.String() });
-      const RenameFileSchema  = Type.Object({ filePath: Type.String(), newPath: Type.String() });
+      const ReadFileSchema    = Type.Object({ filePath: Type.String({ description: 'Relative path to the file from workspace root.' }), offset: Type.Optional(Type.Number()), limit: Type.Optional(Type.Number()) });
+      const WriteFileSchema   = Type.Object({ filePath: Type.String({ description: 'Relative path to the file from workspace root.' }), content: Type.String() });
+      const CreateFileSchema  = Type.Object({ filePath: Type.String({ description: 'Relative path to the file from workspace root.' }), isDirectory: Type.Optional(Type.Boolean()), content: Type.Optional(Type.String()) });
+      const DeleteFileSchema  = Type.Object({ filePath: Type.String({ description: 'Relative path to the file/directory from workspace root.' }) });
+      const RenameFileSchema  = Type.Object({ filePath: Type.String({ description: 'Relative path to the source file from workspace root.' }), newPath: Type.String({ description: 'Relative path to the destination file from workspace root.' }) });
       const GlobToolSchema    = Type.Object({ fileGlob: Type.Optional(Type.String()), maxResults: Type.Optional(Type.Number()) });
       const GrepToolSchema    = Type.Object({ query: Type.String(), fileGlob: Type.Optional(Type.String()), maxResults: Type.Optional(Type.Number()) });
       const RunCommandSchema  = Type.Object({ command: Type.String(), cwd: Type.Optional(Type.String()) });
       const WebScrapeSchema   = Type.Object({ url: Type.String() });
       const WebSearchSchema   = Type.Object({ query: Type.Array(Type.String()) });
       const AnalyzeFileSchema = Type.Object({ filePath: Type.String() });
+      const SpawnSubagentSchema = Type.Object({
+        task: Type.String({ description: 'The task description or instructions for the subagent.' })
+      });
+
+      const DEFAULT_AGENTS: Record<string, { name: string; role: string; tools: string[]; prompt: string }> = {
+        orchestrator: {
+          name: 'Orchestrator Agent',
+          role: 'Coordinates execution, plans subtasks, and assigns work.',
+          tools: ['read_file', 'run_command', 'glob_tool', 'grep_tool'],
+          prompt: 'You are the Orchestrator subagent. Your role is to analyze the high-level request, check the codebase state, plan the subtasks, and coordinate execution. Break down complex tasks into subtasks for specialized subagents.'
+        },
+        analyzer: {
+          name: 'Analyzer Agent',
+          role: 'Researches codebase, traces dependencies, and locates functions.',
+          tools: ['read_file', 'glob_tool', 'grep_tool'],
+          prompt: 'You are the Analyzer subagent. Your role is to explore the codebase, research files, locate functions and types, trace dependencies, and summarize architecture or bugs. You do not write or modify code.'
+        },
+        coder: {
+          name: 'Coder Agent',
+          role: 'Implements features, refactors, and edits workspace files.',
+          tools: ['read_file', 'write_file', 'edit_file', 'delete_file', 'rename_file', 'glob_tool', 'grep_tool'],
+          prompt: 'You are the Coder subagent. Your role is to write clean, maintainable, and correct code in the workspace. Read the necessary files first, implement requested features or refactors, and ensure file paths are resolved properly.'
+        },
+        debugger: {
+          name: 'Debugger Agent',
+          role: 'Diagnoses failures, runs compiler checks, and verifies fixes.',
+          tools: ['read_file', 'write_file', 'edit_file', 'run_command', 'glob_tool', 'grep_tool'],
+          prompt: 'You are the Debugger subagent. Your role is to diagnose bugs, run test suites, analyze compiler or runtime errors, and modify code to fix failures. Run relevant commands to verify your fixes.'
+        },
+        reviewer: {
+          name: 'Reviewer Agent',
+          role: 'Performs static analysis, reviews code, and checks styles.',
+          tools: ['read_file', 'glob_tool', 'grep_tool'],
+          prompt: 'You are the Reviewer subagent. Your role is to perform static code analysis, code review, check for style compliance, find potential logic errors, security vulnerabilities, or performance bottlenecks, and provide recommendations.'
+        }
+      };
+
+      const executeSubagent = async (agentKey: string, task: string) => {
+        const agentCfg = subagentConfigs?.[agentKey] || {};
+        const systemPrompt = agentCfg.systemPrompt || DEFAULT_AGENTS[agentKey].prompt;
+        const agentTools = agentCfg.tools || DEFAULT_AGENTS[agentKey].tools;
+        
+        const resolvedTools = agentTools.map((toolName: string) => ({
+          id: toolName,
+          name: toolName,
+          description: `Workspace tool: ${toolName}`
+        }));
+
+        const runtimeAgent: RuntimeAgent = {
+          id: agentKey,
+          name: agentCfg.name || DEFAULT_AGENTS[agentKey].name,
+          description: DEFAULT_AGENTS[agentKey].role,
+          systemPrompt,
+          mode: 'subagent',
+          permissions: { allowedTools: agentTools },
+          tools: resolvedTools,
+          model: agentCfg.modelId || profileConfig.modelId,
+          baseUrl: agentCfg.endpoint || profileConfig.endpoint,
+          apiKey: agentCfg.apiKey || profileConfig.apiKey,
+          provider: agentCfg.provider || detectedProvider
+        };
+
+        let finalText = '';
+        const mockRes: any = {
+          write: (chunk: string) => {
+            const lines = chunk.split('\n').filter(Boolean);
+            for (const line of lines) {
+              try {
+                const parsed = JSON.parse(line);
+                if (parsed.type === 'token' && typeof parsed.text === 'string') {
+                  finalText += parsed.text;
+                }
+                if (parsed.type === 'event' && parsed.event?.type === 'agent_done') {
+                  finalText = parsed.event.result || finalText;
+                }
+              } catch {}
+            }
+          },
+          setHeader: () => {},
+          flushHeaders: () => {},
+          end: () => {}
+        };
+
+        await runExecutionAgent({
+          agent: runtimeAgent,
+          task,
+          bridgeTools: [],
+          res: mockRes
+        });
+
+        return toolResult({
+          agent: runtimeAgent.name,
+          task,
+          result: finalText || 'Subagent execution completed.'
+        });
+      };
 
       const tools = [
         defineTool({ name: 'read_file',    label: 'Read File',    description: 'Read file contents', parameters: ReadFileSchema,
@@ -1314,6 +1631,21 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
             return toolResult({ filePath: cp, language: ext, lineCount: lines.length, charCount: data.content.length, preview: lines.slice(0, 20).join('\n') });
           }
         }),
+        defineTool({ name: 'spawn_orchestrator', label: 'Spawn Orchestrator Agent', description: 'Spawn the Orchestrator subagent to coordinate project execution, analyze request, check the codebase state, plan subtasks, and coordinate execution.', parameters: SpawnSubagentSchema,
+          execute: async (_tcId: any, params: any) => executeSubagent('orchestrator', params.task)
+        }),
+        defineTool({ name: 'spawn_analyzer', label: 'Spawn Analyzer Agent', description: 'Spawn the Analyzer subagent to explore the codebase, research files, locate functions/types, trace dependencies, and summarize architecture or bugs.', parameters: SpawnSubagentSchema,
+          execute: async (_tcId: any, params: any) => executeSubagent('analyzer', params.task)
+        }),
+        defineTool({ name: 'spawn_coder', label: 'Spawn Coder Agent', description: 'Spawn the Coder subagent to write clean, maintainable code, edit files, and implement features in the workspace.', parameters: SpawnSubagentSchema,
+          execute: async (_tcId: any, params: any) => executeSubagent('coder', params.task)
+        }),
+        defineTool({ name: 'spawn_debugger', label: 'Spawn Debugger Agent', description: 'Spawn the Debugger subagent to diagnose bugs, compile errors, run test suites, and write fixes.', parameters: SpawnSubagentSchema,
+          execute: async (_tcId: any, params: any) => executeSubagent('debugger', params.task)
+        }),
+        defineTool({ name: 'spawn_reviewer', label: 'Spawn Reviewer Agent', description: 'Spawn the Reviewer subagent to perform static code analysis, code review, check for style compliance, and find potential vulnerabilities or performance bottlenecks.', parameters: SpawnSubagentSchema,
+          execute: async (_tcId: any, params: any) => executeSubagent('reviewer', params.task)
+        }),
       ];
 
       // ── Resolve provider config from request ─────────────────────────────────
@@ -1398,8 +1730,14 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
           toolMap[t.name] = t.execute;
         }
 
+        const workspaceSummary = getWorkspaceSummary(workspacePath);
         const CODER_SYSTEM_INSTRUCTION = `You are a professional software engineering agent.
 Your workspace path is: ${workspacePath || '.'}.
+
+CRITICAL PATH/DIRECTORY INSTRUCTIONS:
+1. All tools that accept a file path (e.g., 'read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file') expect paths RELATIVE to the workspace root (e.g., 'hello.html', 'src/App.tsx'). DO NOT pass absolute paths starting with 'A:\' or 'C:\' or similar absolute prefixes.
+2. Here is the initial layout of the workspace root directory:
+${workspaceSummary}
 
 CRITICAL DIRECTIVE ON TOOL USAGE:
 1. Always prefer using the highly optimized built-in tools for normal tasks:
@@ -1410,7 +1748,13 @@ CRITICAL DIRECTIVE ON TOOL USAGE:
    - Use 'search' to search the web for external info.
 2. DO NOT use the terminal command ('run_command') to list files, check current directory, or search text (e.g. do not run 'ls', 'pwd', 'find', 'grep', 'cat', etc.). These shell commands fail in many sandboxed/unprivileged environments, return unformatted output, and consume unnecessary terminal processes.
 3. Use the terminal command ('run_command') ONLY when there are no built-in tools available for your task (e.g. running build scripts, executing test suites, running git commands, or starting local dev servers).
-4. Always prioritize built-in tools. Run terminal commands only as a last resort.`;
+4. Always prioritize built-in tools. Run terminal commands only as a last resort.
+5. You can spawn specialized sub-agents to parallelize work, coordinate plan, or verify code:
+   - Use 'spawn_orchestrator' to coordinate execution or plan subtasks.
+   - Use 'spawn_analyzer' to research files, dependencies, or codebase state.
+   - Use 'spawn_coder' to write/refactor code or implement workspace edits.
+   - Use 'spawn_debugger' to diagnose compiler errors, failures, or verify bugfixes.
+   - Use 'spawn_reviewer' to perform code reviews or static analysis checks.`;
 
         const messages: any[] = [
           { role: 'system', content: CODER_SYSTEM_INSTRUCTION },
@@ -1597,6 +1941,7 @@ CRITICAL DIRECTIVE ON TOOL USAGE:
         }
       });
 
+      const workspaceSummary = getWorkspaceSummary(workspacePath);
       const CODER_SYSTEM_INSTRUCTION = `[SYSTEM DIRECTIVE - PREFER BUILT-IN TOOLS]
 1. Always prefer using the highly optimized built-in tools for normal tasks:
    - Use 'glob_tool' to find files/list directories.
@@ -1608,6 +1953,12 @@ CRITICAL DIRECTIVE ON TOOL USAGE:
 3. Use the terminal command ('run_command') ONLY when there are no built-in tools available for your task (e.g. running build scripts, executing test suites, running git commands, or starting local dev servers).
 4. Always prioritize built-in tools. Run terminal commands only as a last resort.
 [END DIRECTIVE]
+
+CRITICAL PATH/DIRECTORY INSTRUCTIONS:
+1. Your workspace root is: ${workspacePath || process.cwd()}.
+2. All tools that accept a file path (e.g., 'read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file') expect paths RELATIVE to the workspace root (e.g., 'hello.html', 'src/App.tsx'). DO NOT pass absolute paths starting with 'A:\\' or 'C:\\' or similar absolute prefixes.
+3. Here is the initial layout of the workspace root directory:
+${workspaceSummary}
 
 Task to execute:
 ${task}`;
@@ -1793,7 +2144,7 @@ ${task}`;
             parameters: {
               type: 'object',
               properties: {
-                filePath: { type: 'string', description: 'Path to file.' },
+                filePath: { type: 'string', description: 'Relative path to file from workspace root (e.g. hello.html)' },
                 offset: { type: 'number', description: 'Line offset (1-based).' },
                 limit: { type: 'number', description: 'Line count limit.' }
               },
@@ -1810,7 +2161,7 @@ ${task}`;
             parameters: {
               type: 'object',
               properties: {
-                filePath: { type: 'string', description: 'Path to file.' },
+                filePath: { type: 'string', description: 'Relative path to file from workspace root (e.g. hello.html)' },
                 content: { type: 'string', description: 'File content.' }
               },
               required: ['filePath', 'content']
@@ -1826,7 +2177,7 @@ ${task}`;
             parameters: {
               type: 'object',
               properties: {
-                filePath: { type: 'string', description: 'Path to file.' },
+                filePath: { type: 'string', description: 'Relative path to file from workspace root (e.g. hello.html)' },
                 search: { type: 'string', description: 'Search content.' },
                 replace: { type: 'string', description: 'Replacement content.' },
                 all: { type: 'boolean', description: 'Replace all occurrences.' }
@@ -1844,7 +2195,7 @@ ${task}`;
             parameters: {
               type: 'object',
               properties: {
-                filePath: { type: 'string', description: 'Path to delete.' }
+                filePath: { type: 'string', description: 'Relative path to delete from workspace root.' }
               },
               required: ['filePath']
             }
@@ -1859,8 +2210,8 @@ ${task}`;
             parameters: {
               type: 'object',
               properties: {
-                filePath: { type: 'string', description: 'Current path.' },
-                newPath: { type: 'string', description: 'New path.' }
+                filePath: { type: 'string', description: 'Current relative path.' },
+                newPath: { type: 'string', description: 'New relative path.' }
               },
               required: ['filePath', 'newPath']
             }
@@ -6602,13 +6953,14 @@ Ensure the JSON is perfectly valid and matches the requested keys. Output only r
         if (userQuery) {
           const matchedChunks = await ragBackend.retrieve(userQuery, 5, ragConfig.activeDocumentIds);
           if (matchedChunks && matchedChunks.length > 0) {
+            const allDocs = ragBackend.getDocuments();
             const contextStr = matchedChunks.map(m => {
-              const loc = m.chunk.pageNumber ? `Page ${m.chunk.pageNumber}` : (m.chunk.section ? `Section: ${m.chunk.section}` : 'General');
+              const doc = allDocs.find(d => d.id === m.documentId);
+              const docName = doc ? doc.fileName : 'Unknown Document';
               return `--- START OF FRAGMENT ---
-Source Document: ${m.chunk.documentName}
-Location Reference: ${loc}
+Source Document: ${docName}
 
-${m.chunk.content}
+${m.content}
 --- END OF FRAGMENT ---`;
             }).join('\n\n');
             
@@ -6805,31 +7157,63 @@ ${contextStr}`;
       return msg;
     }));
 
+    const MAX_RETRIES = 3;
+    const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+    const isRetryableError = (err: any) => {
+      if (!err) return false;
+      if (err.response?.status === 429) return true;
+      if (err.response?.status && [502, 503, 504].includes(err.response.status)) return true;
+      const code = err.code;
+      if (code && ['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ERR_BAD_RESPONSE'].includes(code)) return true;
+      if (!err.response) return true;
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('connreset') || msg.includes('timeout') || msg.includes('network error') || msg.includes('socket hang up')) return true;
+      return false;
+    };
+
     try {
       if (provider === 'anthropic' || provider === 'opencode') {
         // Anthropic/OpenCode uses a different API format (x-api-key auth, /v1/messages)
-        const response = await axios.post(
-          `${baseUrl}/messages`,
-          {
-            model: model || 'claude-3-5-sonnet-20241022',
-            max_tokens: 4096,
-            system: finalSystemPrompt || undefined,
-            messages: messages.map((m: any) => ({
-              role: m.role === 'assistant' ? 'assistant' : 'user',
-              content: m.content
-            })),
-            stream: true
-          },
-          {
-            headers: {
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-              'Content-Type': 'application/json'
-            },
-            responseType: 'stream',
-            timeout: 60000
+        let response;
+        let lastError: any;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            response = await axios.post(
+              `${baseUrl}/messages`,
+              {
+                model: model || 'claude-3-5-sonnet-20241022',
+                max_tokens: 4096,
+                system: finalSystemPrompt || undefined,
+                messages: messages.map((m: any) => ({
+                  role: m.role === 'assistant' ? 'assistant' : 'user',
+                  content: m.content
+                })),
+                stream: true
+              },
+              {
+                headers: {
+                  'x-api-key': apiKey,
+                  'anthropic-version': '2023-06-01',
+                  'Content-Type': 'application/json'
+                },
+                responseType: 'stream',
+                timeout: 60000
+              }
+            );
+            break;
+          } catch (err: any) {
+            lastError = err;
+            if (isRetryableError(err) && attempt < MAX_RETRIES) {
+              const delay = getRetryDelayMs(err, Math.pow(2, attempt) * 1000);
+              console.warn(`[Anthropic] Retryable error (${err.code || err.response?.status}), retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+              await wait(delay);
+              continue;
+            }
+            throw err;
           }
-        );
+        }
+
+        if (!response) throw lastError || new Error('Anthropic connection failed');
 
         // Transform Anthropic stream to OpenAI-compatible SSE format
         res.setHeader('Content-Type', 'text/event-stream');
@@ -6862,27 +7246,45 @@ ${contextStr}`;
       if (provider === 'google-gemini') {
         // Google Gemini API format
         const url = `${baseUrl}/models/${model || 'gemini-2.5-flash'}:streamGenerateContent?alt=sse&key=${apiKey}`;
-        const response = await axios.post(
-          url,
-          {
-            contents: apiMessages.map((m: any) => ({
-              role: m.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: m.content }]
-            })),
-            systemInstruction: finalSystemPrompt ? {
-              parts: [{ text: finalSystemPrompt }]
-            } : undefined,
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: 8192
+        let response;
+        let lastError: any;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            response = await axios.post(
+              url,
+              {
+                contents: apiMessages.map((m: any) => ({
+                  role: m.role === 'assistant' ? 'model' : 'user',
+                  parts: [{ text: m.content }]
+                })),
+                systemInstruction: finalSystemPrompt ? {
+                  parts: [{ text: finalSystemPrompt }]
+                } : undefined,
+                generationConfig: {
+                  temperature: 0.7,
+                  maxOutputTokens: 8192
+                }
+              },
+              {
+                headers: { 'Content-Type': 'application/json' },
+                responseType: 'stream',
+                timeout: 60000
+              }
+            );
+            break;
+          } catch (err: any) {
+            lastError = err;
+            if (isRetryableError(err) && attempt < MAX_RETRIES) {
+              const delay = getRetryDelayMs(err, Math.pow(2, attempt) * 1000);
+              console.warn(`[Gemini] Retryable error (${err.code || err.response?.status}), retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+              await wait(delay);
+              continue;
             }
-          },
-          {
-            headers: { 'Content-Type': 'application/json' },
-            responseType: 'stream',
-            timeout: 60000
+            throw err;
           }
-        );
+        }
+
+        if (!response) throw lastError || new Error('Gemini connection failed');
 
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
@@ -6926,9 +7328,6 @@ ${contextStr}`;
         requestBody.tool_choice = 'auto';
       }
 
-      const MAX_RETRIES = 3;
-      const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-
       if (stream === false) {
         let response;
         let lastError: any;
@@ -6950,10 +7349,10 @@ ${contextStr}`;
           } catch (toolChoiceError: any) {
             lastError = toolChoiceError;
 
-            // Retry on rate limit (429) with exponential backoff
-            if (toolChoiceError.response?.status === 429 && attempt < MAX_RETRIES) {
+            // Retry on rate limit or network issues
+            if (isRetryableError(toolChoiceError) && attempt < MAX_RETRIES) {
               const delay = getRetryDelayMs(toolChoiceError, Math.pow(2, attempt) * 1000);
-              console.warn(`Rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+              console.warn(`Retryable error (${toolChoiceError.code || toolChoiceError.response?.status}), retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
               await wait(delay);
               continue;
             }
@@ -6984,9 +7383,9 @@ ${contextStr}`;
               break;
             } catch (retryError: any) {
               lastError = retryError;
-              if (retryError.response?.status === 429 && attempt < MAX_RETRIES) {
+              if (isRetryableError(retryError) && attempt < MAX_RETRIES) {
                 const delay = getRetryDelayMs(retryError, Math.pow(2, attempt) * 1000);
-                console.warn(`Rate limited (429) on tool_choice fallback, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+                console.warn(`Retryable error (${retryError.code || retryError.response?.status}) on tool_choice fallback, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
                 await wait(delay);
                 continue;
               }
@@ -7019,9 +7418,9 @@ ${contextStr}`;
           break;
         } catch (error: any) {
           lastError = error;
-          if (error.response?.status === 429 && attempt < MAX_RETRIES) {
+          if (isRetryableError(error) && attempt < MAX_RETRIES) {
             const delay = getRetryDelayMs(error, Math.pow(2, attempt) * 1000);
-            console.warn(`Rate limited (429) on stream, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+            console.warn(`Retryable error (${error.code || error.response?.status}) on stream, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
             await wait(delay);
             continue;
           }
@@ -8183,7 +8582,8 @@ ${contextStr}`;
   });
 
   app.post("/api/composio/execute", async (req, res) => {
-    const { toolSlug, args, connectedAccountId } = req.body || {};
+    const { toolSlug, args } = req.body || {};
+    const connectedAccountId = req.body.connectedAccountId || args?.connectedAccountId || args?.connected_account_id;
     if (!toolSlug) {
       res.status(400).json({ error: "toolSlug required" });
       return;
@@ -8223,7 +8623,29 @@ ${contextStr}`;
           })),
         };
       });
-      res.json({ enabled: Boolean(getComposio()), toolkits });
+      
+      const curatedSlugs = new Set(CURATED_TOOLKITS.map((t) => t.slug));
+      const extras = [...connectionsBySlug.entries()]
+        .filter(([slug]) => !curatedSlugs.has(slug))
+        .map(([slug, conns]) => {
+          return {
+            slug,
+            displayName: slug.charAt(0).toUpperCase() + slug.slice(1).replace(/_/g, " "),
+            authMode: "managed" as const,
+            connections: conns.map((c) => ({
+              id: c.connectionId,
+              status: c.status,
+              alias: c.alias ?? null,
+              accountLabel: c.accountLabel ?? null,
+              accountEmail: c.accountEmail ?? null,
+              accountName: c.accountName ?? null,
+              accountAvatarUrl: c.accountAvatarUrl ?? null,
+              createdAt: c.createdAt ?? null,
+            })),
+          };
+        });
+
+      res.json({ enabled: Boolean(getComposio()), toolkits: [...toolkits, ...extras] });
     } catch (err) {
       console.error("[composio] list toolkits failed", err);
       res.status(500).json({ error: String(err) });
