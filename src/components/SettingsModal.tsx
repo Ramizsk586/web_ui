@@ -5154,10 +5154,26 @@ function OldComposioPanel() {
                     </div>
                   );
                 })}
-              </divinterface AnthropicProxyPanelProps {
+              </div>
+            ) : (
+              <div className="px-4 py-8 text-center text-xs text-zinc-500">No toolkits found</div>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+interface AnthropicProxyPanelProps {
   availableModels: any[];
   aiProviderProfiles: any[];
 }
+
+const renderAppModelLogo = (fullName: string, modelId: string, fallback: React.ReactNode) => {
+  if (fallback) return fallback;
+  return <Brain size={14} className="text-[var(--theme-muted)] shrink-0" />;
+};
 
 function AnthropicProxyPanel({ availableModels, aiProviderProfiles }: AnthropicProxyPanelProps) {
   const [mappings, setMappings] = React.useState<Record<string, string>>({
@@ -5444,7 +5460,7 @@ function AnthropicProxyPanel({ availableModels, aiProviderProfiles }: AnthropicP
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-[var(--theme-primary)]">Select Model</div>
                   <div className="text-xs text-[var(--theme-secondary)] truncate">
-                    Mapping for Claude {activeSelectTier.toUpperCase()}
+                    Mapping for Claude {activeSelectTier.charAt(0).toUpperCase() + activeSelectTier.slice(1)} (Currently: {getMappedModelName(mappings[activeSelectTier])})
                   </div>
                 </div>
                 <button
@@ -5479,25 +5495,31 @@ function AnthropicProxyPanel({ availableModels, aiProviderProfiles }: AnthropicP
 
                 {/* Direct Pass-through option */}
                 <div className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
-                  <button
-                    onClick={() => {
-                      setMappings({ ...mappings, [activeSelectTier]: 'direct' });
-                      setActiveSelectTier(null);
-                      setSearchQuery('');
-                    }}
-                    className={`w-full min-h-[46px] flex items-center gap-3 px-3 py-2 text-xs font-medium transition-colors text-left ${
+                  <div
+                    className={`group w-full min-h-[46px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                       mappings[activeSelectTier] === 'direct'
                         ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold'
                         : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
                     }`}
                   >
-                    <Globe size={13} className="text-[var(--theme-muted)] shrink-0" />
-                    <span className="flex-1 min-w-0">
-                      <span className="block truncate">Direct Pass-through</span>
-                      <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">Pass requests directly to Anthropic</span>
-                    </span>
-                    {mappings[activeSelectTier] === 'direct' && <Check size={13} className="text-[var(--theme-accent)] shrink-0" />}
-                  </button>
+                    <button
+                      onClick={() => {
+                        setMappings({ ...mappings, [activeSelectTier]: 'direct' });
+                        setActiveSelectTier(null);
+                        setSearchQuery('');
+                      }}
+                      className="flex-1 min-w-0 flex items-center gap-3 text-left"
+                    >
+                      <div className="shrink-0">
+                        <Globe size={14} className="text-[var(--theme-muted)]" />
+                      </div>
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">Direct Pass-through</span>
+                        <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">Pass requests directly to Anthropic</span>
+                      </span>
+                    </button>
+                    {mappings[activeSelectTier] === 'direct' && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
+                  </div>
                 </div>
 
                 {/* Categories */}
@@ -5530,26 +5552,32 @@ function AnthropicProxyPanel({ availableModels, aiProviderProfiles }: AnthropicP
                             const value = `${model.id}::${model.providerProfileId}`;
                             const isSelected = mappings[activeSelectTier] === value;
                             return (
-                              <button
+                              <div
                                 key={`${category.id}-${model.id}`}
-                                onClick={() => {
-                                  setMappings({ ...mappings, [activeSelectTier]: value });
-                                  setActiveSelectTier(null);
-                                  setSearchQuery('');
-                                }}
-                                className={`w-full min-h-[42px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors text-left ${
+                                className={`group w-full min-h-[46px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                                   isSelected
                                     ? 'bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] font-bold'
                                     : 'text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]'
                                 }`}
                               >
-                                <Brain size={13} className="text-[var(--theme-muted)] shrink-0" />
-                                <span className="flex-1 min-w-0">
-                                  <span className="block truncate">{model.name}</span>
-                                  <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</span>
-                                </span>
-                                {isSelected && <Check size={13} className="text-[var(--theme-accent)] shrink-0" />}
-                              </button>
+                                <button
+                                  onClick={() => {
+                                    setMappings({ ...mappings, [activeSelectTier]: value });
+                                    setActiveSelectTier(null);
+                                    setSearchQuery('');
+                                  }}
+                                  className="flex-1 min-w-0 flex items-center gap-3 text-left"
+                                >
+                                  <div className="shrink-0">
+                                    {renderAppModelLogo(model.author || model.providerProfileName || model.id.split('/')[0] || '', model.id, model.icon)}
+                                  </div>
+                                  <span className="flex-1 min-w-0">
+                                    <span className="block truncate">{model.name}</span>
+                                    <span className="block text-[10px] text-[var(--theme-muted)] truncate font-normal">{model.id}</span>
+                                  </span>
+                                </button>
+                                {isSelected && <Check size={14} className="text-[var(--theme-accent)] shrink-0" />}
+                              </div>
                             );
                           })}
                         </div>
@@ -5557,18 +5585,6 @@ function AnthropicProxyPanel({ availableModels, aiProviderProfiles }: AnthropicP
                     </div>
                   );
                 })}
-              </div>
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}-500" />}
-                        </button>
-                      );
-                    })}
-                </div>
               </div>
             </motion.aside>
           </>

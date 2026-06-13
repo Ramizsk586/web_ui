@@ -25,11 +25,12 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    let q = ctx.db.query("activityEvents");
     if (args.eventType) {
-      q = q.withIndex("by_type", (q) => q.eq("eventType", args.eventType));
+      return await ctx.db.query("activityEvents")
+        .withIndex("by_type", (q) => q.eq("eventType", args.eventType!))
+        .order("desc").take(args.limit ?? 100);
     }
-    return await q.order("desc").take(args.limit ?? 100);
+    return await ctx.db.query("activityEvents").order("desc").take(args.limit ?? 100);
   },
 });
 

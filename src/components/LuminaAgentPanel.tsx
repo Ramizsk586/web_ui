@@ -207,12 +207,10 @@ interface LuminaAgentPanelProps {
   agents: Agent[];
   orchestrationState: AgentOrchestrationState;
   onOpenAgentsPage?: () => void;
-  activeModelId: string;
-  activeModelList: Array<{ id: string; name: string }>;
-  onOpenModelSelector: () => void;
   convex?: {
     isConvexConnected: boolean;
     metrics: any;
+    agents: ExecutionAgent[];
     addEvent: (eventType: string, source: string, message: string, metadata?: Record<string, string>) => Promise<void>;
     addAgent: (agent: any) => Promise<void>;
     patchAgent: (agentId: string, patch: any) => Promise<void>;
@@ -477,71 +475,17 @@ const LOG_TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string; la
   error: { icon: <XCircle size={10} />, color: 'text-rose-400', label: 'Error' },
 };
 
-// ─── Simulated Agent Tasks ──────────────────────────────────────────────────────
-const SIMULATED_TASKS = [
-  { name: 'Email Research', task: 'Search for recent emails and summarize key points', integrations: ['gmail'] },
-  { name: 'GitHub Monitor', task: 'Check GitHub notifications and summarize new PRs', integrations: ['github'] },
-  { name: 'Calendar Prep', task: 'Review upcoming meetings and prepare agendas', integrations: ['googlecalendar'] },
-  { name: 'Slack Digest', task: 'Summarize unread Slack messages from today', integrations: ['slack'] },
-  { name: 'Web Research', task: 'Research latest AI news and create a summary', integrations: ['web'] },
-  { name: 'Notion Update', task: 'Update project documentation in Notion', integrations: ['notion'] },
-  { name: 'Twitter Monitor', task: 'Check Twitter mentions and trending topics', integrations: ['twitter'] },
-  { name: 'Multi-Tool Task', task: 'Gather data from multiple sources and compile report', integrations: ['gmail', 'github', 'web'] },
-];
-
-function generateSimulatedLogs(task: string, integrations: string[]): AgentLogEntry[] {
-  const logs: AgentLogEntry[] = [];
-  const now = Date.now();
-
-  logs.push({ id: generateLogId(), logType: 'thinking', content: `Analyzing task: ${task}`, createdAt: now });
-
-  if (integrations.includes('gmail')) {
-    logs.push({ id: generateLogId(), logType: 'tool_use', toolName: 'gmail.search', content: 'Searching inbox for recent emails', createdAt: now + 1000 });
-    logs.push({ id: generateLogId(), logType: 'tool_result', toolName: 'gmail.search', content: 'Found 12 unread emails', createdAt: now + 2500 });
-  }
-  if (integrations.includes('github')) {
-    logs.push({ id: generateLogId(), logType: 'tool_use', toolName: 'github.list_prs', content: 'Fetching open pull requests', createdAt: now + 1500 });
-    logs.push({ id: generateLogId(), logType: 'tool_result', toolName: 'github.list_prs', content: 'Found 5 open PRs across 3 repos', createdAt: now + 3000 });
-  }
-  if (integrations.includes('web')) {
-    logs.push({ id: generateLogId(), logType: 'tool_use', toolName: 'web.search', content: 'Searching for recent news', createdAt: now + 2000 });
-    logs.push({ id: generateLogId(), logType: 'tool_result', toolName: 'web.search', content: 'Found 8 relevant articles', createdAt: now + 3500 });
-  }
-  if (integrations.includes('slack')) {
-    logs.push({ id: generateLogId(), logType: 'tool_use', toolName: 'slack.history', content: 'Fetching channel history', createdAt: now + 1200 });
-    logs.push({ id: generateLogId(), logType: 'tool_result', toolName: 'slack.history', content: 'Retrieved 45 messages from 3 channels', createdAt: now + 2800 });
-  }
-  if (integrations.includes('notion')) {
-    logs.push({ id: generateLogId(), logType: 'tool_use', toolName: 'notion.update_page', content: 'Updating documentation', createdAt: now + 1800 });
-    logs.push({ id: generateLogId(), logType: 'tool_result', toolName: 'notion.update_page', content: 'Page updated successfully', createdAt: now + 3200 });
-  }
-
-  logs.push({ id: generateLogId(), logType: 'thinking', content: 'Compiling results and formatting response', createdAt: now + 4000 });
-  logs.push({ id: generateLogId(), logType: 'text', content: 'Task completed successfully. Results compiled.', createdAt: now + 5000 });
-
-  return logs;
-}
-
 // ─── Agents Panel ───────────────────────────────────────────────────────────────
-function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
+function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage, convex }: {
   agents: Agent[];
   orchestrationState: AgentOrchestrationState;
   onOpenAgentsPage?: () => void;
+  convex?: LuminaAgentPanelProps['convex'];
 }) {
-  const [execAgents, setExecAgents] = useState<ExecutionAgent[]>(loadExecAgents);
+  const execAgents = convex?.agents || [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | ExecAgentStatus>('all');
   const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    saveExecAgents(execAgents);
-  }, [execAgents]);
-
-  // Re-read from localStorage periodically
-  useEffect(() => {
-    const interval = setInterval(() => setExecAgents(loadExecAgents()), 2000);
-    return () => clearInterval(interval);
-  }, []);
 
   const activeCount = useMemo(() => execAgents.filter(a => a.status === 'running' || a.status === 'spawned').length, [execAgents]);
 
@@ -555,105 +499,23 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
     return result;
   }, [execAgents, statusFilter, search]);
 
-  const selectedAgent = useMemo(() => execAgents.find(a => a.id === selectedId) || null, [execAgents, selectedId]);
+  const selectedAgent = useMemo(() => execAgents.find(a => a.agentId === selectedId) || null, [execAgents, selectedId]);
 
   const cancelAgent = useCallback((id: string) => {
-    setExecAgents(prev => prev.map(a => {
-      if (a.id !== id) return a;
-      return { ...a, status: 'cancelled' as const, completedAt: Date.now() };
-    }));
-  }, []);
+    convex?.patchAgent(id, { status: 'cancelled', completedAt: Date.now() });
+  }, [convex]);
 
   const deleteAgent = useCallback((id: string) => {
-    setExecAgents(prev => prev.filter(a => a.id !== id));
+    convex?.deleteAgent(id);
     if (selectedId === id) setSelectedId(null);
-  }, [selectedId]);
+  }, [convex, selectedId]);
 
-  const retryAgent = useCallback((agent: ExecutionAgent) => {
-    const newAgent: ExecutionAgent = {
-      ...agent,
-      id: generateAgentId(),
-      agentId: generateAgentId(),
-      status: 'spawned',
-      result: undefined,
-      error: undefined,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-      startedAt: Date.now(),
-      completedAt: undefined,
-      logs: [],
-    };
-    setExecAgents(prev => [newAgent, ...prev]);
-
-    // Simulate lifecycle
-    setTimeout(() => {
-      setExecAgents(prev => prev.map(a => a.id === newAgent.id ? { ...a, status: 'running' } : a));
-    }, 500);
-
-    const duration = 3000 + Math.random() * 5000;
-    setTimeout(() => {
-      const success = Math.random() > 0.2;
-      const logs = generateSimulatedLogs(agent.task, agent.integrations);
-      setExecAgents(prev => prev.map(a => {
-        if (a.id !== newAgent.id) return a;
-        return {
-          ...a,
-          status: success ? 'completed' : 'failed',
-          result: success ? 'Task completed successfully. All objectives met.' : undefined,
-          error: success ? undefined : 'Agent timed out while processing',
-          logs,
-          completedAt: Date.now(),
-          inputTokens: Math.floor(Math.random() * 5000) + 500,
-          outputTokens: Math.floor(Math.random() * 2000) + 200,
-          costUsd: parseFloat((Math.random() * 0.05).toFixed(4)),
-        };
-      }));
-    }, duration);
-  }, []);
-
-  // Spawn a new agent
-  const spawnAgent = useCallback((taskConfig?: typeof SIMULATED_TASKS[number]) => {
-    const config = taskConfig || SIMULATED_TASKS[Math.floor(Math.random() * SIMULATED_TASKS.length)];
-    const newAgent: ExecutionAgent = {
-      id: generateAgentId(),
-      agentId: generateAgentId(),
-      name: config.name,
-      task: config.task,
-      status: 'spawned',
-      integrations: config.integrations,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-      startedAt: Date.now(),
-      logs: [],
-    };
-    setExecAgents(prev => [newAgent, ...prev]);
-
-    // Simulate lifecycle
-    setTimeout(() => {
-      setExecAgents(prev => prev.map(a => a.id === newAgent.id ? { ...a, status: 'running' } : a));
-    }, 800);
-
-    const duration = 3000 + Math.random() * 5000;
-    setTimeout(() => {
-      const success = Math.random() > 0.15;
-      const logs = generateSimulatedLogs(config.task, config.integrations);
-      setExecAgents(prev => prev.map(a => {
-        if (a.id !== newAgent.id) return a;
-        return {
-          ...a,
-          status: success ? 'completed' : 'failed',
-          result: success ? 'Task completed successfully. All objectives met.' : undefined,
-          error: success ? undefined : 'Agent encountered an error during execution',
-          logs,
-          completedAt: Date.now(),
-          inputTokens: Math.floor(Math.random() * 5000) + 500,
-          outputTokens: Math.floor(Math.random() * 2000) + 200,
-          costUsd: parseFloat((Math.random() * 0.05).toFixed(4)),
-        };
-      }));
-    }, duration);
+  const retryAgent = useCallback(async (agent: ExecutionAgent) => {
+    try {
+      await fetch(`/api/agents/${agent.agentId}/retry`, { method: 'POST' });
+    } catch (err) {
+      console.error('Failed to retry agent', err);
+    }
   }, []);
 
   // ─── Detail View ───────────────────────────────────────────────────────────
@@ -678,7 +540,7 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
           </div>
           {isActive ? (
             <button
-              onClick={() => cancelAgent(selectedAgent.id)}
+              onClick={() => cancelAgent(selectedAgent.agentId)}
               className="px-2.5 py-1 text-[10px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-lg hover:bg-rose-500/20 transition-colors"
             >
               Cancel
@@ -692,7 +554,7 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
                 Retry
               </button>
               <button
-                onClick={() => deleteAgent(selectedAgent.id)}
+                onClick={() => deleteAgent(selectedAgent.agentId)}
                 className="px-2.5 py-1 text-[10px] font-medium bg-zinc-800/50 text-zinc-500 border border-zinc-800 rounded-lg hover:text-rose-400 transition-colors"
               >
                 <Trash2 size={10} />
@@ -753,7 +615,7 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
               {selectedAgent.logs.map((log, i) => {
                 const logCfg = LOG_TYPE_CONFIG[log.logType] || LOG_TYPE_CONFIG.text;
                 return (
-                  <div key={log.id} className="flex gap-3 relative">
+                  <div key={log.id || log.createdAt} className="flex gap-3 relative">
                     {/* Timeline line */}
                     <div className="flex flex-col items-center">
                       <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${logCfg.color}`} style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
@@ -822,13 +684,6 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
             </span>
           )}
         </div>
-        <button
-          onClick={() => spawnAgent()}
-          className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[10px] font-medium hover:bg-emerald-500/20 transition-colors flex items-center gap-1"
-        >
-          <Play size={10} />
-          Spawn Agent
-        </button>
       </div>
 
       {/* Filters */}
@@ -869,10 +724,10 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
         <div className="border border-dashed border-zinc-800 rounded-xl p-6 text-center">
           <Bot size={24} className="mx-auto text-zinc-600 mb-3" />
           <p className="text-xs text-zinc-400 mb-1">
-            {execAgents.length === 0 ? 'No agents spawned yet' : 'No matching agents'}
+            {execAgents.length === 0 ? 'No agents running yet' : 'No matching agents'}
           </p>
           <p className="text-[10px] text-zinc-600">
-            {execAgents.length === 0 ? 'Click "Spawn Agent" to create one' : 'Try a different filter'}
+            {execAgents.length === 0 ? 'Waiting for agents to be spawned...' : 'Try a different filter'}
           </p>
         </div>
       ) : (
@@ -886,8 +741,8 @@ function AgentsSubPanel({ agents, orchestrationState, onOpenAgentsPage }: {
 
             return (
               <button
-                key={agent.id}
-                onClick={() => setSelectedId(agent.id)}
+                key={agent.agentId}
+                onClick={() => setSelectedId(agent.agentId)}
                 className="w-full border border-zinc-800 bg-zinc-900/40 rounded-xl p-3.5 hover:bg-zinc-800/30 transition-colors text-left"
               >
                 {/* Header */}
@@ -4690,27 +4545,11 @@ export function LuminaAgentPanel({
   agents,
   orchestrationState,
   onOpenAgentsPage,
-  activeModelId,
-  activeModelList,
-  onOpenModelSelector,
   convex,
   isSidebarOpen,
   onToggleSidebar
 }: LuminaAgentPanelProps) {
   const [activeView, setActiveView] = useState<View>('dashboard');
-
-  const getCleanModelName = (id: string) => {
-    const matched = activeModelList.find(m => m.id === id);
-    if (matched) return matched.name;
-    let name = id;
-    if (name.includes("/")) {
-      name = name.split("/").slice(-1)[0];
-    }
-    return name
-      .replace(/[-_]/g, " ")
-      .replace(/\bgguf\b/gi, "")
-      .trim() || id;
-  };
 
   const NAV_ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
@@ -4726,7 +4565,7 @@ export function LuminaAgentPanel({
   const renderContent = () => {
     switch (activeView) {
       case 'dashboard': return <DashboardSubPanel agents={agents} orchestrationState={orchestrationState} onOpenAgentsPage={onOpenAgentsPage} />;
-      case 'agents': return <AgentsSubPanel agents={agents} orchestrationState={orchestrationState} onOpenAgentsPage={onOpenAgentsPage} />;
+      case 'agents': return <AgentsSubPanel agents={agents} orchestrationState={orchestrationState} onOpenAgentsPage={onOpenAgentsPage} convex={convex} />;
       case 'memory': return <MemorySubPanel agents={agents} />;
       case 'automations': return <AutomationsSubPanel agents={agents} />;
       case 'events': return <EventsSubPanel orchestrationState={orchestrationState} />;
@@ -4755,18 +4594,6 @@ export function LuminaAgentPanel({
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={onOpenModelSelector}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--theme-card-bg)] hover:bg-[var(--theme-hover-bg)] border border-[var(--theme-border)] rounded-full transition-all text-[11px] font-bold text-[var(--theme-primary)] shadow-sm cursor-pointer select-none max-w-[230px]"
-            title="Open shared model selector"
-          >
-            <Sparkles size={10} className="text-[var(--theme-accent)] shrink-0" />
-            <span className="truncate text-[var(--theme-primary)] font-bold max-w-[138px]">
-              {getCleanModelName(activeModelId)}
-            </span>
-            <ChevronDown size={10} className="text-[var(--theme-secondary)] shrink-0" />
-          </button>
-
           <button
             onClick={onClose}
             className="p-2 hover:bg-rose-500/10 text-[var(--theme-secondary)] hover:text-rose-400 rounded-lg transition-colors cursor-pointer"

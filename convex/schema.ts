@@ -64,7 +64,7 @@ export default defineSchema({
     accessCount: v.number(),
     lastAccessedAt: v.number(),
     lifecycle: v.union(v.literal("active"), v.literal("archived"), v.literal("pruned")),
-    supersedes: v.optional(v.string()),
+    supersedes: v.optional(v.array(v.string())),
     source: v.string(),
     agentId: v.optional(v.string()),
     createdAt: v.number(),

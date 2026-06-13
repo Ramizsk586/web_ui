@@ -51,12 +51,14 @@ const normalizeProviderProfiles = (profiles: AiProviderProfile[]): AiProviderPro
 };
 
 export interface UseAppSettingsProps {
+  selectedModel: string;
   setAvailableModels: React.Dispatch<React.SetStateAction<any[]>>;
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>;
   showToast: (msg: string) => void;
 }
 
 export function useAppSettings({
+  selectedModel,
   setAvailableModels,
   setSelectedModel,
   showToast
@@ -319,6 +321,11 @@ export function useAppSettings({
     const profileModels = profiles.flatMap(profile =>
       profile.models
         .filter(model => profile.selectedModelIds.includes(model.id))
+        .filter(model => {
+          // Keep the model if its profile is active,
+          // OR if this model is the currently selected model.
+          return profile.active || model.id === selectedModel;
+        })
         .map(model => ({
           ...model,
           id: model.id,
@@ -348,7 +355,7 @@ export function useAppSettings({
       ]);
       setSelectedModel(prev => prev || 'openprovider/auto-free');
     }
-  }, [setAvailableModels, setSelectedModel]);
+  }, [selectedModel, setAvailableModels, setSelectedModel]);
 
   const persistAiProviderProfiles = useCallback((nextProfiles: AiProviderProfile[]) => {
     setAiProviderProfiles(nextProfiles);

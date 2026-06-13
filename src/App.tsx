@@ -249,6 +249,7 @@ export default function App() {
 
   // 1. App Settings Hook
   const appSettings = useAppSettings({
+    selectedModel,
     setAvailableModels,
     setSelectedModel,
     showToast

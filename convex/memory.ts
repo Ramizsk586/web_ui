@@ -13,13 +13,14 @@ export const create = mutation({
     ),
     source: v.string(),
     agentId: v.optional(v.string()),
+    supersedes: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const decayRate = args.tier === "permanent"
       ? (args.segment === "identity" ? 0.0000228 : 0.000114)
       : args.tier === "long" ? 0.00015 : 0.0005;
     const importance = args.tier === "permanent" ? 0.99 : args.tier === "long" ? 0.85 : 0.6;
-    return await ctx.db.insert("memoryRecords", {
+    const id = await ctx.db.insert("memoryRecords", {
       memoryId: args.memoryId,
       content: args.content,
       tier: args.tier,
@@ -29,10 +30,23 @@ export const create = mutation({
       accessCount: 0,
       lastAccessedAt: Date.now(),
       lifecycle: "active",
+      supersedes: args.supersedes,
       source: args.source,
       agentId: args.agentId,
       createdAt: Date.now(),
     });
+    // Archive any memories this one supersedes
+    if (args.supersedes) {
+      for (const sid of args.supersedes) {
+        const old = await ctx.db.query("memoryRecords")
+          .withIndex("by_memory_id", (q) => q.eq("memoryId", sid))
+          .unique();
+        if (old && old.lifecycle === "active") {
+          await ctx.db.patch(old._id, { lifecycle: "archived" });
+        }
+      }
+    }
+    return id;
   },
 });
 
@@ -101,6 +115,74 @@ export const remove = mutation({
   },
 });
 
+// ── Upsert — for debate consolidation decisions ──────────────────────────────
+// Creates a new memory record and atomically archives any records it supersedes.
+// If a record with memoryId already exists it patches the content instead.
+export const upsert = mutation({
+  args: {
+    memoryId: v.string(),
+    content: v.string(),
+    tier: v.union(v.literal("short"), v.literal("long"), v.literal("permanent")),
+    segment: v.union(
+      v.literal("identity"), v.literal("preference"), v.literal("correction"),
+      v.literal("relationship"), v.literal("project"), v.literal("knowledge"),
+      v.literal("context"),
+    ),
+    source: v.string(),
+    agentId: v.optional(v.string()),
+    supersedes: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.query("memoryRecords")
+      .withIndex("by_memory_id", (q) => q.eq("memoryId", args.memoryId))
+      .unique();
+
+    if (existing) {
+      // Patch existing record
+      await ctx.db.patch(existing._id, {
+        content: args.content,
+        tier: args.tier,
+        segment: args.segment,
+        supersedes: args.supersedes ?? existing.supersedes,
+        lifecycle: "active",
+      });
+    } else {
+      // Insert fresh record
+      const decayRate = args.tier === "permanent"
+        ? (args.segment === "identity" ? 0.0000228 : 0.000114)
+        : args.tier === "long" ? 0.00015 : 0.0005;
+      const importance = args.tier === "permanent" ? 0.99 : args.tier === "long" ? 0.85 : 0.6;
+      await ctx.db.insert("memoryRecords", {
+        memoryId: args.memoryId,
+        content: args.content,
+        tier: args.tier,
+        segment: args.segment,
+        importance,
+        decayRate,
+        accessCount: 0,
+        lastAccessedAt: Date.now(),
+        lifecycle: "active",
+        supersedes: args.supersedes,
+        source: args.source,
+        agentId: args.agentId,
+        createdAt: Date.now(),
+      });
+    }
+
+    // Archive all superseded records
+    if (args.supersedes) {
+      for (const sid of args.supersedes) {
+        const old = await ctx.db.query("memoryRecords")
+          .withIndex("by_memory_id", (q) => q.eq("memoryId", sid))
+          .unique();
+        if (old && old.lifecycle === "active") {
+          await ctx.db.patch(old._id, { lifecycle: "archived" });
+        }
+      }
+    }
+  },
+});
+
 export const list = query({
   args: {
     tier: v.optional(v.union(v.literal("short"), v.literal("long"), v.literal("permanent"))),
@@ -113,11 +195,22 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    let q = ctx.db.query("memoryRecords");
-    if (args.tier) q = q.withIndex("by_tier", (q) => q.eq("tier", args.tier));
-    else if (args.segment) q = q.withIndex("by_segment", (q) => q.eq("segment", args.segment));
-    else if (args.lifecycle) q = q.withIndex("by_lifecycle", (q) => q.eq("lifecycle", args.lifecycle));
-    return await q.order("desc").take(args.limit ?? 100);
+    if (args.tier) {
+      return await ctx.db.query("memoryRecords")
+        .withIndex("by_tier", (q) => q.eq("tier", args.tier!))
+        .order("desc").take(args.limit ?? 100);
+    }
+    if (args.segment) {
+      return await ctx.db.query("memoryRecords")
+        .withIndex("by_segment", (q) => q.eq("segment", args.segment!))
+        .order("desc").take(args.limit ?? 100);
+    }
+    if (args.lifecycle) {
+      return await ctx.db.query("memoryRecords")
+        .withIndex("by_lifecycle", (q) => q.eq("lifecycle", args.lifecycle!))
+        .order("desc").take(args.limit ?? 100);
+    }
+    return await ctx.db.query("memoryRecords").order("desc").take(args.limit ?? 100);
   },
 });
 

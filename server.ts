@@ -28,6 +28,13 @@ import {
   createInitialStreamState
 } from "./server/anthropicConverter";
 
+// ─── Lumina Agent backend (imported lazily to avoid startup latency) ──────────
+import { startCleanupLoop } from "./server/clean";
+import { startConsolidationLoop, runConsolidation } from "./server/consolidation";
+import { startAutomationLoop } from "./server/automations";
+import { startTelegram } from "./server/telegram";
+import { handleUserMessage } from "./server/interaction-agent";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = process.env.NODE_ENV !== "production";
@@ -488,9 +495,9 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       }
     });
 
-    const bridgeBacked = agent.bridgeUrl || process.env.LLAMA_BRIDGE_URL || 'http://localhost:8089';
-    const bridgeKey = agent.bridgeApiKey || process.env.LLAMA_BRIDGE_API_KEY || '';
-    const model = agent.bridgeModel || agent.model || 'openprovider/auto-free';
+    const bridgeBacked = `http://127.0.0.1:${PORT}/v1`;
+    const bridgeKey = 'lumina-proxy';
+    const model = 'claude-3-5-sonnet-20241022';
     const toolSchemas = enabledTools.map(mapRuntimeToolSchema);
 
     const messages: any[] = [
@@ -856,6 +863,48 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Boop Agent Chat Endpoint ──────────────────────────────────────────────
+  app.post("/api/agent/chat", async (req, res) => {
+    const { content, conversationId, source } = req.body;
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: 'content (string) is required' });
+    }
+    try {
+      const response = await handleUserMessage({
+        content,
+        conversationId,
+        source: source ?? 'web',
+      });
+      res.json(response);
+    } catch (err: any) {
+      console.error('[/api/agent/chat]', err);
+      res.status(500).json({ error: err.message ?? 'Agent error' });
+    }
+  });
+
+  // ─── Draft Retrieval ───────────────────────────────────────────────────────
+  app.get("/api/agent/drafts/:draftId", (req, res) => {
+    import('./server/interaction-agent').then(({ getDraft }) => {
+      const content = getDraft(req.params.draftId);
+      if (!content) return res.status(404).json({ error: 'Draft not found' });
+      res.json({ draftId: req.params.draftId, content });
+    }).catch((err: any) => res.status(500).json({ error: err.message }));
+  });
+
+  // ─── Manual Consolidation Trigger ────────────────────────────────────────────
+  // Runs the full Proposer-Adversary-Judge debate cycle immediately.
+  // Useful for debugging and post-session cleanup.
+  // Usage: curl -X POST http://localhost:3000/api/consolidate
+  app.post("/api/consolidate", async (req, res) => {
+    try {
+      const result = await runConsolidation('manual');
+      res.json(result);
+    } catch (err: any) {
+      console.error('[/api/consolidate]', err);
+      res.status(500).json({ error: err.message ?? 'Consolidation failed' });
     }
   });
 
@@ -1648,43 +1697,13 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         }),
       ];
 
-      // ── Resolve provider config from request ─────────────────────────────────
-      const selectedModelId = modelId || model?.id || 'openprovider/auto-free';
-      let profileConfig = { endpoint: 'https://openprovider.mimika.in/v1', apiKey: '', modelId: selectedModelId };
-
-      if (providerProfile?.endpoint) {
-        profileConfig = { endpoint: providerProfile.endpoint, apiKey: providerProfile.apiKey || '', modelId: selectedModelId };
-      } else if (model?.baseUrl) {
-        profileConfig = { endpoint: model.baseUrl, apiKey: _apiKey || '', modelId: selectedModelId };
-      }
-
-      console.log('[Pi Agent] Model:', profileConfig.modelId, '| Endpoint:', profileConfig.endpoint);
-      console.log('[Pi Agent] Provider from frontend:', providerProfile?.provider || model?.provider || '(none)');
-
-      // ── Detect provider (endpoint-based only) ─────────────────────────────────
-      const detectProvider = (endpoint: string): string => {
-        const ep = endpoint.toLowerCase();
-        if (ep.includes('anthropic') || ep.includes('claude.ai')) return 'anthropic';
-        if (ep.includes('openai.com')) return 'openai';
-        if (ep.includes('groq')) return 'groq';
-        if (ep.includes('openrouter')) return 'openrouter';
-        if (ep.includes('together') || ep.includes('together.xyz')) return 'together';
-        if (ep.includes('mistral')) return 'mistral';
-        if (ep.includes('ollama.com') || ep.includes('/ollama/')) return 'ollama_cloud';
-        if (ep.includes('localhost:11434') || ep.includes('127.0.0.1:11434')) return 'ollama_local';
-        if (ep.includes('localhost:1234')  || ep.includes('127.0.0.1:1234'))  return 'lm_studio';
-        if (ep.includes('nvidia') || ep.includes('integrate.api.nvidia')) return 'nvidia_nim';
-        if (ep.includes('generativelanguage') || ep.includes('gemini')) return 'gemini';
-        if (ep.includes('cohere')) return 'cohere';
-        if (ep.includes('deepseek')) return 'deepseek';
-        if (ep.includes('azure') || ep.includes('azurewebsites')) return 'azure';
-        if (ep.includes('amazon') || ep.includes('bedrock')) return 'amazon-bedrock';
-        // All other endpoints are treated as OpenAI-compatible
-        return 'openai-compatible';
+      // ── Resolve provider config directly to Anthropic Proxy ─────────────────
+      const profileConfig = {
+        endpoint: `http://127.0.0.1:${PORT}/v1`,
+        apiKey: 'lumina-proxy',
+        modelId: 'claude-3-5-sonnet-20241022'
       };
-
-      const requestedProvider = providerProfile?.provider || model?.provider || '';
-      const detectedProvider  = requestedProvider || detectProvider(profileConfig.endpoint);
+      const detectedProvider: string = 'anthropic';
       console.log('[Pi Agent] Resolved provider:', detectedProvider);
 
       // ── Decide which execution path to use ────────────────────────────────────
@@ -8720,6 +8739,18 @@ ${contextStr}`;
 
   const server = app.listen(PORT, "127.0.0.1", () => {
     console.log(`\n🚀 Proxy server ready at http://127.0.0.1:${PORT}`);
+
+    // ── Start Lumina Agent background services ──────────────────────────────
+    // All loops are idempotent and gracefully no-op when env vars are missing.
+    try {
+      startCleanupLoop();       // Memory expiry / pruning
+      startConsolidationLoop(); // Short → Long term memory extraction
+      startAutomationLoop();    // Cron automation runner
+      startTelegram();          // Telegram bot polling (if TELEGRAM_BOT_TOKEN set)
+      console.log('🤖 Lumina Agent backend services started.');
+    } catch (agentErr) {
+      console.warn('⚠️  Agent backend services failed to start:', agentErr);
+    }
   }).on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ Error: Port ${PORT} is already in use.`);

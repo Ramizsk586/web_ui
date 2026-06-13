@@ -94,11 +94,12 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    let q = ctx.db.query("executionAgents");
     if (args.status) {
-      q = q.withIndex("by_status", (q) => q.eq("status", args.status));
+      return await ctx.db.query("executionAgents")
+        .withIndex("by_status", (q) => q.eq("status", args.status!))
+        .order("desc").take(args.limit ?? 50);
     }
-    return await q.order("desc").take(args.limit ?? 50);
+    return await ctx.db.query("executionAgents").order("desc").take(args.limit ?? 50);
   },
 });
 

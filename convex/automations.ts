@@ -73,9 +73,12 @@ export const remove = mutation({
 export const list = query({
   args: { enabledOnly: v.optional(v.boolean()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    let q = ctx.db.query("automations");
-    if (args.enabledOnly) q = q.withIndex("by_enabled", (q) => q.eq("enabled", true));
-    return await q.order("desc").take(args.limit ?? 50);
+    if (args.enabledOnly) {
+      return await ctx.db.query("automations")
+        .withIndex("by_enabled", (q) => q.eq("enabled", true))
+        .order("desc").take(args.limit ?? 50);
+    }
+    return await ctx.db.query("automations").order("desc").take(args.limit ?? 50);
   },
 });
 
