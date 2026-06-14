@@ -171,14 +171,14 @@ export function extractArtifacts(
   }
 
   // Heuristics fallback if no document, poem or report artifacts were detected
-  return artifacts;
   if (artifacts.filter(a => ['poem', 'report', 'markdown'].includes(a.type)).length === 0) {
     const lowerContent = cleanContent.toLowerCase();
     const stanzas = cleanContent.split('\n\n').filter(s => s.trim().length > 0);
     
     // Get last user prompt to detect intent
     const currentChat = chats.find(c => c.id === currentChatId);
-    const userMessages = currentChat ? currentChat.messages.filter(m => m.role === 'user') : [];
+    if (!currentChat) return artifacts;
+    const userMessages = currentChat.messages.filter(m => m.role === 'user');
     const lastUserMessage = userMessages[userMessages.length - 1];
     const userPromptLower = lastUserMessage ? lastUserMessage.content.toLowerCase() : '';
 

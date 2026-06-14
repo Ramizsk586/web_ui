@@ -18,7 +18,7 @@ export function useComposioTools() {
           .replace('composio_', '')
           .replace(/_/g, ' ')
           .replace(/\b\w/g, (c) => c.toUpperCase()),
-        description: td.function.description,
+        description: td.function.description || '',
         enabled: false,
         toolkit: tk.slug,
         toolkitDisplayName: tk.displayName,

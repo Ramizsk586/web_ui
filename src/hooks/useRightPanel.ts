@@ -175,7 +175,7 @@ export function useRightPanel({
             const childIndexPath: number[] = [];
             pathEl = clickedEl;
             while (pathEl && pathEl !== doc.body && selectorSegments.length < 8) {
-              const parent = pathEl.parentElement;
+              const parent = pathEl.parentElement as HTMLElement | null;
               const siblings = parent ? Array.from(parent.children) : [];
               const childIndex = siblings.indexOf(pathEl);
               childIndexPath.unshift(childIndex);

@@ -1,38 +1,3 @@
-/**
- * youtubeUtils.ts
- *
- * CORS-safe YouTube transcript fetching.
- *
- * The Problem
- * -----------
- * Fetching `https://www.youtube.com/watch?v=...` directly from the browser is
- * blocked by YouTube's CORS policy (no Access-Control-Allow-Origin header).
- *
- * The Fix
- * -------
- * We never touch youtube.com from the browser. Instead we use a small waterfall
- * of three proxy strategies, trying each in order until one succeeds:
- *
- *   1. Local Express proxy  — `/api/youtube/transcript?videoId=…`
- *      Best option: your own server relays the request server-side (no CORS).
- *      Add the route shown at the bottom of this file to your Express app.
- *
- *   2. allorigins.win       — free public CORS proxy, wraps any URL.
- *      Reliable fallback when the local proxy isn't set up yet.
- *
- *   3. corsproxy.io         — secondary public proxy, different CDN.
- *      Last resort before we give up and throw.
- *
- * Transcript format
- * -----------------
- * YouTube returns timedtext as XML:
- *   <transcript><text start="1.23" dur="2.00">Hello world</text>...</transcript>
- *
- * We parse that into TranscriptSegment[] and also produce a plain-text string.
- */
-
-/* ------------------------------------------------------------------ types -- */
-
 export interface TranscriptSegment {
   /** Start time in seconds */
   start: number;
