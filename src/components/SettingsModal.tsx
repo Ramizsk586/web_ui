@@ -44,11 +44,13 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  ExternalLink
+  ExternalLink,
+  Palette
 } from 'lucide-react';
 import { CLOUD_PROVIDERS } from '../constants';
 import { SkillsPanel } from './SkillsPanel';
 import { ComposioPanelRefactored } from './ComposioPanelRefactored';
+import { ThemeSettingsContent } from './ThemeSettingsContent';
 
 type AiProviderProfile = {
   id: string;
@@ -1985,6 +1987,7 @@ export function SettingsModal({
               { id: 'profile', label: 'My Profile', icon: <User size={16} /> },
               { id: 'ai', label: 'AI Service', icon: <Sparkles size={16} /> },
               { id: 'search', label: 'Search', icon: <Search size={16} /> },
+              { id: 'theme', label: 'Theme', icon: <Palette size={16} /> },
               { id: 'persona', label: 'Persona', icon: <User size={16} /> },
               { id: 'agents', label: 'Agents', icon: <Bot size={16} /> },
               { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
@@ -4249,6 +4252,17 @@ export function SettingsModal({
             {activeSettingsTab === 'skills' && (
               <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="h-full flex flex-col font-sans text-left relative overflow-hidden">
                 <SkillsPanel />
+              </motion.div>
+            )}
+
+            {activeSettingsTab === 'theme' && (
+              <motion.div 
+                initial={{ opacity: 0, y: 8 }} 
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, ease: 'easeOut' }}
+                className="h-full overflow-y-auto custom-scrollbar pb-8"
+              >
+                <ThemeSettingsContent compact />
               </motion.div>
             )}
 
