@@ -3,12 +3,14 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from 'url';
 import os from 'os';
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true });
 import axios from 'axios';
 import { search } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "child_process";
+import { spawn, spawnSync, execSync, type ChildProcessWithoutNullStreams } from "child_process";
 import si from 'systeminformation';
 
 import { createRequire } from "module";
@@ -38,6 +40,93 @@ import { handleUserMessage } from "./server/interaction-agent";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = process.env.NODE_ENV !== "production";
+
+// Global server-side traffic logs array for display in the frontend panel
+(global as any).serverTrafficLogs = [];
+(global as any).logServerTraffic = (log: any) => {
+  const logs = (global as any).serverTrafficLogs || [];
+  const newLog = {
+    id: log.id || `server-log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    timestamp: log.timestamp || new Date().toLocaleTimeString(),
+    method: log.method || 'POST',
+    endpoint: log.endpoint || '',
+    status: log.status || 200,
+    statusText: log.statusText || 'OK',
+    latency: log.latency || 0,
+    type: log.type || 'system',
+    request: typeof log.request === 'string' ? log.request : JSON.stringify(log.request || {}, null, 2),
+    response: typeof log.response === 'string' ? log.response : JSON.stringify(log.response || {}, null, 2),
+  };
+  logs.unshift(newLog);
+  if (logs.length > 100) {
+    logs.pop();
+  }
+  (global as any).serverTrafficLogs = logs;
+};
+
+const PROVIDER_ENV_KEYS: Record<string, string> = {
+  'openai': 'OPENAI_API_KEY',
+  'anthropic': 'ANTHROPIC_API_KEY',
+  'gemini': 'GEMINI_API_KEY',
+  'google-gemini': 'GEMINI_API_KEY',
+  'groq': 'GROQ_API_KEY',
+  'deepseek': 'DEEPSEEK_API_KEY',
+  'openrouter': 'OPENROUTER_API_KEY',
+  'together': 'TOGETHER_API_KEY',
+  'mistral': 'MISTRAL_API_KEY',
+  'nvidia_nim': 'NVIDIA_API_KEY',
+  'nvidia': 'NVIDIA_API_KEY',
+  'cohere': 'COHERE_API_KEY',
+  'sarvamai': 'SARVAM_API_KEY',
+  'sarvam': 'SARVAM_API_KEY',
+  'kilo': 'KILO_API_KEY',
+  'opencode': 'OPENCODE_API_KEY',
+  'kimchi': 'KIMCHI_API_KEY',
+  'cline': 'CLINE_API_KEY',
+  'openprovider': 'AI_API_KEY',
+  'custom': 'AI_API_KEY',
+  'openai-compatible': 'AI_API_KEY',
+};
+
+function resolveApiKeyFromEnv(provider: string, fallback: string = ''): string {
+  const envKey = PROVIDER_ENV_KEYS[provider];
+  if (envKey && process.env[envKey]) {
+    return process.env[envKey]!;
+  }
+  return fallback;
+}
+
+function updateEnvFile(key: string, value: string) {
+  const envPath = path.resolve(process.cwd(), '.env.local');
+  let content = '';
+  try {
+    content = fs.readFileSync(envPath, 'utf8');
+  } catch {
+    // file doesn't exist yet
+  }
+  const lines = content.split('\n');
+  let found = false;
+  const newLines = lines.map((line: string) => {
+    if (line.startsWith(`${key}=`)) {
+      found = true;
+      return `${key}=${value}`;
+    }
+    return line;
+  });
+  if (!found) {
+    newLines.push(`${key}=${value}`);
+  }
+  fs.writeFileSync(envPath, newLines.join('\n') + '\n', 'utf8');
+  // Reload env vars into current process
+  dotenv.config({ path: envPath, override: true });
+}
+
+function resolveKimchiApiKey(apiKey: string): string {
+  if (apiKey && apiKey.trim() !== '') {
+    return apiKey.trim();
+  }
+  return process.env.KIMCHI_API_KEY || '';
+}
 
 async function startServer() {
   const app = express();
@@ -626,16 +715,97 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
   // ─── Custom LLM Bridge API ─────────────────────────────────────────────────
   // This endpoint allows any internal service (like Pi agent) to use the app's configured providers
-  // The app stores provider profiles in localStorage, we read them here
+  // The app stores provider profiles in .lumina/provider_profiles.json
   const getLlmConfig = () => {
     try {
-      const profilesJson = localStorage.getItem('lumina_ai_provider_profiles');
-      if (profilesJson) {
-        return JSON.parse(profilesJson);
+      const profilesPath = path.join(process.cwd(), '.lumina', 'provider_profiles.json');
+      if (fs.existsSync(profilesPath)) {
+        return JSON.parse(fs.readFileSync(profilesPath, 'utf8'));
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Failed to read provider profiles config file:", e);
+    }
     return null;
   };
+
+  // Sync endpoint to save provider profiles from frontend to filesystem
+  app.post("/api/llm/profiles", (req, res) => {
+    try {
+      const profilesPath = path.join(process.cwd(), '.lumina', 'provider_profiles.json');
+      const configDir = path.dirname(profilesPath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+      fs.writeFileSync(profilesPath, JSON.stringify(req.body, null, 2), 'utf8');
+
+      // Update .env.local with LLM provider API keys
+      if (Array.isArray(req.body)) {
+        try {
+          const envPath = path.resolve(process.cwd(), '.env.local');
+          let envContent = '';
+          if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+          }
+
+          const lines = envContent.split(/\r?\n/);
+          const providerToEnvMap: Record<string, string> = {
+            'openai': 'OPENAI_API_KEY',
+            'google-gemini': 'GEMINI_API_KEY',
+            'google': 'GEMINI_API_KEY',
+            'gemini': 'GEMINI_API_KEY',
+            'anthropic': 'ANTHROPIC_API_KEY',
+            'deepseek': 'DEEPSEEK_API_KEY',
+            'groq': 'GROQ_API_KEY',
+            'mistral': 'MISTRAL_API_KEY',
+            'cohere': 'COHERE_API_KEY',
+            'nvidia': 'NVIDIA_API_KEY',
+            'together': 'TOGETHER_API_KEY',
+            'sarvam': 'SARVAM_API_KEY',
+            'kilo': 'KILO_API_KEY',
+            'opencode': 'OPENCODE_API_KEY',
+            'kimchi': 'KIMCHI_API_KEY',
+          };
+
+          const keysToUpdate: Record<string, string> = {};
+          for (const profile of req.body) {
+            if (!profile || !profile.provider) continue;
+            const envVarName = providerToEnvMap[profile.provider.toLowerCase()];
+            if (envVarName && profile.apiKey) {
+              keysToUpdate[envVarName] = profile.apiKey;
+            }
+          }
+
+          for (const [envVarName, apiKey] of Object.entries(keysToUpdate)) {
+            let found = false;
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].startsWith(`${envVarName}=`)) {
+                lines[i] = `${envVarName}=${apiKey}`;
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              lines.push(`${envVarName}=${apiKey}`);
+            }
+            process.env[envVarName] = apiKey;
+          }
+
+          fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
+        } catch (envErr) {
+          console.error('[profiles sync] Error updating .env.local:', envErr);
+        }
+      }
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Traffic logs polling endpoint
+  app.get("/api/traffic-logs", (req, res) => {
+    res.json((global as any).serverTrafficLogs || []);
+  });
 
   // Get list of available models from app profiles
   app.get("/api/llm/models", async (req, res) => {
@@ -703,12 +873,18 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         apiKey = process.env.AI_API_KEY || '';
       }
 
+      if (endpoint.includes('kimchi.dev')) {
+        apiKey = resolveKimchiApiKey(apiKey);
+      }
+
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) {
         // Check if it's Anthropic
         if (endpoint.includes('anthropic')) {
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
+        } else if (endpoint.includes('opencode.ai')) {
+          headers['x-api-key'] = apiKey;
         } else {
           headers['Authorization'] = `Bearer ${apiKey}`;
         }
@@ -909,6 +1085,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
   });
 
   app.post("/v1/messages", async (req, res) => {
+    const startTime = performance.now();
     const { model, stream } = req.body;
     const isStream = stream === true;
 
@@ -930,9 +1107,21 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     let apiKey = "";
 
     if (mapping) {
-      if (mapping.provider === "anthropic" || mapping.endpoint?.includes("anthropic.com")) {
+      if (
+        mapping.provider === "anthropic" ||
+        mapping.endpoint?.includes("anthropic.com") ||
+        mapping.provider === "opencode" ||
+        mapping.endpoint?.includes("opencode.ai")
+      ) {
         useDirectForward = true;
-        targetUrl = `${mapping.endpoint.replace(/\/+$/, "")}/v1/messages`;
+        const cleanEndpoint = mapping.endpoint.replace(/\/+$/, "");
+        if (cleanEndpoint.endsWith("/v1")) {
+          targetUrl = `${cleanEndpoint}/messages`;
+        } else if (cleanEndpoint.endsWith("/v1/messages") || cleanEndpoint.endsWith("/messages")) {
+          targetUrl = cleanEndpoint;
+        } else {
+          targetUrl = `${cleanEndpoint}/v1/messages`;
+        }
         apiKey = mapping.apiKey;
       }
     } else {
@@ -946,7 +1135,11 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       
       const anthKey = apiKey || req.headers['x-api-key'] || req.headers['authorization'];
       if (anthKey) {
-        headers['x-api-key'] = String(anthKey).replace(/^Bearer\s+/i, '');
+        let keyStr = String(anthKey).replace(/^Bearer\s+/i, '');
+        if (targetUrl.includes('kimchi.dev') || (mapping && (mapping.provider === 'kimchi' || mapping.endpoint?.includes('kimchi.dev')))) {
+          keyStr = resolveKimchiApiKey(keyStr);
+        }
+        headers['x-api-key'] = keyStr;
       }
       if (req.headers['anthropic-version']) {
         headers['anthropic-version'] = String(req.headers['anthropic-version']);
@@ -964,20 +1157,75 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
         if (isStream) {
           const response = await axios.post(targetUrl, req.body, { headers, timeout: 120000, responseType: 'stream' });
+          
           response.data.on('data', (chunk: Buffer) => res.write(chunk));
-          response.data.on('end', () => res.end());
+          response.data.on('end', () => {
+            const latency = Math.round(performance.now() - startTime);
+            if ((global as any).logServerTraffic) {
+              (global as any).logServerTraffic({
+                method: 'POST',
+                endpoint: '/v1/messages',
+                status: 200,
+                statusText: 'OK',
+                latency,
+                type: 'ai',
+                request: req.body,
+                response: '[Streaming Response]'
+              });
+            }
+            res.end();
+          });
           response.data.on('error', (err: Error) => {
             console.error('[Anthropic Proxy Direct] Stream error:', err.message);
+            const latency = Math.round(performance.now() - startTime);
+            if ((global as any).logServerTraffic) {
+              (global as any).logServerTraffic({
+                method: 'POST',
+                endpoint: '/v1/messages',
+                status: 500,
+                statusText: 'Stream Error',
+                latency,
+                type: 'ai',
+                request: req.body,
+                response: { error: err.message }
+              });
+            }
             res.end();
           });
         } else {
           const response = await axios.post(targetUrl, req.body, { headers, timeout: 120000 });
+          const latency = Math.round(performance.now() - startTime);
+          if ((global as any).logServerTraffic) {
+            (global as any).logServerTraffic({
+              method: 'POST',
+              endpoint: '/v1/messages',
+              status: response.status,
+              statusText: response.statusText,
+              latency,
+              type: 'ai',
+              request: req.body,
+              response: response.data
+            });
+          }
           res.json(response.data);
         }
       } catch (err: any) {
         console.error('[Anthropic Proxy Direct] Error forwarding request:', err?.response?.data || err.message);
         const status = err?.response?.status || 500;
         const data = err?.response?.data || { error: { message: err.message } };
+        const latency = Math.round(performance.now() - startTime);
+        if ((global as any).logServerTraffic) {
+          (global as any).logServerTraffic({
+            method: 'POST',
+            endpoint: '/v1/messages',
+            status,
+            statusText: err?.response?.statusText || 'Error',
+            latency,
+            type: 'ai',
+            request: req.body,
+            response: data
+          });
+        }
         res.status(status).json(data);
       }
       return;
@@ -988,8 +1236,16 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
     const targetEndpoint = mapping.endpoint.replace(/\/+$/, "");
     const fullUrl = `${targetEndpoint}/chat/completions`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (mapping.apiKey) {
-      headers['Authorization'] = `Bearer ${mapping.apiKey}`;
+    let mappingApiKey = mapping.apiKey;
+    if (targetEndpoint.includes('kimchi.dev') || mapping.provider === 'kimchi') {
+      mappingApiKey = resolveKimchiApiKey(mappingApiKey);
+    }
+    if (mappingApiKey) {
+      if (mapping.provider === 'opencode' || targetEndpoint.includes('opencode.ai')) {
+        headers['x-api-key'] = mappingApiKey;
+      } else {
+        headers['Authorization'] = `Bearer ${mappingApiKey}`;
+      }
     }
 
     try {
@@ -1031,6 +1287,19 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         });
 
         response.data.on('end', () => {
+          const latency = Math.round(performance.now() - startTime);
+          if ((global as any).logServerTraffic) {
+            (global as any).logServerTraffic({
+              method: 'POST',
+              endpoint: '/v1/messages',
+              status: 200,
+              statusText: 'OK',
+              latency,
+              type: 'ai',
+              request: req.body,
+              response: '[Streaming Response]'
+            });
+          }
           if (!streamState.messageStopped) {
             if (streamState.messageStarted && streamState.activeContentIndex >= 0) {
               res.write(`event: content_block_stop\n`);
@@ -1045,18 +1314,57 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
         response.data.on('error', (err: Error) => {
           console.error('[Anthropic Proxy OpenAI Stream] Stream error:', err.message);
+          const latency = Math.round(performance.now() - startTime);
+          if ((global as any).logServerTraffic) {
+            (global as any).logServerTraffic({
+              method: 'POST',
+              endpoint: '/v1/messages',
+              status: 500,
+              statusText: 'Stream Error',
+              latency,
+              type: 'ai',
+              request: req.body,
+              response: { error: err.message }
+            });
+          }
           res.end();
         });
 
       } else {
         const response = await axios.post(fullUrl, openaiPayload, { headers, timeout: 120000 });
         const anthResponse = openAIToAnthropicResponse(response.data, requestedModel);
+        const latency = Math.round(performance.now() - startTime);
+        if ((global as any).logServerTraffic) {
+          (global as any).logServerTraffic({
+            method: 'POST',
+            endpoint: '/v1/messages',
+            status: response.status,
+            statusText: response.statusText,
+            latency,
+            type: 'ai',
+            request: req.body,
+            response: anthResponse
+          });
+        }
         res.json(anthResponse);
       }
     } catch (err: any) {
       console.error('[Anthropic Proxy OpenAI] Error calling endpoint:', err?.response?.data || err.message);
       const status = err?.response?.status || 500;
       const data = err?.response?.data || { error: { message: err.message } };
+      const latency = Math.round(performance.now() - startTime);
+      if ((global as any).logServerTraffic) {
+        (global as any).logServerTraffic({
+          method: 'POST',
+          endpoint: '/v1/messages',
+          status,
+          statusText: err?.response?.statusText || 'Error',
+          latency,
+          type: 'ai',
+          request: req.body,
+          response: data
+        });
+      }
       res.status(status).json(data);
     }
   });
@@ -1097,11 +1405,17 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         apiKey = process.env.AI_API_KEY || '';
       }
 
+      if (endpoint.includes('kimchi.dev')) {
+        apiKey = resolveKimchiApiKey(apiKey);
+      }
+
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) {
         if (endpoint.includes('anthropic')) {
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
+        } else if (endpoint.includes('opencode.ai')) {
+          headers['x-api-key'] = apiKey;
         } else {
           headers['Authorization'] = `Bearer ${apiKey}`;
         }
@@ -4243,14 +4557,26 @@ ${task}`;
 
   // Universal model listing proxy: fetch models from any OpenAI-compatible endpoint server-side to avoid CORS
   app.post("/api/provider/models", async (req, res) => {
-    const { endpoint, apiKey } = req.body;
+    let { endpoint, apiKey, provider: providerType } = req.body;
     if (!endpoint) {
       return res.status(400).json({ error: "endpoint is required" });
+    }
+    if (!apiKey && providerType) {
+      apiKey = resolveApiKeyFromEnv(providerType);
+    }
+    if (endpoint.includes('kimchi.dev')) {
+      apiKey = resolveKimchiApiKey(apiKey);
     }
     try {
       const url = endpoint.replace(/\/+$/, '');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      if (apiKey) {
+        if (url.includes('opencode.ai')) {
+          headers['x-api-key'] = apiKey;
+        } else {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+      }
 
       // Most OpenAI-compatible endpoints expose /models or /v1/models
       let models: any[] = [];
@@ -4312,13 +4638,21 @@ ${task}`;
 
   // Universal verification proxy: checks if an endpoint responds with valid auth
   app.post("/api/provider/verify", async (req, res) => {
-    const { endpoint, apiKey, provider: providerType } = req.body;
+    let { endpoint, apiKey, provider: providerType } = req.body;
     if (!endpoint) {
       return res.status(400).json({ error: "endpoint is required" });
     }
     try {
       const url = endpoint.replace(/\/+$/, '');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+      if (!apiKey && providerType) {
+        apiKey = resolveApiKeyFromEnv(providerType);
+      }
+
+      if (providerType === 'kimchi' || url.includes('kimchi.dev')) {
+        apiKey = resolveKimchiApiKey(apiKey);
+      }
 
       const isOpenCode = providerType === 'opencode' || url.includes('opencode.ai');
       if (apiKey) {
@@ -4370,10 +4704,28 @@ ${task}`;
     }
   });
 
+  // Persist API keys to .env.local so they live server-side only
+  app.post("/api/settings/env", async (req, res) => {
+    let { key, value, provider } = req.body;
+    if (!key && provider) {
+      key = PROVIDER_ENV_KEYS[provider];
+    }
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({ error: "key is required" });
+    }
+    try {
+      updateEnvFile(key, String(value ?? ''));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to write .env.local' });
+    }
+  });
+
   // Search API key verification proxy
   app.post("/api/provider/verify-search", async (req, res) => {
     const { provider: searchProvider, apiKey } = req.body;
     if (!apiKey) {
+      return res.status(400).json({ error: "API key is required" });
       return res.status(400).json({ error: "API key is required" });
     }
     try {
@@ -4813,6 +5165,14 @@ ${task}`;
       const oldContent = existed ? fs.readFileSync(resolvedPath, 'utf8') : '';
       fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
       fs.writeFileSync(resolvedPath, content, 'utf8');
+      if (resolvedPath.endsWith('.env.local')) {
+        try {
+          dotenv.config({ path: resolvedPath, override: true });
+          startTelegram();
+        } catch (envErr) {
+          console.error('[EnvReload] Failed to reload .env.local dynamically:', envErr);
+        }
+      }
       recordWorkspaceChange(resolvedPath, workspaceRoot, oldContent, String(content), existed ? 'modified' : 'added');
       
       const changed = countChangedLines(oldContent, String(content));
@@ -7030,6 +7390,9 @@ ${contextStr}`;
       apiKey = config.apiKey || '';
     }
 
+    // Always resolve API key from env vars for known providers (keys are stored server-side in .env.local)
+    apiKey = resolveApiKeyFromEnv(provider, apiKey);
+
     // Resolve endpoint based on the selected model/provider from agentApiKeys
     // If no config provided, try to infer from the model name
     console.log('[Chat API] Received - provider:', provider, 'baseUrl:', baseUrl, 'model:', model);
@@ -7155,6 +7518,10 @@ ${contextStr}`;
         baseUrl = process.env.AI_BASE_URL || 'http://localhost:11434/v1';
         apiKey = process.env.AI_API_KEY || '';
       }
+    }
+
+    if (baseUrl.includes('kimchi.dev') || provider === 'kimchi') {
+      apiKey = resolveKimchiApiKey(apiKey);
     }
 
     // Build the API messages array with system prompt
@@ -8570,22 +8937,111 @@ ${contextStr}`;
     res.json({ ok: true });
   });
 
+  // ── Convex interactive setup ──────────────────────────────────────────────
+  // POST /api/convex/open-setup — opens a new terminal window in the project
+  // root. The user runs `npx convex dev --once` (or any convex command) and
+  // interacts with the prompts (local vs cloud, login, project selection, etc.)
+  app.post("/api/convex/open-setup", async (_req, res) => {
+    try {
+      const projectRoot = process.cwd();
+      const { spawn } = await import('child_process');
+      const isWin = process.platform === 'win32';
+      if (isWin) {
+        // Open a new cmd.exe window in the project root with a helpful title
+        const title = "Lumina Convex Setup";
+        const bannerLines = [
+          'echo.',
+          'echo ========================================',
+          'echo   Lumina Convex Setup',
+          'echo ========================================',
+          'echo.',
+          'echo Run one of the following commands:',
+          'echo.',
+          'echo   npx convex dev --once    (recommended for existing project)',
+          'echo   npm create convex@latest  (to scaffold a new Convex project)',
+          'echo.',
+          'echo After setup completes, return to the Lumina app.',
+          'echo The .env.local values will be detected automatically.',
+          'echo.',
+          'echo ========================================'
+        ];
+        const innerCmd = `cd /d "${projectRoot}" && ${bannerLines.join(' && ')}`;
+        const cmdStr = `/c "start "${title}" cmd.exe /k "${innerCmd}""`;
+        spawn('cmd.exe', [cmdStr], {
+          detached: true,
+          stdio: 'ignore',
+          windowsVerbatimArguments: true
+        }).unref();
+      } else {
+        const shell = process.env.SHELL || '/bin/bash';
+        const banner = `echo '' && echo '=======================================' && echo '  Lumina Convex Setup' && echo '=======================================' && echo '' && echo 'Run: npx convex dev --once' && echo '' && echo 'After setup, return to the Lumina app.' && echo '=======================================' && echo ''`;
+        try {
+          spawn('open', ['-a', 'Terminal', '--args', shell, '-c', `cd "${projectRoot}" && ${banner}; exec ${shell}`], {
+            detached: true, stdio: 'ignore'
+          }).unref();
+        } catch {
+          spawn('xterm', ['-e', `cd "${projectRoot}" && ${banner}; exec ${shell}`], {
+            detached: true, stdio: 'ignore'
+          }).unref();
+        }
+      }
+      res.json({ ok: true, cwd: projectRoot });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: String(err) });
+    }
+  });
+
+  // GET /api/convex/read-env — reads CONVEX_DEPLOYMENT and VITE_CONVEX_URL (or CONVEX_URL)
+  // from .env.local after the user has completed the Convex setup wizard.
+  app.get("/api/convex/read-env", async (_req, res) => {
+    try {
+      const envPath = path.join(process.cwd(), '.env.local');
+      const { readFileSync } = await import('fs');
+      let deployment = '';
+      let url = '';
+      try {
+        const content = readFileSync(envPath, 'utf8');
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('CONVEX_DEPLOYMENT=')) {
+            const rawVal = trimmed.slice('CONVEX_DEPLOYMENT='.length).trim();
+            deployment = rawVal.split('#')[0].trim();
+          }
+          if (trimmed.startsWith('VITE_CONVEX_URL=')) {
+            const rawVal = trimmed.slice('VITE_CONVEX_URL='.length).trim();
+            url = rawVal.split('#')[0].trim();
+          }
+          if (!url && trimmed.startsWith('CONVEX_URL=')) {
+            const rawVal = trimmed.slice('CONVEX_URL='.length).trim();
+            url = rawVal.split('#')[0].trim();
+          }
+        }
+      } catch {}
+      res.json({ deployment, url });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
   app.post("/api/composio/verify", async (req, res) => {
-    const apiKey = req.body?.apiKey as string | undefined;
+    let apiKey = req.body?.apiKey as string | undefined;
     if (!apiKey) {
       res.status(400).json({ valid: false, error: "apiKey required" });
       return;
     }
+    apiKey = apiKey.trim().replace(/^COMPOSIO_API_KEY=/i, '').trim();
     try {
       resetComposio();
-      setApiKey(apiKey);
       const result = await verifyApiKey(apiKey);
       if (result.valid) {
+        setApiKey(apiKey);
         res.json({ enabled: true });
       } else {
+        console.error("[ComposioVerify] API key verification failed:", result.error);
         res.json({ enabled: false, error: result.error });
       }
     } catch (err) {
+      console.error("[ComposioVerify] Unexpected verification error:", err);
       res.json({ enabled: false, error: String(err) });
     }
   });
@@ -8731,7 +9187,15 @@ ${contextStr}`;
     }
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      maxAge: '1y',
+      immutable: true,
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html') || !filePath.includes('assets')) {
+          res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+        }
+      }
+    }));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

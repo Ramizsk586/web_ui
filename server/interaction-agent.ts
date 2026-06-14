@@ -279,7 +279,17 @@ export async function handleUserMessage(msg: UserMessage): Promise<AgentResponse
       });
     } catch (err: any) {
       console.error('[Boop] LLM error:', err);
-      return { reply: `I encountered an error: ${err.message}` };
+      let replyMessage = `I encountered an error: ${err.message}`;
+      const errMsg = String(err.message || '').toLowerCase();
+      const errStatus = err.status || (err.response && err.response.status);
+      
+      if (errStatus === 404 || errMsg.includes('404') || errMsg.includes('not found')) {
+        replyMessage = `⚠️ **LLM Routing Error (404 Not Found)**\n\nThe LLM proxy could not route this request because the mapped model endpoint is invalid or returned a 404.\n\n**How to fix:**\n1. Open the **Lumina Agent Panel** in your browser.\n2. Go to **Settings** -> **Anthropic Proxy**.\n3. Verify that the mapping for **sonnet** is configured correctly and points to a working LLM provider endpoint. If you recently configured Gemini or another provider, make sure to save the mapping in the Anthropic Proxy tab.`;
+      } else if (errMsg.includes('econnrefused') || errMsg.includes('connection refused') || errMsg.includes('fetch failed')) {
+        replyMessage = `⚠️ **LLM Connection Refused**\n\nThe LLM proxy failed to connect to the configured endpoint.\n\n**How to fix:**\n1. Ensure your local LLM service (e.g. Ollama or LM Studio) is running.\n2. Go to **Settings** -> **Anthropic Proxy** and check if the endpoint host/port is correct.`;
+      }
+      
+      return { reply: replyMessage };
     }
 
     // If the model is done — extract text reply

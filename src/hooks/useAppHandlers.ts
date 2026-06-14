@@ -5650,11 +5650,14 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
       console.error('Lumina API Error:', error);
       const msg = error?.message || '';
       const isRateLimit = /429|rate.li[mit]|too many requests|quota/i.test(msg);
+      const isPaymentRequired = /402|payment required|exhausted its credits/i.test(msg);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: isRateLimit
           ? `Rate limit exceeded. The upstream provider is rate-limiting this model.\n\n**Suggestions:**\n- Wait a moment and try again\n- Add your own API key in **Settings → AI Provider**\n- Switch to a different model`
+          : isPaymentRequired
+          ? `Payment required. The provider for this model has exhausted its credits or your API key is invalid.\n\n**Suggestions:**\n- Add your own API key in **Settings → AI Provider**\n- Switch to a different model`
           : `Error: ${msg || 'Chat completion failed'}. Please check your API key, model, and server configuration in Settings.`,
         timestamp: new Date(),
       };

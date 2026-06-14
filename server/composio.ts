@@ -42,9 +42,27 @@ export function setApiKey(key: string): void {
   singleton = null;
 }
 
+export function cleanApiKey(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^COMPOSIO_API_KEY=/i, '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim();
+}
+
+export function getSafeKeyLog(key: string): string {
+  if (!key) return "empty";
+  const trimmed = key.trim();
+  if (trimmed.length <= 8) return `too-short (length: ${trimmed.length})`;
+  return `${trimmed.substring(0, 4)}...${trimmed.substring(trimmed.length - 4)} (length: ${trimmed.length})`;
+}
+
 export function getComposio(): Composio<ClaudeAgentSDKProvider> | null {
   if (singleton) return singleton;
-  const apiKey = overrideApiKey || process.env.COMPOSIO_API_KEY;
+  const raw = overrideApiKey || process.env.COMPOSIO_API_KEY;
+  if (!raw) return null;
+  const apiKey = cleanApiKey(raw);
   if (!apiKey) return null;
   singleton = new Composio<ClaudeAgentSDKProvider>({
     apiKey,
@@ -136,16 +154,23 @@ export async function renameConnection(connectionId: string, alias: string): Pro
 }
 
 export async function verifyApiKey(apiKey: string): Promise<{ valid: boolean; error?: string }> {
+  const cleanedKey = cleanApiKey(apiKey);
+  const safeLog = getSafeKeyLog(cleanedKey);
+  console.log(`[composio] verifyApiKey initiating connection test with API key: ${safeLog}`);
+
   try {
     const testComposio = new Composio<ClaudeAgentSDKProvider>({
-      apiKey,
+      apiKey: cleanedKey,
       provider: new ClaudeAgentSDKProvider(),
     });
     await testComposio.connectedAccounts.list({ userIds: [luminaUserId()] });
+    console.log(`[composio] verifyApiKey successfully validated key: ${safeLog}`);
     return { valid: true };
   } catch (err: any) {
+    const status = err?.status ?? err?.statusCode ?? (err?.message?.includes("401") ? 401 : undefined);
+    console.error(`[composio] verifyApiKey failed for key ${safeLog} with status ${status}:`, err?.message || err);
     const msg = err?.message ?? String(err);
-    if (msg.includes("401") || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("invalid api key")) {
+    if (status === 401 || msg.includes("401") || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("invalid api key")) {
       return { valid: false, error: "Invalid API key" };
     }
     return { valid: false, error: msg };

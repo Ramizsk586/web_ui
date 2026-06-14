@@ -240,60 +240,13 @@ export function ComposioPanelRefactored() {
             <strong>READY TO CONNECT</strong> Composio-managed OAuth — click Connect
           </p>
         </div>
-        <button
-          onClick={() => setShowKeyForm(!showKeyForm)}
-          className="self-start md:self-center px-3 py-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer bg-white dark:bg-zinc-900/40"
-        >
-          <svg className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <span>{showKeyForm ? 'Hide API Key' : 'Configure API Key'}</span>
-        </button>
       </div>
 
-      {(!isEnabled || showKeyForm) && (
-        <div className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 rounded-xl p-5 space-y-4">
-          <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
-            <Server size={16} className="text-blue-500" />
-            <span className="text-xs font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 font-sans">Composio API Key Configuration</span>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider font-sans">COMPOSIO_API_KEY</label>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => saveKey(e.target.value)}
-                placeholder="Get a key at app.composio.dev/developers"
-                className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 focus:border-blue-500 dark:focus:border-zinc-600 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-600 font-mono"
-              />
-              <button
-                onClick={verifyKey}
-                disabled={isVerifying || !apiKey}
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-              >
-                {isVerifying ? 'Verifying...' : 'Verify'}
-              </button>
-            </div>
-            <span className="text-[10px] text-zinc-500 font-sans">
-              Get your API key at{' '}
-              <a href="https://app.composio.dev/developers" target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 dark:text-sky-400 dark:hover:text-sky-300 underline transition-colors">
-                app.composio.dev/developers
-              </a>
-            </span>
-            {verifyError && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
-                <span className="text-xs text-rose-500 dark:text-rose-400 font-sans">{verifyError}</span>
-              </div>
-            )}
-            {isEnabled && !verifyError && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-sans">API key verified successfully</span>
-              </div>
-            )}
-          </div>
+      {!isEnabled && (
+        <div className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 rounded-xl p-5 text-center">
+          <p className="text-sm text-zinc-500">
+            Composio API key is not configured. Please use the workspace setup panel to configure it.
+          </p>
         </div>
       )}
 

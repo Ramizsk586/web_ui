@@ -13,27 +13,38 @@
 import { handleUserMessage } from './interaction-agent.js';
 import { deliverToTelegram, sendTypingAction } from './telegram-delivery.js';
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
-const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+function getBotToken(): string {
+  return process.env.TELEGRAM_BOT_TOKEN ?? '';
+}
+
+function getTelegramApi(): string {
+  return `https://api.telegram.org/bot${getBotToken()}`;
+}
 
 /** Optional allowlist of chat IDs (numbers). Empty = allow all. */
-const ALLOWLIST: Set<number> = new Set(
-  (process.env.TELEGRAM_ALLOWLIST ?? '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(Number)
-);
+function getAllowlist(): Set<number> {
+  return new Set(
+    (process.env.TELEGRAM_ALLOWLIST ?? '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(Number)
+  );
+}
 
 let _polling = false;
 let _offset = 0;
+let _currentBotToken = '';
 
 function isAllowed(chatId: number): boolean {
-  return ALLOWLIST.size === 0 || ALLOWLIST.has(chatId);
+  const allowlist = getAllowlist();
+  return allowlist.size === 0 || allowlist.has(chatId);
 }
 
 async function fetchUpdates(offset: number): Promise<any[]> {
-  const res = await fetch(`${TELEGRAM_API}/getUpdates?offset=${offset}&timeout=25`, {
+  const api = getTelegramApi();
+  if (!api || !getBotToken()) return [];
+  const res = await fetch(`${api}/getUpdates?offset=${offset}&timeout=25`, {
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) return [];
@@ -55,6 +66,19 @@ async function processUpdate(update: any): Promise<void> {
   }
 
   console.log(`[Telegram] Message from @${username} (${chatId}): ${text.slice(0, 80)}`);
+
+  if ((global as any).logServerTraffic) {
+    (global as any).logServerTraffic({
+      method: 'POST',
+      endpoint: `telegram/update/${username}`,
+      status: 200,
+      statusText: 'OK',
+      latency: 0,
+      type: 'telegram',
+      request: update,
+      response: `Received message: ${text}`
+    });
+  }
 
   // Handle /start command
   if (text === '/start') {
@@ -90,17 +114,32 @@ async function processUpdate(update: any): Promise<void> {
  * Safe to call multiple times — only starts one loop.
  */
 export function startTelegram(): void {
-  if (!BOT_TOKEN) {
+  const token = getBotToken();
+  if (!token) {
     console.warn('[Telegram] TELEGRAM_BOT_TOKEN not set — Telegram bot disabled.');
+    if (_polling) {
+      console.log('[Telegram] Stopping polling loop because token was cleared…');
+      _polling = false;
+    }
     return;
   }
-  if (_polling) return;
+  
+  if (_polling && _currentBotToken === token) {
+    return; // Already polling with this token
+  }
+  
+  if (_polling) {
+    console.log('[Telegram] Token changed, stopping old loop first…');
+    _polling = false;
+  }
+  
   _polling = true;
-
+  _currentBotToken = token;
   console.log('[Telegram] Starting polling loop…');
 
   (async () => {
-    while (_polling) {
+    const loopToken = token;
+    while (_polling && _currentBotToken === loopToken) {
       try {
         const updates = await fetchUpdates(_offset);
         for (const update of updates) {

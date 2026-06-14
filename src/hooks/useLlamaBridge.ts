@@ -713,7 +713,6 @@ export function useLlamaBridge({
         config: {
           provider: selectedProvider,
           baseUrl,
-          apiKey: key,
         },
         tools: requestTools,
         stream: false,
@@ -743,7 +742,16 @@ export function useLlamaBridge({
       if (isRateLimitError(errorMsg, response.status)) {
         throw new Error(`Rate limited: ${errorMsg}. Try waiting, adding your own API key in Settings, or switching to a different model.`);
       }
+      if (response.status === 402) {
+        throw new Error(`Payment required: ${errorMsg}. The provider has exhausted its credits or your API key is invalid. Try adding your own API key in Settings or switching to a different model.`);
+      }
       throw new Error(errorMsg);
+    }
+
+    const contentLength = response.headers.get('content-length');
+    const contentType = response.headers.get('content-type');
+    if (contentLength === '0' || (!contentLength && contentType && !contentType.includes('application/json'))) {
+      throw new Error(`Server returned status ${response.status} with an empty or non-JSON response body.`);
     }
 
     return normalizeLlmResponse(await response.json());

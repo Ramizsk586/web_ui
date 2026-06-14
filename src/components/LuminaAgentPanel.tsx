@@ -2701,6 +2701,34 @@ function LogsSubPanel() {
     return () => window.removeEventListener('lumina_new_api_log', handleNewApiLog);
   }, [isStreaming]);
 
+  // Poll and merge server-side traffic logs
+  useEffect(() => {
+    if (!isStreaming) return;
+
+    const pollServerLogs = async () => {
+      try {
+        const res = await fetch('/api/traffic-logs');
+        if (res.ok) {
+          const serverLogs = await res.json();
+          if (Array.isArray(serverLogs) && serverLogs.length > 0) {
+            setLogs(prev => {
+              const existingIds = new Set(prev.map(l => l.id));
+              const newLogs = serverLogs.filter(l => !existingIds.has(l.id));
+              if (newLogs.length === 0) return prev;
+              return [...newLogs, ...prev].slice(0, 50);
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to poll server logs:', err);
+      }
+    };
+
+    pollServerLogs();
+    const interval = setInterval(pollServerLogs, 2500);
+    return () => clearInterval(interval);
+  }, [isStreaming]);
+
   // Listener for general active change configurations to record as log
   useEffect(() => {
     const handleModelChangeLog = () => {
@@ -3478,19 +3506,17 @@ function TelegramSubPanel({ convex }: { convex?: LuminaAgentPanelProps['convex']
 // ─── Settings Sub-Panel ────────────────────────────────────────────────────────
 function SettingsSubPanel() {
   const [serverUrl, setServerUrl] = useState(() => localStorage.getItem('lumina_server_url') || 'https://openprovider.mimika.in/v1');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('lumina_api_key') || '');
+  const [apiKey, setApiKey] = useState('');
   const [selectedProvider, setSelectedProvider] = useState(() => localStorage.getItem('lumina_provider') || 'openprovider');
   const [providerSearchQuery, setProviderSearchQuery] = useState('');
   const [verificationState, setVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>(() => {
     try {
-      const savedKey = localStorage.getItem('lumina_verified_api_key') || '';
       const savedUrl = localStorage.getItem('lumina_verified_server_url') || '';
       const savedProv = localStorage.getItem('lumina_verified_provider') || '';
-      const currentKey = localStorage.getItem('lumina_api_key') || '';
       const currentUrl = localStorage.getItem('lumina_server_url') || 'https://openprovider.mimika.in/v1';
       const currentProv = localStorage.getItem('lumina_provider') || 'openprovider';
       const isVerified = localStorage.getItem('lumina_ai_verified') === 'true';
-      if (isVerified && savedKey === currentKey && savedUrl === currentUrl && savedProv === currentProv) {
+      if (isVerified && savedUrl === currentUrl && savedProv === currentProv) {
         return 'success';
       }
     } catch {}
@@ -3499,10 +3525,9 @@ function SettingsSubPanel() {
 
   useEffect(() => {
     try {
-      const savedKey = localStorage.getItem('lumina_verified_api_key') || '';
       const savedUrl = localStorage.getItem('lumina_verified_server_url') || '';
       const savedProv = localStorage.getItem('lumina_verified_provider') || '';
-      if (apiKey !== savedKey || serverUrl !== savedUrl || selectedProvider !== savedProv) {
+      if (serverUrl !== savedUrl || selectedProvider !== savedProv) {
         localStorage.setItem('lumina_ai_verified', 'false');
         setVerificationState('idle');
       } else if (localStorage.getItem('lumina_ai_verified') === 'true') {
@@ -3524,10 +3549,20 @@ function SettingsSubPanel() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     localStorage.setItem('lumina_server_url', serverUrl);
-    localStorage.setItem('lumina_api_key', apiKey);
     localStorage.setItem('lumina_provider', selectedProvider);
+    if (apiKey.trim()) {
+      try {
+        await fetch('/api/settings/env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: selectedProvider, value: apiKey.trim() })
+        });
+      } catch (e) {
+        console.error('Failed to save API key to server:', e);
+      }
+    }
   };
 
   const handleVerify = useCallback(async () => {
@@ -3545,7 +3580,6 @@ function SettingsSubPanel() {
           handleSave();
           try {
             localStorage.setItem('lumina_ai_verified', 'true');
-            localStorage.setItem('lumina_verified_api_key', apiKey);
             localStorage.setItem('lumina_verified_server_url', serverUrl);
             localStorage.setItem('lumina_verified_provider', selectedProvider);
           } catch {}
@@ -3563,7 +3597,6 @@ function SettingsSubPanel() {
           handleSave();
           try {
             localStorage.setItem('lumina_ai_verified', 'true');
-            localStorage.setItem('lumina_verified_api_key', apiKey);
             localStorage.setItem('lumina_verified_server_url', serverUrl);
             localStorage.setItem('lumina_verified_provider', selectedProvider);
           } catch {}
@@ -4331,57 +4364,13 @@ function ComposioSubPanel() {
             <strong>READY TO CONNECT</strong> Composio-managed OAuth — click Connect
           </p>
         </div>
-        <button
-          onClick={() => setShowKeyForm(!showKeyForm)}
-          className="self-start md:self-center px-3 py-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer bg-white dark:bg-zinc-900/40"
-        >
-          <Settings size={12} />
-          <span>{showKeyForm ? 'Hide API Key' : 'Configure API Key'}</span>
-        </button>
       </div>
 
-      {(!isEnabled || showKeyForm) && (
-        <div className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 rounded-xl p-5 space-y-4">
-          <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
-            <Server size={16} className="text-blue-500" />
-            <span className="text-xs font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-200 font-sans">Composio API Key Configuration</span>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider font-sans">COMPOSIO_API_KEY</label>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => saveKey(e.target.value)}
-                placeholder="Get a key at app.composio.dev/developers"
-                className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 focus:border-blue-500 dark:focus:border-zinc-600 focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-600 font-mono"
-              />
-              <button
-                onClick={verifyKey}
-                disabled={isVerifying || !apiKey}
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-              >
-                {isVerifying ? 'Verifying...' : 'Verify'}
-              </button>
-            </div>
-            <span className="text-[10px] text-zinc-500 font-sans">
-              Get your API key at{' '}
-              <a href="https://app.composio.dev/developers" target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-600 dark:text-sky-400 dark:hover:text-sky-300 underline transition-colors">
-                app.composio.dev/developers
-              </a>
-            </span>
-            {verifyError && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
-                <span className="text-xs text-rose-500 dark:text-rose-400 font-sans">{verifyError}</span>
-              </div>
-            )}
-            {isEnabled && !verifyError && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-sans">API key verified successfully</span>
-              </div>
-            )}
-          </div>
+      {!isEnabled && (
+        <div className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 rounded-xl p-5 text-center">
+          <p className="text-sm text-zinc-500">
+            Composio API key is not configured. Please use the workspace setup panel to configure it.
+          </p>
         </div>
       )}
 

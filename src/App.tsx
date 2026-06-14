@@ -18,7 +18,7 @@ import {
   useLuminaConvex
 } from './hooks';
 
-function StartupSplash({ isVisible }: { isVisible: boolean }) {
+function StartupSplash({ isVisible, onClickStart }: { isVisible: boolean; onClickStart?: () => void }) {
   return (
     <div
       aria-hidden={!isVisible}
@@ -31,7 +31,7 @@ function StartupSplash({ isVisible }: { isVisible: boolean }) {
         background: 'var(--splash-bg, #09090b)',
         opacity: isVisible ? 1 : 0,
         visibility: isVisible ? 'visible' : 'hidden',
-        pointerEvents: 'none',
+        pointerEvents: isVisible ? 'auto' : 'none',
         transition: 'opacity 600ms cubic-bezier(0.16, 1, 0.3, 1), visibility 600ms ease',
         zIndex: 9999,
         userSelect: 'none',
@@ -64,6 +64,24 @@ function StartupSplash({ isVisible }: { isVisible: boolean }) {
           0%   { opacity: 1; }
           100% { opacity: 0; }
         }
+        .splash-interactive-area {
+          cursor: pointer;
+          transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .splash-interactive-area:hover {
+          transform: scale(1.04);
+        }
+        .splash-interactive-area:active {
+          transform: scale(0.98);
+        }
+        .setup-badge-hover {
+          transition: all 200ms ease;
+        }
+        .splash-interactive-area:hover .setup-badge-hover {
+          background: rgba(99,102,241,0.15) !important;
+          border-color: rgba(99,102,241,0.4) !important;
+          box-shadow: 0 0 12px rgba(99,102,241,0.25);
+        }
       `}</style>
 
       {/* Ambient background radial */}
@@ -79,6 +97,8 @@ function StartupSplash({ isVisible }: { isVisible: boolean }) {
 
       {/* Centered content */}
       <div
+        onClick={onClickStart}
+        className="splash-interactive-area"
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -192,7 +212,7 @@ function StartupSplash({ isVisible }: { isVisible: boolean }) {
         {/* Subtle loading dots */}
         <div
           style={{
-            marginTop: 32,
+            marginTop: 24,
             display: 'flex',
             gap: 6,
             animation: 'splash-text-in 400ms cubic-bezier(0.16, 1, 0.3, 1) 600ms both',
@@ -210,6 +230,28 @@ function StartupSplash({ isVisible }: { isVisible: boolean }) {
               }}
             />
           ))}
+        </div>
+
+        {/* Click-to-setup Badge */}
+        <div
+          style={{
+            marginTop: 24,
+            fontSize: 10,
+            fontWeight: 600,
+            color: 'var(--splash-accent, #6366f1)',
+            opacity: 0.9,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            fontFamily: "'Inter', system-ui, sans-serif",
+            animation: 'splash-text-in 400ms cubic-bezier(0.16, 1, 0.3, 1) 700ms both',
+            border: '1px solid rgba(99,102,241,0.2)',
+            padding: '5px 14px',
+            borderRadius: '14px',
+            background: 'rgba(99,102,241,0.04)',
+          }}
+          className="setup-badge-hover"
+        >
+          Click to setup integration / bot
         </div>
       </div>
 
@@ -356,13 +398,19 @@ export default function App() {
   const devTools = null;
 
   const sendMessageRef = useRef<((content: string) => void) | undefined>(undefined);
+  const bootTimerRef = useRef<number | null>(null);
+  const fadeTimerRef = useRef<number | null>(null);
+  const [onboardingInitialStep, setOnboardingInitialStep] = useState<'profile' | 'telegram' | 'composio' | 'convex'>('profile');
+  const [onboardingAutoBypass, setOnboardingAutoBypass] = useState(true);
 
   useEffect(() => {
-    const bootTimer = window.setTimeout(() => {
+    bootTimerRef.current = window.setTimeout(() => {
       setIsBooting(false);
     }, 1350);
 
-    return () => window.clearTimeout(bootTimer);
+    return () => {
+      if (bootTimerRef.current) window.clearTimeout(bootTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -370,12 +418,26 @@ export default function App() {
       return;
     }
 
-    const fadeTimer = window.setTimeout(() => {
+    fadeTimerRef.current = window.setTimeout(() => {
       setShowSplash(false);
     }, 360);
 
-    return () => window.clearTimeout(fadeTimer);
+    return () => {
+      if (fadeTimerRef.current) window.clearTimeout(fadeTimerRef.current);
+    };
   }, [isBooting]);
+
+  const handleStartSetup = useCallback(() => {
+    if (bootTimerRef.current) window.clearTimeout(bootTimerRef.current);
+    if (fadeTimerRef.current) window.clearTimeout(fadeTimerRef.current);
+
+    const profileCreated = localStorage.getItem('lumina_profile_created') === 'true';
+    setOnboardingInitialStep(profileCreated ? 'telegram' : 'profile');
+    setOnboardingAutoBypass(false);
+    setIsBooting(false);
+    setShowSplash(false);
+    appSettings.setShowLogin(true);
+  }, [appSettings]);
 
   const askAi = useAskAi({
     input: inputState.input,
@@ -463,9 +525,11 @@ export default function App() {
           activeModelId={activeModelId}
           sendMessageRef={sendMessageRef}
           luminaConvex={luminaConvex}
+          onboardingInitialStep={onboardingInitialStep}
+          onboardingAutoBypass={onboardingAutoBypass}
         />
       </div>
-      <StartupSplash isVisible={showSplash} />
+      <StartupSplash isVisible={showSplash} onClickStart={handleStartSetup} />
     </>
   );
 }

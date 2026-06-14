@@ -136,7 +136,7 @@ function resolveProviderForModel(modelId: string, fallbackProvider?: string, fal
   return {
     provider: fallbackProvider || localStorage.getItem('lumina_provider') || 'openprovider',
     endpoint: fallbackEndpoint || localStorage.getItem('lumina_server_url') || 'https://openprovider.mimika.in/v1',
-    apiKey: fallbackApiKey || localStorage.getItem('lumina_api_key') || '',
+    apiKey: fallbackApiKey || '',
     modelId,
   };
 }

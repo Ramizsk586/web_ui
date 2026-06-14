@@ -150,6 +150,8 @@ interface AppContentProps {
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>;
   activeModelId: string;
   luminaConvex?: any;
+  onboardingInitialStep?: 'profile' | 'telegram' | 'composio' | 'convex';
+  onboardingAutoBypass?: boolean;
 }
 
 export default function AppContent({
@@ -176,7 +178,9 @@ export default function AppContent({
   selectedModel,
   setSelectedModel,
   activeModelId,
-  luminaConvex
+  luminaConvex,
+  onboardingInitialStep,
+  onboardingAutoBypass
 }: AppContentProps) {
   const {
     userProfile, setUserProfile,
@@ -1972,6 +1976,8 @@ const startCoderPreview = useCallback(async () => {
   if (showLogin) {
     return (
       <OnboardingModal
+        initialStep={onboardingInitialStep}
+        autoBypass={onboardingAutoBypass}
         onComplete={(updatedProfile) => {
           setUserProfile(updatedProfile);
           try {

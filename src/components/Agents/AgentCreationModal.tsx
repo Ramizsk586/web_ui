@@ -382,17 +382,73 @@ Available tools: Web Search, Code Runner, and Workspace Access.
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
+  const [verifiedProfiles, setVerifiedProfiles] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (isOpen) {
+      try {
+        const saved = localStorage.getItem('lumina_ai_provider_profiles');
+        if (saved) {
+          setVerifiedProfiles(JSON.parse(saved));
+        }
+      } catch (e) {
+        console.error('Failed to load verified profiles in AgentCreationModal', e);
+      }
+    }
+  }, [isOpen]);
+
   const allModelEntries = useMemo(() => {
     const entries: { provider: string; providerLabel: string; label: string; value: string }[] = [];
-    Object.entries(PROVIDER_MODELS).forEach(([provId, models]) => {
-      const provDef = PROVIDERS.find(p => p.id === provId);
-      const provLabel = provDef?.label || provId;
-      models.forEach(m => {
-        entries.push({ provider: provId, providerLabel: provLabel, label: m.label, value: m.value });
+    
+    // Gather all models from verified profiles in localStorage
+    const verifiedModelsByProvider: Record<string, { label: string; value: string }[]> = {};
+    
+    verifiedProfiles.forEach(profile => {
+      if (!profile || !profile.provider || !Array.isArray(profile.models)) return;
+      const provId = profile.provider;
+      if (!verifiedModelsByProvider[provId]) {
+        verifiedModelsByProvider[provId] = [];
+      }
+      profile.models.forEach((m: any) => {
+        // Avoid duplicates
+        if (!verifiedModelsByProvider[provId].some(existing => existing.value === m.id)) {
+          verifiedModelsByProvider[provId].push({
+            label: `${m.name || m.id} (Verified)`,
+            value: m.id
+          });
+        }
       });
     });
+
+    // Merge PROVIDER_MODELS and verifiedModelsByProvider
+    PROVIDERS.forEach(prov => {
+      const provId = prov.id;
+      const provLabel = prov.label;
+      const standardModels = PROVIDER_MODELS[provId] || [];
+      const verifiedModels = verifiedModelsByProvider[provId] || [];
+
+      // Combine models: prefer verified ones if they exist
+      const combined = [...verifiedModels];
+      
+      // Also add standard models if they aren't already represented in the verified models
+      standardModels.forEach(std => {
+        if (!combined.some(c => c.value === std.value)) {
+          combined.push(std);
+        }
+      });
+
+      combined.forEach(m => {
+        entries.push({
+          provider: provId,
+          providerLabel: provLabel,
+          label: m.label,
+          value: m.value
+        });
+      });
+    });
+
     return entries;
-  }, []);
+  }, [verifiedProfiles]);
 
   const filteredModelEntries = modelSearchQuery
     ? allModelEntries.filter(m =>
@@ -466,8 +522,10 @@ Available tools: Web Search, Code Runner, and Workspace Access.
       setBaseUrl(editAgent.baseUrl || '');
       
       const standardModelsList = PROVIDER_MODELS[editProvider] || [];
-      const matchesStandard = standardModelsList.some(m => m.value === editAgent.model);
-      if (matchesStandard) {
+      const profile = verifiedProfiles.find(p => p.provider === editProvider);
+      const verifiedModelsList = profile ? (profile.models || []).map((m: any) => m.id) : [];
+      const isKnownModel = standardModelsList.some(m => m.value === editAgent.model) || verifiedModelsList.includes(editAgent.model);
+      if (isKnownModel) {
         setModel(editAgent.model);
         setCustomModelText('');
       } else {

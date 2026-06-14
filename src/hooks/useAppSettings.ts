@@ -234,9 +234,9 @@ export function useAppSettings({
     } catch (e) {}
   }, [persona]);
   const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', 'https://openprovider.mimika.in/v1'));
-  const [apiKey, setApiKey] = useState(() => safeGetItem('lumina_api_key', DEFAULT_API_KEY));
+  const [apiKey, setApiKey] = useState('');
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
-  const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', DEFAULT_API_KEY));
+  const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', ''));
 
   const [selectedProvider, setSelectedProvider] = useState(() => safeGetItem('lumina_provider', 'openprovider'));
   const [searchProvider, setSearchProvider] = useState(() => localStorage.getItem('lumina_search_provider') || 'duckduckgo');
@@ -245,14 +245,12 @@ export function useAppSettings({
 
   const [aiVerificationState, setAiVerificationState] = useState<'idle' | 'verifying' | 'success' | 'error'>(() => {
     try {
-      const savedKey = localStorage.getItem('lumina_verified_api_key') || '';
       const savedUrl = localStorage.getItem('lumina_verified_server_url') || '';
       const savedProv = localStorage.getItem('lumina_verified_provider') || '';
-      const currentKey = localStorage.getItem('lumina_api_key') || '';
       const currentUrl = localStorage.getItem('lumina_server_url') || 'https://openprovider.mimika.in/v1';
       const currentProv = localStorage.getItem('lumina_provider') || 'openprovider';
       const isVerified = localStorage.getItem('lumina_ai_verified') === 'true';
-      if (isVerified && savedKey === currentKey && savedUrl === currentUrl && savedProv === currentProv) {
+      if (isVerified && savedUrl === currentUrl && savedProv === currentProv) {
         return 'success';
       }
     } catch {}
@@ -277,10 +275,9 @@ export function useAppSettings({
 
   useEffect(() => {
     try {
-      const savedKey = localStorage.getItem('lumina_verified_api_key') || '';
       const savedUrl = localStorage.getItem('lumina_verified_server_url') || '';
       const savedProv = localStorage.getItem('lumina_verified_provider') || '';
-      if (apiKey !== savedKey || serverUrl !== savedUrl || selectedProvider !== savedProv) {
+      if (serverUrl !== savedUrl || selectedProvider !== savedProv) {
         localStorage.setItem('lumina_ai_verified', 'false');
         setAiVerificationState('idle');
       } else if (localStorage.getItem('lumina_ai_verified') === 'true') {
@@ -357,15 +354,27 @@ export function useAppSettings({
     }
   }, [selectedModel, setAvailableModels, setSelectedModel]);
 
+  const syncProfilesToBackend = useCallback((profiles: AiProviderProfile[]) => {
+    fetch('/api/llm/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(profiles)
+    }).catch(err => console.error('Failed to sync provider profiles to backend:', err));
+  }, []);
+
   const persistAiProviderProfiles = useCallback((nextProfiles: AiProviderProfile[]) => {
     setAiProviderProfiles(nextProfiles);
     localStorage.setItem('lumina_ai_provider_profiles', JSON.stringify(nextProfiles));
     applyActiveProviderModels(nextProfiles);
-  }, [applyActiveProviderModels]);
+    syncProfilesToBackend(nextProfiles);
+  }, [applyActiveProviderModels, syncProfilesToBackend]);
 
   useEffect(() => {
     applyActiveProviderModels(aiProviderProfiles);
-  }, [aiProviderProfiles, applyActiveProviderModels]);
+    if (aiProviderProfiles.length > 0) {
+      syncProfilesToBackend(aiProviderProfiles);
+    }
+  }, [aiProviderProfiles, applyActiveProviderModels, syncProfilesToBackend]);
 
   const getProfileDisplayName = useCallback((providerId: string, endpoint: string) => {
     const providerLabel = CLOUD_PROVIDERS.find(p => p.id === providerId)?.label || providerId || 'Custom';
@@ -401,9 +410,20 @@ export function useAppSettings({
     setIsAiSaved(false);
   };
 
-  const handleSaveAI = () => {
+  const handleSaveAI = async () => {
+    // Save API key to server-side .env.local (never store in browser localStorage)
+    if (apiKey.trim()) {
+      try {
+        await fetch('/api/settings/env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: selectedProvider, value: apiKey.trim() })
+        });
+      } catch (e) {
+        console.error('Failed to save API key to server:', e);
+      }
+    }
     localStorage.setItem('lumina_server_url', serverUrl);
-    localStorage.setItem('lumina_api_key', apiKey);
     localStorage.setItem('lumina_provider', selectedProvider);
     setIsAiSaved(true);
     setTimeout(() => setIsAiSaved(false), 2000);
@@ -452,7 +472,6 @@ export function useAppSettings({
           setAiVerificationState('success');
           try {
             localStorage.setItem('lumina_ai_verified', 'true');
-            localStorage.setItem('lumina_verified_api_key', apiKey);
             localStorage.setItem('lumina_verified_server_url', serverUrl);
             localStorage.setItem('lumina_verified_provider', selectedProvider);
           } catch {}
@@ -488,7 +507,6 @@ export function useAppSettings({
           setAiVerificationState('success');
           try {
             localStorage.setItem('lumina_ai_verified', 'true');
-            localStorage.setItem('lumina_verified_api_key', apiKey);
             localStorage.setItem('lumina_verified_server_url', serverUrl);
             localStorage.setItem('lumina_verified_provider', selectedProvider);
           } catch {}
@@ -532,7 +550,10 @@ export function useAppSettings({
       endpoint: targetEndpoint,
       apiKey: targetApiKey,
       models: normalizedModels,
-      selectedModelIds: existing?.selectedModelIds?.filter(id => normalizedModels.some(model => model.id === id)) ?? normalizedModels.map(model => model.id),
+      selectedModelIds: (() => {
+        const filtered = existing?.selectedModelIds?.filter(id => normalizedModels.some(model => model.id === id)) ?? [];
+        return filtered.length > 0 ? filtered : normalizedModels.map(model => model.id);
+      })(),
       active: existing?.active ?? true,
       accentColor: existing?.accentColor || PROFILE_ACCENT_COLORS[sameProviderCount % PROFILE_ACCENT_COLORS.length],
       verifiedAt: now,
@@ -547,8 +568,8 @@ export function useAppSettings({
     if (!override?.profileId) {
       setEditingAiProfileId(null);
     }
+    // Only persist non-sensitive settings to localStorage; API keys live server-side in .env.local
     localStorage.setItem('lumina_server_url', targetEndpoint);
-    localStorage.setItem('lumina_api_key', targetApiKey);
     localStorage.setItem('lumina_provider', targetProvider);
     showToast(existing ? 'Provider profile updated' : 'Provider profile saved');
   };
@@ -697,11 +718,11 @@ export function useAppSettings({
   const handleSelectAiProfileModel = useCallback((modelId: string, profileId: string) => {
     const profile = aiProviderProfiles.find(item => item.id === profileId);
     if (!profile) return;
-    
-    // Set this profile as active, and set others to inactive
+
+    // Activate the selected profile without deactivating others
     const updatedProfiles = aiProviderProfiles.map(p => ({
       ...p,
-      active: p.id === profileId
+      active: p.id === profileId ? true : p.active
     }));
     persistAiProviderProfiles(updatedProfiles);
 
@@ -709,7 +730,6 @@ export function useAppSettings({
     setServerUrl(profile.endpoint);
     setApiKey(profile.apiKey);
     localStorage.setItem('lumina_server_url', profile.endpoint);
-    localStorage.setItem('lumina_api_key', profile.apiKey);
     localStorage.setItem('lumina_provider', profile.provider);
     setSelectedModel(modelId);
   }, [aiProviderProfiles, persistAiProviderProfiles, setSelectedModel]);

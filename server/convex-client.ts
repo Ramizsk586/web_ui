@@ -1,3 +1,5 @@
+import { ConvexClient } from 'convex/browser';
+
 /**
  * convex-client.ts
  * ─────────────────────────────────────────────────────────────────────────────
@@ -30,9 +32,6 @@ export function getConvexClient(): any {
   }
 
   try {
-    // Dynamic import so the server still loads if the convex package behaves
-    // differently at runtime vs build time.
-    const { ConvexClient } = require('convex/browser');
     const client = new ConvexClient(url);
     console.log(`[ConvexClient] Connected to ${url}`);
     (globalThis as any)._convexClient = client;

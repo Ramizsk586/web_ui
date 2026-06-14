@@ -7,8 +7,13 @@
  * Requires TELEGRAM_BOT_TOKEN in the environment.
  */
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
-const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+function getBotToken(): string {
+  return process.env.TELEGRAM_BOT_TOKEN ?? '';
+}
+
+function getTelegramApi(): string {
+  return `https://api.telegram.org/bot${getBotToken()}`;
+}
 
 /**
  * Send a plain or Markdown-formatted message to a specific Telegram chat.
@@ -19,13 +24,17 @@ export async function deliverToTelegram(
   text: string,
   parseMode: 'Markdown' | 'HTML' | 'MarkdownV2' | '' = 'Markdown'
 ): Promise<void> {
-  if (!BOT_TOKEN) return; // Telegram not configured — silently skip
+  const token = getBotToken();
+  if (!token) return; // Telegram not configured — silently skip
+
+  const api = getTelegramApi();
 
   // Telegram max message length is 4096 chars
   const chunks = splitIntoChunks(text, 4000);
   for (const chunk of chunks) {
+    const startTime = performance.now();
     try {
-      await fetch(`${TELEGRAM_API}/sendMessage`, {
+      const response = await fetch(`${api}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -35,8 +44,37 @@ export async function deliverToTelegram(
         }),
         signal: AbortSignal.timeout(10_000),
       });
-    } catch (err) {
+      const latency = Math.round(performance.now() - startTime);
+      if ((global as any).logServerTraffic) {
+        let respBody = '';
+        try {
+          respBody = await response.clone().text();
+        } catch {}
+        (global as any).logServerTraffic({
+          method: 'POST',
+          endpoint: 'telegram/sendMessage',
+          status: response.status,
+          statusText: response.statusText,
+          latency,
+          type: 'telegram',
+          request: { chat_id: chatId, text: chunk },
+          response: respBody
+        });
+      }
+    } catch (err: any) {
       console.error('[TelegramDelivery] Failed to send message:', err);
+      if ((global as any).logServerTraffic) {
+        (global as any).logServerTraffic({
+          method: 'POST',
+          endpoint: 'telegram/sendMessage',
+          status: 500,
+          statusText: 'Error',
+          latency: Math.round(performance.now() - startTime),
+          type: 'telegram',
+          request: { chat_id: chatId, text: chunk },
+          response: { error: err.message }
+        });
+      }
     }
   }
 }
@@ -66,9 +104,11 @@ function splitIntoChunks(text: string, maxLen: number): string[] {
  * Send a typing indicator to a chat to show the bot is working.
  */
 export async function sendTypingAction(chatId: number | string): Promise<void> {
-  if (!BOT_TOKEN) return;
+  const token = getBotToken();
+  if (!token) return;
+  const api = getTelegramApi();
   try {
-    await fetch(`${TELEGRAM_API}/sendChatAction`, {
+    await fetch(`${api}/sendChatAction`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, action: 'typing' }),

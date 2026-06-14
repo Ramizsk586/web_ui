@@ -20,7 +20,7 @@ import { Skill } from '../types';
 
 export const DEFAULT_SERVER_URL = '/api';
 export const DEFAULT_MCP_URL = '/api';
-export const DEFAULT_API_KEY = 'llama';
+export const DEFAULT_API_KEY = '';
 
 export const AVAILABLE_AVATARS = [
   "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
