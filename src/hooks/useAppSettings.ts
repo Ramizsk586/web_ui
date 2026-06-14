@@ -412,19 +412,38 @@ export function useAppSettings({
 
   const handleSaveAI = async () => {
     // Save API key to server-side .env.local (never store in browser localStorage)
-    if (apiKey.trim()) {
+    const trimmedKey = apiKey.trim();
+    if (trimmedKey) {
       try {
         await fetch('/api/settings/env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: selectedProvider, value: apiKey.trim() })
+          body: JSON.stringify({ provider: selectedProvider, value: trimmedKey })
         });
+        if (selectedProvider === 'freemodel_openai' || selectedProvider === 'freemodel_claude') {
+          const otherProvider = selectedProvider === 'freemodel_openai' ? 'freemodel_claude' : 'freemodel_openai';
+          await fetch('/api/settings/env', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: otherProvider, value: trimmedKey })
+          });
+        }
       } catch (e) {
         console.error('Failed to save API key to server:', e);
       }
     }
     localStorage.setItem('lumina_server_url', serverUrl);
     localStorage.setItem('lumina_provider', selectedProvider);
+
+    // Auto-create/activate both profiles for FreeModel when saved
+    if (selectedProvider === 'freemodel_openai' || selectedProvider === 'freemodel_claude') {
+      saveVerifiedAiProfile([], {
+        provider: selectedProvider,
+        endpoint: serverUrl,
+        apiKey: trimmedKey
+      });
+    }
+
     setIsAiSaved(true);
     setTimeout(() => setIsAiSaved(false), 2000);
   };
@@ -530,6 +549,85 @@ export function useAppSettings({
     const targetProvider = override?.provider || selectedProvider;
     const targetEndpoint = override?.endpoint || serverUrl;
     const targetApiKey = override?.apiKey || apiKey;
+
+    const isFreeModel = targetProvider === 'freemodel_openai' || targetProvider === 'freemodel_claude';
+
+    if (isFreeModel) {
+      // 1. OpenAI Profile
+      const openaiExisting = aiProviderProfiles.find(p => p.id === 'freemodel_openai');
+      const openaiModels = targetProvider === 'freemodel_openai' && models.length > 0 ? models : [
+        { id: 'gpt-4o', name: 'GPT-4o', color: 'text-blue-500' },
+        { id: 'gpt-4o-mini', name: 'GPT-4o-mini', color: 'text-blue-500' },
+        { id: 'o1-mini', name: 'o1-mini', color: 'text-blue-500' },
+        { id: 'o1-preview', name: 'o1-preview', color: 'text-blue-500' },
+      ];
+      const openaiProfile: AiProviderProfile = {
+        id: 'freemodel_openai',
+        name: 'free model (openai)',
+        provider: 'freemodel_openai',
+        endpoint: 'https://api.freemodel.dev',
+        apiKey: targetApiKey,
+        models: openaiModels,
+        selectedModelIds: openaiExisting?.selectedModelIds?.filter(id => openaiModels.some(m => m.id === id)) ?? openaiModels.map(m => m.id),
+        active: openaiExisting?.active ?? true,
+        accentColor: '#3b82f6',
+        verifiedAt: now,
+        updatedAt: now,
+      };
+
+      // 2. Claude Profile
+      const claudeExisting = aiProviderProfiles.find(p => p.id === 'freemodel_claude');
+      const claudeModels = targetProvider === 'freemodel_claude' && models.length > 0 ? models : [
+        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', color: 'text-blue-500' },
+        { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', color: 'text-blue-500' },
+        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', color: 'text-blue-500' },
+      ];
+      const claudeProfile: AiProviderProfile = {
+        id: 'freemodel_claude',
+        name: 'free model (claude)',
+        provider: 'freemodel_claude',
+        endpoint: 'https://cc.freemodel.dev',
+        apiKey: targetApiKey,
+        models: claudeModels,
+        selectedModelIds: claudeExisting?.selectedModelIds?.filter(id => claudeModels.some(m => m.id === id)) ?? claudeModels.map(m => m.id),
+        active: claudeExisting?.active ?? true,
+        accentColor: '#8b5cf6',
+        verifiedAt: now,
+        updatedAt: now,
+      };
+
+      // Filter out any older profiles with these IDs and prepend the new ones
+      const baseProfiles = aiProviderProfiles.filter(p => p.id !== 'freemodel_openai' && p.id !== 'freemodel_claude');
+      const nextProfiles = [openaiProfile, claudeProfile, ...baseProfiles];
+
+      persistAiProviderProfiles(nextProfiles);
+
+      // Save both API keys to server
+      try {
+        fetch('/api/settings/env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'freemodel_openai', value: targetApiKey })
+        }).catch(err => console.error('Failed to sync freemodel_openai key to backend:', err));
+
+        fetch('/api/settings/env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'freemodel_claude', value: targetApiKey })
+        }).catch(err => console.error('Failed to sync freemodel_claude key to backend:', err));
+      } catch (e) {
+        console.error('Failed to save FreeModel keys to server:', e);
+      }
+
+      if (!override?.profileId) {
+        setEditingAiProfileId(null);
+      }
+      localStorage.setItem('lumina_server_url', targetEndpoint);
+      localStorage.setItem('lumina_provider', targetProvider);
+      showToast('FreeModel profiles saved and activated');
+      return;
+    }
+
     const matchingProfile = aiProviderProfiles.find(profile =>
       profile.provider === targetProvider &&
       profile.endpoint === targetEndpoint &&

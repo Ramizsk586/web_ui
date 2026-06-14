@@ -621,6 +621,18 @@ export default function AppContent({
 
   const smartPopupPosition = smartPopup;
 
+  const handleSelectChat = useCallback((id: string | null) => {
+    setCurrentChatId(id);
+    if (id) {
+      const selectedChat = chats.find((c: any) => c.id === id);
+      if (selectedChat) {
+        const isCoder = Boolean(selectedChat.isCoderMode);
+        setIsCoderMode(isCoder);
+        setIsCoderWorkspacePanelOpen(isCoder);
+      }
+    }
+  }, [chats, setCurrentChatId, setIsCoderMode, setIsCoderWorkspacePanelOpen]);
+
 
 
   // React Refs
@@ -2062,7 +2074,7 @@ const startCoderPreview = useCallback(async () => {
                 chats={chats} 
                 currentChatId={currentChatId} 
                 setCurrentChatId={(id) => {
-                  setCurrentChatId(id);
+                  handleSelectChat(id);
                   setActiveAgent(null); setShowAgentsPage(false);
                   setIsMobileMenuOpen(false);
                 }} 
@@ -2158,7 +2170,7 @@ const startCoderPreview = useCallback(async () => {
             chats={chats} 
             currentChatId={currentChatId} 
             setCurrentChatId={(id) => {
-              setCurrentChatId(id);
+              handleSelectChat(id);
               setActiveAgent(null);
             }} 
             createNewChat={(projId) => {
@@ -3519,7 +3531,7 @@ const startCoderPreview = useCallback(async () => {
         chats={chats.filter((c: Chat) => c.projectId === selectedProjectForChats?.id)}
         currentChatId={currentChatId}
         onSelectChat={(chatId) => {
-          setCurrentChatId(chatId);
+          handleSelectChat(chatId);
           if (setActiveProjectId) {
             setActiveProjectId(selectedProjectForChats.id);
           }
@@ -3560,7 +3572,7 @@ const startCoderPreview = useCallback(async () => {
         chats={chats.filter((c: Chat) => c.agentId === selectedAgentForChats?.id)}
         currentChatId={currentChatId}
         onSelectChat={(chatId) => {
-          setCurrentChatId(chatId);
+          handleSelectChat(chatId);
           if (setActiveAgent) {
             setActiveAgent(selectedAgentForChats);
           }

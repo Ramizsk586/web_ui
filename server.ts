@@ -86,6 +86,8 @@ const PROVIDER_ENV_KEYS: Record<string, string> = {
   'openprovider': 'AI_API_KEY',
   'custom': 'AI_API_KEY',
   'openai-compatible': 'AI_API_KEY',
+  'freemodel_openai': 'FREEMODEL_API_KEY',
+  'freemodel_claude': 'FREEMODEL_API_KEY',
 };
 
 function resolveApiKeyFromEnv(provider: string, fallback: string = ''): string {
@@ -764,6 +766,8 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
             'kilo': 'KILO_API_KEY',
             'opencode': 'OPENCODE_API_KEY',
             'kimchi': 'KIMCHI_API_KEY',
+            'freemodel_openai': 'FREEMODEL_API_KEY',
+            'freemodel_claude': 'FREEMODEL_API_KEY',
           };
 
           const keysToUpdate: Record<string, string> = {};
@@ -880,7 +884,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) {
         // Check if it's Anthropic
-        if (endpoint.includes('anthropic')) {
+        if (endpoint.includes('anthropic') || endpoint.includes('cc.freemodel.dev')) {
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
         } else if (endpoint.includes('opencode.ai')) {
@@ -903,7 +907,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
       // Determine API path based on provider
       let apiPath = '/chat/completions';
-      if (endpoint.includes('anthropic')) {
+      if (endpoint.includes('anthropic') || endpoint.includes('cc.freemodel.dev')) {
         apiPath = '/v1/messages';
       }
 
@@ -1111,7 +1115,9 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         mapping.provider === "anthropic" ||
         mapping.endpoint?.includes("anthropic.com") ||
         mapping.provider === "opencode" ||
-        mapping.endpoint?.includes("opencode.ai")
+        mapping.endpoint?.includes("opencode.ai") ||
+        mapping.provider === "freemodel_claude" ||
+        mapping.endpoint?.includes("cc.freemodel.dev")
       ) {
         useDirectForward = true;
         const cleanEndpoint = mapping.endpoint.replace(/\/+$/, "");
@@ -1411,7 +1417,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) {
-        if (endpoint.includes('anthropic')) {
+        if (endpoint.includes('anthropic') || endpoint.includes('cc.freemodel.dev')) {
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
         } else if (endpoint.includes('opencode.ai')) {
@@ -1437,7 +1443,7 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
       Object.assign(body, otherParams);
 
       let apiPath = '/chat/completions';
-      if (endpoint.includes('anthropic')) apiPath = '/v1/messages';
+      if (endpoint.includes('anthropic') || endpoint.includes('cc.freemodel.dev')) apiPath = '/v1/messages';
 
       const fullUrl = `${endpoint.replace(/\/$/, '')}${apiPath}`;
       console.log('[Bridge] POST', fullUrl);
@@ -2011,13 +2017,39 @@ ${toolsContent ? `#### [tools.md]\n${toolsContent}\n\n` : ''}
         }),
       ];
 
-      // ── Resolve provider config directly to Anthropic Proxy ─────────────────
-      const profileConfig = {
-        endpoint: `http://127.0.0.1:${PORT}/v1`,
-        apiKey: 'lumina-proxy',
-        modelId: 'claude-3-5-sonnet-20241022'
+      // Resolve provider config dynamically from the request body or active profiles
+      let detectedProvider = 'openai-compatible';
+      let profileConfig = {
+        endpoint: '',
+        apiKey: '',
+        modelId: ''
       };
-      const detectedProvider: string = 'anthropic';
+
+      if (providerProfile) {
+        detectedProvider = providerProfile.provider || 'openai-compatible';
+        profileConfig = {
+          endpoint: providerProfile.endpoint || '',
+          apiKey: providerProfile.apiKey || '',
+          modelId: modelId || ''
+        };
+      } else if (model) {
+        detectedProvider = model.provider || 'openai-compatible';
+        profileConfig = {
+          endpoint: model.baseUrl || '',
+          apiKey: _apiKey || '',
+          modelId: model.id || modelId || ''
+        };
+      } else {
+        detectedProvider = 'openai-compatible';
+        profileConfig = {
+          endpoint: `http://127.0.0.1:${PORT}/v1`,
+          apiKey: 'lumina-proxy',
+          modelId: modelId || 'claude-3-5-sonnet-20241022'
+        };
+      }
+
+      // Always resolve API key from env vars if not provided
+      profileConfig.apiKey = resolveApiKeyFromEnv(detectedProvider, profileConfig.apiKey);
       console.log('[Pi Agent] Resolved provider:', detectedProvider);
 
       // ── Decide which execution path to use ────────────────────────────────────
@@ -4654,9 +4686,13 @@ ${task}`;
         apiKey = resolveKimchiApiKey(apiKey);
       }
 
+      const isAnthropic = providerType === 'freemodel_claude' || providerType === 'anthropic' || url.includes('anthropic') || url.includes('cc.freemodel.dev');
       const isOpenCode = providerType === 'opencode' || url.includes('opencode.ai');
       if (apiKey) {
-        if (isOpenCode) {
+        if (isAnthropic) {
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else if (isOpenCode) {
           headers['x-api-key'] = apiKey;
         } else {
           headers['Authorization'] = `Bearer ${apiKey}`;
@@ -7384,7 +7420,25 @@ ${contextStr}`;
     let baseUrl = '';
     let apiKey = '';
 
-    if (config) {
+    // Check if the model is associated with any active provider profile
+    const activeProfiles = getLlmConfig();
+    let resolvedProfile: any = null;
+    if (activeProfiles && Array.isArray(activeProfiles)) {
+      for (const profile of activeProfiles) {
+        if (profile.active !== false && Array.isArray(profile.models)) {
+          if (profile.models.some((m: any) => m.id === model)) {
+            resolvedProfile = profile;
+            break;
+          }
+        }
+      }
+    }
+
+    if (resolvedProfile) {
+      provider = resolvedProfile.provider || 'openai-compatible';
+      baseUrl = resolvedProfile.endpoint || '';
+      apiKey = resolvedProfile.apiKey || '';
+    } else if (config) {
       provider = config.provider || 'openai-compatible';
       baseUrl = config.baseUrl || '';
       apiKey = config.apiKey || '';
@@ -7558,14 +7612,15 @@ ${contextStr}`;
     };
 
     try {
-      if (provider === 'anthropic' || provider === 'opencode') {
+      if (provider === 'anthropic' || provider === 'opencode' || provider === 'freemodel_claude') {
         // Anthropic/OpenCode uses a different API format (x-api-key auth, /v1/messages)
         let response;
         let lastError: any;
+        const targetUrl = baseUrl.includes('/v1') ? `${baseUrl}/messages` : `${baseUrl}/v1/messages`;
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
           try {
             response = await axios.post(
-              `${baseUrl}/messages`,
+              targetUrl,
               {
                 model: model || 'claude-3-5-sonnet-20241022',
                 max_tokens: 4096,

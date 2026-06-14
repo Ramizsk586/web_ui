@@ -2062,7 +2062,6 @@ ${JSON.stringify(parsed.memories, null, 2)}`
     
     const effectiveCoderMode =
       isCoderMode ||
-      Boolean(activeChatForTurn?.isCoderMode) ||
       content.toLowerCase().startsWith('/coder');
 
     const userMessage: Message = {
@@ -3550,11 +3549,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
       const toolCallNodes: ToolCallNode[] = [];
       let agentTraceContent = '';
 
-      const hasWebScrapeCall = toolCallsRaw && toolCallsRaw.some((tc: any) => {
-        const name = tc.function?.name || '';
-        return name === 'current_time' || name === 'web_scrape' || name === 'search' || name === 'visit' || name === 'google_scholar' || name.startsWith('wiki_') || name.startsWith('composio_');
-      });
-      if (isCoderMode || hasWebScrapeCall) {
+      const hasToolCalls = toolCallsRaw && toolCallsRaw.length > 0;
+      if (isCoderMode || hasToolCalls) {
         let successfulScrapesCount = 0;
         let successfulWikiSearchCount = 0;
         let successfulVisitCount = 0;

@@ -37,6 +37,8 @@ export const AVAILABLE_AVATARS = [
 
 export const CLOUD_PROVIDERS = [
   { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: React.createElement(Terminal, { size: 13 }) },
+  { id: 'freemodel_openai', label: 'free model (openai)', endpoint: 'https://api.freemodel.dev', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
+  { id: 'freemodel_claude', label: 'free model (claude)', endpoint: 'https://cc.freemodel.dev', key: '', icon: React.createElement(Brain, { size: 13 }) },
   { id: 'openprovider', label: 'OpenProvider', endpoint: 'https://openprovider.mimika.in/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'kimchi', label: 'Kimchi', endpoint: 'https://llm.kimchi.dev/openai/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },

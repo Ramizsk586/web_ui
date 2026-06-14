@@ -3552,13 +3552,22 @@ function SettingsSubPanel() {
   const handleSave = async () => {
     localStorage.setItem('lumina_server_url', serverUrl);
     localStorage.setItem('lumina_provider', selectedProvider);
-    if (apiKey.trim()) {
+    const trimmedKey = apiKey.trim();
+    if (trimmedKey) {
       try {
         await fetch('/api/settings/env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: selectedProvider, value: apiKey.trim() })
+          body: JSON.stringify({ provider: selectedProvider, value: trimmedKey })
         });
+        if (selectedProvider === 'freemodel_openai' || selectedProvider === 'freemodel_claude') {
+          const otherProvider = selectedProvider === 'freemodel_openai' ? 'freemodel_claude' : 'freemodel_openai';
+          await fetch('/api/settings/env', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: otherProvider, value: trimmedKey })
+          });
+        }
       } catch (e) {
         console.error('Failed to save API key to server:', e);
       }
