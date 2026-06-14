@@ -3647,6 +3647,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
               name === 'run_skill' ? `read_skill ${String(args.skillId || '').trim() ? `(${String(args.skillId || '').trim()})` : ''}` :
               name.startsWith('composio_') ? `Composio: ${name.replace('composio_', '').replace(/_/g, ' ')}` :
               `${name} ${normalizedArgPath ? `(${normalizedArgPath})` : ''}${readRange}`;
+            const isScrape = name === 'fetch_url';
             const node: ToolCallNode = {
               id: tc.id || createStableTurnId('tc', loopCount, idx, name),
               type: 'tool',
@@ -4334,10 +4335,10 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     extractLinks: args.extractLinks ?? true,
                     extractImages: args.extractImages ?? true
                   });
-                  const normalizedScrapeResult = {
+                  const normalizedScrapeResult: any = {
                     ...scrapeResult,
                     requestedUrl: scrapeTarget.requestedUrl,
-                    url: scrapeResult.url || scrapeTarget.resolvedUrl
+                    url: (scrapeResult as any).url || scrapeTarget.resolvedUrl
                   };
                   setScrapingResults(prev => { const c = new Map(prev); c.set(tc.id, normalizedScrapeResult); return c; });
                   setActiveScrapingJobs(prev => { const c = new Set(prev); c.delete(tc.id); return c; });
@@ -5724,7 +5725,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         searchProvider
       });
       // Use the existing scrapeUrl service
-      const result = await scrapeUrl({ url: scrapeTarget.resolvedUrl, extractLinks: false, extractImages: false });
+      const result: any = await scrapeUrl({ url: scrapeTarget.resolvedUrl, extractLinks: false, extractImages: false });
       
       // Compress: strip HTML, collapse whitespace, cap at 8000 chars
       let text = '';

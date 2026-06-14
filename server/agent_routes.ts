@@ -762,7 +762,8 @@ export function setupAgentRoutes(app: express.Express) {
   });
 
   app.post("/api/pi-agent/run", async (req: express.Request, res: express.Response) => {
-    const { task, workspaceRoot, provider, model, apiKey, baseUrl } = req.body;
+    const { task, provider, model, apiKey, baseUrl } = req.body;
+    const workspaceRoot = req.body.workspaceRoot || req.body.workspacePath;
     if (!task) {
       return res.status(400).json({ error: 'task is required' });
     }
@@ -775,8 +776,8 @@ export function setupAgentRoutes(app: express.Express) {
     const resolvedWorkspace = resolveCoderPath(workspaceRoot);
 
     try {
-      const { startPiAgentLoop } = await import('./interaction-agent.js');
-      await startPiAgentLoop({
+      const { runAiSdkAgentLoop } = await import('./ai_sdk_agent.js');
+      await runAiSdkAgentLoop({
         task,
         workspaceRoot: resolvedWorkspace,
         provider,
@@ -784,13 +785,13 @@ export function setupAgentRoutes(app: express.Express) {
         apiKey,
         baseUrl,
         onEvent: (event) => {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
+          res.write(`${JSON.stringify(event)}\n`);
         }
       });
       res.end();
     } catch (error: any) {
       console.error('[pi-agent] Run error:', error);
-      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+      res.write(`${JSON.stringify({ type: 'error', error: error.message })}\n`);
       res.end();
     }
   });

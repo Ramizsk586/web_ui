@@ -54,6 +54,8 @@ const PROVIDERS = [
   { id: 'deepseek', label: 'DeepSeek' },
   { id: 'groq', label: 'Groq Llama / Mixtral' },
   { id: 'opencode', label: 'OpenCode Zen' },
+  { id: 'zed', label: 'Zed AI' },
+  { id: 'copilot', label: 'GitHub Copilot' },
   { id: 'openprovider', label: 'OpenProvider' },
   { id: 'kimchi', label: 'Kimchi' },
   { id: 'openrouter', label: 'OpenRouter' },
@@ -104,8 +106,28 @@ const PROVIDER_MODELS: Record<string, { label: string; value: string }[]> = {
     { label: 'Custom Model ID...', value: 'custom' }
   ],
   'opencode': [
-    { label: 'OpenCode Zen (v1)', value: 'opencode-zen-v1' },
-    { label: 'Big Pickle Coder', value: 'big-pickle-coder' },
+    { label: 'DeepSeek V4 Flash Free (Free)', value: 'deepseek-v4-flash-free' },
+    { label: 'Big Pickle (Free Stealth)', value: 'big-pickle' },
+    { label: 'MiMo-V2.5 Free (Free)', value: 'mimo-v2.5-free' },
+    { label: 'North Mini Code Free (Free)', value: 'north-mini-code-free' },
+    { label: 'Nemotron 3 Ultra Free (Free)', value: 'nemotron-3-ultra-free' },
+    { label: 'Claude Sonnet 4.6 (Zen)', value: 'claude-sonnet-4-6' },
+    { label: 'Claude Opus 4.8 (Zen)', value: 'claude-opus-4-8' },
+    { label: 'GPT 5.5 (Zen)', value: 'gpt-5.5' },
+    { label: 'Gemini 3.5 Flash (Zen)', value: 'gemini-3.5-flash' },
+    { label: 'Qwen 3.7 Max (Zen)', value: 'qwen3.7-max' },
+    { label: 'DeepSeek V4 Pro (Zen)', value: 'deepseek-v4-pro' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'zed': [
+    { label: 'Claude 3.5 Sonnet (Zed)', value: 'claude-3-5-sonnet' },
+    { label: 'Claude 3.5 Haiku (Zed)', value: 'claude-3-5-haiku' },
+    { label: 'GPT-4o (Zed)', value: 'gpt-4o' },
+    { label: 'Custom Model ID...', value: 'custom' }
+  ],
+  'copilot': [
+    { label: 'GPT-4o (Copilot)', value: 'gpt-4o' },
+    { label: 'Claude 3.5 Sonnet (Copilot)', value: 'claude-3-5-sonnet' },
     { label: 'Custom Model ID...', value: 'custom' }
   ],
   'openprovider': [
@@ -183,6 +205,8 @@ const editModelProvider = (modelVal: string, providerVal?: string): string => {
   if (modelLower.includes('deepseek')) return 'deepseek';
   if (modelLower.includes('llama') || modelLower.includes('groq')) return 'groq';
   if (modelLower.includes('opencode')) return 'opencode';
+  if (modelLower.includes('zed')) return 'zed';
+  if (modelLower.includes('copilot')) return 'copilot';
   if (modelLower.includes('openprovider')) return 'openprovider';
   if (modelLower.includes('kimchi')) return 'kimchi';
   if (modelLower.includes('openrouter')) return 'openrouter';

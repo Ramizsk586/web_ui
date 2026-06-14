@@ -30,6 +30,8 @@ const PROVIDER_ENV_KEYS: Record<string, string> = {
   'sarvam': 'SARVAM_API_KEY',
   'kilo': 'KILO_API_KEY',
   'opencode': 'OPENCODE_API_KEY',
+  'zed': 'ZED_API_KEY',
+  'copilot': 'COPILOT_API_KEY',
   'kimchi': 'KIMCHI_API_KEY',
   'cline': 'CLINE_API_KEY',
   'openprovider': 'AI_API_KEY',
@@ -115,6 +117,8 @@ export function setupLlmRoutes(app: express.Express) {
             'sarvam': 'SARVAM_API_KEY',
             'kilo': 'KILO_API_KEY',
             'opencode': 'OPENCODE_API_KEY',
+            'zed': 'ZED_API_KEY',
+            'copilot': 'COPILOT_API_KEY',
             'kimchi': 'KIMCHI_API_KEY',
             'freemodel_openai': 'FREEMODEL_API_KEY',
             'freemodel_claude': 'FREEMODEL_API_KEY',
@@ -1143,10 +1147,44 @@ ${contextStr}`;
         apiKey = process.env.KILO_API_KEY || '';
       }
       // OpenCode models
-      else if (modelLower.includes('opencode') || modelLower.includes('big pickle') || modelLower.includes('big-pickle') || modelLower.includes('bigpickle')) {
+      else if (
+        modelLower.startsWith('opencode/') ||
+        modelLower.includes('opencode') ||
+        modelLower.includes('big pickle') ||
+        modelLower.includes('big-pickle') ||
+        modelLower.includes('bigpickle') ||
+        modelLower.includes('mimo-v2.5-free') ||
+        modelLower.includes('north-mini-code-free') ||
+        modelLower.includes('nemotron-3-ultra-free') ||
+        modelLower.includes('deepseek-v4-flash-free') ||
+        modelLower.startsWith('gpt-5.') ||
+        modelLower.startsWith('claude-opus-4-') ||
+        modelLower.startsWith('claude-sonnet-4-') ||
+        modelLower.startsWith('claude-fable-') ||
+        modelLower.startsWith('qwen3.7-') ||
+        modelLower.startsWith('qwen3.6-') ||
+        modelLower.startsWith('qwen3.5-') ||
+        modelLower.startsWith('deepseek-v4-') ||
+        modelLower.startsWith('minimax-m2.') ||
+        modelLower.startsWith('glm-5') ||
+        modelLower.startsWith('kimi-k2.') ||
+        modelLower.startsWith('grok-build-')
+      ) {
         provider = 'opencode';
         baseUrl = 'https://opencode.ai/zen/v1';
         apiKey = process.env.OPENCODE_API_KEY || '';
+      }
+      // Zed AI models
+      else if (modelLower.includes('zed')) {
+        provider = 'zed';
+        baseUrl = 'https://api.zed.dev/v1';
+        apiKey = process.env.ZED_API_KEY || '';
+      }
+      // GitHub Copilot models
+      else if (modelLower.includes('copilot')) {
+        provider = 'copilot';
+        baseUrl = 'https://api.githubcopilot.com';
+        apiKey = process.env.COPILOT_API_KEY || '';
       }
       // Cline models
       else if (modelLower.includes('cline')) {

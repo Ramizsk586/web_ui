@@ -3,7 +3,6 @@
  * All tools are sourced from the bridge - no built-in tool duplication.
  */
 import type { ToolDefinition } from './types';
-import { webScrapeTool } from './tools/webScrapeTool';
 import { ALL_WIKI_TOOLS } from './tools/wikiTools';
 
 export const registeredTools: ToolDefinition[] = [];
@@ -16,7 +15,6 @@ export function registerTool(tool: ToolDefinition): void {
 }
 
 // Register default scrape and general Wikipedia tools on startup
-registerTool(webScrapeTool);
 ALL_WIKI_TOOLS.forEach(registerTool);
 
 /**

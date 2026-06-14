@@ -5,8 +5,9 @@ import axios from "axios";
 import { load as loadHtml } from "cheerio";
 import TurndownService from "turndown";
 import { search as ddgSearch } from "duck-duck-scrape";
-import { Type, type Model } from "@earendil-works/pi-ai";
-import { Agent as PiAgent, type AgentEvent as PiAgentEvent, type AgentTool as PiAgentTool } from "@earendil-works/pi-agent-core";
+import { z } from "zod";
+import { streamText, generateText, tool } from "ai";
+import { buildProviderModel } from "./ai_sdk_providers.js";
 import { DEEP_RESEARCH_SYSTEM_PROMPT, getDeepResearchMinimums, getDeepResearchPresetPrompt } from "../src/utils/deepResearchWorkflow";
 import {
   wikiSearch,
@@ -55,6 +56,10 @@ const isOpenAiCompatibleResearchProvider = (provider?: string, baseUrl?: string,
   const normalizedModel = String(model || "").trim().toLowerCase();
 
   if (!normalizedProvider && !normalizedBaseUrl) {
+    return true;
+  }
+
+  if (normalizedProvider === "zed" || normalizedProvider === "copilot") {
     return true;
   }
 
@@ -129,50 +134,33 @@ const createWorkspaceDir = () => {
   return dir;
 };
 
-const buildPiResearchModel = (modelId?: string, provider?: string, baseUrl?: string) => {
-  const normalizedProvider = String(provider || "").trim().toLowerCase();
-  if (normalizedProvider === "anthropic") {
-    return {
-      id: modelId || "claude-3-5-sonnet-20241022",
-      name: modelId || "claude-3-5-sonnet-20241022",
-      provider: "anthropic",
-      api: "anthropic-messages",
-      baseUrl: baseUrl || "",
-      reasoning: true,
-      input: [],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 200000,
-      maxTokens: 8192,
-    } satisfies Model<any>;
-  }
+interface ResearchModel {
+  id: string;
+  provider: string;
+  baseUrl: string;
+}
 
-  if (normalizedProvider.includes("google") || normalizedProvider.includes("gemini")) {
-    return {
-      id: modelId || "gemini-2.5-flash",
-      name: modelId || "gemini-2.5-flash",
-      provider: "google",
-      api: "google-generative-ai",
-      baseUrl: baseUrl || "",
-      reasoning: true,
-      input: [],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 1000000,
-      maxTokens: 8192,
-    } satisfies Model<any>;
+const buildPiResearchModel = (modelId?: string, provider?: string, baseUrl?: string): ResearchModel => {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  let effectiveModelId = modelId || "";
+  let effectiveProvider = provider || "";
+
+  if (normalizedProvider === "anthropic") {
+    effectiveModelId = modelId || "claude-3-5-sonnet-20241022";
+    effectiveProvider = "anthropic";
+  } else if (normalizedProvider.includes("google") || normalizedProvider.includes("gemini")) {
+    effectiveModelId = modelId || "gemini-2.5-flash";
+    effectiveProvider = "google";
+  } else {
+    effectiveModelId = modelId || "gpt-4o-mini";
+    effectiveProvider = provider || "openai";
   }
 
   return {
-    id: modelId || "gpt-4o-mini",
-    name: modelId || "gpt-4o-mini",
-    provider: "openai",
-    api: "openai-completions",
+    id: effectiveModelId,
+    provider: effectiveProvider,
     baseUrl: baseUrl || "",
-    reasoning: true,
-    input: [],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 8192,
-  } satisfies Model<any>;
+  };
 };
 
 const formatToolResult = (value: unknown, maxLen = 4000) => {
@@ -615,12 +603,12 @@ export async function runDeepResearch(params: DeepResearchRunParams): Promise<De
   const piModel = buildPiResearchModel(effectiveModel, params.provider, effectiveBaseUrl);
   const checkpointOne = createCheckpoint("Initial research memory", evidenceLedger, toolCalls);
 
-  const piTools: PiAgentTool<any>[] = [
-    {
-      name: "current_time",
-      label: "Current Time",
+  const researchWorkspace = createWorkspaceDir();
+
+  const piTools: any = {
+    current_time: {
       description: "Get the current local date, time, timezone, timestamp, and ISO datetime before beginning research.",
-      parameters: Type.Object({}),
+      parameters: z.object({}) as any,
       execute: async () => {
         const result = await trackTool("current_time", {}, "clock", async () => {
           const now = new Date();
@@ -631,48 +619,42 @@ export async function runDeepResearch(params: DeepResearchRunParams): Promise<De
             unixMs: now.getTime(),
           };
         });
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "search",
-      label: "Web Search",
+    search: {
       description: "Search the web for recent and relevant sources.",
-      parameters: Type.Object({
-        query: Type.Array(Type.String()),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        query: z.array(z.string()),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("search", { query: paramsValue.query }, "search", async () => {
           const batches = await Promise.all((paramsValue.query || []).map((item: string) => runSearch(item, params.tavilyKey, params.serpKey, params.provider)));
           return (paramsValue.query || []).map((item: string, index: number) => ({ query: item, results: batches[index] }));
         });
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "google_scholar",
-      label: "Scholar Search",
+    google_scholar: {
       description: "Find academic and publication-heavy sources.",
-      parameters: Type.Object({
-        query: Type.Array(Type.String()),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        query: z.array(z.string()),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("google_scholar", { query: paramsValue.query }, "search", async () => {
           const batches = await Promise.all((paramsValue.query || []).map((item: string) => runSearch(`${item} research paper`, params.tavilyKey, params.serpKey, params.provider)));
           return (paramsValue.query || []).map((item: string, index: number) => ({ query: item, results: batches[index] }));
         });
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "visit",
-      label: "Visit Page",
+    visit: {
       description: "Open a web page and extract goal-focused evidence.",
-      parameters: Type.Object({
-        url: Type.Array(Type.String()),
-        goal: Type.String(),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        url: z.array(z.string()),
+        goal: z.string(),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("visit", { url: paramsValue.url, goal: paramsValue.goal }, "globe", async () => {
           const pages = await Promise.all((paramsValue.url || []).map((item: string) => scrapeUrl(item, "markdown", false, false)));
           return (paramsValue.url || []).map((item: string, index: number) => ({
@@ -681,20 +663,18 @@ export async function runDeepResearch(params: DeepResearchRunParams): Promise<De
             evidence: formatToolResult(pages[index]?.rawText, 3000),
           }));
         });
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "web_scrape",
-      label: "Web Scrape",
+    web_scrape: {
       description: "Extract fuller text from a high-value page.",
-      parameters: Type.Object({
-        url: Type.String(),
-        outputFormat: Type.Optional(Type.String()),
-        extractLinks: Type.Optional(Type.Boolean()),
-        extractTables: Type.Optional(Type.Boolean()),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        url: z.string(),
+        outputFormat: z.string().optional(),
+        extractLinks: z.boolean().optional(),
+        extractTables: z.boolean().optional(),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("web_scrape", paramsValue, "globe", async () =>
           scrapeUrl(
             paramsValue.url,
@@ -703,105 +683,96 @@ export async function runDeepResearch(params: DeepResearchRunParams): Promise<De
             Boolean(paramsValue.extractTables)
           )
         );
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "wiki_search",
-      label: "Wiki Search",
+    wiki_search: {
       description: "Search Wikipedia for background context and entities.",
-      parameters: Type.Object({
-        query: Type.String(),
-        limit: Type.Optional(Type.Number()),
-        language: Type.Optional(Type.String()),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        query: z.string(),
+        limit: z.number().optional(),
+        language: z.string().optional(),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("wiki_search", paramsValue, "globe", async () =>
           wikiSearch(paramsValue.query, paramsValue.limit || 5, paramsValue.language || "en")
         );
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "wiki_get_summary",
-      label: "Wiki Summary",
+    wiki_get_summary: {
       description: "Fetch a concise Wikipedia summary.",
-      parameters: Type.Object({
-        pageId: Type.Number(),
-        language: Type.Optional(Type.String()),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        pageId: z.number(),
+        language: z.string().optional(),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("wiki_get_summary", paramsValue, "globe", async () =>
           wikiGetSummary(paramsValue.pageId, paramsValue.language || "en")
         );
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "wiki_get_page",
-      label: "Wiki Page",
+    wiki_get_page: {
       description: "Fetch a detailed Wikipedia page.",
-      parameters: Type.Object({
-        pageId: Type.Number(),
-        language: Type.Optional(Type.String()),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        pageId: z.number(),
+        language: z.string().optional(),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("wiki_get_page", paramsValue, "globe", async () =>
           wikiGetPage(paramsValue.pageId, paramsValue.language || "en")
         );
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-    {
-      name: "wiki_get_related",
-      label: "Wiki Related",
+    wiki_get_related: {
       description: "Find related Wikipedia pages.",
-      parameters: Type.Object({
-        pageId: Type.Number(),
-        limit: Type.Optional(Type.Number()),
-        language: Type.Optional(Type.String()),
-      }),
-      execute: async (_toolCallId, paramsValue: any) => {
+      parameters: z.object({
+        pageId: z.number(),
+        limit: z.number().optional(),
+        language: z.string().optional(),
+      }) as any,
+      execute: async (paramsValue: any) => {
         const result = await trackTool("wiki_get_related", paramsValue, "globe", async () =>
           wikiGetRelated(paramsValue.pageId, paramsValue.limit || 10, paramsValue.language || "en")
         );
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        return JSON.stringify(result);
       },
     },
-  ];
+  };
 
-  const researchWorkspace = createWorkspaceDir();
-  const piAgent = new PiAgent({
-    initialState: {
-      systemPrompt: [
-        DEEP_RESEARCH_SYSTEM_PROMPT,
-        getDeepResearchPresetPrompt(params.preset),
-        `Current date: ${new Date().toISOString().slice(0, 10)}`,
-        `Deep research preset: ${params.preset}`,
-        `Minimum wiki searches: ${minimums.minWikiSearches}`,
-        `Minimum web scrapes: ${minimums.minWebScrapes}`,
-        `Minimum visit calls: ${minimums.minVisits}`,
-        `Minimum search calls: ${minimums.minSearchCalls}`,
-        `Research workspace: ${researchWorkspace}`,
-        `Initial planner outline:\n${initialOutline}`,
-        `Planned research angles:\n${researchAngles.map((angle, index) => `${index + 1}. ${angle.angle} - ${angle.goal} | query: ${angle.query} | source: ${angle.sourceType}`).join("\n")}`,
-        `Compressed research memory checkpoint:\n${formatToolResult(checkpointOne, 1600)}`,
-        "Use the available tools in loops to gather evidence across web search, wiki, visit, and scrape.",
-        "Do not stop after one search pass. Re-search, compare, and refine until the outline is well-supported.",
-        "When evidence is sufficient, write a polished Markdown report with section headings, synthesis, and sources.",
-        "Your final answer must be the complete Markdown report only.",
-      ].join("\n\n"),
-      model: piModel,
-      tools: piTools,
-    },
-    getApiKey: async () => effectiveApiKey,
+  const modelInstance = buildProviderModel({
+    provider: piModel.provider,
+    modelId: piModel.id,
+    apiKey: effectiveApiKey,
+    baseUrl: piModel.baseUrl,
   });
 
-  const activeToolSubsteps = new Map<string, DeepResearchEvent>();
-  let activeReasoningNode: DeepResearchEvent | null = null;
+  const systemPrompt = [
+    DEEP_RESEARCH_SYSTEM_PROMPT,
+    getDeepResearchPresetPrompt(params.preset),
+    `Current date: ${new Date().toISOString().slice(0, 10)}`,
+    `Deep research preset: ${params.preset}`,
+    `Minimum wiki searches: ${minimums.minWikiSearches}`,
+    `Minimum web scrapes: ${(minimums as any).minWebScrapes || minimums.minVisits || 1}`,
+    `Minimum visit calls: ${minimums.minVisits}`,
+    `Minimum search calls: ${minimums.minSearchCalls}`,
+    `Research workspace: ${researchWorkspace}`,
+    `Initial planner outline:\n${initialOutline}`,
+    `Planned research angles:\n${researchAngles.map((angle, index) => `${index + 1}. ${angle.angle} - ${angle.goal} | query: ${angle.query} | source: ${angle.sourceType}`).join("\n")}`,
+    `Compressed research memory checkpoint:\n${formatToolResult(checkpointOne, 1600)}`,
+    "Use the available tools in loops to gather evidence across web search, wiki, visit, and scrape.",
+    "Do not stop after one search pass. Re-search, compare, and refine until the outline is well-supported.",
+    "When evidence is sufficient, write a polished Markdown report with section headings, synthesis, and sources.",
+    "Your final answer must be the complete Markdown report only.",
+  ].join("\n\n");
+
   const reportChunks: string[] = [];
-  piAgent.subscribe(async (event: PiAgentEvent) => {
-    if (event.type === "message_start" && event.message.role === "assistant") {
+  let activeReasoningNode: DeepResearchEvent | null = null;
+
+  const ensureReasoningNodeActive = async () => {
+    if (!activeReasoningNode) {
       activeReasoningNode = {
         id: randomId("dr_ai"),
         type: "ai",
@@ -811,121 +782,73 @@ export async function runDeepResearch(params: DeepResearchRunParams): Promise<De
         resultSummary: "Planning the next research move",
       };
       await emitPipelineNode(activeReasoningNode);
-      return;
     }
+  };
 
-    if (event.type === "message_update" && event.message.role === "assistant") {
-      const chunk = Array.isArray((event.message as any)?.content)
-        ? (event.message as any).content
-            .filter((part: any) => part?.type === "text")
-            .map((part: any) => String(part.text || ""))
-            .join("")
-        : "";
-      if (chunk) {
-        const nextChunk = chunk.slice(reportChunks.join("").length);
-        if (nextChunk) {
-          reportChunks.push(nextChunk);
-          await emit({ type: "report", chunk: nextChunk, report: reportChunks.join("") });
-        }
-      }
-      return;
-    }
-
-    if (event.type === "message_end" && event.message.role === "assistant" && activeReasoningNode) {
+  const ensureReasoningNodeComplete = async (summary: string) => {
+    if (activeReasoningNode) {
       activeReasoningNode.status = "complete";
-      activeReasoningNode.resultSummary = reportChunks.length > 0
-        ? "Updated the research narrative"
-        : "Planned the next research move";
+      activeReasoningNode.resultSummary = summary;
       await emit({ type: "pipeline", node: { ...activeReasoningNode } });
       activeReasoningNode = null;
-      return;
     }
+  };
 
-    if (event.type === "tool_execution_start") {
-      const subNode: DeepResearchEvent = {
-        id: event.toolCallId,
-        type: "tool",
-        label: event.toolName,
-        toolName: event.toolName,
-        status: "active",
-        icon: event.toolName.includes("wiki") || event.toolName.includes("visit") || event.toolName.includes("scrape") ? "globe" : event.toolName.includes("search") ? "search" : "sparkles",
-        argsCount: event.args && typeof event.args === "object" ? Object.keys(event.args).length : 0,
-        resultSummary: formatToolResult(event.args, 180),
-      };
-      activeToolSubsteps.set(event.toolCallId, subNode);
-      await emit({ type: "pipeline", node: { ...subNode } });
-      return;
+  // Start the first reasoning node immediately
+  await ensureReasoningNodeActive();
+
+  const promptText = [
+    `Research question: ${params.query}`,
+    `Required workflow:`,
+    `1. Start with current_time.`,
+    `2. Build evidence through web search, wiki, visit, and scrape in loops.`,
+    `3. Cross-check claims using multiple sources whenever possible.`,
+    `4. Use at least the requested minimum tool coverage from the system prompt.`,
+    `5. End with a detailed Markdown report with a Sources section.`,
+  ].join("\n");
+
+  const resultStream = streamText({
+    model: modelInstance,
+    system: systemPrompt,
+    prompt: promptText,
+    maxSteps: 12,
+    tools: piTools,
+  } as any);
+
+  for await (const chunk of resultStream.fullStream as any) {
+    if (chunk.type === "text-delta") {
+      await ensureReasoningNodeComplete("Updated the research narrative");
+      const textDelta = chunk.text || chunk.textDelta || "";
+      if (textDelta) {
+        reportChunks.push(textDelta);
+        await emit({ type: "report", chunk: textDelta, report: reportChunks.join("") });
+      }
+    } else if (chunk.type === "reasoning-delta") {
+      await ensureReasoningNodeActive();
+    } else if (chunk.type === "tool-call") {
+      await ensureReasoningNodeComplete("Planned the next research move");
+    } else if (chunk.type === "tool-result") {
+      await ensureReasoningNodeActive();
     }
+  }
 
-    if (event.type === "tool_execution_update") {
-      const existing = activeToolSubsteps.get(event.toolCallId);
-      if (!existing) return;
-      existing.resultSummary = formatToolResult(event.partialResult, 220);
-      await emit({ type: "pipeline", node: { ...existing } });
-      return;
-    }
+  await ensureReasoningNodeComplete(reportChunks.length > 0 ? "Updated the research narrative" : "Completed planning");
 
-    if (event.type === "tool_execution_end") {
-      const existing = activeToolSubsteps.get(event.toolCallId);
-      const node: DeepResearchEvent = existing || {
-        id: event.toolCallId,
-        type: "tool",
-        label: event.toolName,
-        toolName: event.toolName,
-        status: "active",
-      };
-      node.status = event.isError ? "failed" : "complete";
-      node.resultSummary = formatToolResult(event.result, 260);
-      activeToolSubsteps.set(event.toolCallId, node);
-      await emit({ type: "pipeline", node: { ...node } });
-    }
-  });
-
-  await piAgent.prompt(
-    [
-      `Research question: ${params.query}`,
-      `Required workflow:`,
-      `1. Start with current_time.`,
-      `2. Build evidence through web search, wiki, visit, and scrape in loops.`,
-      `3. Cross-check claims using multiple sources whenever possible.`,
-      `4. Use at least the requested minimum tool coverage from the system prompt.`,
-      `5. End with a detailed Markdown report with a Sources section.`,
-    ].join("\n")
-  );
-
-  const report = (() => {
-    const assistantMessages = piAgent.state.messages.filter((message: any) => message?.role === "assistant");
-    const lastAssistant = assistantMessages[assistantMessages.length - 1] as any;
-    if (!lastAssistant?.content || !Array.isArray(lastAssistant.content)) {
-      return "Deep Research completed, but no report text was returned.";
-    }
-    const text = lastAssistant.content
-      .filter((part: any) => part?.type === "text")
-      .map((part: any) => part.text || "")
-      .join("\n")
-      .trim();
-    return text || "Deep Research completed, but no report text was returned.";
-  })();
+  const report = reportChunks.join("").trim() || "Deep Research completed, but no report text was returned.";
   await emit({ type: "report", chunk: "", report });
 
   let htmlReport = "";
   try {
-    const htmlAgent = new PiAgent({
-      initialState: {
-        systemPrompt: "Generate a self-contained HTML visual report. Return only a fenced ```html block.",
-        model: piModel,
-      },
-      getApiKey: async () => effectiveApiKey,
+    const htmlResponse = await generateText({
+      model: modelInstance,
+      system: "Generate a self-contained HTML visual report. Return only a fenced ```html block.",
+      prompt: buildVisualReportPrompt({
+        query: params.query,
+        markdownReport: report,
+        imageUrls: uniqueStrings(imageLedger),
+      }),
     });
-    await htmlAgent.prompt(buildVisualReportPrompt({
-      query: params.query,
-      markdownReport: report,
-      imageUrls: uniqueStrings(imageLedger),
-    }));
-    const htmlAssistant = [...htmlAgent.state.messages].reverse().find((message: any) => message?.role === "assistant") as any;
-    const htmlReportRaw = Array.isArray(htmlAssistant?.content)
-      ? htmlAssistant.content.map((part: any) => part?.text || "").join("\n")
-      : "";
+    const htmlReportRaw = htmlResponse.text || "";
     htmlReport = extractHtmlBlock(htmlReportRaw) || htmlReportRaw.trim();
   } catch (error) {
     htmlReport = "";

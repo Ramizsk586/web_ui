@@ -416,7 +416,10 @@ export function useLlamaBridge({
 
       const text = await response.text();
       try {
-        return normalizeLlmResponse(JSON.parse(text));
+        const parsed = JSON.parse(text);
+        const normalized = normalizeLlmResponse(parsed);
+        recordUsage(selectedLlamaModel || activeModelId, messagesPrompt, normalized);
+        return normalized;
       } catch {
         throw new Error(`Failed to parse response: ${text.substring(0, 100)}`);
       }
@@ -625,7 +628,10 @@ export function useLlamaBridge({
           throw new Error(`[llama-server ${response.status}] ${serverError}`);
         }
 
-        return normalizeLlmResponse(await response.json());
+        const parsed = await response.json();
+        const normalized = normalizeLlmResponse(parsed);
+        recordUsage(activeModelId, messagesPrompt, normalized);
+        return normalized;
       };
 
       try {
@@ -754,7 +760,10 @@ export function useLlamaBridge({
       throw new Error(`Server returned status ${response.status} with an empty or non-JSON response body.`);
     }
 
-    return normalizeLlmResponse(await response.json());
+    const parsed = await response.json();
+    const normalized = normalizeLlmResponse(parsed);
+    recordUsage(activeModelId, messagesPrompt, normalized);
+    return normalized;
   };
 
   return {
@@ -771,4 +780,168 @@ export function useLlamaBridge({
     handleLoadLlamaModels,
     callLlamaBridge
   };
+}
+
+function getModelPricing(modelId: string): { input: number; output: number } {
+  const model = String(modelId || '').toLowerCase();
+  
+  if (
+    model.includes('free') || 
+    model.includes('big-pickle') || 
+    model.includes('big_pickle') || 
+    model.includes('bigpickle')
+  ) {
+    return { input: 0, output: 0 };
+  }
+
+  if (model.includes('minimax-m2.7') || model.includes('minimax-m2.5')) {
+    return { input: 0.30, output: 1.20 };
+  }
+  if (model.includes('glm-5.1')) {
+    return { input: 1.40, output: 4.40 };
+  }
+  if (model.includes('glm-5')) {
+    return { input: 1.00, output: 3.20 };
+  }
+  if (model.includes('kimi-k2.5')) {
+    return { input: 0.60, output: 3.00 };
+  }
+  if (model.includes('kimi-k2.6')) {
+    return { input: 0.95, output: 4.00 };
+  }
+  if (model.includes('qwen3.7-max')) {
+    return { input: 2.50, output: 7.50 };
+  }
+  if (model.includes('qwen3.7-plus')) {
+    return { input: 0.40, output: 1.60 };
+  }
+  if (model.includes('qwen3.6-plus')) {
+    return { input: 0.50, output: 3.00 };
+  }
+  if (model.includes('qwen3.5-plus')) {
+    return { input: 0.20, output: 1.20 };
+  }
+  if (model.includes('deepseek-v4-pro')) {
+    return { input: 1.74, output: 3.48 };
+  }
+  if (model.includes('deepseek-v4-flash')) {
+    return { input: 0.14, output: 0.28 };
+  }
+  if (model.includes('grok-build-0.1')) {
+    return { input: 1.00, output: 2.00 };
+  }
+  if (model.includes('claude-fable-5')) {
+    return { input: 10.00, output: 50.00 };
+  }
+  if (model.includes('claude-opus-4-')) {
+    return { input: 5.00, output: 25.00 };
+  }
+  if (model.includes('claude-sonnet-4-6') || model.includes('claude-sonnet-4.6')) {
+    return { input: 3.00, output: 15.00 };
+  }
+  if (model.includes('claude-sonnet-4.5') || model.includes('claude-sonnet-4-5')) {
+    return { input: 3.00, output: 15.00 };
+  }
+  if (model.includes('claude-sonnet-4')) {
+    return { input: 3.00, output: 15.00 };
+  }
+  if (model.includes('claude-haiku-4-5') || model.includes('claude-3-5-haiku') || model.includes('claude-haiku-3.5')) {
+    return { input: 1.00, output: 5.00 };
+  }
+  if (model.includes('gemini-3.5-flash')) {
+    return { input: 1.50, output: 9.00 };
+  }
+  if (model.includes('gemini-3.1-pro')) {
+    return { input: 2.00, output: 12.00 };
+  }
+  if (model.includes('gemini-3-flash')) {
+    return { input: 0.50, output: 3.00 };
+  }
+  if (model.includes('gpt-5.5-pro')) {
+    return { input: 30.00, output: 180.00 };
+  }
+  if (model.includes('gpt-5.5')) {
+    return { input: 5.00, output: 30.00 };
+  }
+  if (model.includes('gpt-5.4-pro')) {
+    return { input: 30.00, output: 180.00 };
+  }
+  if (model.includes('gpt-5.4-mini')) {
+    return { input: 0.75, output: 4.50 };
+  }
+  if (model.includes('gpt-5.4-nano')) {
+    return { input: 0.20, output: 1.25 };
+  }
+  if (model.includes('gpt-5.4')) {
+    return { input: 2.50, output: 15.00 };
+  }
+  if (model.includes('gpt-5.3') || model.includes('gpt-5.2') || model.includes('gpt-5.1') || model.includes('gpt-5')) {
+    return { input: 1.07, output: 8.50 };
+  }
+
+  if (model.includes('gpt-4o-mini')) {
+    return { input: 0.15, output: 0.60 };
+  }
+  if (model.includes('gpt-4o')) {
+    return { input: 2.50, output: 10.00 };
+  }
+  if (model.includes('claude-3-5-sonnet')) {
+    return { input: 3.00, output: 15.00 };
+  }
+  if (model.includes('claude-3-5-haiku')) {
+    return { input: 0.80, output: 4.00 };
+  }
+  if (model.includes('deepseek-chat') || model.includes('deepseek-coder') || model.includes('deepseek-reasoner')) {
+    return { input: 0.14, output: 0.28 };
+  }
+  if (model.includes('gemini-2.5-flash') || model.includes('gemini-1.5-flash')) {
+    return { input: 0.075, output: 0.30 };
+  }
+  if (model.includes('gemini-2.5-pro') || model.includes('gemini-1.5-pro')) {
+    return { input: 1.25, output: 5.00 };
+  }
+  if (model.includes('llama')) {
+    return { input: 0.20, output: 0.20 };
+  }
+
+  return { input: 0.50, output: 1.50 };
+}
+
+function recordUsage(model: string, requestMessages: any[], responseData: any) {
+  try {
+    const promptTokens = responseData?.usage?.prompt_tokens || 
+      requestMessages.reduce((acc, m) => acc + (typeof m.content === 'string' ? Math.ceil(m.content.length / 4) : 100), 0);
+      
+    const contentText = responseData?.choices?.[0]?.message?.content || '';
+    const completionTokens = responseData?.usage?.completion_tokens || 
+      Math.ceil(contentText.length / 4);
+
+    const totalTokens = promptTokens + completionTokens;
+
+    const raw = localStorage.getItem('lumina_usage_stats');
+    const stats = raw ? JSON.parse(raw) : { totalTokens: 0, totalCost: 0, byModel: {} };
+
+    const pricing = getModelPricing(model);
+    const promptCost = (promptTokens / 1000000) * pricing.input;
+    const completionCost = (completionTokens / 1000000) * pricing.output;
+    const transactionCost = promptCost + completionCost;
+
+    stats.totalTokens += totalTokens;
+    stats.totalCost += transactionCost;
+
+    if (!stats.byModel) {
+      stats.byModel = {};
+    }
+    if (!stats.byModel[model]) {
+      stats.byModel[model] = { tokens: 0, cost: 0, promptTokens: 0, completionTokens: 0 };
+    }
+    stats.byModel[model].tokens += totalTokens;
+    stats.byModel[model].promptTokens += promptTokens;
+    stats.byModel[model].completionTokens += completionTokens;
+    stats.byModel[model].cost += transactionCost;
+
+    localStorage.setItem('lumina_usage_stats', JSON.stringify(stats));
+  } catch (e) {
+    console.error('Failed to record token usage', e);
+  }
 }

@@ -70,8 +70,8 @@ interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
   setUseLocalModelsOnly?: (val: boolean) => void;
-  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio' | 'anthropic';
-  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio' | 'anthropic') => void;
+  activeSettingsTab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio' | 'anthropic' | 'usage';
+  setActiveSettingsTab: (tab: 'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'agents' | 'convex' | 'composio' | 'anthropic' | 'usage') => void;
   availableModels: any[];
   useBubbles: boolean;
   setUseBubbles: (val: boolean) => void;
@@ -429,6 +429,7 @@ export function SettingsModal({
   availableModels
 }: SettingsModalProps) {
   // Rich Profile State
+  const [usageResetCount, setUsageResetCount] = React.useState(0);
   const [timezone, setTimezone] = React.useState(() => localStorage.getItem('lumina_profile_timezone') || 'GMT+05:30');
   const [preferredLanguages, setPreferredLanguages] = React.useState<string[]>(() => {
     try {
@@ -1945,6 +1946,7 @@ export function SettingsModal({
               { id: 'llama_cpp', label: 'llama.cpp', icon: <Box size={16} /> },
               { id: 'models', label: 'Models', icon: <Brain size={16} /> },
               { id: 'anthropic', label: 'Anthropic Proxy', icon: <Cpu size={16} /> },
+              { id: 'usage', label: 'Usage', icon: <Activity size={16} /> },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -4273,6 +4275,116 @@ export function SettingsModal({
 
             {activeSettingsTab === 'anthropic' && (
               <AnthropicProxyPanel availableModels={availableModels} aiProviderProfiles={aiProviderProfiles} />
+            )}
+
+            {activeSettingsTab === 'usage' && (
+              <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 text-left font-sans">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Token Usage & Cost Analysis</h3>
+                  <p className="text-xs text-gray-500 mb-6">
+                    Track token consumption, query volume, and calculated costs across all models.
+                  </p>
+
+                  {(() => {
+                    const rawStats = localStorage.getItem('lumina_usage_stats');
+                    const stats = rawStats ? JSON.parse(rawStats) : { totalTokens: 0, totalCost: 0, byModel: {} };
+                    const modelsList = Object.entries(stats.byModel || {}).map(([modelId, data]: [string, any]) => ({
+                      modelId,
+                      tokens: data.tokens || 0,
+                      promptTokens: data.promptTokens || 0,
+                      completionTokens: data.completionTokens || 0,
+                      cost: data.cost || 0,
+                    })).sort((a, b) => b.tokens - a.tokens);
+
+                    const handleResetStats = () => {
+                      localStorage.setItem('lumina_usage_stats', JSON.stringify({ totalTokens: 0, totalCost: 0, byModel: {} }));
+                      if (showToast) showToast('Usage statistics reset successfully');
+                      setUsageResetCount(prev => prev + 1);
+                    };
+
+                    if (!stats.totalTokens || stats.totalTokens === 0) {
+                      return (
+                        <div className="rounded-xl border border-dashed border-gray-200 dark:border-white/10 bg-gray-50/50 dark:bg-white/[0.02] p-8 text-center text-xs text-gray-500">
+                          <p className="font-semibold text-sm mb-1 text-gray-400">No Usage Recorded Yet</p>
+                          <p>Start chatting or running agents to track your token usage and costs here.</p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-6">
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="p-4 rounded-xl border border-gray-100 dark:border-white/5 bg-gray-50/30 dark:bg-white/[0.01]">
+                            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider animate-pulse">Total Tokens Consumed</span>
+                            <div className="text-2xl font-bold font-mono mt-1 text-blue-500 dark:text-blue-400">
+                              {stats.totalTokens.toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="p-4 rounded-xl border border-gray-100 dark:border-white/5 bg-gray-50/30 dark:bg-white/[0.01]">
+                            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Total Estimated Cost</span>
+                            <div className="text-2xl font-bold font-mono mt-1 text-emerald-500 dark:text-emerald-400">
+                              ${stats.totalCost.toFixed(4)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Model List */}
+                        <div className="space-y-4">
+                          <h4 className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Usage by Model</h4>
+                          <div className="space-y-3">
+                            {modelsList.map((m) => {
+                              const tokenPercent = stats.totalTokens > 0 ? (m.tokens / stats.totalTokens) * 100 : 0;
+                              return (
+                                <div key={m.modelId} className="p-4 rounded-xl border border-gray-100 dark:border-white/5 bg-gray-50/20 dark:bg-white/[0.01] space-y-2">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                      <div className="font-semibold text-sm text-gray-800 dark:text-gray-200 truncate max-w-xs md:max-w-md">
+                                        {m.modelId}
+                                      </div>
+                                      <div className="text-[10px] text-gray-400 mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                                        <span>Prompt: <strong className="font-mono">{m.promptTokens.toLocaleString()}</strong></span>
+                                        <span>Completion: <strong className="font-mono">{m.completionTokens.toLocaleString()}</strong></span>
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <div className="font-bold font-mono text-sm text-gray-800 dark:text-gray-200">
+                                        {m.tokens.toLocaleString()} tokens
+                                      </div>
+                                      <div className="text-xs font-semibold text-emerald-500 dark:text-emerald-400 mt-0.5">
+                                        ${m.cost.toFixed(4)}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Progress bar */}
+                                  <div className="w-full h-1.5 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
+                                    <div 
+                                      className="h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all"
+                                      style={{ width: `${tokenPercent}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Reset button */}
+                        <div className="flex justify-end pt-2">
+                          <button
+                            onClick={handleResetStats}
+                            className="px-3 py-1.5 rounded-xl text-xs font-semibold text-red-500 hover:text-red-600 bg-red-500/10 hover:bg-red-500/20 border border-red-500/10 transition-colors flex items-center gap-1.5"
+                          >
+                            <Trash2 size={13} />
+                            Reset Usage Statistics
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </motion.div>
             )}
 
             {activeSettingsTab === 'agents' && (

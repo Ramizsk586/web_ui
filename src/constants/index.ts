@@ -57,6 +57,8 @@ export const CLOUD_PROVIDERS = [
   { id: 'sarvamai', label: 'Sarvam AI', endpoint: 'https://api.sarvam.ai/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'kilo', label: 'Kilo AI', endpoint: 'https://api.kilo.ai/api/gateway', key: '', icon: React.createElement(Brain, { size: 13 }) },
   { id: 'opencode', label: 'OpenCode Zen', endpoint: 'https://opencode.ai/zen/v1', key: '', icon: React.createElement(Code, { size: 13 }) },
+  { id: 'zed', label: 'Zed AI', endpoint: 'https://api.zed.dev/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
+  { id: 'copilot', label: 'GitHub Copilot', endpoint: 'https://api.githubcopilot.com', key: '', icon: React.createElement(Code, { size: 13 }) },
   { id: 'cline', label: 'Cline', endpoint: 'https://api.cline.bot', key: '', icon: React.createElement(Terminal, { size: 13 }) },
 ];
 

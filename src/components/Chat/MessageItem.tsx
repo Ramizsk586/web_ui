@@ -742,8 +742,6 @@ function MessageItemComponent({
   const [feedback, setFeedback] = useState<'like' | 'dislike' | null>(null);
   const [isThinkingPanelCollapsed, setIsThinkingPanelCollapsed] = useState(false);
   const [thinkingElapsedMs, setThinkingElapsedMs] = useState(0);
-  const [isScrapePanelCollapsed, setIsScrapePanelCollapsed] = useState(false);
-  const [scrapeElapsedMs, setScrapeElapsedMs] = useState(0);
 
   useEffect(() => {
     setIsPlayingSpeech(globalSpeechController.getActiveId() === message.id);
@@ -817,11 +815,6 @@ function MessageItemComponent({
     return isCoderTool(toolName) || isWebSearchTool(toolName);
   };
 
-  const isScrapeTool = (toolName: string) => {
-    const name = toolName.toLowerCase();
-    return name === 'web_scrape' || name === 'fetch_url' || name.includes('scrape');
-  };
-
   const toolCallsById = useMemo(() => {
     return new Map(toolCalls.map((node) => [node.id, node]));
   }, [toolCalls]);
@@ -829,7 +822,6 @@ function MessageItemComponent({
   const toolCallsForSummary = useMemo(() => {
     return toolCalls
       .filter(node => node.id !== 'thinking-node')
-      .filter(node => !isScrapeTool(node.toolName || ''))
       .filter(node => shouldShowTool(node.toolName || ''));
   }, [toolCalls]);
 
@@ -857,141 +849,8 @@ function MessageItemComponent({
     return toolCalls
       .filter(node => node.id !== 'thinking-node')
       .filter(node => !message.content?.includes(`[[tool_call:${node.id}]]`))
-      .filter(node => !isScrapeTool(node.toolName || ''))
       .filter(node => shouldShowTool(node.toolName || ''));
   }, [toolCalls, message.content]);
-
-  const scrapeNodes = useMemo(() => {
-    return toolCalls
-      .filter(node => node.id !== 'thinking-node')
-      .filter(node => isScrapeTool(node.toolName || ''));
-  }, [toolCalls]);
-
-  const activeScrapeNode = useMemo(() => {
-    if (scrapeNodes.length === 0) return null;
-    return scrapeNodes.find(node => node.status === 'active') || scrapeNodes[scrapeNodes.length - 1];
-  }, [scrapeNodes]);
-
-  const scrapeProgressState = useMemo(() => {
-    if (!activeScrapeNode) return null;
-
-    const scrapeResult = scrapingResults.get(activeScrapeNode.id);
-    const startedAtValue = message.startedAt ?? message.timestamp;
-    const startedAtMs = startedAtValue
-      ? (startedAtValue instanceof Date ? startedAtValue.getTime() : new Date(startedAtValue).getTime())
-      : Date.now();
-    const elapsedMs = activeScrapeNode.status === 'active'
-      ? scrapeElapsedMs
-      : Math.max(0, Date.now() - startedAtMs);
-    const urlMatch = activeScrapeNode.label.match(/\(([^)]+)\)/);
-    const resolvedUrl = scrapeResult?.url || activeScrapeNode.filePath || urlMatch?.[1] || '';
-    const requestedUrl = scrapeResult?.requestedUrl || '';
-    const rawUrl = resolvedUrl || requestedUrl;
-    const title = scrapeResult?.title || '';
-    const cleanUrl = rawUrl || title;
-
-    let domain = 'Target page';
-    try {
-      if (cleanUrl) domain = new URL(cleanUrl).hostname;
-    } catch {}
-
-    const baseSteps = [
-      'Connecting to source',
-      'Loading page shell',
-      'Collecting text blocks',
-      'Collecting links and media',
-      'Structuring scrape payload',
-      'Preparing answer context'
-    ];
-
-    let activeStepIndex = 0;
-    let steps = baseSteps.map((label, idx) => ({
-      label,
-      status: idx === 0 ? 'active' : 'pending' as 'pending' | 'active' | 'complete' | 'failed',
-      progress: idx === 0 ? 12 : 0
-    }));
-
-    if (activeScrapeNode.status === 'complete' || scrapeResult) {
-      activeStepIndex = baseSteps.length - 1;
-      steps = baseSteps.map((label) => ({ label, status: 'complete' as const, progress: 100 }));
-    } else if (activeScrapeNode.status === 'failed') {
-      activeStepIndex = Math.min(baseSteps.length - 1, Math.floor(elapsedMs / 2200));
-      steps = baseSteps.map((label, idx) => ({
-        label,
-        status: idx < activeStepIndex ? 'complete' as const : idx === activeStepIndex ? 'failed' as const : 'pending' as const,
-        progress: idx < activeStepIndex ? 100 : idx === activeStepIndex ? 100 : 0
-      }));
-    } else {
-      let currentStepProgress = 12;
-      if (elapsedMs < 1800) {
-        activeStepIndex = 0;
-        currentStepProgress = Math.min(96, 12 + Math.floor(elapsedMs / 35));
-      } else if (elapsedMs < 4200) {
-        activeStepIndex = 1;
-        currentStepProgress = Math.min(96, 10 + Math.floor((elapsedMs - 1800) / 40));
-      } else if (elapsedMs < 7000) {
-        activeStepIndex = 2;
-        currentStepProgress = Math.min(96, 8 + Math.floor((elapsedMs - 4200) / 38));
-      } else if (elapsedMs < 9400) {
-        activeStepIndex = 3;
-        currentStepProgress = Math.min(96, 8 + Math.floor((elapsedMs - 7000) / 42));
-      } else if (elapsedMs < 11800) {
-        activeStepIndex = 4;
-        currentStepProgress = Math.min(96, 10 + Math.floor((elapsedMs - 9400) / 45));
-      } else {
-        activeStepIndex = 5;
-        currentStepProgress = Math.min(96, 12 + Math.floor((elapsedMs - 11800) / 48));
-      }
-
-      steps = baseSteps.map((label, idx) => ({
-        label,
-        status: idx < activeStepIndex ? 'complete' as const : idx === activeStepIndex ? 'active' as const : 'pending' as const
-        ,
-        progress: idx < activeStepIndex ? 100 : idx === activeStepIndex ? currentStepProgress : 0
-      }));
-    }
-
-    const visibleStep =
-      activeScrapeNode.status === 'complete' || scrapeResult
-        ? null
-        : steps.find((step) => step.status === 'active' || step.status === 'failed') || null;
-
-    return {
-      node: activeScrapeNode,
-      scrapeResult,
-      domain,
-      title: title || domain,
-      resolvedUrl,
-      requestedUrl,
-      steps,
-      visibleStep,
-      linksFound: scrapeResult?.links?.length || 0
-    };
-  }, [activeScrapeNode, scrapingResults, message.startedAt, message.timestamp, scrapeElapsedMs]);
-
-  useEffect(() => {
-    if (activeScrapeNode?.status === 'active') {
-      setIsScrapePanelCollapsed(false);
-    }
-  }, [activeScrapeNode?.status, activeScrapeNode?.id]);
-
-  useEffect(() => {
-    if (activeScrapeNode?.status !== 'active') return;
-
-    const getStartedAt = () => {
-      const raw = message.startedAt ?? message.timestamp;
-      if (!raw) return Date.now();
-      return raw instanceof Date ? raw.getTime() : new Date(raw).getTime();
-    };
-
-    const updateElapsed = () => {
-      setScrapeElapsedMs(Math.max(0, Date.now() - getStartedAt()));
-    };
-
-    updateElapsed();
-    const interval = window.setInterval(updateElapsed, 400);
-    return () => window.clearInterval(interval);
-  }, [activeScrapeNode?.status, message.startedAt, message.timestamp]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -1169,7 +1028,7 @@ function MessageItemComponent({
       if (!contentToProcess && (!toolCalls || toolCalls.length === 0)) return null;
       if (!contentToProcess.includes('[[tool_call:') && toolCalls && toolCalls.length > 0) {
         let toolIdx = 0;
-        const filteredTools = toolCalls.filter(node => node.id !== 'thinking-node' && !isScrapeTool(node.toolName || ''));
+        const filteredTools = toolCalls.filter(node => node.id !== 'thinking-node');
         const thinkParts = contentToProcess.split(/(<\/think>)/gi);
         const newParts: string[] = [];
         for (const part of thinkParts) {
@@ -1195,7 +1054,7 @@ function MessageItemComponent({
             const toolMatch = part.match(/^\[\[tool_call:([a-zA-Z0-9_-]+)\]\]$/);
             if (toolMatch) {
               const node = toolCallsById.get(toolMatch[1]);
-              if (!node || isScrapeTool(node.toolName || '')) return null;
+              if (!node) return null;
               return (
                 <div key={idx} className="my-4">
                   <CoderToolActivity
@@ -1262,9 +1121,6 @@ function MessageItemComponent({
               return null;
             }
             if (!node) {
-              return null;
-            }
-            if (isScrapeTool(node.toolName || '')) {
               return null;
             }
 
@@ -1582,128 +1438,6 @@ function MessageItemComponent({
               sources={message.sources || []} 
               isSearching={message.isSearching}
             />
-          )}
-          {scrapeProgressState && (
-            <div className="px-1 w-full max-w-full overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setIsScrapePanelCollapsed(!isScrapePanelCollapsed)}
-                className="flex items-center gap-2 text-[12px] text-zinc-300 font-medium mb-3 w-fit max-w-full cursor-pointer"
-              >
-                <span>
-                  {scrapeProgressState.node.status === 'complete'
-                    ? 'Web scrape'
-                    : scrapeProgressState.node.status === 'failed'
-                      ? 'Web scrape failed'
-                      : `Web scraping ${(scrapeElapsedMs / 1000).toFixed(1)}s`}
-                </span>
-                <ChevronDown
-                  size={12}
-                  className={`transition-transform duration-200 ${isScrapePanelCollapsed ? '-rotate-90' : 'rotate-0'}`}
-                />
-              </button>
-              <AnimatePresence initial={false}>
-                {!isScrapePanelCollapsed && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.22, ease: 'easeInOut' }}
-                    className="overflow-hidden w-full max-w-full"
-                  >
-                    <div className="border-l border-zinc-600/70 pl-4 ml-1 max-w-full">
-                      <div className="flex items-center gap-2 text-[13px] text-zinc-200 break-words">
-                        <Globe size={13} className="text-sky-400 shrink-0" />
-                        <span>{scrapeProgressState.title}</span>
-                      </div>
-                      <div className="mt-1 text-[12px] text-zinc-500 break-words">
-                        {scrapeProgressState.domain}
-                      </div>
-                      <div className="mt-4">
-                        <AnimatePresence mode="wait" initial={false}>
-                          {scrapeProgressState.visibleStep && (
-                            <motion.div
-                              key={`${scrapeProgressState.visibleStep.label}-${scrapeProgressState.visibleStep.status}`}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              exit={{ opacity: 0, y: -10 }}
-                              transition={{ duration: 0.2, ease: 'easeOut' }}
-                              className="space-y-1.5"
-                            >
-                              <div className="flex items-center justify-between gap-3 text-[12px]">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span
-                                    className={`w-2 h-2 rounded-full shrink-0 ${
-                                      scrapeProgressState.visibleStep.status === 'failed'
-                                        ? 'bg-rose-400'
-                                        : 'bg-sky-400 animate-pulse'
-                                    }`}
-                                  />
-                                  <span
-                                    className={`truncate ${
-                                      scrapeProgressState.visibleStep.status === 'failed'
-                                        ? 'text-rose-400'
-                                        : 'text-sky-300'
-                                    }`}
-                                  >
-                                    {scrapeProgressState.visibleStep.label}
-                                  </span>
-                                </div>
-                                <span className="text-[11px] text-zinc-500 shrink-0">
-                                  {scrapeProgressState.visibleStep.progress}%
-                                </span>
-                              </div>
-                              <div className="h-1.5 rounded-full bg-zinc-800/90 overflow-hidden">
-                                <motion.div
-                                  initial={false}
-                                  animate={{ width: `${scrapeProgressState.visibleStep.progress}%` }}
-                                  transition={{ duration: 0.45, ease: 'easeOut' }}
-                                  className={`h-full rounded-full ${
-                                    scrapeProgressState.visibleStep.status === 'failed'
-                                      ? 'bg-rose-400'
-                                      : 'bg-sky-400'
-                                  }`}
-                                />
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-
-                      {(scrapeProgressState.node.status === 'complete' || scrapeProgressState.scrapeResult) && (
-                        <div className="mt-5">
-                          <a
-                            href={scrapeProgressState.resolvedUrl || scrapeProgressState.requestedUrl || '#'}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-3 hover:bg-zinc-900/70 transition-colors"
-                          >
-                            <Globe size={14} className="text-sky-400 shrink-0 mt-0.5" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[12px] text-zinc-200 truncate">
-                                {scrapeProgressState.title}
-                              </div>
-                              <div className="mt-1 text-[11px] text-zinc-500 truncate">
-                                {scrapeProgressState.domain}
-                              </div>
-                            </div>
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                    {scrapeProgressState.node.status !== 'complete' && scrapeProgressState.node.status !== 'failed' && (
-                      <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-400">
-                        <span className="relative flex h-3 w-3 shrink-0">
-                          <span className="absolute inline-flex h-full w-full rounded-full bg-sky-400/40 animate-ping" />
-                          <span className="relative inline-flex h-3 w-3 rounded-full bg-sky-400" />
-                        </span>
-                        <span>Collecting realtime page data...</span>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
           )}
           {!isCoderMode && message.thinking && !message.thinkContent && !message.isThinking && (
             <div className="px-1 w-full max-w-full overflow-hidden">
