@@ -10,7 +10,7 @@
 
 // Dependencies: react-syntax-highlighter @types/react-syntax-highlighter
 
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -727,6 +727,18 @@ export default function AppContent({
 
   const activeSources = activeSourcesMessage?.sources || [];
 
+  // Pre-compiled regex patterns for model name cleaning (performance optimization)
+  const MODEL_NAME_PATTERNS = useMemo(() => [
+    { match: /\.(gguf|ggfu|bin|tar|gz|zip)$/i, replace: '' },
+    { match: /[-_]?[qQ][0-9](_[a-zA-Z0-9_]+)?/g, replace: '' },
+    { match: /[-_]?gguf$/i, replace: '' },
+    { match: /[-_]?ggfu$/i, replace: '' },
+    { match: /\s+GGUF$/i, replace: '' },
+    { match: /\s+GGFU$/i, replace: '' },
+    { match: /[-_]+/g, replace: ' ' },
+    { match: /\s+/g, replace: ' ' },
+  ], []);
+
   const activeModelList = useMemo(() => {
     const list = useLocalModelsOnly
       ? downloadedModels.length > 0
@@ -738,24 +750,20 @@ export default function AppContent({
 
     return list.map(model => {
       let cleaned = model.name || model.id;
-      if (cleaned.includes('/')) {
-        cleaned = cleaned.split('/').pop() || cleaned;
+      const slashIdx = cleaned.lastIndexOf('/');
+      if (slashIdx >= 0) {
+        cleaned = cleaned.slice(slashIdx + 1);
       }
       cleaned = cleaned.replace(/\s*\(.*?\)\s*/g, '');
-      cleaned = cleaned.replace(/\.(gguf|ggfu|bin|tar|gz|zip)$/i, '');
-      cleaned = cleaned.replace(/[-_]?[qQ][0-9](_[a-zA-Z0-9_]+)?/g, '');
-      cleaned = cleaned.replace(/[-_]?gguf$/i, '');
-      cleaned = cleaned.replace(/[-_]?ggfu$/i, '');
-      cleaned = cleaned.replace(/\s+GGUF$/i, '');
-      cleaned = cleaned.replace(/\s+GGFU$/i, '');
-      cleaned = cleaned.replace(/[-_]+/g, ' ');
-      cleaned = cleaned.replace(/\s+/g, ' ');
+      for (const p of MODEL_NAME_PATTERNS) {
+        cleaned = cleaned.replace(p.match, p.replace);
+      }
       return {
         ...model,
         name: cleaned.trim()
       };
     });
-  }, [availableModels, useLocalModelsOnly, downloadedModels]);
+  }, [availableModels, useLocalModelsOnly, downloadedModels, MODEL_NAME_PATTERNS]);
 
   const setActiveModelId = (id: string, providerProfileId?: string) => {
     if (providerProfileId && handleSelectAiProfileModel) {
@@ -788,11 +796,14 @@ export default function AppContent({
     );
   };
 
+  // Deferred search query to avoid filtering on every keystroke
+  const deferredModelSearchQuery = useDeferredValue(modelSearchQuery);
+
   const filteredModelList = useMemo(() => {
-    const query = modelSearchQuery.trim().toLowerCase();
+    const query = deferredModelSearchQuery.trim().toLowerCase();
     if (!query) return activeModelList;
     return activeModelList.filter(model => model.name.toLowerCase().includes(query) || model.id.toLowerCase().includes(query));
-  }, [activeModelList, modelSearchQuery]);
+  }, [activeModelList, deferredModelSearchQuery]);
 
   const normalizedModelSearchQuery = useMemo(
     () => modelSearchQuery.trim().toLowerCase(),

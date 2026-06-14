@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Globe,
@@ -199,7 +199,7 @@ export interface ChatBoxPanelProps {
   researchState?: any;
 }
 
-export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
+const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
   isCenteredState = false,
   theme,
   isWhiteboardOpen,
@@ -3083,3 +3083,20 @@ export const ChatBoxPanel: React.FC<ChatBoxPanelProps> = ({
     </div>
   );
 };
+
+// Memoize to prevent unnecessary re-renders on parent state changes
+export const ChatBoxPanel = memo(ChatBoxPanelBase, (prevProps, nextProps) => {
+  // Custom comparison for props that shouldn't trigger re-renders
+  const ignoreProps = ['adjustTextareaHeight', 'handleKeyDown', 'handleFileAttach', 'handleScreenshot'];
+  const prevKeys = Object.keys(prevProps).filter(k => !ignoreProps.includes(k));
+  const nextKeys = Object.keys(nextProps).filter(k => !ignoreProps.includes(k));
+  
+  if (prevKeys.length !== nextKeys.length) return false;
+  
+  for (const key of prevKeys) {
+    if (prevProps[key as keyof ChatBoxPanelProps] !== nextProps[key as keyof ChatBoxPanelProps]) {
+      return false;
+    }
+  }
+  return true;
+});
