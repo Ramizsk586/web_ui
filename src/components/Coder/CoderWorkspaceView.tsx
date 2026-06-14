@@ -57,7 +57,6 @@ interface CoderWorkspaceViewProps {
   handleSetCanvasView: (view: 'code' | 'preview') => void;
   handleUpdateTodoPlan: (id: string, plan: any) => void;
   handleStartBuildingBtn: (messageId: string) => void;
-  scrapingResults: any;
   wikiResults: any;
   handleSend: (event?: any, options?: any) => void;
   renderChatBox: (isCentered: boolean) => React.ReactNode;
@@ -116,7 +115,6 @@ export default function CoderWorkspaceView({
   handleSetCanvasView,
   handleUpdateTodoPlan,
   handleStartBuildingBtn,
-  scrapingResults,
   wikiResults,
   handleSend,
   renderChatBox,
@@ -587,7 +585,6 @@ export default function CoderWorkspaceView({
                       showToast={showToast}
                       onUpdateTodoPlan={handleUpdateTodoPlan}
                       onStartBuilding={handleStartBuildingBtn}
-                      scrapingResults={scrapingResults}
                       wikiResults={wikiResults}
                       onSendMessage={handleSend}
                     />

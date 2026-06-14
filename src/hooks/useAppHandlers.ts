@@ -16,7 +16,21 @@ import {
 import { SKILLS } from '../constants';
 import { Chat, Message, ToolCallNode } from '../types';
 import { CoderPermissionMode } from '../types';
-import { scrapeUrl, ScrapeResult } from '../services/scrapingService';
+
+// Web scraping has been removed - stub returns error
+const scrapeUrl = async (_options: any) => ({
+  url: _options?.url || '',
+  title: 'Web Scraping Disabled',
+  statusCode: 503,
+  scrapedAt: new Date().toISOString(),
+  data: {},
+  error: 'Web scraping has been disabled in this deployment.'
+});
+
+// Stubs for removed scraping state
+const setScrapingResults = (_prev: any) => new Map();
+const setActiveScrapingJobs = (_prev: any) => new Set();
+
 import { explainCommandRestriction, shouldRequestCommandPermission } from '../utils/permissionUtils';
 import { executeViaTerminal } from '../utils/terminalService';
 import {
@@ -132,10 +146,6 @@ const compressToolResultForApi = (name: string, result: any): string => {
         info: `[Output truncated to save Groq TPM rate limits. Total stdout: ${stdout.length} chars, stderr: ${stderr.length} chars]`
       });
     }
-  }
-  
-  if (name === 'web_scrape' || name === 'fetch_url') {
-    return `${str.substring(0, 2000)}\n\n... [Webpage content truncated to save token rate limits. Total length: ${str.length} characters]`;
   }
   
   return `${str.substring(0, 2500)}\n\n... [Truncated to save token rate limits]`;
@@ -272,7 +282,7 @@ const getToolCategory = (toolName: string): ToolCallNode['toolCategory'] => {
   if (['write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'apply_patch'].includes(toolName)) return 'write';
   if (toolName === 'run_command') return 'execute';
   if (toolName.startsWith('spawn_')) return 'delegate';
-  if (['fetch_url', 'web_search', 'web_scrape', 'search', 'visit', 'google_scholar'].includes(toolName) || toolName.startsWith('wiki_') || toolName.startsWith('composio_')) return 'web';
+  if (['fetch_url', 'web_search', 'search', 'visit', 'google_scholar'].includes(toolName) || toolName.startsWith('wiki_') || toolName.startsWith('composio_')) return 'web';
   if (toolName === 'ask_user') return 'question';
   if (['run_skill', 'manage_todos', 'todowrite', 'current_time'].includes(toolName)) return 'workflow';
   return 'other';
@@ -786,9 +796,6 @@ export interface UseAppHandlersParams {
   coderWorkspacePath: string;
   triggerWorkspaceRefresh: () => void;
 
-  scrapingResults: Map<string, any>;
-  setScrapingResults: React.Dispatch<React.SetStateAction<Map<string, any>>>;
-  setActiveScrapingJobs: React.Dispatch<React.SetStateAction<Set<string>>>;
   wikiResults: Map<string, any>;
   setWikiResults: React.Dispatch<React.SetStateAction<Map<string, any>>>;
 
@@ -1028,8 +1035,6 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     orchestrationState, setOrchestrationState,
     setIsSidebarOpen,
     coderWorkspacePath, triggerWorkspaceRefresh,
-    scrapingResults, setScrapingResults,
-    setActiveScrapingJobs,
     wikiResults, setWikiResults,
     localElementAttachments, setLocalElementAttachments,
     inputRef, abortControllerRef,
@@ -1476,7 +1481,7 @@ ${JSON.stringify(parsed.memories, null, 2)}`
       if (name === 'run_command' || name === 'run_build' || name === 'run_test') return 'execute';
       if (name === 'analyze_file' || name === 'inspect_code') return 'discovery';
       if (name === 'spawn_subagent' || name === 'delegate_task') return 'delegate';
-      if (name === 'web_scrape' || name === 'web_search' || name === 'search' || name === 'visit') return 'web';
+      if (name === 'web_search' || name === 'search' || name === 'visit') return 'web';
       if (name === 'ask_user' || name === 'manage_todos') return 'workflow';
       if (name.startsWith('wiki_')) return 'web';
       return 'read';
@@ -1484,7 +1489,7 @@ ${JSON.stringify(parsed.memories, null, 2)}`
 
     // Helper to get icon for tool
     const getToolIcon = (name: string): string => {
-      if (name === 'web_scrape' || name === 'search' || name === 'web_search') return 'globe';
+      if (name === 'search' || name === 'web_search') return 'globe';
       if (name === 'glob_tool' || name === 'list_directory') return 'file';
       if (name === 'grep_tool') return 'search';
       if (name === 'read_file') return 'file';
@@ -1519,7 +1524,6 @@ ${JSON.stringify(parsed.memories, null, 2)}`
             toolName === 'glob_tool' ? `Find files (${String(event.args?.fileGlob || '*').trim()})` :
             toolName === 'grep_tool' ? `Search code (${String(event.args?.query || '').trim()})` :
             toolName === 'analyze_file' ? `Analyze file ${normalizedArgPath ? `(${normalizedArgPath})` : ''}` :
-            toolName === 'web_scrape' ? `Web scrape (${event.args?.url || 'url'})` :
             toolName === 'search' ? `Web search` :
             toolName === 'current_time' ? 'Get current time' :
             toolName;
@@ -2994,13 +2998,13 @@ ${skillMd.content}
         systemPrompt += `\n[TOOLS] Active: ${activeTools.map(t => t.function.name).join(', ')}. Use relevant tools proactively.`;
       }
       if (!isCoderMode) {
-        const hasWebTooling = activeTools.some((tool: any) => ['fetch_url', 'web_search', 'web_scrape'].includes(tool?.function?.name));
-        const requestsLiveInfo = /\b(latest|current|today|now|recent|real[- ]?time|use the tool|search|scrape|fetch|look up|check online|web)\b/i.test(content);
+        const hasWebTooling = activeTools.some((tool: any) => ['fetch_url', 'web_search'].includes(tool?.function?.name));
+        const requestsLiveInfo = /\b(latest|current|today|now|recent|real[- ]?time|use the tool|search|fetch|look up|check online|web)\b/i.test(content);
         if (hasWebTooling && requestsLiveInfo) {
           systemPrompt += `\n[MANDATORY WEB TOOL RULE]
-For this request, you MUST use the available web tools before answering if the user is asking for current, recent, live, searchable, scraped, or externally verifiable information.
+For this request, you MUST use the available web tools before answering if the user is asking for current, recent, live, searchable, or externally verifiable information.
 - Do not answer from memory first.
-- First call an appropriate web tool such as 'web_search', 'fetch_url', or 'web_scrape'.
+- First call an appropriate web tool such as 'web_search' or 'fetch_url'.
 - If the user gives a search-engine URL or asks a factual current-events question, resolve and inspect real destination pages, not just search result summaries.
 - After tool results arrive, answer using the collected data.`;
         }
@@ -3018,7 +3022,7 @@ For this request, you MUST use the available web tools before answering if the u
       const deepResearchPreset = (researchMode?.depthPreset || 'standard') as 'standard' | 'extreme';
       const deepResearchMinimums = getDeepResearchMinimums(deepResearchPreset);
       if (isDeepSearchEnabled && !isCoderMode) {
-        systemPrompt += `\n\n${DEEP_RESEARCH_SYSTEM_PROMPT}${getDeepResearchPresetPrompt(deepResearchPreset)}\nCurrent date: ${new Date().toISOString().slice(0, 10)}\nDeep research preset: ${deepResearchPreset === 'extreme' ? 'Advanced' : 'Normal'}\nMinimum wiki searches: ${deepResearchMinimums.minWikiSearches}\nMinimum web scrapes: ${deepResearchMinimums.minWebScrapes}\nMinimum visit calls: ${deepResearchMinimums.minVisits}\nMinimum search calls: ${deepResearchMinimums.minSearchCalls}`;
+        systemPrompt += `\n\n${DEEP_RESEARCH_SYSTEM_PROMPT}${getDeepResearchPresetPrompt(deepResearchPreset)}\nCurrent date: ${new Date().toISOString().slice(0, 10)}\nDeep research preset: ${deepResearchPreset === 'extreme' ? 'Advanced' : 'Normal'}\nMinimum wiki searches: ${deepResearchMinimums.minWikiSearches}\nMinimum visit calls: ${deepResearchMinimums.minVisits}\nMinimum search calls: ${deepResearchMinimums.minSearchCalls}`;
       }
 
       if (isCoderMode) {
@@ -3624,12 +3628,11 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             const name = fn.name || 'unknown';
             const args = fn.arguments ? (() => { try { return JSON.parse(fn.arguments); } catch { return {}; } })() : {};
             
-            const isScrape = name === 'web_scrape' || name === 'fetch_url';
             const readRange = name === 'read_file' && (args.offset || args.limit) ? ` [offset=${args.offset || 1}, limit=${args.limit || 'all'}]` : '';
             const normalizedArgPath = normalizeToolFilePath(String(args.filePath || ''), coderWorkspacePath);
             const toolCategory = getToolCategory(name);
             const displayLabel =
-              isScrape ? `Web fetch (${args.url})` :
+              name === 'fetch_url' ? `Web fetch (${args.url})` :
               name === 'run_command' ? `Run command (${String(args.command || '').trim() || 'shell'})` :
               name.startsWith('spawn_') ? `Delegate ${name.replace('spawn_', '')} (${String(args.task || '').slice(0, 60) || 'task'})` :
               name === 'grep_tool' ? `Search code (${String(args.query || '').slice(0, 60) || 'query'})${args.fileGlob ? ` in ${args.fileGlob}` : ''}` :
@@ -4907,92 +4910,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 if (currentN) {
                   currentN.resultSummary = `${urls.slice(0, 5).length} page${urls.length === 1 ? '' : 's'} visited for targeted evidence`;
                 }
-              } else if (name === 'web_scrape') {
-                const targetUrl = args.url;
-                if (!targetUrl) {
-                  throw new Error("Missing required 'url' parameter for web_scrape.");
-                }
-                const scrapeTarget = await resolveScrapeTargetUrl({
-                  targetUrl,
-                  queryFallback: String(args.goal || args.query || content || ''),
-                  tavilyApiKey,
-                  serpApiKey,
-                  searchProvider,
-                  signal
-                });
-
-                // Push to active scraping jobs set
-                setActiveScrapingJobs(prev => {
-                  const cloned = new Set(prev);
-                  cloned.add(tc.id);
-                  return cloned;
-                });
-
-                showToast(`Scraping webpage: ${scrapeTarget.resolvedUrl.substring(0, 30)}...`);
-
-                // Perform proxy-mediated scraping
-                const scrapeResult = await scrapeUrl({
-                  url: scrapeTarget.resolvedUrl,
-                  strategy: args.strategy,
-                  browserEngine: args.browserEngine,
-                  selectors: args.selectors,
-                  useJavaScript: args.useJavaScript,
-                  waitForSelector: args.waitForSelector,
-                  extractLinks: args.extractLinks ?? true,
-                  extractImages: args.extractImages ?? true,
-                  extractTables: args.extractTables,
-                  outputFormat: args.outputFormat,
-                  maxPages: args.maxPages,
-                  maxDepth: args.maxDepth
-                });
-                const normalizedScrapeResult = {
-                  ...scrapeResult,
-                  requestedUrl: scrapeTarget.requestedUrl,
-                  url: scrapeResult.url || scrapeTarget.resolvedUrl
-                };
-
-                // Update scraping results Map state
-                setScrapingResults(prev => {
-                  const cloned = new Map(prev);
-                  cloned.set(tc.id, normalizedScrapeResult);
-                  return cloned;
-                });
-
-                // Evict from active scraping jobs set
-                setActiveScrapingJobs(prev => {
-                  const cloned = new Set(prev);
-                  cloned.delete(tc.id);
-                  return cloned;
-                });
-
-                if (normalizedScrapeResult.error) {
-                  resultValue = { error: normalizedScrapeResult.error };
-                  showToast(`Scrape failed: ${normalizedScrapeResult.error.substring(0, 30)}...`);
-                } else {
-                  const rawMarkdown = normalizedScrapeResult.rawText || '';
-                  const processedMarkdown = useTurboQuant
-                    ? turboQuantCompress(rawMarkdown, 4000, 'medium')
-                    : (rawMarkdown.substring(0, 3000) + (rawMarkdown.length > 3000 ? '... [Truncated for prompt boundaries]' : ''));
-
-                  resultValue = {
-                    title: normalizedScrapeResult.title,
-                    url: normalizedScrapeResult.url,
-                    statusCode: normalizedScrapeResult.statusCode,
-                    scrapedAt: normalizedScrapeResult.scrapedAt,
-                    dataExcerpt: normalizedScrapeResult.data,
-                    linksFound: normalizedScrapeResult.links?.length || 0,
-                    markdownExcerpt: processedMarkdown || 'No page text extracted.',
-                    turboQuantApplied: useTurboQuant,
-                  };
-                  successfulScrapesCount++;
-                  showToast(`Successfully scraped "${normalizedScrapeResult.title || 'Page'}"`);
-                }
-
-                if (!resultValue) {
-                  resultValue = {
-                    error: 'web_scrape completed without a usable payload'
-                  };
-                }
               } else if (name === 'wiki_search') {
                 const { query, limit = 10, language = 'en' } = args;
                 showToast(`Searching Wikipedia for: ${query}`);
@@ -5287,9 +5204,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             if (successfulVisitCount < deepResearchMinimums.minVisits) {
               unmetRequirements.push(`Complete at least ${deepResearchMinimums.minVisits} successful visit calls. Current count: ${successfulVisitCount}.`);
             }
-            if (successfulScrapesCount < deepResearchMinimums.minWebScrapes) {
-              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minWebScrapes} successful web_scrape calls. Current count: ${successfulScrapesCount}.`);
-            }
 
             if (unmetRequirements.length > 0) {
               apiMessages.push({
@@ -5362,20 +5276,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
       
       const scavengedImages: any[] = [];
       toolCallNodes.forEach(tc => {
-        if (tc.toolName === 'web_scrape') {
-          const scraped = scrapingResults.get(tc.id);
-          if (scraped && scraped.images && scraped.images.length > 0) {
-            scraped.images.slice(0, 12).forEach((imgUrl: string, idx: number) => {
-              if (imgUrl && !scavengedImages.some(x => x.url === imgUrl)) {
-                scavengedImages.push({
-                  title: `Scraped Image ${idx + 1}`,
-                  url: imgUrl,
-                  source: scraped.title || 'Web Scrape'
-                });
-              }
-            });
-          }
-        } else if (tc.toolName?.startsWith('wiki_')) {
+        if (tc.toolName?.startsWith('wiki_')) {
           const wikiRes = wikiResults.get(tc.id);
           if (wikiRes && wikiRes.data) {
             if (wikiRes.wikiType === 'page' && wikiRes.data.images && wikiRes.data.images.length > 0) {
@@ -5823,7 +5724,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         searchProvider
       });
       // Use the existing scrapeUrl service
-      const result: ScrapeResult = await scrapeUrl({ url: scrapeTarget.resolvedUrl, extractLinks: false, extractImages: false });
+      const result = await scrapeUrl({ url: scrapeTarget.resolvedUrl, extractLinks: false, extractImages: false });
       
       // Compress: strip HTML, collapse whitespace, cap at 8000 chars
       let text = '';

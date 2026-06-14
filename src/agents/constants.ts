@@ -2,13 +2,6 @@ import { AgentSkill, AgentTool, Agent } from './types';
 
 export const ALL_AGENT_SKILLS: AgentSkill[] = [
   {
-    id: 'web_browsing',
-    name: 'Web Browsing',
-    description: 'Agent can search and read live web pages',
-    icon: 'Globe',
-    enabled: false,
-  },
-  {
     id: 'memory',
     name: 'Memory',
     description: 'Agent remembers things across conversations',
@@ -50,20 +43,12 @@ export const ALL_AGENT_SKILLS: AgentSkill[] = [
     icon: 'BookOpen',
     enabled: false,
   },
-  {
-    id: 'web_scraper',
-    name: 'Web Scraper',
-    description: 'Agent can deeply scrape and extract web content',
-    icon: 'Link',
-    enabled: false,
-  },
 ];
 
 export const ALL_AGENT_TOOLS: AgentTool[] = [
   { id: 'web_search',   name: 'Web Search',      description: 'Search the web for real-time info',    icon: 'Search',      active: false },
   { id: 'wikipedia',    name: 'Wikipedia',        description: 'Query Wikipedia articles',              icon: 'BookOpen',    active: false },
   { id: 'code_runner',  name: 'Code Runner',      description: 'Execute code in a sandboxed env',      icon: 'Play',        active: false },
-  { id: 'scraper',      name: 'Scraper',           description: 'Scrape full web pages',                icon: 'Globe',       active: false },
   { id: 'image_gen',    name: 'Image Gen',         description: 'Generate images from prompts',         icon: 'Camera',      active: false },
   { id: 'file_manager', name: 'File Manager',      description: 'Read, write, list workspace files',   icon: 'Folder',      active: false },
   { id: 'calculator',   name: 'Calculator',        description: 'Perform complex math computations',    icon: 'Hash',        active: false },

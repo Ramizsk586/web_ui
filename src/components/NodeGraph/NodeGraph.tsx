@@ -20,7 +20,6 @@ import {
   Puzzle
 } from 'lucide-react';
 import { ToolCallNode } from '../../types';
-import { ScrapeResult } from '../../services/scrapingService';
 import { WikiArticleArtifact } from '../WikiArticleArtifact';
 import { WikiToolCallIndicator } from '../WikiToolCallIndicator';
 import { ComposioToolCallIndicator } from '../ComposioToolCallIndicator';
@@ -481,7 +480,6 @@ const renderPlainToolResult = (node: ToolCallNode) => {
 const renderToolBody = (
   node: ToolCallNode,
   effectiveStatus: ToolCallNode['status'],
-  scrapingResults: Map<string, ScrapeResult>,
   wikiResults: Map<string, { wikiType: string, data: any }>,
   onSendMessage?: (msg: string) => void
 ) => {
@@ -574,7 +572,6 @@ interface NodeGraphProps {
   isSearching?: boolean;
   searchQuery?: string;
   sources?: any[];
-  scrapingResults?: Map<string, ScrapeResult>;
   wikiResults?: Map<string, { wikiType: string, data: any }>;
   onSendMessage?: (msg: string) => void;
   hideConnectors?: boolean;
@@ -639,7 +636,6 @@ export const NodeGraph = React.memo(({
   isSearching,
   searchQuery,
   sources = [],
-  scrapingResults = new Map(),
   wikiResults = new Map(),
   onSendMessage,
   hideConnectors = false
@@ -825,7 +821,7 @@ export const NodeGraph = React.memo(({
                                   </div>
                                 ) : (
                                   <div className="text-[11px] p-2 bg-[#0c0c0e]/85 rounded-lg border border-zinc-900">
-                                    {renderToolBody(item.node, item.node.status, scrapingResults, wikiResults, onSendMessage)}
+                                    {renderToolBody(item.node, item.node.status, wikiResults, onSendMessage)}
                                   </div>
                                 )}
                                 
@@ -859,14 +855,12 @@ export const NodeGraph = React.memo(({
 
 export interface InlineToolCallCardProps {
   node: ToolCallNode;
-  scrapingResults?: Map<string, ScrapeResult>;
   wikiResults?: Map<string, { wikiType: string, data: any }>;
   onSendMessage?: (msg: string) => void;
 }
 
 export const InlineToolCallCard = React.memo(({
   node,
-  scrapingResults = new Map(),
   wikiResults = new Map(),
   onSendMessage
 }: InlineToolCallCardProps) => {
@@ -892,7 +886,7 @@ export const InlineToolCallCard = React.memo(({
         animate={{ opacity: 1, y: 0 }}
         className="w-full"
       >
-        {renderToolBody(node, effectiveStatus, scrapingResults, wikiResults, onSendMessage)}
+        {renderToolBody(node, effectiveStatus, wikiResults, onSendMessage)}
       </motion.div>
     );
   }
@@ -977,12 +971,8 @@ export const InlineToolCallCard = React.memo(({
               className={`text-zinc-400 font-bold transition-transform duration-200 ${!isCollapsed ? 'rotate-90' : ''}`}
               strokeWidth={3}
             />
-            {effectiveStatus === 'complete' && node.toolName && ['web_scrape', 'fetch_url'].includes(node.toolName) && (() => {
-              const scrapeResult = scrapingResults.get(node.id);
-              if (scrapeResult && (scrapeResult.error || (scrapeResult.statusCode && scrapeResult.statusCode >= 400))) {
-                return <X size={12} className="text-rose-500 shrink-0" strokeWidth={3} />;
-              }
-              return null;
+            {effectiveStatus === 'complete' && node.toolName && node.toolName === 'fetch_url' && (() => {
+              return <X size={12} className="text-rose-500 shrink-0" strokeWidth={3} />;
             })()}
           </div>
         </div>
@@ -1048,7 +1038,7 @@ export const InlineToolCallCard = React.memo(({
                   </div>
                 </div>
               ) : (
-                renderToolBody(node, effectiveStatus, scrapingResults, wikiResults, onSendMessage)
+                renderToolBody(node, effectiveStatus, wikiResults, onSendMessage)
               )}
 
               {effectiveStatus === 'failed' && node.result && (() => {

@@ -66,33 +66,6 @@ type AiProviderProfile = {
   updatedAt: number;
 };
 
-type LightpandaCloudConfig = {
-  region: 'euwest' | 'uswest' | 'useast';
-  token: string;
-  browser: string;
-  proxy: string;
-};
-
-const DEFAULT_LIGHTPANDA_CLOUD_CONFIG: LightpandaCloudConfig = {
-  region: 'euwest',
-  token: '',
-  browser: 'lightpanda',
-  proxy: 'fast_dc',
-};
-
-const LIGHTPANDA_CLOUD_REGION_OPTIONS: Array<{ value: LightpandaCloudConfig['region']; label: string }> = [
-  { value: 'euwest', label: 'EU West' },
-  { value: 'uswest', label: 'US West' },
-  { value: 'useast', label: 'US East' },
-];
-
-const LIGHTPANDA_PROXY_OPTIONS = [
-  'fast_dc',
-  'uswest_fast_dc',
-  'datacenter',
-  'useast_fast_dc',
-] as const;
-
 interface SettingsModalProps {
   onClose: () => void;
   useLocalModelsOnly?: boolean;
@@ -635,25 +608,6 @@ export function SettingsModal({
     () => aiProviderProfiles.find(profile => profile.id === editingAiProfileId) || null,
     [aiProviderProfiles, editingAiProfileId]
   );
-  const [isLightpandaCloudConfigOpen, setIsLightpandaCloudConfigOpen] = React.useState(false);
-  const [lightpandaCloudConfig, setLightpandaCloudConfig] = React.useState<LightpandaCloudConfig>(() => {
-    try {
-      const saved = localStorage.getItem('lumina_lightpanda_cloud_config');
-      if (!saved) return DEFAULT_LIGHTPANDA_CLOUD_CONFIG;
-      return {
-        ...DEFAULT_LIGHTPANDA_CLOUD_CONFIG,
-        ...JSON.parse(saved),
-      };
-    } catch {
-      return DEFAULT_LIGHTPANDA_CLOUD_CONFIG;
-    }
-  });
-
-  const persistLightpandaCloudConfig = React.useCallback((config: LightpandaCloudConfig) => {
-    setLightpandaCloudConfig(config);
-    localStorage.setItem('lumina_lightpanda_cloud_config', JSON.stringify(config));
-  }, []);
-
   // Rich Persona State
   const [personaTone, setPersonaTone] = React.useState(() => localStorage.getItem('lumina_persona_tone') || 'technical');
   const [personaLength, setPersonaLength] = React.useState(() => localStorage.getItem('lumina_persona_length') || 'balanced');
@@ -1954,12 +1908,6 @@ export function SettingsModal({
     localStorage.setItem('lumina_persona_tone', tone);
   };
 
-  const handleSaveLightpandaCloudConfig = () => {
-    persistLightpandaCloudConfig(lightpandaCloudConfig);
-    setIsLightpandaCloudConfigOpen(false);
-    showToast(lightpandaCloudConfig.token.trim() ? 'Lightpanda cloud settings saved.' : 'Lightpanda cloud settings saved. Add a token before using cloud sessions.');
-  };
-
   const handleLengthChange = (length: string) => {
     setPersonaLength(length);
     localStorage.setItem('lumina_persona_length', length);
@@ -2170,26 +2118,6 @@ export function SettingsModal({
                         />
                       </button>
                     </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <div className="font-medium text-sm">Lightpanda Cloud</div>
-                        <div className="text-xs text-gray-400">
-                          Dynamic scraping now uses Lightpanda Cloud by default. Configure the token and region here.
-                        </div>
-                        <div className="text-[10px] text-sky-500 mt-1 font-medium">
-                          {LIGHTPANDA_CLOUD_REGION_OPTIONS.find((option) => option.value === lightpandaCloudConfig.region)?.label || 'EU West'}
-                          {' '}• {lightpandaCloudConfig.proxy}
-                          {lightpandaCloudConfig.token.trim() ? ' • token ready' : ' • token missing'}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setIsLightpandaCloudConfigOpen(true)}
-                        title="Configure Lightpanda cloud token"
-                        className="w-9 h-9 rounded-xl border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/5 flex items-center justify-center transition-colors shrink-0"
-                      >
-                        <Settings size={15} />
-                      </button>
-                    </div>
                   </div>
                 </div>
                 <div>
@@ -2233,112 +2161,6 @@ export function SettingsModal({
                   </div>
                 </div>
               </motion.div>
-            )}
-
-            {isLightpandaCloudConfigOpen && (
-              <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="w-full max-w-lg rounded-3xl border border-gray-200 dark:border-white/10 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden">
-                  <div className="px-6 py-5 border-b border-gray-100 dark:border-white/10 flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="text-lg font-semibold">Lightpanda Cloud</h3>
-                      <p className="text-xs text-gray-500 dark:text-zinc-400 mt-1">
-                        Configure the token-based CDP endpoint used for dynamic scraping and JavaScript crawl sessions.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setIsLightpandaCloudConfigOpen(false)}
-                      className="w-9 h-9 rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 flex items-center justify-center transition-colors"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-
-                  <div className="p-6 space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Region</label>
-                        <select
-                          value={lightpandaCloudConfig.region}
-                          onChange={(e) => setLightpandaCloudConfig(prev => ({ ...prev, region: e.target.value as LightpandaCloudConfig['region'] }))}
-                          className="w-full px-3.5 py-3 rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-zinc-950 text-sm outline-none"
-                        >
-                          {LIGHTPANDA_CLOUD_REGION_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Browser</label>
-                        <input
-                          value={lightpandaCloudConfig.browser}
-                          onChange={(e) => setLightpandaCloudConfig(prev => ({ ...prev, browser: e.target.value || 'lightpanda' }))}
-                          className="w-full px-3.5 py-3 rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-zinc-950 text-sm outline-none"
-                          placeholder="lightpanda"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Token</label>
-                      <input
-                        type="password"
-                        value={lightpandaCloudConfig.token}
-                        onChange={(e) => setLightpandaCloudConfig(prev => ({ ...prev, token: e.target.value }))}
-                        className="w-full px-3.5 py-3 rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-zinc-950 text-sm outline-none"
-                        placeholder="lp_xxxxxxxxx"
-                      />
-                      <p className="text-[11px] text-gray-500 dark:text-zinc-400">
-                        Endpoint preview: {`wss://${lightpandaCloudConfig.region}.cloud.lightpanda.io/ws?token=***&browser=${encodeURIComponent(lightpandaCloudConfig.browser || 'lightpanda')}&proxy=${encodeURIComponent(lightpandaCloudConfig.proxy)}`}
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">Proxy</label>
-                      <select
-                        value={lightpandaCloudConfig.proxy}
-                        onChange={(e) => setLightpandaCloudConfig(prev => ({ ...prev, proxy: e.target.value }))}
-                        className="w-full px-3.5 py-3 rounded-2xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-zinc-950 text-sm outline-none"
-                      >
-                        {LIGHTPANDA_PROXY_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="px-6 py-4 border-t border-gray-100 dark:border-white/10 flex items-center justify-between gap-3">
-                    <button
-                      onClick={() => {
-                        setLightpandaCloudConfig(DEFAULT_LIGHTPANDA_CLOUD_CONFIG);
-                        persistLightpandaCloudConfig(DEFAULT_LIGHTPANDA_CLOUD_CONFIG);
-                        showToast('Lightpanda cloud settings reset.');
-                      }}
-                      className="px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
-                    >
-                      Reset
-                    </button>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => setIsLightpandaCloudConfigOpen(false)}
-                        className="px-4 py-2 rounded-xl text-sm font-medium text-gray-500 hover:text-gray-800 dark:hover:text-zinc-200 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleSaveLightpandaCloudConfig}
-                        className="px-4 py-2 rounded-xl text-sm font-semibold bg-sky-600 hover:bg-sky-500 text-white transition-colors"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
             )}
 
             {activeSettingsTab === 'ai' && (

@@ -275,8 +275,6 @@ export default function AppContent({
   } = sidebar;
 
   const {
-    scrapingResults, setScrapingResults,
-    activeScrapingJobs, setActiveScrapingJobs,
     wikiResults, setWikiResults,
     luminaTools, setLuminaTools
   } = luminaToolsData;
@@ -1537,8 +1535,6 @@ const startCoderPreview = useCallback(async () => {
     orchestrationState, setOrchestrationState,
     setIsSidebarOpen,
     coderWorkspacePath, triggerWorkspaceRefresh,
-    scrapingResults, setScrapingResults,
-    setActiveScrapingJobs,
     wikiResults, setWikiResults,
     localElementAttachments, setLocalElementAttachments,
     inputRef, abortControllerRef,
@@ -2666,7 +2662,6 @@ const startCoderPreview = useCallback(async () => {
             handleSetCanvasView={handleSetCanvasView}
             handleUpdateTodoPlan={handleUpdateTodoPlan}
             handleStartBuildingBtn={(messageId) => handleStartBuilding(currentChatId || '', messageId, [])}
-            scrapingResults={scrapingResults}
             wikiResults={wikiResults}
             handleSend={handleSend}
             renderChatBox={renderChatBox}
@@ -3059,7 +3054,6 @@ const startCoderPreview = useCallback(async () => {
                           onUpdateTodoPlan={handleUpdateTodoPlan}
                           onUpdateMessage={handleUpdateMessage}
                           onStartBuilding={handleStartBuildingBtn}
-                          scrapingResults={scrapingResults}
                           wikiResults={wikiResults}
                           onSendMessage={handleSend}
                         />

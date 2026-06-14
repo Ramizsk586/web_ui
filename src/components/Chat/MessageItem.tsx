@@ -26,7 +26,6 @@ import {
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message, Artifact, ToolCallNode } from '../../types';
-import { ScrapeResult } from '../../services/scrapingService';
 import { CustomCodeBlockVisualizer, renderTextWithMath } from '../LuminaVisualizer';
 import { NodeGraph } from '../NodeGraph/NodeGraph';
 import { InlineFileDiffPreview } from '../NodeGraph/FileDiffNode';
@@ -640,7 +639,6 @@ class SpeechController {
 }
 
 const globalSpeechController = new SpeechController();
-const EMPTY_SCRAPE_RESULTS = new Map<string, ScrapeResult>();
 const EMPTY_WIKI_RESULTS = new Map<string, { wikiType: string, data: any }>();
 
 function cleanMessageTextForSpeech(content: string): string {
@@ -711,7 +709,6 @@ interface MessageItemProps {
   onUpdateTodoPlan?: (messageId: string, updatedPlan: any) => void;
   onUpdateMessage?: (messageId: string, updatedFields: Partial<Message>) => void;
   onStartBuilding?: (messageId: string) => void;
-  scrapingResults?: Map<string, ScrapeResult>;
   wikiResults?: Map<string, { wikiType: string, data: any }>;
   onSendMessage?: (msg: string) => void;
 }
@@ -734,7 +731,6 @@ function MessageItemComponent({
   onUpdateTodoPlan,
   onUpdateMessage,
   onStartBuilding,
-  scrapingResults = EMPTY_SCRAPE_RESULTS,
   wikiResults = EMPTY_WIKI_RESULTS,
   onSendMessage
 }: MessageItemProps) {
@@ -1321,7 +1317,6 @@ function MessageItemComponent({
     messageComponents,
     onOpenInEditor,
     onSendMessage,
-    scrapingResults,
     shouldShowWorkedSummary,
     toolCalls,
     toolCallsById,
@@ -1516,7 +1511,6 @@ function MessageItemComponent({
               isSearching={message.isSearching}
               searchQuery={message.searchQuery}
               sources={message.sources || []}
-              scrapingResults={scrapingResults}
               wikiResults={wikiResults}
               onSendMessage={onSendMessage}
             />
@@ -2478,7 +2472,6 @@ const areMessageItemPropsEqual = (prev: MessageItemProps, next: MessageItemProps
     prev.userProfile === next.userProfile &&
     prev.persona === next.persona &&
     prev.isSourcesPanelOpen === next.isSourcesPanelOpen &&
-    prev.scrapingResults === next.scrapingResults &&
     prev.wikiResults === next.wikiResults &&
     prev.onSendMessage === next.onSendMessage &&
     prev.onOpenInEditor === next.onOpenInEditor &&

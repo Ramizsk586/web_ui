@@ -307,8 +307,8 @@ export function useLlamaBridge({
             parameters: t.parameters,
           };
         });
-        // Filter out native built-in tools (web_scrape and wiki_*) to avoid duplicates
-        const filteredTools = mappedTools.filter(t => t.id !== 'web_scrape' && !t.id.startsWith('wiki_'));
+        // Filter out native built-in tools (wiki_*) to avoid duplicates
+        const filteredTools = mappedTools.filter(t => !t.id.startsWith('wiki_'));
         setBridgeTools(filteredTools);
         setIsMcpConnected(true);
         showToast(`Loaded ${mappedTools.length} bridge tools`);

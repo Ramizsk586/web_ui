@@ -10,21 +10,20 @@ export const DEEP_RESEARCH_SYSTEM_PROMPT = `You are a deep research assistant. Y
 3. Split the objective into complementary search angles and track which angle each tool call supports.
 4. Start with normal web discovery using search when you need current sources, news, product pages, company pages, blogs, or documentation.
 5. Use visit for high-value URLs. Always include a specific goal so the extraction is relevant.
-6. Use web_scrape when you need a fuller page extraction from an important result.
-7. Use wiki_search, wiki_get_summary, wiki_get_page, and wiki_get_related for background knowledge, entity grounding, timelines, terminology, and adjacent topics.
-8. Use google_scholar for academic or publication-heavy questions.
-9. Every deep research run must include at least 3 successful wiki_search calls and at least 3 successful web_scrape calls before you finalize.
-10. Blend evidence from search results, scraped pages, and Wikipedia instead of relying on a single source type.
-11. Iterate through search, visit, scrape, compare, and synthesize until you have enough evidence.
-12. During each research round, gather both factual evidence and useful visual material when available: portraits, product images, diagrams, maps, logos, charts, or contextual photos.
-13. For people-heavy topics, build enough evidence to support dedicated people spotlight/profile sections in the final report.
-14. Cite sources with source titles/URLs when available. Flag uncertainty and conflicting evidence.
-15. Do not finalize early. If the minimum required wiki searches or web scrapes are not complete yet, continue researching.
-16. The research process should feel iterative: web search, Wikipedia grounding, targeted scraping, comparison, reasoning, and another round if evidence is still thin.
-17. Finish with two deliverables:
+6. Use wiki_search, wiki_get_summary, wiki_get_page, and wiki_get_related for background knowledge, entity grounding, timelines, terminology, and adjacent topics.
+7. Use google_scholar for academic or publication-heavy questions.
+8. Every deep research run must include at least 3 successful wiki_search calls before you finalize.
+9. Blend evidence from search results and Wikipedia instead of relying on a single source type.
+10. Iterate through search, visit, compare, and synthesize until you have enough evidence.
+11. During each research round, gather both factual evidence and useful visual material when available: portraits, product images, diagrams, maps, logos, charts, or contextual photos.
+12. For people-heavy topics, build enough evidence to support dedicated people spotlight/profile sections in the final report.
+13. Cite sources with source titles/URLs when available. Flag uncertainty and conflicting evidence.
+14. Do not finalize early. If the minimum required wiki searches are not complete yet, continue researching.
+15. The research process should feel iterative: web search, Wikipedia grounding, targeted visits, comparison, reasoning, and another round if evidence is still thin.
+16. Finish with two deliverables:
    a. a polished Markdown report for the chat transcript
    b. a self-contained HTML visual report for preview/export
-18. The HTML report must be wrapped in one \`\`\`html fenced block and should include a strong hero section, executive summary, evidence-based sections, source-aware callouts, segmented narrative structure, and visual/profile blocks when relevant.`;
+17. The HTML report must be wrapped in one \`\`\`html fenced block and should include a strong hero section, executive summary, evidence-based sections, source-aware callouts, segmented narrative structure, and visual/profile blocks when relevant.`;
 
 export const getDeepResearchPresetPrompt = (preset: DeepResearchPreset) => {
   if (preset === 'extreme') {
@@ -34,7 +33,7 @@ export const getDeepResearchPresetPrompt = (preset: DeepResearchPreset) => {
 - Use more complementary search angles before converging on conclusions.
 - Prefer additional visit and comparison passes before finalizing.
 - Use Wikipedia not only for definitions, but also for timeline checks, related entities, and disambiguation.
-- Scrape multiple high-value pages across different source types whenever possible.
+- Visit multiple high-value pages across different source types whenever possible.
 - Explicitly compare source agreement, conflicts, recency, and evidence quality before writing the final answer.
 - The final answer should be more complete, structured, and source-dense than normal mode.`;
   }
@@ -49,7 +48,6 @@ export const getDeepResearchMinimums = (preset: DeepResearchPreset) => {
   if (preset === 'extreme') {
     return {
       minWikiSearches: 5,
-      minWebScrapes: 5,
       minVisits: 3,
       minSearchCalls: 3
     };
@@ -57,7 +55,6 @@ export const getDeepResearchMinimums = (preset: DeepResearchPreset) => {
 
   return {
     minWikiSearches: 3,
-    minWebScrapes: 3,
     minVisits: 1,
     minSearchCalls: 1
   };
@@ -114,36 +111,6 @@ export const deepResearchTools: ToolDefinition[] = [
           }
         },
         required: ['url', 'goal']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'web_scrape',
-      description: 'Deeply scrape a specific webpage when it looks highly relevant and you need fuller text than a standard visit summary.',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: {
-            type: 'string',
-            description: 'The webpage URL to scrape.'
-          },
-          outputFormat: {
-            type: 'string',
-            enum: ['markdown', 'json', 'html'],
-            description: 'Preferred output format for extracted content.'
-          },
-          extractLinks: {
-            type: 'boolean',
-            description: 'Whether to include discovered outbound links.'
-          },
-          extractTables: {
-            type: 'boolean',
-            description: 'Whether to attempt table extraction.'
-          }
-        },
-        required: ['url']
       }
     }
   },
