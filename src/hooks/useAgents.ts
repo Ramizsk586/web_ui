@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
-import { Agent } from '../agents/types';
-import { loadAgents, addAgent, updateAgent, deleteAgent } from '../agents/agentStore';
+import { Agent } from '../agent/agents/types';
+import { loadAgents, addAgent, updateAgent, deleteAgent } from '../agent/agents/agentStore';
 
 export interface UseAgentsProps {
   setCurrentChatId: React.Dispatch<React.SetStateAction<string | null>>;

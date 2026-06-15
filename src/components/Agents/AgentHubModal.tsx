@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, X, Bot, Edit, Trash2, ArrowRight } from 'lucide-react';
-import { Agent } from '../../agents/types';
+import { Agent } from '../../agent/agents/types';
 import { AgentAvatar } from './AgentAvatar';
 
 interface AgentHubModalProps {

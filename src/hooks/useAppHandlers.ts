@@ -583,18 +583,20 @@ const buildOpenCodePromptPrelude = (
 
   const commandKey = inferOpenCodeCommandKey(input);
   const normalizedMode = normalizeOpenCodeKey(activeAssistantMode);
-  const directCommand = commandKey
+  const directCommand = commandKey && context.commands
     ? context.commands.find((item) => normalizeOpenCodeKey(item.id) === commandKey || normalizeOpenCodeKey(item.name) === commandKey)
     : null;
-  const roleAgent = context.agents.find((item) => {
-    const id = normalizeOpenCodeKey(item.id);
-    return (
-      id === normalizedMode ||
-      (normalizedMode === 'builder' && id === 'build') ||
-      (normalizedMode === 'planner' && id === 'plan') ||
-      ((normalizedMode === 'reviewer' || normalizedMode === 'tester') && id === 'general')
-    );
-  }) || null;
+  const roleAgent = context.agents
+    ? context.agents.find((item) => {
+        const id = normalizeOpenCodeKey(item.id);
+        return (
+          id === normalizedMode ||
+          (normalizedMode === 'builder' && id === 'build') ||
+          (normalizedMode === 'planner' && id === 'plan') ||
+          ((normalizedMode === 'reviewer' || normalizedMode === 'tester') && id === 'general')
+        );
+      })
+    : null;
 
   const selectedItems = [directCommand, roleAgent].filter(Boolean) as OpenCodeContextItem[];
   const preferredTools = [...new Set(selectedItems.flatMap((item) => item.tools || []))];

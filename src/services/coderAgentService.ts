@@ -215,6 +215,7 @@ export async function runCoderAgent(
     },
     modelId: actualModelId,
     thinkingLevel: config.thinkingLevel || 'high',
+    systemPrompt: config.systemPrompt,
     providerProfile: providerProfile || null,
     subagentConfigs,
   };
@@ -293,8 +294,39 @@ export async function runCoderAgent(
       for (const line of lines) {
         if (!line.trim()) continue;
         
+        let parsedLine = line;
+        
+        // Detect Vercel AI SDK SSE format and convert to legacy format
+        if (line.startsWith('0:') || line.startsWith('b:') || line.startsWith('a:') || line.startsWith('d:') || line.startsWith('3:')) {
+          try {
+            const prefix = line[0];
+            const data = line.substring(2);
+            
+            if (prefix === '0') {
+              // text delta
+              parsedLine = JSON.stringify({ type: 'token', text: JSON.parse(data) });
+            } else if (prefix === 'b') {
+              // tool call start
+              const obj = JSON.parse(data);
+              parsedLine = JSON.stringify({ type: 'tool_call_start', toolCallId: obj.toolCallId, toolName: obj.toolName, args: obj.argsTextDelta || {} });
+            } else if (prefix === 'a') {
+              // tool result
+              const obj = JSON.parse(data);
+              parsedLine = JSON.stringify({ type: 'tool_call_end', toolCallId: obj.toolCallId, toolName: '', result: obj.result });
+            } else if (prefix === 'd') {
+              // done
+              parsedLine = JSON.stringify({ type: 'done' });
+            } else if (prefix === '3') {
+              // error
+              parsedLine = JSON.stringify({ type: 'error', error: JSON.parse(data) });
+            }
+          } catch (e) {
+            console.warn('[CoderAgent] Failed to convert Vercel format line:', line.substring(0, 50));
+          }
+        }
+        
         try {
-          const event = JSON.parse(line) as CoderAgentEvent;
+          const event = JSON.parse(parsedLine) as CoderAgentEvent;
           
           switch (event.type) {
             case 'token':

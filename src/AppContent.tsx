@@ -98,7 +98,7 @@ import { CoderPermissionMode, PendingCommandPermission } from './types';
 
 import { MessageItem } from './components/Chat/MessageItem';
 
-import { Agent } from './agents/types';
+import { Agent } from './agent/agents/types';
 import { AgentSidebarSection } from './components/Agents/AgentSidebarSection';
 import { AgentCreationModal } from './components/Agents/AgentCreationModal';
 import { AgentChatView } from './components/Agents/AgentChatView';

@@ -15,7 +15,7 @@ import {
   MessageSquare,
   MoreVertical
 } from 'lucide-react';
-import { Agent } from '../agents/types';
+import { Agent } from '../agent/agents/types';
 import { AgentAvatar } from './Agents/AgentAvatar';
 
 interface AgentsPageProps {

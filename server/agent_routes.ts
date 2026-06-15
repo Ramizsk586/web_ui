@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
+import { spawn } from 'child_process';
 import { runDeepResearch } from './deepResearchAgent.js';
 import { loadOpenCodeWorkspaceContext, resolveOpenCodeAgentProfile } from './opencode.js';
 import { runConsolidation } from './consolidation.js';
@@ -594,10 +595,100 @@ const getWorkspaceSummary = (workspaceRoot?: string): string => {
   return 'Directory does not exist';
 };
 
+let rustAgentProcess: any = null;
+
+async function ensureRustAgentRunning(params: {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  baseUrl?: string;
+}): Promise<boolean> {
+  // Check health
+  try {
+    const health = await axios.get('http://127.0.0.1:3001/api/agent/health', { timeout: 1000 });
+    if (health.status === 200) {
+      return true;
+    }
+  } catch (err) {
+    // Not running
+  }
+
+  if (rustAgentProcess) {
+    try { rustAgentProcess.kill(); } catch {}
+    rustAgentProcess = null;
+  }
+
+  console.log('🤖 Starting Rust Agent server via "cargo run"...');
+  
+  // Set up env variables
+  const env: Record<string, string> = { ...process.env };
+  const { provider, model, apiKey, baseUrl } = params;
+
+  if (provider === 'openai' || provider === 'openprovider' || provider === 'opencode' || provider === 'groq' || provider === 'mistral' || provider === 'google' || provider === 'anthropic') {
+    env.LLM_PROVIDER = 'OpenAI';
+    if (baseUrl) env.OPENAI_URL = baseUrl;
+    if (apiKey) env.OPENAI_API_KEY = apiKey;
+  } else if (provider === 'ollama') {
+    env.LLM_PROVIDER = 'Ollama';
+    if (baseUrl) env.OLLAMA_URL = baseUrl;
+  }
+  
+  if (model) {
+    env.DEFAULT_MODEL = model;
+  }
+
+  // Ensure port is set to 3001
+  env.PORT = '3001';
+
+  try {
+    rustAgentProcess = spawn('cargo', ['run'], {
+      cwd: path.resolve(process.cwd(), 'src/agent'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      shell: true
+    });
+
+    rustAgentProcess.stdout.on('data', (data: Buffer) => {
+      console.log(`[Rust Agent stdout] ${data.toString().trim()}`);
+    });
+
+    rustAgentProcess.stderr.on('data', (data: Buffer) => {
+      console.error(`[Rust Agent stderr] ${data.toString().trim()}`);
+    });
+
+    rustAgentProcess.on('close', (code: number) => {
+      console.log(`[Rust Agent] Process exited with code ${code}`);
+      rustAgentProcess = null;
+    });
+
+    // Wait for it to become healthy (up to 15 seconds)
+    for (let i = 0; i < 30; i++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      try {
+        const health = await axios.get('http://127.0.0.1:3001/api/agent/health', { timeout: 500 });
+        if (health.status === 200) {
+          console.log('✅ Rust Agent server started successfully on port 3001!');
+          return true;
+        }
+      } catch (err) {
+        // Continue waiting
+      }
+    }
+    console.error('❌ Rust Agent server failed to start within 15 seconds.');
+    return false;
+  } catch (err: any) {
+    console.error('❌ Failed to spawn cargo run for Rust Agent:', err.message);
+    return false;
+  }
+}
+
 export function setupAgentRoutes(app: express.Express) {
   // Boop Agent Chat Endpoint
   app.post("/api/agent/chat", async (req, res) => {
     const { content, conversationId, source } = req.body;
+    if (!content && req.body.task) {
+      return res.status(400).json({ error: 'content (string) is required — did you mean /api/coder/run?' });
+    }
     if (!content || typeof content !== 'string') {
       return res.status(400).json({ error: 'content (string) is required' });
     }
@@ -671,7 +762,10 @@ export function setupAgentRoutes(app: express.Express) {
       summary: summarizeOpenCodeContext(context),
       toolIds: extractOpenCodeToolIds(context),
       mappedTools: normalizeOpenCodeToolNames(extractOpenCodeToolIds(context)),
-      config: context.config
+      config: context.config,
+      commands: context.commands || [],
+      agents: context.agents || [],
+      tools: context.tools || []
     });
   });
 
@@ -788,22 +882,58 @@ export function setupAgentRoutes(app: express.Express) {
     const resolvedWorkspace = resolveCoderPath(workspaceRoot);
 
     try {
-      const { runAiSdkAgentLoop } = await import('./ai_sdk_agent.js');
-      await runAiSdkAgentLoop({
-        task,
-        workspaceRoot: resolvedWorkspace,
+      const isRustAgentActive = await ensureRustAgentRunning({
         provider: typeof provider === 'string' ? provider : undefined,
         model: typeof model === 'string' ? model : undefined,
         apiKey,
         baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
-        onEvent: (event) => {
-          res.write(`${JSON.stringify(event)}\n`);
+      });
+
+      if (isRustAgentActive) {
+        console.log('🔗 Proxying request to Rust agent on port 3001...');
+        const response = await axios.post('http://127.0.0.1:3001/api/agent/chat', {
+          message: task,
+          workspace: resolvedWorkspace
+        }, {
+          responseType: 'stream',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        response.data.on('data', (chunk: Buffer) => {
+          res.write(chunk);
           if ((res as any).flush) {
             (res as any).flush();
           }
-        }
-      });
-      res.end();
+        });
+
+        response.data.on('end', () => {
+          res.end();
+        });
+
+        response.data.on('error', (err: any) => {
+          console.error('[rust-agent] Stream error:', err);
+          res.write(`${JSON.stringify({ type: 'error', error: err.message })}\n`);
+          res.end();
+        });
+      } else {
+        console.log('⚠️ Falling back to TypeScript-based coder agent loop...');
+        const { runAiSdkAgentLoop } = await import('./ai_sdk_agent.js');
+        await runAiSdkAgentLoop({
+          task,
+          workspaceRoot: resolvedWorkspace,
+          provider: typeof provider === 'string' ? provider : undefined,
+          model: typeof model === 'string' ? model : undefined,
+          apiKey,
+          baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
+          onEvent: (event) => {
+            res.write(`${JSON.stringify(event)}\n`);
+            if ((res as any).flush) {
+              (res as any).flush();
+            }
+          }
+        });
+        res.end();
+      }
     } catch (error: any) {
       console.error('[coder-agent] Run error:', error);
       res.write(`${JSON.stringify({ type: 'error', error: error.message })}\n`);

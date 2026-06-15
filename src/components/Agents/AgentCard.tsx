@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MoreHorizontal, Edit, Trash, Bot, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Agent } from '../../agents/types';
+import { Agent } from '../../agent/agents/types';
 import { AgentAvatar } from './AgentAvatar';
 
 interface AgentCardProps {

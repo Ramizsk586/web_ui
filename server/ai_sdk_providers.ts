@@ -13,6 +13,35 @@ export interface ProviderConfig {
   baseUrl?: string;
 }
 
+// Providers directly supported by the AI SDK - use native SDK
+const DIRECTLY_SUPPORTED_PROVIDERS = new Set([
+  'openai',
+  'anthropic',
+  'google',
+  'gemini',
+  'google-gemini',
+  'groq',
+  'mistral',
+  'cohere',
+  'together',
+  'openrouter',
+  'deepseek',
+  'zed',
+  'copilot',
+  'nvidia_nim',
+  'kilo',
+  'kimchi',
+  'cline',
+  'ollama',
+  'ollama_local',
+  'ollama_cloud',
+  'lm_studio',
+]);
+
+function isDirectlySupportedProvider(provider: string): boolean {
+  return DIRECTLY_SUPPORTED_PROVIDERS.has(provider.toLowerCase());
+}
+
 export function buildProviderModel(config: ProviderConfig) {
   const provider = String(config.provider || '').trim().toLowerCase();
   const modelId = String(config.modelId || '').trim();
@@ -172,6 +201,17 @@ export function buildProviderModel(config: ProviderConfig) {
     } else if (modelLower.startsWith('gemini-')) {
       routingBaseUrl = finalBaseUrl || 'https://opencode.ai/zen/v1/models';
     }
+  }
+
+  // If provider is not directly supported, route through OpenAI-compatible converter
+  if (!isDirectlySupportedProvider(provider)) {
+    // Use openai-compatible converter for unsupported providers
+    const client = createOpenAICompatible({
+      name: provider,
+      apiKey: finalApiKey || 'dummy-key',
+      baseURL: routingBaseUrl || finalBaseUrl || 'http://localhost:8080/v1',
+    });
+    return client(cleanModel);
   }
 
   // Dynamic model-family routing for custom/fallback providers

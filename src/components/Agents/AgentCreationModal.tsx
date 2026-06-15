@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Sparkles, ArrowLeft, Bot, Check, ChevronDown, ChevronUp, AlertCircle, RefreshCw, Wand2, Terminal, Key, Eye, EyeOff, Server, Globe, Cpu, Brain, FileText, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Agent, AgentSkill, AgentTool, AgentModel, AgentSkillFile } from '../../agents/types';
-import { ALL_AGENT_SKILLS, ALL_AGENT_TOOLS, AGENT_AVATARS, AGENT_AVATAR_COLORS, MAX_AGENT_SKILLS, MAX_AGENT_TOOLS } from '../../agents/constants';
+import { Agent, AgentSkill, AgentTool, AgentModel, AgentSkillFile } from '../../agent/agents/types';
+import { ALL_AGENT_SKILLS, ALL_AGENT_TOOLS, AGENT_AVATARS, AGENT_AVATAR_COLORS, MAX_AGENT_SKILLS, MAX_AGENT_TOOLS } from '../../agent/agents/constants';
 import { AgentAvatar } from './AgentAvatar';
 import { fetchModelsDevCatalog, getModelsForProviderId, ModelsDevEntry } from '../../services/modelsDevService';
 
