@@ -1,5 +1,5 @@
 import React from 'react';
-import { Agent } from '../../agent/agents/types';
+import { Agent } from '../../agents/types';
 
 interface AgentSidebarSectionProps {
   agents: Agent[];

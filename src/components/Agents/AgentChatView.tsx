@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, Box, HardDrive, BookOpen, Link, Image, ChevronDown, Plus, ArrowUp, X, Mic } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Agent, AgentMessage } from '../../agent/agents/types';
-import { runAgent } from '../../agent/agents/agentRunner';
+import { Agent, AgentMessage } from '../../agents/types';
+import { runAgent } from '../../agents/agentRunner';
 import { createPiAgent, runPiAgent, type PiAgentEventHandler, type PiAgentInstance } from '../../services/coderAgentService';
 import { MessageItem } from '../Chat/MessageItem';
 import { AgentToolBadge } from './AgentToolBadge';

@@ -683,6 +683,10 @@ async function ensureRustAgentRunning(params: {
 }
 
 export function setupAgentRoutes(app: express.Express) {
+  // Trigger Rust Agent startup in background on server start
+  ensureRustAgentRunning({}).catch((err) => {
+    console.warn('⚠️ Rust Agent startup check failed on initial server boot:', err.message);
+  });
   // Boop Agent Chat Endpoint
   app.post("/api/agent/chat", async (req, res) => {
     const { content, conversationId, source } = req.body;
@@ -882,14 +886,16 @@ export function setupAgentRoutes(app: express.Express) {
     const resolvedWorkspace = resolveCoderPath(workspaceRoot);
 
     try {
-      const isRustAgentActive = await ensureRustAgentRunning({
-        provider: typeof provider === 'string' ? provider : undefined,
-        model: typeof model === 'string' ? model : undefined,
-        apiKey,
-        baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
-      });
+      // Fast health check (500ms timeout) to see if Rust Agent is already running
+      let isRustAgentHealthy = false;
+      try {
+        const health = await axios.get('http://127.0.0.1:3001/api/agent/health', { timeout: 500 });
+        isRustAgentHealthy = (health.status === 200);
+      } catch (err) {
+        // Not healthy / not running
+      }
 
-      if (isRustAgentActive) {
+      if (isRustAgentHealthy) {
         console.log('🔗 Proxying request to Rust agent on port 3001...');
         const response = await axios.post('http://127.0.0.1:3001/api/agent/chat', {
           message: task,
@@ -916,6 +922,18 @@ export function setupAgentRoutes(app: express.Express) {
           res.end();
         });
       } else {
+        // Rust agent is not running. Trigger background startup so it can be ready for future requests,
+        // but immediately fallback to TypeScript so that this current request is not blocked or delayed.
+        console.log('🤖 Rust Agent is offline. Triggering background startup...');
+        ensureRustAgentRunning({
+          provider: typeof provider === 'string' ? provider : undefined,
+          model: typeof model === 'string' ? model : undefined,
+          apiKey,
+          baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
+        }).catch((err) => {
+          console.warn('⚠️ Background Rust Agent startup failed:', err.message);
+        });
+
         console.log('⚠️ Falling back to TypeScript-based coder agent loop...');
         const { runAiSdkAgentLoop } = await import('./ai_sdk_agent.js');
         await runAiSdkAgentLoop({

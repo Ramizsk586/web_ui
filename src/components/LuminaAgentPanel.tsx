@@ -48,7 +48,7 @@ import {
   Sidebar,
   Server
 } from 'lucide-react';
-import { Agent } from '../agent/agents/types';
+import { Agent } from '../agents/types';
 import { CLOUD_PROVIDERS } from '../constants';
 
 // Safe global fetch proxy to log real API traffic in real-time
