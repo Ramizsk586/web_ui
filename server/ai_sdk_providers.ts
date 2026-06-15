@@ -58,42 +58,6 @@ export function buildProviderModel(config: ProviderConfig) {
     return client(modelId || 'claude-3-5-sonnet-20241022');
   }
 
-  if (provider === 'opencode') {
-    const finalApiKey = apiKey || process.env.OPENCODE_API_KEY || undefined;
-    let cleanModel = modelId || 'deepseek-v4-flash';
-    if (cleanModel.startsWith('opencode/')) {
-      cleanModel = cleanModel.substring(9);
-    }
-    const modelLower = cleanModel.toLowerCase();
-    
-    if (modelLower.startsWith('claude-')) {
-      const client = createAnthropic({
-        apiKey: finalApiKey,
-        baseURL: baseUrl || 'https://opencode.ai/zen/v1/messages',
-      });
-      return client(cleanModel);
-    } else if (modelLower.startsWith('gpt-')) {
-      const client = createOpenAI({
-        apiKey: finalApiKey,
-        baseURL: baseUrl || 'https://opencode.ai/zen/v1/responses',
-      });
-      return client(cleanModel);
-    } else if (modelLower.startsWith('gemini-')) {
-      const client = createGoogleGenerativeAI({
-        apiKey: finalApiKey,
-        baseURL: baseUrl || 'https://opencode.ai/zen/v1/models',
-      });
-      return client(cleanModel);
-    } else {
-      const client = createOpenAICompatible({
-        name: 'opencode',
-        apiKey: finalApiKey || 'dummy-key',
-        baseURL: baseUrl || 'https://opencode.ai/zen/v1/chat/completions',
-      });
-      return client(cleanModel);
-    }
-  }
-
   if (provider === 'google' || provider === 'gemini' || provider === 'google-gemini') {
     const client = createGoogleGenerativeAI({
       apiKey: apiKey || undefined,
@@ -126,11 +90,15 @@ export function buildProviderModel(config: ProviderConfig) {
     return client(modelId || 'command-r-plus');
   }
 
-  // Handle OpenAI-Compatible and custom providers
+  // Handle OpenAI-Compatible, custom, and opencode providers
   let finalBaseUrl = baseUrl;
   let finalApiKey = apiKey;
 
   switch (provider) {
+    case 'opencode':
+      finalBaseUrl = finalBaseUrl || 'https://opencode.ai/zen/v1';
+      finalApiKey = finalApiKey || process.env.OPENCODE_API_KEY || '';
+      break;
     case 'together':
       finalBaseUrl = finalBaseUrl || 'https://api.together.xyz/v1';
       break;
@@ -156,7 +124,7 @@ export function buildProviderModel(config: ProviderConfig) {
       finalBaseUrl = finalBaseUrl || 'https://llm.kimchi.dev/openai/v1';
       break;
     case 'cline':
-      finalBaseUrl = finalBaseUrl || 'https://api.cline.bot';
+      finalBaseUrl = finalBaseUrl || 'https://api.cline.bot/api/v1';
       break;
     case 'openprovider':
       finalBaseUrl = finalBaseUrl || 'https://openprovider.mimika.in/v1';
@@ -188,11 +156,49 @@ export function buildProviderModel(config: ProviderConfig) {
       break;
   }
 
-  // Fallback to OpenAI Compatible client
-  const client = createOpenAICompatible({
-    name: provider,
-    apiKey: finalApiKey || 'dummy-key',
-    baseURL: finalBaseUrl,
-  });
-  return client(modelId);
+  let cleanModel = modelId || 'deepseek-v4-flash';
+  if (cleanModel.startsWith('opencode/')) {
+    cleanModel = cleanModel.substring(9);
+  }
+  const modelLower = cleanModel.toLowerCase();
+
+  // Determine dynamic routing URLs specifically for opencode
+  let routingBaseUrl = finalBaseUrl;
+  if (provider === 'opencode') {
+    if (modelLower.startsWith('claude-')) {
+      routingBaseUrl = finalBaseUrl || 'https://opencode.ai/zen/v1/messages';
+    } else if (modelLower.startsWith('gpt-')) {
+      routingBaseUrl = finalBaseUrl || 'https://opencode.ai/zen/v1/responses';
+    } else if (modelLower.startsWith('gemini-')) {
+      routingBaseUrl = finalBaseUrl || 'https://opencode.ai/zen/v1/models';
+    }
+  }
+
+  // Dynamic model-family routing for custom/fallback providers
+  if (modelLower.startsWith('claude-')) {
+    const client = createAnthropic({
+      apiKey: finalApiKey || undefined,
+      baseURL: routingBaseUrl,
+    });
+    return client(cleanModel);
+  } else if (modelLower.startsWith('gpt-') || modelLower.startsWith('o1-') || modelLower.startsWith('o3-')) {
+    const client = createOpenAI({
+      apiKey: finalApiKey || undefined,
+      baseURL: routingBaseUrl,
+    });
+    return client(cleanModel);
+  } else if (modelLower.startsWith('gemini-')) {
+    const client = createGoogleGenerativeAI({
+      apiKey: finalApiKey || undefined,
+      baseURL: routingBaseUrl,
+    });
+    return client(cleanModel);
+  } else {
+    // Fallback to OpenAI compatible client forcing chat completions
+    const client = createOpenAI({
+      apiKey: finalApiKey || 'dummy-key',
+      baseURL: routingBaseUrl,
+    });
+    return client.chat(cleanModel);
+  }
 }

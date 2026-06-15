@@ -41,6 +41,38 @@ const PROVIDER_ENV_KEYS: Record<string, string> = {
   'freemodel_claude': 'FREEMODEL_API_KEY',
 };
 
+const PROVIDER_DEFAULTS: Record<string, { endpoint: string; testModel: string }> = {
+  'openai': { endpoint: 'https://api.openai.com/v1', testModel: 'gpt-4o-mini' },
+  'anthropic': { endpoint: 'https://api.anthropic.com/v1', testModel: 'claude-3-5-haiku-20241022' },
+  'gemini': { endpoint: 'https://generativelanguage.googleapis.com/v1beta', testModel: 'gemini-1.5-flash' },
+  'google-gemini': { endpoint: 'https://generativelanguage.googleapis.com/v1beta', testModel: 'gemini-1.5-flash' },
+  'groq': { endpoint: 'https://api.groq.com/openai/v1', testModel: 'llama-3.1-8b-instant' },
+  'deepseek': { endpoint: 'https://api.deepseek.com/v1', testModel: 'deepseek-chat' },
+  'openrouter': { endpoint: 'https://openrouter.ai/api/v1', testModel: 'meta-llama/llama-3.1-8b-instruct' },
+  'together': { endpoint: 'https://api.together.xyz/v1', testModel: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo' },
+  'mistral': { endpoint: 'https://api.mistral.ai/v1', testModel: 'mistral-small-latest' },
+  'nvidia_nim': { endpoint: 'https://integrate.api.nvidia.com/v1', testModel: 'meta/llama3-70b-instruct' },
+  'nvidia': { endpoint: 'https://integrate.api.nvidia.com/v1', testModel: 'meta/llama3-70b-instruct' },
+  'cohere': { endpoint: 'https://api.cohere.com/compatibility/v1', testModel: 'command-r' },
+  'sarvamai': { endpoint: 'https://api.sarvam.ai/v1', testModel: 'sarvam-1' },
+  'sarvam': { endpoint: 'https://api.sarvam.ai/v1', testModel: 'sarvam-1' },
+  'kilo': { endpoint: 'https://api.kilo.ai/api/gateway', testModel: 'kilo-model-v1' },
+  'opencode': { endpoint: 'https://opencode.ai/zen/v1', testModel: 'deepseek-v4-flash-free' },
+  'zed': { endpoint: 'https://api.zed.dev/v1', testModel: 'gpt-4o' },
+  'copilot': { endpoint: 'https://api.githubcopilot.com', testModel: 'gpt-4o' },
+  'cline': { endpoint: 'https://api.cline.bot/api/v1', testModel: 'cline-agent-v1' },
+  'kimchi': { endpoint: 'https://llm.kimchi.dev/openai/v1', testModel: 'kimi-k2.5' },
+  'openprovider': { endpoint: 'https://openprovider.mimika.in/v1', testModel: 'auto-free' },
+  'freemodel_openai': { endpoint: 'https://api.freemodel.dev/v1', testModel: 'gpt-5.5' },
+  'freemodel_claude': { endpoint: 'https://cc.freemodel.dev', testModel: 'claude-opus-4-8' },
+  'ollama': { endpoint: 'http://localhost:11434/v1', testModel: 'llama3.2' },
+  'ollama_cloud': { endpoint: 'https://ollama.com/v1', testModel: 'llama3' },
+  'ollama_local': { endpoint: 'http://127.0.0.1:11434/v1', testModel: 'llama3.2' },
+  'lm_studio': { endpoint: 'http://127.0.0.1:1234/v1', testModel: 'lm-studio' },
+  'custom': { endpoint: 'http://localhost:11434/v1', testModel: 'gpt-4o-mini' },
+  'openai-compatible': { endpoint: 'http://localhost:11434/v1', testModel: 'gpt-4o-mini' },
+};
+
 function resolveApiKeyFromEnv(provider: string, fallback: string = ''): string {
   const envKey = PROVIDER_ENV_KEYS[provider];
   if (envKey && process.env[envKey]) {
@@ -859,47 +891,159 @@ export function setupLlmRoutes(app: express.Express) {
     }
   });
 
+  function createMockResponse() {
+    const mockRes: any = {
+      statusCode: 200,
+      headers: {} as Record<string, string>,
+      body: '',
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      setHeader(name: string, value: string) {
+        this.headers[name] = value;
+        return this;
+      },
+      write(chunk: any) {
+        this.body += chunk.toString();
+        return true;
+      },
+      end(chunk?: any) {
+        if (chunk) this.body += chunk.toString();
+        return this;
+      },
+      json(data: any) {
+        this.body = typeof data === 'string' ? data : JSON.stringify(data);
+        return this;
+      },
+      send(data: any) {
+        this.body = data.toString();
+        return this;
+      }
+    };
+    return mockRes;
+  }
+
   app.post("/api/provider/models", async (req, res) => {
-    const { provider, apiKey, baseUrl } = req.body;
+    const provider = req.body.provider;
+    const apiKey = req.body.apiKey;
+    const baseUrl = req.body.baseUrl || req.body.endpoint;
+    
     try {
-      const models = await dispatchChatCompletion(req, res, {
-        provider,
-        apiKey,
-        baseUrl,
-        messages: [],
-        model: '',
-        apiMessages: [],
-        tools: [],
-        stream: false,
-        finalSystemPrompt: ''
-      });
-      res.json({ models });
+      let modelsList: any[] = [];
+      const resolvedProvider = provider || (
+        baseUrl?.includes('gemini') || baseUrl?.includes('googleapis.com') ? 'gemini' : 'openai'
+      );
+
+      if (resolvedProvider === 'gemini' || resolvedProvider === 'google-gemini') {
+        const url = `${baseUrl || 'https://generativelanguage.googleapis.com/v1beta'}/models?key=${apiKey}`;
+        const response = await axios.get(url, { timeout: 10000 });
+        if (response.data && Array.isArray(response.data.models)) {
+          modelsList = response.data.models.map((m: any) => ({
+            id: m.name.replace(/^models\//, ''),
+            name: m.displayName || m.name.replace(/^models\//, '')
+          }));
+        }
+      } else {
+        // OpenAI-compatible and others
+        const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/models` : 'https://api.openai.com/v1/models';
+        const response = await axios.get(url, {
+          headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
+          timeout: 10000
+        });
+        
+        const data = response.data;
+        const modelsArr = data.data || data.models || [];
+        if (Array.isArray(modelsArr)) {
+          modelsList = modelsArr.map((m: any) => ({
+            id: m.id,
+            name: m.id
+          }));
+        }
+      }
+      res.json({ success: true, models: modelsList });
     } catch (e: any) {
-      const detail = getUpstreamErrorDetail(e);
-      res.status(getUpstreamErrorStatus(e)).json({ error: 'Failed to fetch provider models', detail });
+      console.error('[ProviderModels] Error fetching models:', e.message);
+      res.json({ success: true, models: [] });
     }
   });
 
   app.post("/api/provider/verify", async (req, res) => {
-    const { provider, apiKey, baseUrl, model } = req.body;
-    const testModel = model || (provider === 'gemini' || provider === 'google-gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
+    const provider = req.body.provider;
+    const apiKey = req.body.apiKey;
+    const baseUrl = req.body.baseUrl || req.body.endpoint;
+    const model = req.body.model;
+
+    const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS['custom'];
+    const resolvedBaseUrl = baseUrl || defaults.endpoint;
+    const testModel = model || defaults.testModel;
+
     try {
-      const testResult = await dispatchChatCompletion(req, res, {
+      const mockRes = createMockResponse();
+      const testResult = await dispatchChatCompletion(req, mockRes, {
         provider,
         apiKey,
-        baseUrl,
+        baseUrl: resolvedBaseUrl,
         model: testModel,
         messages: [{ role: 'user', content: 'Ping' }],
-        apiMessages: [],
+        apiMessages: [{ role: 'user', content: 'Ping' }],
         tools: [],
         stream: false,
         finalSystemPrompt: ''
       });
-      res.json({ success: true, message: 'Provider API connection verified successfully.', result: testResult });
+
+      let resultData = testResult || mockRes.body;
+      if (typeof resultData === 'string') {
+        try {
+          resultData = JSON.parse(resultData);
+        } catch {}
+      }
+      res.json({ success: true, message: 'Provider API connection verified successfully.', result: resultData });
     } catch (e: any) {
       await parseStreamError(e);
       const detail = getUpstreamErrorDetail(e);
       res.status(getUpstreamErrorStatus(e)).json({ error: 'Verification failed', detail });
+    }
+  });
+
+  // Simple in-memory cache for models.dev with 5-minute TTL
+  const modelsDevCache: Record<string, { data: any; ts: number }> = {};
+  const MODELS_DEV_CACHE_MS = 5 * 60 * 1000;
+  const fetchModelsDev = async (path: string) => {
+    const now = Date.now();
+    const cached = modelsDevCache[path];
+    if (cached && now - cached.ts < MODELS_DEV_CACHE_MS) {
+      return cached.data;
+    }
+    const response = await axios.get(`https://models.dev${path}`, { timeout: 15000 });
+    modelsDevCache[path] = { data: response.data, ts: now };
+    return response.data;
+  };
+
+  app.get("/api/models-dev/catalog", async (req, res) => {
+    try {
+      const data = await fetchModelsDev('/catalog.json');
+      res.json(data);
+    } catch (e: any) {
+      res.status(502).json({ error: 'Failed to fetch models.dev catalog', detail: e.message });
+    }
+  });
+
+  app.get("/api/models-dev/models", async (req, res) => {
+    try {
+      const data = await fetchModelsDev('/models.json');
+      res.json(data);
+    } catch (e: any) {
+      res.status(502).json({ error: 'Failed to fetch models.dev models', detail: e.message });
+    }
+  });
+
+  app.get("/api/models-dev/providers", async (req, res) => {
+    try {
+      const data = await fetchModelsDev('/api.json');
+      res.json(data);
+    } catch (e: any) {
+      res.status(502).json({ error: 'Failed to fetch models.dev providers', detail: e.message });
     }
   });
 
@@ -1189,7 +1333,7 @@ ${contextStr}`;
       // Cline models
       else if (modelLower.includes('cline')) {
         provider = 'openai-compatible';
-        baseUrl = 'https://api.cline.bot';
+        baseUrl = 'https://api.cline.bot/api/v1';
       }
       // Kimchi models
       else if (modelLower.includes('kimi') || modelLower.includes('kimchi')) {

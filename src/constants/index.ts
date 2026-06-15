@@ -18,6 +18,38 @@ import {
 } from 'lucide-react';
 import { Skill } from '../types';
 
+export const PROVIDER_TO_ENV_KEY: Record<string, string> = {
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  'google-gemini': 'GEMINI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  together: 'TOGETHER_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+  nvidia_nim: 'NVIDIA_API_KEY',
+  nvidia: 'NVIDIA_API_KEY',
+  cohere: 'COHERE_API_KEY',
+  sarvamai: 'SARVAM_API_KEY',
+  sarvam: 'SARVAM_API_KEY',
+  kilo: 'KILO_API_KEY',
+  opencode: 'OPENCODE_API_KEY',
+  zed: 'ZED_API_KEY',
+  copilot: 'COPILOT_API_KEY',
+  kimchi: 'KIMCHI_API_KEY',
+  cline: 'CLINE_API_KEY',
+  openprovider: 'AI_API_KEY',
+  custom: 'AI_API_KEY',
+  'openai-compatible': 'AI_API_KEY',
+  freemodel_openai: 'FREEMODEL_API_KEY',
+  freemodel_claude: 'FREEMODEL_API_KEY',
+  ollama: 'OLLAMA_API_KEY',
+  ollama_cloud: 'OLLAMA_API_KEY',
+  ollama_local: 'OLLAMA_API_KEY',
+  lm_studio: 'LMSTUDIO_API_KEY',
+};
+
 export const DEFAULT_SERVER_URL = '/api';
 export const DEFAULT_MCP_URL = '/api';
 export const DEFAULT_API_KEY = '';
@@ -35,9 +67,11 @@ export const AVAILABLE_AVATARS = [
   "https://api.dicebear.com/7.x/avataaars/svg?seed=George",
 ];
 
+// Cloud providers synced with server-side dispatchChatCompletion.
+// Additional models are fetched dynamically from models.dev at runtime.
 export const CLOUD_PROVIDERS = [
   { id: 'custom', label: 'Custom / Local', endpoint: '', key: '', icon: React.createElement(Terminal, { size: 13 }) },
-  { id: 'freemodel_openai', label: 'free model (openai)', endpoint: 'https://api.freemodel.dev', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
+  { id: 'freemodel_openai', label: 'free model (openai)', endpoint: 'https://api.freemodel.dev/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'freemodel_claude', label: 'free model (claude)', endpoint: 'https://cc.freemodel.dev', key: '', icon: React.createElement(Brain, { size: 13 }) },
   { id: 'openprovider', label: 'OpenProvider', endpoint: 'https://openprovider.mimika.in/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'kimchi', label: 'Kimchi', endpoint: 'https://llm.kimchi.dev/openai/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
@@ -53,13 +87,13 @@ export const CLOUD_PROVIDERS = [
   { id: 'nvidia_nim', label: 'NVIDIA NIM', endpoint: 'https://integrate.api.nvidia.com/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'gemini', label: 'Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'cohere', label: 'Cohere', endpoint: 'https://api.cohere.com/compatibility/v1', key: '', icon: React.createElement(Globe, { size: 13 }) },
-  { id: 'deepseek', label: 'DeepSeek', endpoint: 'https://api.deepseek.com', key: '', icon: React.createElement(Box, { size: 13 }) },
+  { id: 'deepseek', label: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1', key: '', icon: React.createElement(Box, { size: 13 }) },
   { id: 'sarvamai', label: 'Sarvam AI', endpoint: 'https://api.sarvam.ai/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'kilo', label: 'Kilo AI', endpoint: 'https://api.kilo.ai/api/gateway', key: '', icon: React.createElement(Brain, { size: 13 }) },
   { id: 'opencode', label: 'OpenCode Zen', endpoint: 'https://opencode.ai/zen/v1', key: '', icon: React.createElement(Code, { size: 13 }) },
   { id: 'zed', label: 'Zed AI', endpoint: 'https://api.zed.dev/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'copilot', label: 'GitHub Copilot', endpoint: 'https://api.githubcopilot.com', key: '', icon: React.createElement(Code, { size: 13 }) },
-  { id: 'cline', label: 'Cline', endpoint: 'https://api.cline.bot', key: '', icon: React.createElement(Terminal, { size: 13 }) },
+  { id: 'cline', label: 'Cline', endpoint: 'https://api.cline.bot/api/v1', key: '', icon: React.createElement(Terminal, { size: 13 }) },
 ];
 
 export const WRITING_STYLES = [

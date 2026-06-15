@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { safeGetItem } from '../utils/storageUtils';
-import { DEFAULT_SERVER_URL, DEFAULT_MCP_URL, DEFAULT_API_KEY, CLOUD_PROVIDERS } from '../constants';
+import { DEFAULT_SERVER_URL, DEFAULT_MCP_URL, DEFAULT_API_KEY, CLOUD_PROVIDERS, PROVIDER_TO_ENV_KEY } from '../constants';
+import { fetchModelsDevCatalog, getModelsForProviderId } from '../services/modelsDevService';
 
 export interface UserProfile {
   name: string;
@@ -415,17 +416,19 @@ export function useAppSettings({
     const trimmedKey = apiKey.trim();
     if (trimmedKey) {
       try {
+        const envKey = PROVIDER_TO_ENV_KEY[selectedProvider] || `${(selectedProvider || 'custom').toUpperCase()}_API_KEY`;
         await fetch('/api/settings/env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: selectedProvider, value: trimmedKey })
+          body: JSON.stringify({ key: envKey, value: trimmedKey })
         });
         if (selectedProvider === 'freemodel_openai' || selectedProvider === 'freemodel_claude') {
           const otherProvider = selectedProvider === 'freemodel_openai' ? 'freemodel_claude' : 'freemodel_openai';
+          const otherEnvKey = PROVIDER_TO_ENV_KEY[otherProvider] || `${otherProvider.toUpperCase()}_API_KEY`;
           await fetch('/api/settings/env', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider: otherProvider, value: trimmedKey })
+            body: JSON.stringify({ key: otherEnvKey, value: trimmedKey })
           });
         }
       } catch (e) {
@@ -471,7 +474,8 @@ export function useAppSettings({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 endpoint: serverUrl,
-                apiKey: apiKey
+                apiKey: apiKey,
+                provider: selectedProvider
               })
             });
             if (modelsResponse.ok) {
@@ -487,6 +491,16 @@ export function useAppSettings({
           } catch (err) {
             console.warn('Failed to fetch models but verified connection', err);
           }
+          try {
+            const catalog = await fetchModelsDevCatalog();
+            const devModels = getModelsForProviderId(catalog, selectedProvider);
+            const existingIds = new Set(fetchedModels.map(m => m.id));
+            for (const dm of devModels) {
+              if (!existingIds.has(dm.id)) {
+                fetchedModels.push({ id: dm.id, name: dm.name, color: 'text-purple-500' });
+              }
+            }
+          } catch {}
           saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
           try {
@@ -522,6 +536,16 @@ export function useAppSettings({
               color: 'text-blue-500'
             }));
           }
+          try {
+            const catalog = await fetchModelsDevCatalog();
+            const devModels = getModelsForProviderId(catalog, selectedProvider);
+            const existingIds = new Set(fetchedModels.map(m => m.id));
+            for (const dm of devModels) {
+              if (!existingIds.has(dm.id)) {
+                fetchedModels.push({ id: dm.id, name: dm.name, color: 'text-purple-500' });
+              }
+            }
+          } catch {}
           saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
           try {
@@ -556,16 +580,16 @@ export function useAppSettings({
       // 1. OpenAI Profile
       const openaiExisting = aiProviderProfiles.find(p => p.id === 'freemodel_openai');
       const openaiModels = targetProvider === 'freemodel_openai' && models.length > 0 ? models : [
-        { id: 'gpt-4o', name: 'GPT-4o', color: 'text-blue-500' },
-        { id: 'gpt-4o-mini', name: 'GPT-4o-mini', color: 'text-blue-500' },
-        { id: 'o1-mini', name: 'o1-mini', color: 'text-blue-500' },
-        { id: 'o1-preview', name: 'o1-preview', color: 'text-blue-500' },
+        { id: 'gpt-5.5', name: 'GPT 5.5', color: 'text-blue-500' },
+        { id: 'gpt-5.4', name: 'GPT 5.4', color: 'text-blue-500' },
+        { id: 'gpt-5.4-mini', name: 'GPT 5.4-mini', color: 'text-blue-500' },
+        { id: 'gpt-5.3-codex', name: 'GPT 5.3 Codex', color: 'text-blue-500' },
       ];
       const openaiProfile: AiProviderProfile = {
         id: 'freemodel_openai',
         name: 'free model (openai)',
         provider: 'freemodel_openai',
-        endpoint: 'https://api.freemodel.dev',
+        endpoint: 'https://api.freemodel.dev/v1',
         apiKey: targetApiKey,
         models: openaiModels,
         selectedModelIds: openaiExisting?.selectedModelIds?.filter(id => openaiModels.some(m => m.id === id)) ?? openaiModels.map(m => m.id),
@@ -578,9 +602,12 @@ export function useAppSettings({
       // 2. Claude Profile
       const claudeExisting = aiProviderProfiles.find(p => p.id === 'freemodel_claude');
       const claudeModels = targetProvider === 'freemodel_claude' && models.length > 0 ? models : [
-        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', color: 'text-blue-500' },
-        { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', color: 'text-blue-500' },
-        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', color: 'text-blue-500' },
+        { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', color: 'text-blue-500' },
+        { id: 'claude-opus-4-7', name: 'Claude Opus 4.7', color: 'text-blue-500' },
+        { id: 'claude-fable-5', name: 'Claude Fable 5', color: 'text-blue-500' },
+        { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', color: 'text-blue-500' },
+        { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', color: 'text-blue-500' },
+        { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', color: 'text-blue-500' },
       ];
       const claudeProfile: AiProviderProfile = {
         id: 'freemodel_claude',
@@ -607,13 +634,13 @@ export function useAppSettings({
         fetch('/api/settings/env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: 'freemodel_openai', value: targetApiKey })
+          body: JSON.stringify({ key: 'FREEMODEL_API_KEY', value: targetApiKey })
         }).catch(err => console.error('Failed to sync freemodel_openai key to backend:', err));
 
         fetch('/api/settings/env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: 'freemodel_claude', value: targetApiKey })
+          body: JSON.stringify({ key: 'FREEMODEL_API_KEY', value: targetApiKey })
         }).catch(err => console.error('Failed to sync freemodel_claude key to backend:', err));
       } catch (e) {
         console.error('Failed to save FreeModel keys to server:', e);
@@ -746,7 +773,8 @@ export function useAppSettings({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             endpoint: profile.endpoint,
-            apiKey: profile.apiKey
+            apiKey: profile.apiKey,
+            provider: profile.provider
           })
         });
         if (modelsResponse.ok) {
@@ -781,6 +809,16 @@ export function useAppSettings({
           }));
         }
       }
+      try {
+        const catalog = await fetchModelsDevCatalog();
+        const devModels = getModelsForProviderId(catalog, profile.provider);
+        const existingIds = new Set(fetchedModels.map(m => m.id));
+        for (const dm of devModels) {
+          if (!existingIds.has(dm.id)) {
+            fetchedModels.push({ id: dm.id, name: dm.name, color: 'text-purple-500' });
+          }
+        }
+      } catch {}
       saveVerifiedAiProfile(fetchedModels, {
         profileId: profile.id,
         provider: profile.provider,

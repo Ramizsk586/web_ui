@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { handleOpenAI } from './openai.js';
+import { handleAnthropic } from './anthropic.js';
 
 // freemodel_openai uses OpenAI-compatible endpoint
 export async function handleFreemodelOpenAI(
@@ -17,7 +18,7 @@ export async function handleFreemodelOpenAI(
 ) {
   return handleOpenAI(req, res, {
     ...options,
-    baseUrl: options.baseUrl || 'https://api.freemodel.dev'
+    baseUrl: options.baseUrl || 'https://api.freemodel.dev/v1'
   });
 }
 
@@ -29,13 +30,14 @@ export async function handleFreemodelClaude(
     model: string;
     apiKey: string;
     baseUrl: string;
+    messages: any[];
     apiMessages: any[];
     tools: any[];
     stream: boolean;
     finalSystemPrompt: string;
   }
 ) {
-  return handleOpenAI(req, res, {
+  return handleAnthropic(req, res, {
     ...options,
     baseUrl: options.baseUrl || 'https://cc.freemodel.dev'
   });

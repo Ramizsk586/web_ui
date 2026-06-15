@@ -113,7 +113,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AgentsPage } from './components/AgentsPage';
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
-import { ThemeCustomizerPanel } from './components/ThemeCustomizerPanel';
+
 import { LuminaAgentPanel, LuminaMemoryPanel } from './components/LuminaAgentPanel';
 
 import { RAGPanel } from './components/RAGPanel';
@@ -373,8 +373,7 @@ export default function AppContent({
   const [showAgentsPage, setShowAgentsPage] = useState(false);
   const [isLuminaAgentOpen, setIsLuminaAgentOpen] = useState(false);
   const [isLuminaMemoryOpen, setIsLuminaMemoryOpen] = useState(false);
-  const [isCustomThemeOpen, setIsCustomThemeOpen] = useState(false);
-
+  
   const [selectedProjectForChats, setSelectedProjectForChats] = useState<any | null>(null);
   const [selectedAgentForChats, setSelectedAgentForChats] = useState<any | null>(null);
 
@@ -2583,7 +2582,7 @@ const startCoderPreview = useCallback(async () => {
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
                         { id: 'lumina_agent', label: 'Lumina Agent', icon: <Bot size={16} className="text-emerald-500" />, onClick: () => { setIsLuminaMemoryOpen(false); setIsLuminaAgentOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'lumina_memory', label: 'Memory Panel', icon: <Brain size={16} className="text-cyan-400" />, onClick: () => { setIsLuminaAgentOpen(false); setIsLuminaMemoryOpen(true); setIsHeaderMenuOpen(false); } },
-                        { id: 'theme_customizer', label: 'Theme Studio', icon: <Palette size={16} className="text-amber-500" />, onClick: () => { setIsCustomThemeOpen(true); setIsHeaderMenuOpen(false); } },
+                        
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -3929,12 +3928,7 @@ const startCoderPreview = useCallback(async () => {
         silenceCountdown={silenceCountdown}
       />
 
-      {/* Theme Studio Custom sliding panel */}
-      <ThemeCustomizerPanel
-        isOpen={isCustomThemeOpen}
-        onClose={() => setIsCustomThemeOpen(false)}
-      />
-
+      
       {/* Local model GGUF manual engine parameter loader */}
       {localModelConfigModel && (
         <LocalModelConfigModal

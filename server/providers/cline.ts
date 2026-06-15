@@ -16,6 +16,6 @@ export async function handleCline(
 ) {
   return handleOpenAI(req, res, {
     ...options,
-    baseUrl: options.baseUrl || 'https://api.cline.bot'
+    baseUrl: options.baseUrl || 'https://api.cline.bot/api/v1'
   });
 }

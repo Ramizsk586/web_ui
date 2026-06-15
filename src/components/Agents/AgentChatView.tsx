@@ -3,7 +3,7 @@ import { ArrowLeft, Send, Trash2, Edit, Terminal, Bot, Settings, Globe, Brain, B
 import { motion, AnimatePresence } from 'motion/react';
 import { Agent, AgentMessage } from '../../agents/types';
 import { runAgent } from '../../agents/agentRunner';
-import { createPiAgent, runPiAgent, type PiAgentEventHandler, type PiAgentInstance } from '../../services/piAgentService';
+import { createPiAgent, runPiAgent, type PiAgentEventHandler, type PiAgentInstance } from '../../services/coderAgentService';
 import { MessageItem } from '../Chat/MessageItem';
 import { AgentToolBadge } from './AgentToolBadge';
 import { AgentAvatar } from './AgentAvatar';

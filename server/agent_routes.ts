@@ -761,14 +761,26 @@ export function setupAgentRoutes(app: express.Express) {
     }
   });
 
-  app.post("/api/pi-agent/run", async (req: express.Request, res: express.Response) => {
-    const { task, provider, model, apiKey, baseUrl } = req.body;
+  app.post("/api/coder/run", async (req: express.Request, res: express.Response) => {
+    const { task, apiKey } = req.body;
+    let provider = req.body.provider;
+    let model = req.body.model;
+    let baseUrl = req.body.baseUrl;
+
+    if (model && typeof model === 'object') {
+      provider = model.provider || provider;
+      baseUrl = model.baseUrl || baseUrl;
+      model = model.id || '';
+    } else if (typeof model !== 'string') {
+      model = req.body.modelId || '';
+    }
+
     const workspaceRoot = req.body.workspaceRoot || req.body.workspacePath;
     if (!task) {
       return res.status(400).json({ error: 'task is required' });
     }
 
-    const runId = randomRuntimeId('pi');
+    const runId = randomRuntimeId('coder');
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -780,17 +792,20 @@ export function setupAgentRoutes(app: express.Express) {
       await runAiSdkAgentLoop({
         task,
         workspaceRoot: resolvedWorkspace,
-        provider,
-        model,
+        provider: typeof provider === 'string' ? provider : undefined,
+        model: typeof model === 'string' ? model : undefined,
         apiKey,
-        baseUrl,
+        baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
         onEvent: (event) => {
           res.write(`${JSON.stringify(event)}\n`);
+          if ((res as any).flush) {
+            (res as any).flush();
+          }
         }
       });
       res.end();
     } catch (error: any) {
-      console.error('[pi-agent] Run error:', error);
+      console.error('[coder-agent] Run error:', error);
       res.write(`${JSON.stringify({ type: 'error', error: error.message })}\n`);
       res.end();
     }

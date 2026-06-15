@@ -43,7 +43,7 @@ import {
   wikiGetImages,
   wikiGetRelated
 } from '../services/wikiService';
-import { createCoderPiAgent, runCoderPiAgent, type PiAgentInstance, type PiAgentEvent } from '../services/piAgentService';
+import { createCoderAgent, runCoderAgent, type CoderAgentInstance as PiAgentInstance, type CoderAgentEvent as PiAgentEvent } from '../services/coderAgentService';
 
 // Maps our frontend composio tool names → actual Composio API tool slugs.
 // Composio slug format is always UPPERCASE_WITH_UNDERSCORES.
@@ -1442,7 +1442,7 @@ ${JSON.stringify(parsed.memories, null, 2)}`
 
     if (!agentInstance) {
       try {
-        agentInstance = await createCoderPiAgent({
+        agentInstance = await createCoderAgent({
           workspacePath: coderWorkspacePath,
           apiKey,
           model: {
@@ -1774,7 +1774,7 @@ ${JSON.stringify(parsed.memories, null, 2)}`
     }
 
     try {
-      await runCoderPiAgent(agentInstance, task, handlePiEvent, signal);
+      await runCoderAgent(agentInstance, task, handlePiEvent, signal);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       targetContent = targetContent + (targetContent ? '\n\n' : '') + `❌ **Agent Error**: ${errorMsg}`;

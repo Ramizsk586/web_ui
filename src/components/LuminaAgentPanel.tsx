@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { PROVIDER_TO_ENV_KEY } from '../constants';
 import {
   LayoutDashboard,
   Bot,
@@ -90,7 +91,7 @@ if (typeof window !== 'undefined' && !(window as any).__lumina_fetch_proxied__) 
           const contentType = response.headers.get('content-type') || '';
           const transferEncoding = response.headers.get('transfer-encoding') || '';
           const isStreaming = 
-            url.includes('/api/pi-agent/run') ||
+            url.includes('/api/coder/run') ||
             contentType.includes('text/event-stream') ||
             contentType.includes('application/x-ndjson') ||
             transferEncoding.includes('chunked');
@@ -3555,17 +3556,19 @@ function SettingsSubPanel() {
     const trimmedKey = apiKey.trim();
     if (trimmedKey) {
       try {
+        const envKey = PROVIDER_TO_ENV_KEY[selectedProvider] || `${(selectedProvider || 'custom').toUpperCase()}_API_KEY`;
         await fetch('/api/settings/env', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: selectedProvider, value: trimmedKey })
+          body: JSON.stringify({ key: envKey, value: trimmedKey })
         });
         if (selectedProvider === 'freemodel_openai' || selectedProvider === 'freemodel_claude') {
           const otherProvider = selectedProvider === 'freemodel_openai' ? 'freemodel_claude' : 'freemodel_openai';
+          const otherEnvKey = PROVIDER_TO_ENV_KEY[otherProvider] || `${otherProvider.toUpperCase()}_API_KEY`;
           await fetch('/api/settings/env', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider: otherProvider, value: trimmedKey })
+            body: JSON.stringify({ key: otherEnvKey, value: trimmedKey })
           });
         }
       } catch (e) {

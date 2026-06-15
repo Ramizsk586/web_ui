@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Agent, AgentSkill, AgentTool, AgentModel, AgentSkillFile } from '../../agents/types';
 import { ALL_AGENT_SKILLS, ALL_AGENT_TOOLS, AGENT_AVATARS, AGENT_AVATAR_COLORS, MAX_AGENT_SKILLS, MAX_AGENT_TOOLS } from '../../agents/constants';
 import { AgentAvatar } from './AgentAvatar';
+import { fetchModelsDevCatalog, getModelsForProviderId, ModelsDevEntry } from '../../services/modelsDevService';
 
 interface AgentCreationModalProps {
   isOpen: boolean;
@@ -404,6 +405,7 @@ Available tools: Web Search, Code Runner, and Workspace Access.
   const [activeSkillFileIdx, setActiveSkillFileIdx] = useState<number>(0);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const [modelsDevCatalog, setModelsDevCatalog] = useState<Record<string, ModelsDevEntry> | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   const [verifiedProfiles, setVerifiedProfiles] = useState<any[]>([]);
@@ -418,6 +420,11 @@ Available tools: Web Search, Code Runner, and Workspace Access.
       } catch (e) {
         console.error('Failed to load verified profiles in AgentCreationModal', e);
       }
+      fetchModelsDevCatalog().then(catalog => {
+        setModelsDevCatalog(catalog.models || {});
+      }).catch(() => {
+        // models.dev optional
+      });
     }
   }, [isOpen]);
 
@@ -469,10 +476,27 @@ Available tools: Web Search, Code Runner, and Workspace Access.
           value: m.value
         });
       });
+
+      // Merge models.dev catalog data
+      if (modelsDevCatalog) {
+        try {
+          const devModels = getModelsForProviderId({ models: modelsDevCatalog }, provId);
+          devModels.forEach(dm => {
+            if (!entries.some(e => e.provider === provId && e.value === dm.id)) {
+              entries.push({
+                provider: provId,
+                providerLabel: provLabel,
+                label: `${dm.name} (models.dev)`,
+                value: dm.id
+              });
+            }
+          });
+        } catch {}
+      }
     });
 
     return entries;
-  }, [verifiedProfiles]);
+  }, [verifiedProfiles, modelsDevCatalog]);
 
   const filteredModelEntries = modelSearchQuery
     ? allModelEntries.filter(m =>
@@ -503,7 +527,7 @@ Available tools: Web Search, Code Runner, and Workspace Access.
     if (provId === 'google-gemini') setBaseUrl('https://generativelanguage.googleapis.com/v1beta');
     else if (provId === 'openai') setBaseUrl('https://api.openai.com/v1');
     else if (provId === 'anthropic') setBaseUrl('https://api.anthropic.com/v1');
-    else if (provId === 'deepseek') setBaseUrl('https://api.deepseek.com');
+    else if (provId === 'deepseek') setBaseUrl('https://api.deepseek.com/v1');
     else if (provId === 'groq') setBaseUrl('https://api.groq.com/openai/v1');
     else if (provId === 'opencode') setBaseUrl('https://opencode.ai/zen/v1');
     else if (provId === 'openprovider') setBaseUrl('https://openprovider.mimika.in/v1');
@@ -514,10 +538,10 @@ Available tools: Web Search, Code Runner, and Workspace Access.
     else if (provId === 'cohere') setBaseUrl('https://api.cohere.com/compatibility/v1');
     else if (provId === 'sarvamai') setBaseUrl('https://api.sarvam.ai/v1');
     else if (provId === 'kilo') setBaseUrl('https://api.kilo.ai/api/gateway');
-    else if (provId === 'cline') setBaseUrl('https://api.cline.bot');
+    else if (provId === 'cline') setBaseUrl('https://api.cline.bot/api/v1');
     else if (provId === 'nvidia_nim') setBaseUrl('https://integrate.api.nvidia.com/v1');
     else if (provId === 'ollama') setBaseUrl('http://localhost:11434/v1');
-    else if (provId === 'ollama_cloud') setBaseUrl('https://ollama.com');
+    else if (provId === 'ollama_cloud') setBaseUrl('https://ollama.com/v1');
     else if (provId === 'lm-studio') setBaseUrl('http://localhost:1234/v1');
     else setBaseUrl('');
     setIsModelMenuOpen(false);
@@ -1937,7 +1961,11 @@ Do NOT output any markdown backticks outside the JSON. Return only the raw JSON.
                           {(() => {
                             if (customModelText) return customModelText;
                             const foundProvider = PROVIDERS.find(p => p.id === provider);
-                            const foundModel = (PROVIDER_MODELS[provider] || []).find(m => m.value === model);
+                            let foundModel = (PROVIDER_MODELS[provider] || []).find(m => m.value === model);
+                            if (!foundModel && modelsDevCatalog) {
+                              const devModel = getModelsForProviderId({ models: modelsDevCatalog }, provider).find(m => m.id === model);
+                              if (devModel) foundModel = { label: devModel.name, value: devModel.id };
+                            }
                             const modelLabel = foundModel?.label || model;
                             const providerLabel = foundProvider?.label || provider;
                             return `${modelLabel}  ·  ${providerLabel}`;

@@ -698,6 +698,82 @@ export function useLlamaBridge({
       }
     }
 
+    // Route freemodel_claude + Claude models (sonnet/haiku/opus) through PI agent SDK
+    const isFreeModelClaude = selectedProvider === 'freemodel_claude';
+    const isClaudeTierModel = /\b(sonnet|haiku|opus)\b/i.test(activeModelId);
+
+    if (isFreeModelClaude && isClaudeTierModel) {
+      console.log('[LUMINA_DEBUG] callLlamaBridge -> PI AGENT PATH (freemodel_claude + Claude model)');
+
+      // Compile messages into a conversation string for the agent
+      const conversationText = messagesPrompt.map((m: any) => {
+        const role = m.role === 'user' ? 'User' : 'Assistant';
+        const content = typeof m.content === 'string' ? m.content :
+          Array.isArray(m.content) ? m.content.map((c: any) => c.type === 'text' ? c.text : '').join('\n') : '';
+        return `${role}: ${content}`;
+      }).join('\n\n');
+
+      return new Promise((resolve, reject) => {
+        const chunks: string[] = [];
+        let fullText = '';
+
+        fetch('/api/coder/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task: conversationText,
+            provider: 'freemodel_claude',
+            model: activeModelId,
+            apiKey: key,
+            baseUrl: 'https://cc.freemodel.dev'
+          }),
+          signal
+        }).then(piRes => {
+          if (!piRes.ok) {
+            return reject(new Error(`Coder Agent failed: ${piRes.status}`));
+          }
+
+          const reader = piRes.body?.getReader();
+          if (!reader) return reject(new Error('No response body'));
+
+          const decoder = new TextDecoder();
+          const read = () => {
+            reader.read().then(({ done, value }) => {
+              if (done) {
+                // Return accumulated response as normalized LLM response
+                resolve({
+                  choices: [{
+                    message: { role: 'assistant', content: fullText },
+                    finish_reason: 'stop'
+                  }]
+                });
+                return;
+              }
+              const chunk = decoder.decode(value, { stream: true });
+              chunks.push(chunk);
+
+              // Parse SSE events: each line is {"type":..., ...}
+              const lines = chunk.split('\n');
+              for (const line of lines) {
+                if (line.startsWith('data:') || line.startsWith('{')) {
+                  try {
+                    const text = line.replace(/^data:\s*/, '').trim();
+                    if (!text) continue;
+                    const event = JSON.parse(text);
+                    if (event.type === 'content' || event.type === 'text') {
+                      fullText += event.content || event.text || '';
+                    }
+                  } catch {}
+                }
+              }
+              read();
+            });
+          };
+          read();
+        }).catch(reject);
+      });
+    }
+
     console.log('[LUMINA_DEBUG] callLlamaBridge -> /api/chat FALLBACK PATH');
     console.log('[LUMINA_DEBUG] Provider:', selectedProvider, 'Base URL:', baseUrl);
     const hasArrayContent = messagesPrompt.some(m => Array.isArray(m.content));
