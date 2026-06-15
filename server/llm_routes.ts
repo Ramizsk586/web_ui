@@ -732,9 +732,18 @@ export function setupLlmRoutes(app: express.Express) {
         }
       }
 
+      let reqApiKey = '';
+      if (req.headers.authorization) {
+        reqApiKey = String(req.headers.authorization).replace(/^Bearer\s+/i, '');
+      } else if (req.headers['x-api-key']) {
+        reqApiKey = String(req.headers['x-api-key']);
+      }
+
       if (!endpoint) {
         endpoint = process.env.AI_BASE_URL || 'http://localhost:11434/v1';
-        apiKey = process.env.AI_API_KEY || '';
+        apiKey = apiKey || reqApiKey || process.env.AI_API_KEY || '';
+      } else {
+        apiKey = apiKey || reqApiKey;
       }
 
       if (endpoint.includes('kimchi.dev')) {

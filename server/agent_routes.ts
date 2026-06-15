@@ -886,72 +886,23 @@ export function setupAgentRoutes(app: express.Express) {
     const resolvedWorkspace = resolveCoderPath(workspaceRoot);
 
     try {
-      // Fast health check (500ms timeout) to see if Rust Agent is already running
-      let isRustAgentHealthy = false;
-      try {
-        const health = await axios.get('http://127.0.0.1:3001/api/agent/health', { timeout: 500 });
-        isRustAgentHealthy = (health.status === 200);
-      } catch (err) {
-        // Not healthy / not running
-      }
-
-      if (isRustAgentHealthy) {
-        console.log('🔗 Proxying request to Rust agent on port 3001...');
-        const response = await axios.post('http://127.0.0.1:3001/api/agent/chat', {
-          message: task,
-          workspace: resolvedWorkspace
-        }, {
-          responseType: 'stream',
-          headers: { 'Content-Type': 'application/json' }
-        });
-
-        response.data.on('data', (chunk: Buffer) => {
-          res.write(chunk);
+      console.log('🤖 Running coder mode using Pi Agent backend...');
+      const { runAiSdkAgentLoop } = await import('./ai_sdk_agent.js');
+      await runAiSdkAgentLoop({
+        task,
+        workspaceRoot: resolvedWorkspace,
+        provider: typeof provider === 'string' ? provider : undefined,
+        model: typeof model === 'string' ? model : undefined,
+        apiKey,
+        baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
+        onEvent: (event) => {
+          res.write(`${JSON.stringify(event)}\n`);
           if ((res as any).flush) {
             (res as any).flush();
           }
-        });
-
-        response.data.on('end', () => {
-          res.end();
-        });
-
-        response.data.on('error', (err: any) => {
-          console.error('[rust-agent] Stream error:', err);
-          res.write(`${JSON.stringify({ type: 'error', error: err.message })}\n`);
-          res.end();
-        });
-      } else {
-        // Rust agent is not running. Trigger background startup so it can be ready for future requests,
-        // but immediately fallback to TypeScript so that this current request is not blocked or delayed.
-        console.log('🤖 Rust Agent is offline. Triggering background startup...');
-        ensureRustAgentRunning({
-          provider: typeof provider === 'string' ? provider : undefined,
-          model: typeof model === 'string' ? model : undefined,
-          apiKey,
-          baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
-        }).catch((err) => {
-          console.warn('⚠️ Background Rust Agent startup failed:', err.message);
-        });
-
-        console.log('⚠️ Falling back to TypeScript-based coder agent loop...');
-        const { runAiSdkAgentLoop } = await import('./ai_sdk_agent.js');
-        await runAiSdkAgentLoop({
-          task,
-          workspaceRoot: resolvedWorkspace,
-          provider: typeof provider === 'string' ? provider : undefined,
-          model: typeof model === 'string' ? model : undefined,
-          apiKey,
-          baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
-          onEvent: (event) => {
-            res.write(`${JSON.stringify(event)}\n`);
-            if ((res as any).flush) {
-              (res as any).flush();
-            }
-          }
-        });
-        res.end();
-      }
+        }
+      });
+      res.end();
     } catch (error: any) {
       console.error('[coder-agent] Run error:', error);
       res.write(`${JSON.stringify({ type: 'error', error: error.message })}\n`);
