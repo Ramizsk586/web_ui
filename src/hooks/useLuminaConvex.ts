@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSocket } from './useSocket';
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 export type ExecAgentStatus = 'spawned' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -292,6 +293,141 @@ export function useLuminaConvex() {
     if (!isConvexConnected) save('lumina_exec_agents', agents);
   }, [agents, isConvexConnected]);
 
+  // Initial fetch from Convex if connected
+  useEffect(() => {
+    if (!isConvexConnected) return;
+    async function syncAgents() {
+      const list = await convexQuery('agents');
+      const mapped: ExecutionAgent[] = list.map((a: any) => ({
+        agentId: a.agentId,
+        name: a.name,
+        task: a.task,
+        status: a.status,
+        result: a.result,
+        error: a.error,
+        integrations: a.integrations ?? a.mcpServers ?? [],
+        inputTokens: a.inputTokens,
+        outputTokens: a.outputTokens,
+        costUsd: a.costUsd,
+        startedAt: a.startedAt,
+        completedAt: a.completedAt,
+        logs: [],
+      }));
+      setAgents(mapped);
+    }
+    syncAgents();
+  }, [isConvexConnected]);
+
+  // Initial fetch of memories from Convex if connected
+  useEffect(() => {
+    if (!isConvexConnected) return;
+    async function syncMemories() {
+      const list = await convexQuery('memory');
+      const mapped: MemoryRecord[] = list.map((m: any) => ({
+        memoryId: m.memoryId,
+        content: m.content,
+        tier: m.tier,
+        segment: m.segment,
+        importance: m.importance,
+        decayRate: m.decayRate,
+        accessCount: m.accessCount,
+        lastAccessedAt: m.lastAccessedAt,
+        lifecycle: m.lifecycle,
+        source: m.source,
+        agentId: m.agentId,
+        createdAt: m.createdAt,
+      }));
+      setMemories(mapped);
+    }
+    syncMemories();
+  }, [isConvexConnected]);
+
+  // Initial fetch of automations from Convex if connected
+  useEffect(() => {
+    if (!isConvexConnected) return;
+    async function syncAutomations() {
+      const list = await convexQuery('automations');
+      const mapped: Automation[] = list.map((a: any) => ({
+        automationId: a.automationId,
+        name: a.name,
+        task: a.task,
+        integrations: a.integrations ?? [],
+        schedule: a.schedule,
+        enabled: a.enabled,
+        lastRunAt: a.lastRunAt,
+        nextRunAt: a.nextRunAt,
+        createdAt: a.createdAt,
+      }));
+      setAutomations(mapped);
+    }
+    syncAutomations();
+  }, [isConvexConnected]);
+
+  // Real-time WebSocket updates
+  useSocket((e) => {
+    if (e.event === "agent_spawned") {
+      const data = e.data as { agentId: string; name: string; task: string };
+      setAgents((prev) => {
+        if (prev.some((a) => a.agentId === data.agentId)) return prev;
+        const newAgent: ExecutionAgent = {
+          agentId: data.agentId,
+          name: data.name,
+          task: data.task,
+          status: "running",
+          integrations: [],
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: 0,
+          startedAt: Date.now(),
+          logs: [],
+        };
+        return [newAgent, ...prev];
+      });
+    } else if (e.event === "agent_done") {
+      const data = e.data as { agentId: string; status: ExecAgentStatus; result?: string; error?: string };
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.agentId === data.agentId
+            ? {
+                ...a,
+                status: data.status,
+                result: data.result,
+                error: data.error,
+                completedAt: Date.now(),
+              }
+            : a
+        )
+      );
+    }
+  });
+
+  const getAgentLogs = useCallback(
+    async (agentId: string) => {
+      if (isConvexConnected) {
+        const url = localStorage.getItem(CONVEX_URL_KEY);
+        if (!url) return [];
+        try {
+          const res = await fetch(`${url}/api/query`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: "agents:getLogs",
+              args: { agentId, limit: 500 },
+            }),
+          });
+          if (!res.ok) return [];
+          const data = await res.json();
+          return data.value ?? [];
+        } catch {
+          return [];
+        }
+      }
+      const agent = agents.find((a) => a.agentId === agentId);
+      return agent?.logs ?? [];
+    },
+    [isConvexConnected, agents]
+  );
+
   const addAgent = useCallback(async (agent: ExecutionAgent) => {
     if (isConvexConnected) {
       await convexMutation('agents:create', {
@@ -432,6 +568,33 @@ export function useLuminaConvex() {
     setAutomations(prev => prev.filter(a => a.automationId !== automationId));
   }, [isConvexConnected]);
 
+  const getAutomationRuns = useCallback(
+    async (automationId: string) => {
+      if (isConvexConnected) {
+        const url = localStorage.getItem(CONVEX_URL_KEY);
+        if (!url) return [];
+        try {
+          const res = await fetch(`${url}/api/query`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: "automations:recentRuns",
+              args: { automationId, limit: 30 },
+            }),
+          });
+          if (!res.ok) return [];
+          const data = await res.json();
+          return data.value ?? [];
+        } catch {
+          return [];
+        }
+      }
+      const allRuns = load<any[]>('lumina_automation_runs', []);
+      return allRuns.filter((r) => r.automationId === automationId);
+    },
+    [isConvexConnected]
+  );
+
   // ─── Events ────────────────────────────────────────────────────────────────
   const [events, setEvents] = useState<ActivityEvent[]>(() => load('lumina_activity_events', []));
 
@@ -489,9 +652,9 @@ export function useLuminaConvex() {
 
   return {
     isConvexConnected,
-    agents, addAgent, patchAgent, deleteAgent, addLog,
+    agents, addAgent, patchAgent, deleteAgent, addLog, getAgentLogs,
     memories, addMemory, patchMemory, deleteMemory, recallMemory,
-    automations, addAutomation, patchAutomation, toggleAutomation, deleteAutomation,
+    automations, addAutomation, patchAutomation, toggleAutomation, deleteAutomation, getAutomationRuns,
     events, addEvent, deleteEvent, clearAllEvents,
     metrics,
   };

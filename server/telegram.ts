@@ -12,6 +12,8 @@
 
 import { handleUserMessage } from './interaction-agent.js';
 import { deliverToTelegram, sendTypingAction } from './telegram-delivery.js';
+import { getConvexClient } from './convex-client.js';
+import { api } from '../convex/_generated/api.js';
 
 function getBotToken(): string {
   return process.env.TELEGRAM_BOT_TOKEN ?? '';
@@ -52,6 +54,36 @@ async function fetchUpdates(offset: number): Promise<any[]> {
   return data.result ?? [];
 }
 
+function hardcodedReply(content: string): string | null {
+  const normalized = content.trim().toLowerCase().replace(/[!.?]+$/g, "");
+  if (normalized === "/start") {
+    return "Hi, I am Boop. Send me a task, question, reminder, or anything you want me to help with.";
+  }
+  if (normalized === "hi" || normalized === "hello") {
+    return "Hey, I am here. What should we work on?";
+  }
+  return null;
+}
+
+function startTyping(chatId: number | string): { stop: () => void } {
+  let stopped = false;
+  const send = () => {
+    if (stopped) return;
+    sendTypingAction(chatId).catch(() => {
+      /* ignore transient Telegram typing failures */
+    });
+  };
+
+  send();
+  const interval = setInterval(send, 4000);
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(interval);
+    },
+  };
+}
+
 async function processUpdate(update: any): Promise<void> {
   const message = update.message ?? update.edited_message;
   if (!message?.text) return;
@@ -80,32 +112,45 @@ async function processUpdate(update: any): Promise<void> {
     });
   }
 
-  // Handle /start command
-  if (text === '/start') {
-    await deliverToTelegram(chatId, `👋 Hi! I'm **Boop**, your Lumina AI assistant.\n\nSend me a message and I'll help you out.`);
+  const conversationId = `telegram:${chatId}`;
+  const convex = getConvexClient();
+
+  const directReply = hardcodedReply(text);
+  if (directReply) {
+    await convex.mutation(api.messages.send, {
+      conversationId,
+      role: "user",
+      content: text,
+    });
+    await deliverToTelegram(chatId, directReply);
+    await convex.mutation(api.messages.send, {
+      conversationId,
+      role: "assistant",
+      content: directReply,
+    });
+    console.log(`[Telegram] -> telegram hardcoded reply (${directReply.length} chars)`);
     return;
   }
 
-  // Show typing indicator
-  await sendTypingAction(chatId);
-
+  const typing = startTyping(chatId);
   try {
     const response = await handleUserMessage({
       content: text,
       userId: username,
+      conversationId,
       telegramChatId: chatId,
       source: 'telegram',
     });
 
     let reply = response.reply || 'Done.';
-    if (response.spawned && response.agentId) {
-      reply += `\n\n_🤖 A background agent (${response.agentId}) was spawned to handle this. I'll update you when it completes._`;
-    }
-
+    typing.stop();
     await deliverToTelegram(chatId, reply);
   } catch (err: any) {
     console.error('[Telegram] Error handling message:', err);
+    typing.stop();
     await deliverToTelegram(chatId, `❌ An error occurred: ${err.message ?? 'Unknown error'}`);
+  } finally {
+    typing.stop();
   }
 }
 

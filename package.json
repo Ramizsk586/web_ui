@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development tsx server.ts",
     "dev:server": "cross-env NODE_ENV=development tsx server.ts",
-    "build:server": "node -e \"const fs=require('fs');if(!fs.existsSync('dist'))fs.mkdirSync('dist')\" && esbuild server.ts --bundle --platform=node --format=esm --sourcemap --outfile=dist/server.mjs --external:vite --external:playwright-core --external:crawlee --external:chromium-bidi --external:chromium-bidi/*",
+    "build:server": "node -e \"const fs=require('fs');if(!fs.existsSync('dist'))fs.mkdirSync('dist')\" && esbuild server.ts --bundle --platform=node --format=esm --sourcemap --outfile=dist/server.mjs --external:vite --external:playwright-core --external:crawlee --external:chromium-bidi --external:chromium-bidi/* --external:onnxruntime-node --external:nodejs-whisper --external:@huggingface/transformers --external:@anthropic-ai/claude-agent-sdk",
     "build": "vite build && npm run build:server",
     "start": "node dist/server.mjs",
     "preview": "vite preview",
@@ -24,12 +24,14 @@
     "@ai-sdk/mistral": "^3.0.39",
     "@ai-sdk/openai": "^3.0.71",
     "@ai-sdk/openai-compatible": "^2.0.50",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.141",
     "@anthropic-ai/sdk": "^0.104.1",
     "@composio/claude-agent-sdk": "^0.9.2",
     "@composio/core": "^0.10.0",
     "@earendil-works/pi-agent-core": "^0.79.3",
     "@earendil-works/pi-ai": "^0.79.3",
     "@earendil-works/pi-coding-agent": "^0.79.3",
+    "@huggingface/transformers": "^4.2.0",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/react-syntax-highlighter": "^15.5.13",
@@ -55,6 +57,7 @@
     "playwright-core": "^1.53.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "react-force-graph-2d": "^1.27.0",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
@@ -75,7 +78,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
@@ -83,5 +86,11 @@
   },
   "optionalDependencies": {
     "@esbuild/linux-x64": "^0.28.1"
+  },
+  "overrides": {
+    "dompurify": "^3.4.10",
+    "esbuild": "^0.28.1",
+    "protobufjs": "^7.6.4",
+    "ws": "^8.21.0"
   }
 }

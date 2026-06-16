@@ -81,8 +81,11 @@ export default defineSchema({
     decayRate: v.number(),
     accessCount: v.number(),
     lastAccessedAt: v.number(),
+    sourceTurn: v.optional(v.string()),
     lifecycle: v.union(v.literal("active"), v.literal("archived"), v.literal("pruned")),
     supersedes: v.optional(v.array(v.string())),
+    embedding: v.optional(v.array(v.float64())),
+    metadata: v.optional(v.string()),
     source: v.string(),
     agentId: v.optional(v.string()),
     createdAt: v.number(),
@@ -90,7 +93,12 @@ export default defineSchema({
     .index("by_memory_id", ["memoryId"])
     .index("by_tier", ["tier"])
     .index("by_segment", ["segment"])
-    .index("by_lifecycle", ["lifecycle"]),
+    .index("by_lifecycle", ["lifecycle"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 1024,
+      filterFields: ["lifecycle"],
+    }),
 
   automations: defineTable({
     automationId: v.string(),

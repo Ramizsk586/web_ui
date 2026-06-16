@@ -16,6 +16,8 @@ import { setupProxyRoutes } from "./server/proxy_routes.js";
 import { setupLlamaRoutes } from "./server/llama.js";
 import { setupRagRoutes } from "./server/rag_routes.js";
 import { setupSkillRoutes } from "./server/skill_routes.js";
+import { createMemoryRouter } from "./server/memory_routes.js";
+import { preloadLocalModel } from "./server/embeddings.js";
 import { startCleanupLoop } from "./server/clean.js";
 import { startConsolidationLoop } from "./server/consolidation.js";
 import { startAutomationLoop } from "./server/automations.js";
@@ -63,6 +65,7 @@ async function startServer() {
   setupLlamaRoutes(app);
   setupRagRoutes(app);
   await setupSkillRoutes(app);
+  app.use("/api/memory", createMemoryRouter());
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "lumina-agent" });
@@ -96,6 +99,7 @@ async function startServer() {
     startConsolidationLoop();
     startAutomationLoop();
     startTelegram();
+    preloadLocalModel();
   });
 
   const shutdown = () => {

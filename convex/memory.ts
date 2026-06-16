@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, action } from "./_generated/server";
+import { api } from "./_generated/api";
 
 export const create = mutation({
   args: {
@@ -128,11 +129,31 @@ export const upsert = mutation({
       v.literal("relationship"), v.literal("project"), v.literal("knowledge"),
       v.literal("context"),
     ),
+    importance: v.number(),
+    decayRate: v.number(),
+    sourceTurn: v.optional(v.string()),
+    supersedes: v.optional(v.array(v.string())),
+    embedding: v.optional(v.array(v.float64())),
+    metadata: v.optional(v.string()),
     source: v.string(),
     agentId: v.optional(v.string()),
-    supersedes: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
+
+    // Archive all superseded records
+    if (args.supersedes?.length) {
+      for (const sid of args.supersedes) {
+        if (sid === args.memoryId) continue; // never archive self
+        const old = await ctx.db.query("memoryRecords")
+          .withIndex("by_memory_id", (q) => q.eq("memoryId", sid))
+          .unique();
+        if (old && old.lifecycle === "active") {
+          await ctx.db.patch(old._id, { lifecycle: "archived" });
+        }
+      }
+    }
+
     const existing = await ctx.db.query("memoryRecords")
       .withIndex("by_memory_id", (q) => q.eq("memoryId", args.memoryId))
       .unique();
@@ -143,43 +164,65 @@ export const upsert = mutation({
         content: args.content,
         tier: args.tier,
         segment: args.segment,
-        supersedes: args.supersedes ?? existing.supersedes,
-        lifecycle: "active",
-      });
-    } else {
-      // Insert fresh record
-      const decayRate = args.tier === "permanent"
-        ? (args.segment === "identity" ? 0.0000228 : 0.000114)
-        : args.tier === "long" ? 0.00015 : 0.0005;
-      const importance = args.tier === "permanent" ? 0.99 : args.tier === "long" ? 0.85 : 0.6;
-      await ctx.db.insert("memoryRecords", {
-        memoryId: args.memoryId,
-        content: args.content,
-        tier: args.tier,
-        segment: args.segment,
-        importance,
-        decayRate,
-        accessCount: 0,
-        lastAccessedAt: Date.now(),
-        lifecycle: "active",
+        importance: args.importance,
+        decayRate: args.decayRate,
         supersedes: args.supersedes,
-        source: args.source,
-        agentId: args.agentId,
-        createdAt: Date.now(),
+        embedding: args.embedding ?? existing.embedding,
+        metadata: args.metadata ?? existing.metadata,
+        lastAccessedAt: now,
       });
+      return existing._id;
     }
 
-    // Archive all superseded records
-    if (args.supersedes) {
-      for (const sid of args.supersedes) {
-        const old = await ctx.db.query("memoryRecords")
-          .withIndex("by_memory_id", (q) => q.eq("memoryId", sid))
-          .unique();
-        if (old && old.lifecycle === "active") {
-          await ctx.db.patch(old._id, { lifecycle: "archived" });
-        }
-      }
+    // Insert fresh record
+    return await ctx.db.insert("memoryRecords", {
+      memoryId: args.memoryId,
+      content: args.content,
+      tier: args.tier,
+      segment: args.segment,
+      importance: args.importance,
+      decayRate: args.decayRate,
+      sourceTurn: args.sourceTurn,
+      supersedes: args.supersedes,
+      embedding: args.embedding,
+      metadata: args.metadata,
+      source: args.source,
+      agentId: args.agentId,
+      accessCount: 0,
+      lastAccessedAt: now,
+      lifecycle: "active",
+      createdAt: now,
+    });
+  },
+});
+
+export const getByIds = query({
+  args: { ids: v.array(v.id("memoryRecords")) },
+  handler: async (ctx, args) => {
+    const out = [];
+    for (const id of args.ids) {
+      const r = await ctx.db.get(id);
+      if (r) out.push(r);
     }
+    return out;
+  },
+});
+
+export const vectorSearch = action({
+  args: { embedding: v.array(v.float64()), limit: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<Array<{ _id: any; score: number; record: any }>> => {
+    const results = await ctx.vectorSearch("memoryRecords", "by_embedding", {
+      vector: args.embedding,
+      limit: args.limit ?? 20,
+      filter: (q) => q.eq("lifecycle", "active"),
+    });
+    const records = await ctx.runQuery(api.memory.getByIds, {
+      ids: results.map((r) => r._id),
+    });
+    const byId = new Map(records.map((r: any) => [r._id, r]));
+    return results
+      .map((r) => ({ _id: r._id, score: r._score, record: byId.get(r._id) }))
+      .filter((r) => r.record);
   },
 });
 
@@ -195,45 +238,118 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const limit = args.limit ?? 100;
+    let results;
     if (args.tier) {
-      return await ctx.db.query("memoryRecords")
+      results = await ctx.db.query("memoryRecords")
         .withIndex("by_tier", (q) => q.eq("tier", args.tier!))
-        .order("desc").take(args.limit ?? 100);
-    }
-    if (args.segment) {
-      return await ctx.db.query("memoryRecords")
+        .order("desc").take(limit * 2);
+    } else if (args.segment) {
+      results = await ctx.db.query("memoryRecords")
         .withIndex("by_segment", (q) => q.eq("segment", args.segment!))
-        .order("desc").take(args.limit ?? 100);
+        .order("desc").take(limit * 2);
+    } else {
+      results = await ctx.db.query("memoryRecords").order("desc").take(limit * 2);
     }
-    if (args.lifecycle) {
-      return await ctx.db.query("memoryRecords")
-        .withIndex("by_lifecycle", (q) => q.eq("lifecycle", args.lifecycle!))
-        .order("desc").take(args.limit ?? 100);
-    }
-    return await ctx.db.query("memoryRecords").order("desc").take(args.limit ?? 100);
+    const lifecycle = args.lifecycle ?? "active";
+    return results.filter((r) => r.lifecycle === lifecycle).slice(0, limit);
   },
 });
 
 export const search = query({
   args: { query: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const all = await ctx.db.query("memoryRecords")
-      .withIndex("by_lifecycle", (q) => q.eq("lifecycle", "active"))
-      .take(500);
+    const limit = args.limit ?? 20;
     const q = args.query.toLowerCase();
-    return all
+    const active = await ctx.db.query("memoryRecords")
+      .withIndex("by_lifecycle", (idx) => idx.eq("lifecycle", "active"))
+      .order("desc")
+      .take(500);
+    return active
       .filter((m) => m.content.toLowerCase().includes(q))
-      .slice(0, args.limit ?? 50);
+      .sort((a, b) => b.importance - a.importance)
+      .slice(0, limit);
+  },
+});
+
+const COUNTS_SCAN_LIMIT = 5000;
+
+export const embeddingStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_lifecycle", (q) => q.eq("lifecycle", "active"))
+      .order("desc")
+      .take(COUNTS_SCAN_LIMIT);
+    let withEmbedding = 0;
+    let withoutEmbedding = 0;
+    for (const m of all) {
+      if (m.embedding && m.embedding.length > 0) withEmbedding++;
+      else withoutEmbedding++;
+    }
+    return {
+      total: all.length,
+      withEmbedding,
+      withoutEmbedding,
+      truncated: all.length === COUNTS_SCAN_LIMIT,
+    };
+  },
+});
+
+export const listUnembeddedPage = query({
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    pageSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const result = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_lifecycle", (q) => q.eq("lifecycle", "active"))
+      .order("desc")
+      .paginate({
+        cursor: args.cursor ?? null,
+        numItems: args.pageSize ?? 50,
+      });
+    return {
+      page: result.page
+        .filter((m) => !m.embedding || m.embedding.length === 0)
+        .map((m) => ({ memoryId: m.memoryId, content: m.content })),
+      isDone: result.isDone,
+      continueCursor: result.continueCursor,
+    };
+  },
+});
+
+export const setEmbedding = mutation({
+  args: {
+    memoryId: v.string(),
+    embedding: v.array(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    const mem = await ctx.db
+      .query("memoryRecords")
+      .withIndex("by_memory_id", (q) => q.eq("memoryId", args.memoryId))
+      .unique();
+    if (!mem) return null;
+    await ctx.db.patch(mem._id, { embedding: args.embedding });
+    return mem._id;
   },
 });
 
 export const countsByTier = query({
+  args: {},
   handler: async (ctx) => {
-    const all = await ctx.db.query("memoryRecords").take(5000);
-    const counts: Record<string, number> = { short: 0, long: 0, permanent: 0 };
-    for (const m of all) {
-      if (m.lifecycle === "active") counts[m.tier]++;
-    }
-    return counts;
+    const all = await ctx.db.query("memoryRecords").order("desc").take(COUNTS_SCAN_LIMIT);
+    const active = all.filter((m) => m.lifecycle === "active");
+    return {
+      short: active.filter((m) => m.tier === "short").length,
+      long: active.filter((m) => m.tier === "long").length,
+      permanent: active.filter((m) => m.tier === "permanent").length,
+      archived: all.filter((m) => m.lifecycle === "archived").length,
+      pruned: all.filter((m) => m.lifecycle === "pruned").length,
+      truncated: all.length === COUNTS_SCAN_LIMIT,
+      scanLimit: COUNTS_SCAN_LIMIT,
+    };
   },
 });
