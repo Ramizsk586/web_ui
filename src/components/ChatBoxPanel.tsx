@@ -57,8 +57,6 @@ export interface ChatBoxPanelProps {
   isCenteredState?: boolean;
   theme: { id: string };
   writingStyle: string;
-  isWritingCanvasOpen: boolean;
-  setIsWritingCanvasOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isWebSearchEnabled: boolean;
   setIsWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   isDeepSearchEnabled: boolean;

@@ -113,7 +113,7 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, '127.0.0.1', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Proxy server ready at http://127.0.0.1:${PORT}`);
 
     // Start background services

@@ -854,6 +854,28 @@ const shouldActivateOrchestration = (msg: string): boolean => {
   return ORCHESTRATION_TRIGGERS.some(trigger => lower.includes(trigger));
 };
 
+const buildFallbackCoderTodos = (rawTask: string) => {
+  const trimmed = String(rawTask || '').trim();
+  const queryPreview = trimmed.substring(0, 42);
+  return [
+    {
+      id: '1',
+      text: `Understand request: "${queryPreview}${trimmed.length > 42 ? '...' : ''}"`,
+      status: 'in_progress' as const
+    },
+    {
+      id: '2',
+      text: 'Inspect the active workspace and identify likely target files',
+      status: 'pending' as const
+    },
+    {
+      id: '3',
+      text: 'Prepare and execute the engineering checklist in coder mode',
+      status: 'pending' as const
+    }
+  ];
+};
+
 const loadCustomSkillsFromStorage = () => {
   try {
     const saved = localStorage.getItem('lumina_custom_skills');
@@ -1473,8 +1495,32 @@ ${JSON.stringify(parsed.memories, null, 2)}`
     let currentToolCalls: ToolCallNode[] = [];
     let isDone = false;
     let finalEventResultText: string | undefined = undefined;
-    let lastToolCallsJson = '';
+    let lastToolCallsJson = JSON.stringify([]);
     let typingInterval: any;
+    let inlineThinkingOpen = false;
+    let inlineNarrativeMode: 'idle' | 'thinking' | 'text' = 'idle';
+    let hasStreamedText = false;
+
+    const appendInlineSeparator = () => {
+      if (!targetContent) return;
+      if (targetContent.endsWith('\n\n') || targetContent.endsWith('<think>')) return;
+      targetContent += '\n\n';
+    };
+
+    const openInlineThinking = () => {
+      if (inlineThinkingOpen) return;
+      appendInlineSeparator();
+      targetContent += '<think>';
+      inlineThinkingOpen = true;
+      inlineNarrativeMode = 'thinking';
+    };
+
+    const closeInlineThinking = () => {
+      if (!inlineThinkingOpen) return;
+      targetContent += '</think>';
+      inlineThinkingOpen = false;
+      inlineNarrativeMode = 'idle';
+    };
 
     // Helper to get tool category
     const getToolCategory = (name: string): ToolCallNode['toolCategory'] => {
@@ -1515,6 +1561,8 @@ ${JSON.stringify(parsed.memories, null, 2)}`
           loopCount++;
           const toolName = event.toolName;
           const normalizedArgPath = event.args?.filePath || '';
+          closeInlineThinking();
+          inlineNarrativeMode = 'idle';
 
           const displayLabel =
             toolName === 'run_command' ? `Run command (${String(event.args?.command || '').trim() || 'shell'})` :
@@ -1546,7 +1594,8 @@ ${JSON.stringify(parsed.memories, null, 2)}`
           currentToolCalls = [...toolCallNodes];
 
           // Append tool call marker immediately to targetContent
-          targetContent = targetContent + (targetContent ? '\n\n' : '') + `[[tool_call:${node.id}]]`;
+          appendInlineSeparator();
+          targetContent += `[[tool_call:${node.id}]]`;
 
           // Sequential TODO advancement: on each tool call start, ensure
           // the first pending task is activated (if none is in_progress yet).
@@ -2112,6 +2161,7 @@ ${JSON.stringify(parsed.memories, null, 2)}`
       timestamp: new Date(),
       startedAt: new Date(),
       thinking: isCoderPlanning ? 'Preparing engineering task plan...' : (isWebSearchEnabled ? 'Collecting live web sources...' : `${persona.name} is preparing a response...`),
+      isThinking: isCoderPlanning,
       isSearching: isWebSearchEnabled,
       isStreaming: true,
       toolCalls: [
@@ -2220,115 +2270,16 @@ ${JSON.stringify(parsed.memories, null, 2)}`
           } : m)
         } : chat));
         try {
-          const planPromptMessage = [
-            {
-              role: 'system',
-              content: 'You are an expert technical planner. Formulate a targeted, structured task checklist of 3-5 concrete engineering steps to accomplish the user\'s workspace request. Focus on specifying relevant files to check, create, edit, or build. Respond ONLY with a clean JSON object containing a "todos" array with items having "id" (string starting at "1"), "text" (the specific task description), and "status" (always "pending"). Do not explain. Do not wrap in markdown tags. Example: {"todos": [{"id": "1", "text": "Analyze existing project files for structure", "status": "pending"}]}.'
-            },
-            {
-              role: 'user',
-              content: `User query: "${cmdQuery || content}"`
-            }
-          ];
-          const planRes = await callLlamaBridge(planPromptMessage, [], signal);
-          let textResponse = planRes?.choices?.[0]?.message?.content || '';
-          // Clean any XML tool call artifacts that minimax-style models may inject
-          textResponse = textResponse
-            .replace(/minimax:tool_call\s*/gi, '')
-            .replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
-            .replace(/^\s*text\s*$/gm, '')
-            .replace(/^\s*Copy\s*$/gm, '')
-            .trim();
-          const jsonMatch = textResponse.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            if (Array.isArray(parsed.todos) && parsed.todos.length > 0) {
-              const mapped = parsed.todos.map((t: any, idx: number) => ({
-                id: t.id || (idx + 1).toString(),
-                text: t.text || 'Engineering task',
-                status: idx === 0 ? 'in_progress' : 'pending'
-              }));
-              setCoderTodos(mapped);
-
-              if (!shouldActivateOrchestration(content)) {
-                const todoContent = `# Tasks Checklist\n\n` + 
-                  mapped.map((t: any) => `- [ ] ${t.text || t.content || t.text}`).join('\n') + '\n';
-                
-                const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
-                const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md` : `./TODO.md`;
-                
-                fetch('/api/fs/write', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filePath: fullPath, content: todoContent, ...workspaceArg })
-                }).then(() => {
-                  if (triggerWorkspaceRefresh) {
-                    triggerWorkspaceRefresh();
-                  }
-                  setTimeout(() => {
-                    if ((window as any).openFileInPreview) {
-                      (window as any).openFileInPreview('TODO.md');
-                    }
-                  }, 300);
-                }).catch(err => {
-                  console.error("Failed to write TODO.md:", err);
-                });
-              }
-              setChats(prev => prev.map(chat => chat.id === chatId ? {
-                ...chat,
-                messages: chat.messages.map(m => m.id === thinkingId ? {
-                  ...m,
-                  thinking: shouldActivateOrchestration(content) ? 'Subagent plan prepared. Awaiting walkthrough approval...' : 'Coder TODOs ready. Starting agent...',
-                  ...(shouldActivateOrchestration(content) ? {
-                    todoPlan: {
-                      title: "📋 Multi-Agent Walkthrough Plan",
-                      todos: mapped,
-                      isConfirmed: false,
-                      countdown: undefined
-                    }
-                  } : {}),
-                  toolCalls: [
-                    {
-                      id: 'coder-plan-node',
-                      label: 'Coder TODO runbook generated',
-                      type: 'tool',
-                      status: 'complete',
-                      toolName: 'manage_todos',
-                      icon: 'check',
-                      resultSummary: `${mapped.length} tasks prepared`
-                    },
-                    {
-                      id: 'coder-plan-ai',
-                      label: `${persona.name} - starting tool execution`,
-                      type: 'ai',
-                      status: 'active',
-                      icon: 'terminal'
-                    }
-                  ]
-                } : m)
-              } : chat));
-            } else {
-              throw new Error("Invalid structure");
-            }
-          } else {
-            throw new Error("No JSON found");
-          }
-        } catch (err) {
-          console.warn("Failed to generate dynamic todos via AI:", err);
-          const fallbackTodos = [
-            { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' as const },
-            { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' as const },
-            { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' as const }
-          ];
-          setCoderTodos(fallbackTodos);
+          const mapped = buildFallbackCoderTodos(cmdQuery || content);
+          setCoderTodos(mapped);
 
           if (!shouldActivateOrchestration(content)) {
-            const todoContent = `# Tasks Checklist\n\n` + 
-              fallbackTodos.map((t: any) => `- [ ] ${t.text}`).join('\n') + '\n';
-            
+            const todoContent = '# Tasks Checklist\n\n' +
+              mapped.map((t: any) => `- [ ] ${t.text || t.content || t.text}`).join('\n') + '\n';
+
             const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
             const fullPath = coderWorkspacePath ? `${coderWorkspacePath.replace(/\\/g, '/')}/TODO.md` : `./TODO.md`;
-            
+
             fetch('/api/fs/write', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -2342,23 +2293,20 @@ ${JSON.stringify(parsed.memories, null, 2)}`
                   (window as any).openFileInPreview('TODO.md');
                 }
               }, 300);
-            }).catch(writeErr => {
-              console.error("Failed to write fallback TODO.md:", writeErr);
+            }).catch(err => {
+              console.error('Failed to write TODO.md:', err);
             });
           }
+
           setChats(prev => prev.map(chat => chat.id === chatId ? {
             ...chat,
             messages: chat.messages.map(m => m.id === thinkingId ? {
               ...m,
-              thinking: shouldActivateOrchestration(content) ? 'Fallback plan prepared. Awaiting walkthrough approval...' : 'Using fallback TODOs. Starting agent...',
+              thinking: shouldActivateOrchestration(content) ? 'Subagent plan prepared. Awaiting walkthrough approval...' : 'Coder TODOs ready. Starting agent...',
               ...(shouldActivateOrchestration(content) ? {
                 todoPlan: {
-                  title: "📋 Multi-Agent Walkthrough Plan",
-                  todos: [
-                    { id: 'fb-1', text: 'Analyze file layout and project components', status: 'in_progress' as const },
-                    { id: 'fb-2', text: `Implement build changes matching query: ${(cmdQuery || content).substring(0, 35)}${(cmdQuery || content).length > 35 ? '...' : ''}`, status: 'pending' as const },
-                    { id: 'fb-3', text: 'Verify application and render interactive hot-fix', status: 'pending' as const }
-                  ],
+                  title: '📋 Multi-Agent Walkthrough Plan',
+                  todos: mapped,
                   isConfirmed: false,
                   countdown: undefined
                 }
@@ -2366,12 +2314,12 @@ ${JSON.stringify(parsed.memories, null, 2)}`
               toolCalls: [
                 {
                   id: 'coder-plan-node',
-                  label: 'Fallback coder TODO runbook prepared',
+                  label: 'Coder TODO runbook generated',
                   type: 'tool',
                   status: 'complete',
                   toolName: 'manage_todos',
                   icon: 'check',
-                  resultSummary: '3 tasks prepared'
+                  resultSummary: `${mapped.length} tasks prepared`
                 },
                 {
                   id: 'coder-plan-ai',

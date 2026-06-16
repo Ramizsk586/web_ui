@@ -61,7 +61,7 @@ import {
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
 import ResearchWorkspacePanel from './components/ResearchWorkspacePanel';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
-import { FloatingWritingCanvas } from './components/FloatingWritingCanvas';
+
 import Whiteboard from './components/Whiteboard';
 import { ChatsManagerPanel } from './components/ChatsManagerPanel';
 
@@ -1842,8 +1842,6 @@ const startCoderPreview = useCallback(async () => {
         isCenteredState={isCenteredState}
         theme={theme}
         writingStyle={writingStyle}
-        isWritingCanvasOpen={isWritingCanvasOpen}
-        setIsWritingCanvasOpen={setIsWritingCanvasOpen}
         isWebSearchEnabled={isWebSearchEnabled} isDeepSearchEnabled={isDeepSearchEnabled} setIsDeepSearchEnabled={setIsDeepSearchEnabled}
         setIsWebSearchEnabled={setIsWebSearchEnabled}
         activeSkills={activeSkills}
@@ -3804,15 +3802,7 @@ const startCoderPreview = useCallback(async () => {
         />
       )}
 
-      {/* AI Writing Canvas - shown when writing style is not default */}
-      <AnimatePresence>
-        {isWritingCanvasOpen && (
-          <FloatingWritingCanvas
-            writingStyle={writingStyle}
-            onClose={() => setIsWritingCanvasOpen(false)}
-          />
-        )}
-      </AnimatePresence>
+      {/* AI Writing Canvas removed — content now goes to main Canvas panel */}
 
       {/* Global & Connected Whiteboard popup panel */}
       <AnimatePresence>

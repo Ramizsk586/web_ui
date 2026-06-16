@@ -7,7 +7,15 @@ export interface UseWorkspaceProps {
 
 export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
   const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
-  const [coderWorkspacePath, setCoderWorkspacePath] = useState('');
+  const [coderWorkspacePath, setCoderWorkspacePathState] = useState(() => {
+    try {
+      const isUserSelected = localStorage.getItem('lumina_coder_workspace_user_selected') === 'true';
+      if (!isUserSelected) return '';
+      return (localStorage.getItem('lumina_coder_workspace_path') || '').trim();
+    } catch {
+      return '';
+    }
+  });
   const [isCoderRightPanelOpen, setIsCoderRightPanelOpen] = useState(false);
   const [isWhiteboardOpen, setIsWhiteboardOpen] = useState(false);
   const [floatingEditFile, setFloatingEditFile] = useState<string | null>(null);
@@ -31,6 +39,56 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
   const triggerWorkspaceRefresh = useCallback(() => {
     setWorkspaceRefreshKey(prev => prev + 1);
   }, []);
+
+  const setCoderWorkspacePath = useCallback((nextPath: string) => {
+    const normalized = String(nextPath || '').trim();
+    setCoderWorkspacePathState(normalized);
+    try {
+      if (normalized) {
+        localStorage.setItem('lumina_coder_workspace_user_selected', 'true');
+      } else {
+        localStorage.removeItem('lumina_coder_workspace_user_selected');
+      }
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (coderWorkspacePath) return;
+
+    let cancelled = false;
+
+    const hydrateWorkspaceRoot = async () => {
+      try {
+        const res = await fetch('/api/fs/list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderPath: '.' })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && typeof data.rootPath === 'string' && data.rootPath.trim()) {
+          setCoderWorkspacePathState(data.rootPath.trim());
+        }
+      } catch {
+        // Leave the workspace unset if the backend root cannot be resolved yet.
+      }
+    };
+
+    hydrateWorkspaceRoot();
+    return () => {
+      cancelled = true;
+    };
+  }, [coderWorkspacePath]);
+
+  useEffect(() => {
+    if (!coderWorkspacePath) return;
+    try {
+      localStorage.setItem('lumina_coder_workspace_path', coderWorkspacePath);
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [coderWorkspacePath]);
 
   useEffect(() => {
     const handleWorkspaceGlobalRefresh = () => {

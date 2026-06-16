@@ -98,6 +98,12 @@ const getCoderStatusDotClass = (status: ToolCallNode['status']) => {
   return 'border border-zinc-500/60 bg-transparent';
 };
 
+const getCoderStatusLabel = (status: ToolCallNode['status']) => {
+  if (status === 'failed') return 'failed';
+  if (status === 'active' || status === 'pending') return 'running';
+  return 'done';
+};
+
 const getCoderToolSummary = (node: ToolCallNode) => {
   if (node.filePath) return node.filePath.replace(/\\/g, '/');
   const name = (node.toolName || '').toLowerCase();
@@ -115,6 +121,13 @@ const getCoderToolSummary = (node: ToolCallNode) => {
 const isReadFileNode = (node: ToolCallNode) => {
   const name = (node.toolName || '').toLowerCase();
   return name.includes('read') && !!node.filePath;
+};
+
+const shouldExpandCoderNode = (node: ToolCallNode) => {
+  if (node.status === 'failed') return true;
+  if (node.oldContent || node.newContent) return true;
+  if (node.toolName === 'run_command') return true;
+  return Boolean(node.result && String(node.result).trim());
 };
 
 // ── Slow typewriter streaming text ──────────────────────────────────────────
@@ -244,7 +257,7 @@ const CoderToolActivity = ({
   }, []);
 
   return (
-    <div className="space-y-1.5 px-1 text-left select-none">
+    <div className="space-y-1 px-1 text-left select-none">
       <AnimatePresence initial={false}>
         {groupedItems.map((item, itemIndex) => {
           if (item.type === 'reads') {
@@ -252,6 +265,11 @@ const CoderToolActivity = ({
             const isExpanded = expandedNodeId === groupKey;
             const paths = item.nodes.map(node => node.filePath || '').filter(Boolean);
             const preview = paths.map(path => getDisplayFileName(path)).join(', ');
+            const groupStatus = item.nodes.some(node => node.status === 'failed')
+              ? 'failed'
+              : item.nodes.some(node => node.status === 'active' || node.status === 'pending')
+                ? 'active'
+                : 'complete';
 
             return (
               <motion.div
@@ -259,25 +277,32 @@ const CoderToolActivity = ({
                 className="not-prose"
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.22, delay: itemIndex * 0.07, ease: 'easeOut' }}
+                transition={{ duration: 0.18, delay: itemIndex * 0.04, ease: 'easeOut' }}
               >
                 <button
                   type="button"
                   onClick={() => setExpandedNodeId(isExpanded ? null : groupKey)}
-                  className="group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[0.03] cursor-pointer"
+                  className="group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-white/[0.03] cursor-pointer"
                 >
-                  <ChevronDown
-                    size={13}
-                    className={`shrink-0 text-zinc-600 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
+                  <motion.span
+                    animate={groupStatus === 'active' ? { opacity: [0.45, 1, 0.45], scale: [0.96, 1, 0.96] } : { opacity: 1, scale: 1 }}
+                    transition={groupStatus === 'active' ? { duration: 1.15, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.16 }}
+                    className={`size-1.5 shrink-0 rounded-full ${groupStatus === 'failed' ? 'bg-rose-500' : groupStatus === 'active' ? 'bg-sky-500' : 'border border-zinc-500/60 bg-transparent'}`}
                   />
-                  <span className={`size-1.5 shrink-0 rounded-full ${item.nodes.some(node => node.status === 'failed') ? 'bg-rose-500' : 'border border-zinc-500/60 bg-transparent'}`} />
-                  <FileText size={14} className="shrink-0 text-zinc-500" />
+                  <FileText size={13} className="shrink-0 text-zinc-500" />
                   <span className="shrink-0 font-medium text-zinc-300">Read</span>
-                  <span className="shrink-0 text-[12px] text-zinc-500">
+                  <span className="shrink-0 text-[11px] text-zinc-500">
                     {item.nodes.length} file{item.nodes.length === 1 ? '' : 's'}
                   </span>
                   <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500">
                     {preview}
+                  </span>
+                  <span className="shrink-0 flex items-center gap-1 text-zinc-600">
+                    <span className="text-[10px] uppercase tracking-[0.18em]">{getCoderStatusLabel(groupStatus as ToolCallNode['status'])}</span>
+                    <ChevronDown
+                      size={12}
+                      className={`transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`}
+                    />
                   </span>
                 </button>
                 <AnimatePresence initial={false}>
@@ -287,7 +312,7 @@ const CoderToolActivity = ({
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ duration: 0.18, ease: 'easeInOut' }}
-                      className="overflow-hidden ml-7 border-l border-zinc-800/80 pl-3 py-1.5 space-y-1"
+                      className="overflow-hidden ml-5 border-l border-zinc-800/80 pl-3 py-1.5 space-y-1"
                     >
                       {paths.map(path => (
                         <button
@@ -316,8 +341,11 @@ const CoderToolActivity = ({
           const hasResult = Boolean(node.result && !hasDiff);
           const isExpanded = expandedNodeId === node.id;
           const action = getCoderToolAction(node);
-          const canExpand = hasDiff || hasResult;
+          const canExpand = shouldExpandCoderNode(node);
           const isLockedDiff = isStreaming && hasDiff;
+          const showStatusLabel = node.status === 'failed' || node.status === 'active' || node.status === 'pending';
+          const summaryText = node.filePath ? fileName : summary;
+          const detailPreview = node.filePath ? summary : node.resultSummary;
 
           return (
             <motion.div
@@ -325,7 +353,7 @@ const CoderToolActivity = ({
               className="not-prose"
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.22, delay: itemIndex * 0.07, ease: 'easeOut' }}
+              transition={{ duration: 0.18, delay: itemIndex * 0.04, ease: 'easeOut' }}
             >
               <button
                 type="button"
@@ -337,44 +365,52 @@ const CoderToolActivity = ({
                   }
                   if (node.filePath) onOpenInEditor?.(node.filePath);
                 }}
-                className={`group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[13px] transition-colors ${isLockedDiff ? 'cursor-default' : 'hover:bg-white/[0.03] cursor-pointer'}`}
+                className={`group flex w-full items-center gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left text-[12px] transition-colors ${isLockedDiff ? 'cursor-default' : 'hover:bg-white/[0.03] cursor-pointer'}`}
                 title={isLockedDiff ? 'Diff opens when streaming finishes' : undefined}
               >
-                {canExpand ? (
-                  <ChevronDown
-                    size={13}
-                    className={`shrink-0 text-zinc-600 transition-transform ${isExpanded && !isLockedDiff ? 'rotate-0' : '-rotate-90'} ${isLockedDiff ? 'opacity-40' : ''}`}
-                  />
-                ) : (
-                  <span className="w-[13px] shrink-0" />
-                )}
-                <span className={`size-1.5 shrink-0 rounded-full ${getCoderStatusDotClass(node.status)}`} />
+                <motion.span
+                  animate={node.status === 'active' || node.status === 'pending' ? { opacity: [0.45, 1, 0.45], scale: [0.96, 1, 0.96] } : { opacity: 1, scale: 1 }}
+                  transition={node.status === 'active' || node.status === 'pending' ? { duration: 1.15, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.16 }}
+                  className={`size-1.5 shrink-0 rounded-full ${getCoderStatusDotClass(node.status)}`}
+                />
                 {getCoderToolIcon(node)}
                 <span className="shrink-0 font-medium text-zinc-300">{action}</span>
-                {node.filePath ? (
-                  <span className="min-w-0 truncate font-mono text-[11px] text-sky-400" title={node.filePath || fileName}>
-                    {fileName}
-                  </span>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-500" title={summary}>
-                    {summary}
-                  </span>
-                )}
+                <span
+                  className={`min-w-0 flex-1 truncate font-mono text-[11px] ${node.filePath ? 'text-sky-400' : 'text-zinc-500'}`}
+                  title={summaryText}
+                >
+                  {summaryText}
+                </span>
                 <StreamingDiffCount
                   value={node.addedCount}
                   prefix="+"
                   isStreaming={isStreaming && hasDiff}
-                  className="shrink-0 font-mono text-[12px] font-semibold text-emerald-400"
+                  className="shrink-0 font-mono text-[11px] font-semibold text-emerald-400"
                 />
                 <StreamingDiffCount
                   value={node.removedCount}
                   prefix="-"
                   isStreaming={isStreaming && hasDiff}
-                  className="shrink-0 font-mono text-[12px] font-semibold text-rose-400"
+                  className="shrink-0 font-mono text-[11px] font-semibold text-rose-400"
                 />
-                {node.status === 'failed' && (
-                  <span className="shrink-0 text-[10px] font-medium text-rose-400">failed</span>
+                {detailPreview && !hasDiff && !showStatusLabel && (
+                  <span className="hidden max-w-[220px] truncate text-[10px] text-zinc-600 md:block" title={detailPreview}>
+                    {detailPreview}
+                  </span>
                 )}
+                <span className="shrink-0 flex items-center gap-1 text-zinc-600">
+                  {showStatusLabel && (
+                    <span className={`text-[10px] uppercase tracking-[0.18em] ${node.status === 'failed' ? 'text-rose-400' : 'text-zinc-500'}`}>
+                      {getCoderStatusLabel(node.status)}
+                    </span>
+                  )}
+                  {canExpand ? (
+                    <ChevronDown
+                      size={12}
+                      className={`transition-transform ${isExpanded && !isLockedDiff ? 'rotate-0' : '-rotate-90'} ${isLockedDiff ? 'opacity-40' : ''}`}
+                    />
+                  ) : null}
+                </span>
               </button>
 
               <AnimatePresence initial={false}>
@@ -384,7 +420,7 @@ const CoderToolActivity = ({
                     animate={{ height: 'auto', opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.2, ease: 'easeInOut' }}
-                    className="overflow-hidden ml-7 mt-1 max-w-2xl border-l border-zinc-800/80 pl-3"
+                    className="overflow-hidden ml-5 mt-1 max-w-2xl border-l border-zinc-800/80 pl-3"
                   >
                     <AnimatedDiffPreview node={node} />
                   </motion.div>
@@ -395,7 +431,7 @@ const CoderToolActivity = ({
                     animate={{ height: 'auto', opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.18, ease: 'easeInOut' }}
-                    className="overflow-hidden ml-7 mt-1 border-l border-zinc-800/80 pl-3"
+                    className="overflow-hidden ml-5 mt-1 border-l border-zinc-800/80 pl-3"
                   >
                     {node.toolName === 'run_command' ? (
                       <TerminalOutputPreview node={node} />

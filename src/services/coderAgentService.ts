@@ -241,6 +241,8 @@ export async function runCoderAgent(
   let accumulatedText = '';
   const toolResults: CoderAgentResult['toolResults'] = [];
   const toolCalls: CoderAgentResult['toolCalls'] = [];
+  let finalResultFromBackend: CoderAgentResult | null = null;
+  let didDispatchDoneEvent = false;
   
   const controller = new AbortController();
   const runningRequest: RunningRequest = {
@@ -390,6 +392,18 @@ export async function runCoderAgent(
               break;
             case 'done':
               console.log('[CoderAgent Backend Log] Done - execution completed.');
+              if (event.result) {
+                finalResultFromBackend = event.result;
+                if (!accumulatedText && typeof event.result.text === 'string') {
+                  accumulatedText = event.result.text;
+                }
+                if (Array.isArray(event.result.toolCalls) && event.result.toolCalls.length > 0) {
+                  toolCalls.splice(0, toolCalls.length, ...event.result.toolCalls);
+                }
+                if (Array.isArray(event.result.toolResults) && event.result.toolResults.length > 0) {
+                  toolResults.splice(0, toolResults.length, ...event.result.toolResults);
+                }
+              }
               if (typeof window !== 'undefined') {
                 const doneLog = {
                   id: `coder-agent-done-${Date.now()}`,
@@ -405,7 +419,8 @@ export async function runCoderAgent(
                 };
                 window.dispatchEvent(new CustomEvent('lumina_new_api_log', { detail: doneLog }));
               }
-              onEvent({ type: 'done' });
+              didDispatchDoneEvent = true;
+              onEvent({ type: 'done', result: event.result });
               break;
             case 'error':
               console.error('[CoderAgent Backend Log] Error:', event.error);
@@ -433,14 +448,16 @@ export async function runCoderAgent(
       }
     }
 
-    const result: CoderAgentResult = {
+    const result: CoderAgentResult = finalResultFromBackend || {
       text: accumulatedText,
       toolCalls,
       toolResults,
       stopReason: 'end_turn',
     };
     
-    onEvent({ type: 'done', result });
+    if (!didDispatchDoneEvent) {
+      onEvent({ type: 'done', result });
+    }
     return result;
     
   } catch (error: any) {

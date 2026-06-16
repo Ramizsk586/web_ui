@@ -603,6 +603,8 @@ async function ensureRustAgentRunning(params: {
   apiKey?: string;
   baseUrl?: string;
 }): Promise<boolean> {
+  const rustAgentCwd = path.resolve(process.cwd(), 'src/agent');
+
   // Check health
   try {
     const health = await axios.get('http://127.0.0.1:3001/api/agent/health', { timeout: 1000 });
@@ -616,6 +618,11 @@ async function ensureRustAgentRunning(params: {
   if (rustAgentProcess) {
     try { rustAgentProcess.kill(); } catch {}
     rustAgentProcess = null;
+  }
+
+  if (!fs.existsSync(rustAgentCwd)) {
+    console.warn(`Rust Agent project not found at ${rustAgentCwd}; skipping auto-start.`);
+    return false;
   }
 
   console.log('🤖 Starting Rust Agent server via "cargo run"...');
@@ -642,10 +649,10 @@ async function ensureRustAgentRunning(params: {
 
   try {
     rustAgentProcess = spawn('cargo', ['run'], {
-      cwd: path.resolve(process.cwd(), 'src/agent'),
+      cwd: rustAgentCwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
-      shell: true
+      shell: false
     });
 
     rustAgentProcess.stdout.on('data', (data: Buffer) => {
