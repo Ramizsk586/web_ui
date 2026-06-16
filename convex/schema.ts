@@ -2,7 +2,25 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
-  // ─── Execution Agents ──────────────────────────────────────────────────────
+  messages: defineTable({
+    conversationId: v.string(),
+    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
+    content: v.string(),
+    agentId: v.optional(v.string()),
+    turnId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_conversation", ["conversationId"])
+    .index("by_conversation_turn", ["conversationId", "turnId"]),
+
+  conversations: defineTable({
+    conversationId: v.string(),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    messageCount: v.number(),
+    lastActivityAt: v.number(),
+  }).index("by_conversation", ["conversationId"]),
+
   executionAgents: defineTable({
     agentId: v.string(),
     conversationId: v.optional(v.string()),
@@ -21,6 +39,8 @@ export default defineSchema({
     integrations: v.array(v.string()),
     inputTokens: v.number(),
     outputTokens: v.number(),
+    cacheReadTokens: v.optional(v.number()),
+    cacheCreationTokens: v.optional(v.number()),
     costUsd: v.number(),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),
@@ -29,7 +49,6 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_conversation", ["conversationId"]),
 
-  // ─── Agent Logs ────────────────────────────────────────────────────────────
   agentLogs: defineTable({
     agentId: v.string(),
     logType: v.union(
@@ -45,7 +64,6 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_agent", ["agentId"]),
 
-  // ─── Memory Records ────────────────────────────────────────────────────────
   memoryRecords: defineTable({
     memoryId: v.string(),
     content: v.string(),
@@ -74,7 +92,6 @@ export default defineSchema({
     .index("by_segment", ["segment"])
     .index("by_lifecycle", ["lifecycle"]),
 
-  // ─── Automations ───────────────────────────────────────────────────────────
   automations: defineTable({
     automationId: v.string(),
     name: v.string(),
@@ -91,7 +108,24 @@ export default defineSchema({
     .index("by_automation_id", ["automationId"])
     .index("by_enabled", ["enabled"]),
 
-  // ─── Automation Runs ───────────────────────────────────────────────────────
+  drafts: defineTable({
+    draftId: v.string(),
+    conversationId: v.string(),
+    kind: v.string(),
+    summary: v.string(),
+    payload: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("sent"),
+      v.literal("rejected"),
+      v.literal("expired"),
+    ),
+    createdAt: v.number(),
+    decidedAt: v.optional(v.number()),
+  })
+    .index("by_draft_id", ["draftId"])
+    .index("by_conversation_status", ["conversationId", "status"]),
+
   automationRuns: defineTable({
     runId: v.string(),
     automationId: v.string(),
@@ -109,7 +143,6 @@ export default defineSchema({
     .index("by_automation", ["automationId"])
     .index("by_run_id", ["runId"]),
 
-  // ─── Activity Events ───────────────────────────────────────────────────────
   activityEvents: defineTable({
     eventType: v.string(),
     source: v.string(),
@@ -120,10 +153,36 @@ export default defineSchema({
     .index("by_type", ["eventType"])
     .index("by_time", ["createdAt"]),
 
-  // ─── Settings ──────────────────────────────────────────────────────────────
   settings: defineTable({
     key: v.string(),
     value: v.string(),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  usageRecords: defineTable({
+    source: v.union(
+      v.literal("dispatcher"),
+      v.literal("execution"),
+      v.literal("extract"),
+      v.literal("consolidation-proposer"),
+      v.literal("consolidation-adversary"),
+      v.literal("consolidation-judge"),
+      v.literal("proactive"),
+    ),
+    conversationId: v.optional(v.string()),
+    turnId: v.optional(v.string()),
+    agentId: v.optional(v.string()),
+    runId: v.optional(v.string()),
+    model: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    cacheReadTokens: v.number(),
+    cacheCreationTokens: v.number(),
+    costUsd: v.number(),
+    durationMs: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_conversation", ["conversationId"])
+    .index("by_agent", ["agentId"])
+    .index("by_source", ["source"]),
 });

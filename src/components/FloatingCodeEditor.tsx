@@ -3,17 +3,12 @@ import {
   X, 
   Save, 
   RefreshCw, 
-  Check,
   Search,
-  ChevronDown,
-  ChevronRight,
   WrapText,
   Hash,
   ZoomIn,
   ZoomOut,
   FileText,
-  Terminal,
-  Activity,
   Code2,
   FolderOpen,
   Eye,
@@ -32,7 +27,7 @@ interface FloatingCodeEditorProps {
   workspaceRootPath?: string;
 }
 
-interface TabFile {
+interface EditorFile {
   path: string;
   name: string;
   content: string;
@@ -60,8 +55,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
   triggerWorkspaceRefresh,
   workspaceRootPath
 }) => {
-  const [openFiles, setOpenFiles] = useState<TabFile[]>([]);
-  const [activePath, setActivePath] = useState<string>('');
+  const [activeFile, setActiveFile] = useState<EditorFile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -73,10 +67,6 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
   // Search
   const [showFind, setShowFind] = useState(false);
   const [findQuery, setFindQuery] = useState('');
-
-  const activeFile = useMemo(() => {
-    return openFiles.find(f => f.path === activePath) || null;
-  }, [openFiles, activePath]);
 
   const fileExt = useMemo(() => {
     return activeFile ? getFileExt(activeFile.name) : '';
@@ -128,7 +118,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
         setIsPreviewMode(false);
       }
     }
-  }, [activePath]);
+  }, [activeFile]);
 
   const getRelativePath = (absolute: string) => {
     const parts = absolute.split('coder/');
@@ -137,12 +127,6 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
 
   // Open / Read file
   const loadFile = useCallback(async (path: string) => {
-    const isAlreadyOpen = openFiles.find(f => f.path === path);
-    if (isAlreadyOpen) {
-      setActivePath(path);
-      return;
-    }
-
     setIsLoading(true);
     try {
       const response = await fetch('/api/fs/read', {
@@ -153,7 +137,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
       if (response.ok) {
         const data = await response.json();
         const contentVal = data.content || '';
-        const newTab: TabFile = {
+        const nextFile: EditorFile = {
           path,
           name: path.split('/').pop() || path,
           content: contentVal,
@@ -162,8 +146,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
           cursorLine: 1,
           cursorCol: 1
         };
-        setOpenFiles(prev => [...prev, newTab]);
-        setActivePath(path);
+        setActiveFile(nextFile);
       } else {
         showToast(`Failed to load file content.`);
       }
@@ -173,13 +156,13 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [openFiles, showToast, workspaceRootPath]);
+  }, [showToast, workspaceRootPath]);
 
   useEffect(() => {
     if (filePath) {
       loadFile(filePath);
     }
-  }, [filePath]);
+  }, [filePath, loadFile]);
 
   // Save handler
   const handleSaveActive = useCallback(async () => {
@@ -192,11 +175,11 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
         body: JSON.stringify({ filePath: activeFile.path, content: activeFile.editedCode, workspaceRoot: workspaceRootPath })
       });
       if (response.ok) {
-        setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? { 
-          ...f, 
-          content: f.editedCode, 
-          isModified: false 
-        } : f));
+        setActiveFile(prev => prev ? {
+          ...prev,
+          content: prev.editedCode,
+          isModified: false
+        } : prev);
         showToast(`Saved ${getRelativePath(activeFile.path)}`);
         triggerWorkspaceRefresh();
       } else {
@@ -230,28 +213,11 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
 
   const handleCodeChange = (code: string) => {
     if (!activeFile) return;
-    setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? {
-      ...f,
+    setActiveFile(prev => prev ? {
+      ...prev,
       editedCode: code,
-      isModified: code !== f.content
-    } : f));
-  };
-
-  const closeTab = (path: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const targetFile = openFiles.find(f => f.path === path);
-    if (targetFile?.isModified) {
-      if (!confirm(`Discard unsaved modifications in ${targetFile.name}?`)) return;
-    }
-    
-    setOpenFiles(prev => {
-      const filtered = prev.filter(f => f.path !== path);
-      if (activePath === path) {
-        const nextActive = filtered.length > 0 ? filtered[filtered.length - 1].path : '';
-        setActivePath(nextActive);
-      }
-      return filtered;
-    });
+      isModified: code !== prev.content
+    } : prev);
   };
 
   const findMatchesCount = useMemo(() => {
@@ -265,12 +231,22 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
   }, [activeFile, findQuery]);
 
   const handleCloseEditor = () => {
-    const modified = openFiles.some(f => f.isModified);
-    if (modified) {
+    if (activeFile?.isModified) {
       if (!confirm("You have unsaved changes. Discard and close?")) return;
     }
     onClose();
   };
+
+  const getDisplayPath = useCallback((path: string) => {
+    const normalized = path.replace(/\\/g, '/');
+    if (workspaceRootPath) {
+      const root = workspaceRootPath.replace(/\\/g, '/').replace(/\/+$/, '');
+      if (normalized.startsWith(root)) {
+        return normalized.slice(root.length).replace(/^\/+/, '') || path.split('/').pop() || path;
+      }
+    }
+    return normalized.split('/').slice(-3).join('/');
+  }, [workspaceRootPath]);
 
   return (
     <div className="fixed inset-0 bg-[#0F0D0C]/80 backdrop-blur-md flex items-center justify-center z-[150] p-4 md:p-6 animate-fade-in select-none">
@@ -298,7 +274,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#D97756] animate-pulse" />
                 <span className="text-[10px] font-mono text-[#AD9F91]">
-                  {openFiles.length === 1 ? '1 active tab' : `${openFiles.length} files open`}
+                  {activeFile ? getDisplayPath(activeFile.path) : 'No file open'}
                 </span>
               </div>
             </div>
@@ -684,11 +660,11 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
                     onSave={handleSaveActive}
                     onMount={(editor) => {
                       editor.onDidChangeCursorPosition((event) => {
-                        setOpenFiles(prev => prev.map(f => f.path === activeFile.path ? {
-                          ...f,
+                        setActiveFile(prev => prev ? {
+                          ...prev,
                           cursorLine: event.position.lineNumber,
                           cursorCol: event.position.column
-                        } : f));
+                        } : prev);
                       });
                     }}
                   />
@@ -711,7 +687,7 @@ const FloatingCodeEditorComponent: React.FC<FloatingCodeEditorProps> = ({
         {/* Footer info ribbon */}
         {activeFile && (
           <div className="h-8 border-t border-[#2C241E] bg-[#131110] px-5 flex items-center justify-between text-[10px] text-[#AD9F91]/80 select-none font-mono shrink-0">
-            <span className="truncate">File: <span className="text-[#EDE6DD]">{activeFile.name}</span></span>
+            <span className="truncate">File: <span className="text-[#EDE6DD]">{getDisplayPath(activeFile.path)}</span></span>
             <div className="flex items-center gap-4 shrink-0">
               <span>Lang: <span className="text-[#D97756] font-bold">{fileExt ? fileExt.toUpperCase() : 'PLAIN'}</span></span>
               <span>Ln {activeFile.cursorLine}, Col {activeFile.cursorCol}</span>

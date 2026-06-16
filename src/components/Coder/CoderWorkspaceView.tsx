@@ -143,7 +143,6 @@ export default function CoderWorkspaceView({
   setIsModelDrawerOpen,
 }: CoderWorkspaceViewProps) {
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
-  const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [explorerWidth, setExplorerWidth] = useState(280);
   const [isExplorerResizing, setIsExplorerResizing] = useState(false);
@@ -170,10 +169,6 @@ export default function CoderWorkspaceView({
 
   React.useEffect(() => {
     (window as any).openFileInPreview = (filePath: string) => {
-      setOpenFileTabs(prev => {
-        if (prev.includes(filePath)) return prev;
-        return [...prev, filePath];
-      });
       setRightPanelTab(filePath);
     };
     return () => {
@@ -631,8 +626,6 @@ export default function CoderWorkspaceView({
           startCoderPreview={startCoderPreview}
           activeTab={rightPanelTab}
           setActiveTab={setRightPanelTab}
-          openFileTabs={openFileTabs}
-          setOpenFileTabs={setOpenFileTabs}
           workspaceRootPath={coderWorkspacePath}
           orchestrationState={orchestrationState}
           onOpenFile={setFloatingEditFile}

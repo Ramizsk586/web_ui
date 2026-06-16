@@ -58,6 +58,8 @@ interface LivePreviewPanelProps {
   onOpenFile?: (filePath: string) => void;
   isCoderLeftPanelOpen?: boolean;
   explorerWidth?: number;
+  onInsertAttachedText?: (text: string) => void;
+  showToast?: (msg: string) => void;
 }
 
 interface DiffLine {

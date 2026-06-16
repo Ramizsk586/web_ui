@@ -33,6 +33,7 @@ export type CoderAgentEvent =
   | { type: 'token'; text: string }
   | { type: 'thinking'; content: string }
   | { type: 'tool_call_start'; toolCallId: string; toolName: string; args?: any }
+  | { type: 'tool_call_progress'; toolCallId: string; toolName: string; progress?: { addedCount?: number; removedCount?: number; filePath?: string } }
   | { type: 'tool_call_end'; toolCallId: string; toolName: string; result: any; args?: any }
   | { type: 'text'; content: string }
   | { type: 'done'; result?: CoderAgentResult }
@@ -360,6 +361,14 @@ export async function runCoderAgent(
                 toolCallId: event.toolCallId || '',
                 toolName: event.toolName,
                 args: event.args,
+              });
+              break;
+            case 'tool_call_progress':
+              onEvent({
+                type: 'tool_call_progress',
+                toolCallId: event.toolCallId || '',
+                toolName: event.toolName,
+                progress: event.progress,
               });
               break;
             case 'tool_call_end':

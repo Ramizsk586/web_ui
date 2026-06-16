@@ -112,7 +112,7 @@ export function MonacoCodeEditor({
       theme={THEME_NAME}
       options={{
         readOnly,
-        minimap: { enabled: false },
+        minimap: { enabled: true, size: 'proportional', showSlider: 'mouseover' },
         fontSize,
         lineNumbers,
         wordWrap: wordWrap ? 'on' : 'off',
@@ -127,6 +127,14 @@ export function MonacoCodeEditor({
         roundedSelection: true,
         glyphMargin: false,
         folding: true,
+        stickyScroll: { enabled: true },
+        quickSuggestions: true,
+        suggestOnTriggerCharacters: true,
+        inlineSuggest: { enabled: true },
+        scrollbar: {
+          verticalScrollbarSize: 10,
+          horizontalScrollbarSize: 10,
+        },
         bracketPairColorization: { enabled: true },
         guides: {
           indentation: true,

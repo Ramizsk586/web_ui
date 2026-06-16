@@ -16,6 +16,11 @@ export interface StreamEvent {
   toolName?: string;
   args?: any;
   result?: any;
+  progress?: {
+    addedCount?: number;
+    removedCount?: number;
+    filePath?: string;
+  };
   error?: string;
 }
 
@@ -29,6 +34,12 @@ type AgentLoopParams = {
   systemPrompt?: string;
   thinkingLevel?: string;
   onEvent: (event: StreamEvent) => void;
+};
+
+type ToolProgressEmitter = {
+  toolCallId: string;
+  toolName: string;
+  emit: (event: StreamEvent) => void;
 };
 
 const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium';
@@ -361,7 +372,8 @@ async function executeWriteFile(workspaceRoot: string, input: { path: string; co
 
 async function executeEditFile(
   workspaceRoot: string,
-  input: { path: string; target: string; replacement: string }
+  input: { path: string; target: string; replacement: string },
+  progress?: ToolProgressEmitter
 ): Promise<WorkspaceToolResult> {
   const resolved = resolveWorkspacePath(workspaceRoot, input.path);
   if (!resolved.ok) {
@@ -397,6 +409,23 @@ async function executeEditFile(
     }
 
     const newContent = oldContent.replace(input.target, input.replacement);
+    const oldTargetLines = input.target ? input.target.split('\n').length : 0;
+    const newTargetLines = input.replacement ? input.replacement.split('\n').length : 0;
+    if (progress && (oldTargetLines > 0 || newTargetLines > 0)) {
+      const totalSteps = Math.max(oldTargetLines, newTargetLines, 1);
+      for (let step = 1; step <= totalSteps; step += 1) {
+        progress.emit({
+          type: 'tool_call_progress',
+          toolCallId: progress.toolCallId,
+          toolName: progress.toolName,
+          progress: {
+            filePath: resolved.relativePath,
+            addedCount: Math.min(newTargetLines, step),
+            removedCount: Math.min(oldTargetLines, step)
+          }
+        });
+      }
+    }
     fs.writeFileSync(resolved.absolutePath, newContent, 'utf8');
     const { addedCount, removedCount } = summarizeLineDiff(oldContent, newContent);
 
@@ -721,7 +750,7 @@ async function executeWorkspaceTool(toolName: string, workspaceRoot: string, inp
         path: String(input.path || ''),
         target: String(input.target || ''),
         replacement: String(input.replacement || '')
-      });
+      }, input.__progressEmitter);
     case 'create_file':
       return executeCreateFile(workspaceRoot, { path: String(input.path || '') });
     case 'delete_file':
@@ -842,12 +871,25 @@ function createPiWorkspaceTools(workspaceRoot: string) {
 }
 
 function createAiSdkWorkspaceTools(workspaceRoot: string) {
-  const makeTool = <T extends z.ZodTypeAny>(name: string, description: string, inputSchema: T) =>
+  const makeTool = <T extends z.ZodTypeAny>(
+    name: string,
+    description: string,
+    inputSchema: T,
+    onEvent?: AgentLoopParams['onEvent']
+  ) =>
     tool({
       description,
       inputSchema,
-      execute: async (input: z.infer<T>) => {
-        return executeWorkspaceTool(name, workspaceRoot, input as Record<string, any>);
+      execute: async (input: z.infer<T>, options?: { toolCallId?: string }) => {
+        const payload = input as Record<string, any>;
+        if (onEvent && options?.toolCallId) {
+          payload.__progressEmitter = {
+            toolCallId: options.toolCallId,
+            toolName: name,
+            emit: onEvent
+          } satisfies ToolProgressEmitter;
+        }
+        return executeWorkspaceTool(name, workspaceRoot, payload);
       },
       toModelOutput: ({ output }) => ({
         type: 'text' as const,
@@ -861,7 +903,8 @@ function createAiSdkWorkspaceTools(workspaceRoot: string) {
       'Read the contents of a file in the workspace.',
       z.object({
         path: z.string().describe('Absolute path or relative path from the workspace root')
-      })
+      }),
+      undefined
     ),
     write_file: makeTool(
       'write_file',
@@ -869,7 +912,8 @@ function createAiSdkWorkspaceTools(workspaceRoot: string) {
       z.object({
         path: z.string().describe('Absolute path or relative path from the workspace root'),
         content: z.string().describe('The complete file content to write')
-      })
+      }),
+      undefined
     ),
     edit_file: makeTool(
       'edit_file',
@@ -878,21 +922,24 @@ function createAiSdkWorkspaceTools(workspaceRoot: string) {
         path: z.string().describe('Absolute path or relative path from the workspace root'),
         target: z.string().describe('The exact string to find in the file'),
         replacement: z.string().describe('The new string to replace the target with')
-      })
+      }),
+      undefined
     ),
     create_file: makeTool(
       'create_file',
       'Create an empty file if it does not already exist.',
       z.object({
         path: z.string().describe('Absolute path or relative path from the workspace root')
-      })
+      }),
+      undefined
     ),
     delete_file: makeTool(
       'delete_file',
       'Delete a file from the workspace.',
       z.object({
         path: z.string().describe('Absolute path or relative path from the workspace root')
-      })
+      }),
+      undefined
     ),
     rename_file: makeTool(
       'rename_file',
@@ -900,14 +947,16 @@ function createAiSdkWorkspaceTools(workspaceRoot: string) {
       z.object({
         oldPath: z.string().describe('Current relative path of the file'),
         newPath: z.string().describe('Target relative path of the file')
-      })
+      }),
+      undefined
     ),
     glob_tool: makeTool(
       'glob_tool',
       'List files matching a glob pattern in the workspace.',
       z.object({
         pattern: z.string().describe('Glob pattern (e.g., src/**/*.ts, package.json)')
-      })
+      }),
+      undefined
     ),
     grep_tool: makeTool(
       'grep_tool',
@@ -915,16 +964,41 @@ function createAiSdkWorkspaceTools(workspaceRoot: string) {
       z.object({
         pattern: z.string().describe('Text/string pattern to search for'),
         fileGlob: z.string().optional().describe('Optional file extension glob (e.g. *.ts)')
-      })
+      }),
+      undefined
     ),
     run_command: makeTool(
       'run_command',
       'Run a shell command in the workspace directory.',
       z.object({
         command: z.string().describe('The bash/shell command to execute')
-      })
+      }),
+      undefined
     )
   };
+}
+
+function createAiSdkWorkspaceToolsWithEvents(workspaceRoot: string, onEvent: AgentLoopParams['onEvent']) {
+  const tools = createAiSdkWorkspaceTools(workspaceRoot) as any;
+  const patchTool = (name: string) => {
+    const original = tools[name];
+    if (!original?.execute) return;
+    const originalExecute = original.execute;
+    original.execute = async (input: any, options?: { toolCallId?: string }) => {
+      const payload = { ...(input || {}) };
+      if (options?.toolCallId) {
+        payload.__progressEmitter = {
+          toolCallId: options.toolCallId,
+          toolName: name,
+          emit: onEvent
+        } satisfies ToolProgressEmitter;
+      }
+      return originalExecute(payload, options);
+    };
+  };
+
+  patchTool('edit_file');
+  return tools;
 }
 
 async function runPiAgentLoop(params: AgentLoopParams & { provider: string; model: string }) {
@@ -1041,7 +1115,7 @@ async function runDirectAiSdkLoop(params: AgentLoopParams & { provider: string; 
     system: buildSystemPrompt(workspaceRoot, systemPrompt),
     prompt: task,
     maxSteps: 20,
-    tools: createAiSdkWorkspaceTools(workspaceRoot),
+    tools: createAiSdkWorkspaceToolsWithEvents(workspaceRoot, onEvent),
   } as any);
 
   for await (const chunk of resultStream.fullStream as any) {

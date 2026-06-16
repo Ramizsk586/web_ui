@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Folder, FolderOpen, FileText, RefreshCw, Trash2, 
@@ -203,9 +203,9 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
         onContextMenu={(e) => onContextMenu(e, node)}
         onDoubleClick={() => node.type === 'folder' ? onToggleExpand(node) : null}
         className={`w-full flex items-center justify-between group h-[22px] px-2 text-[13px] font-sans transition-colors duration-150 relative cursor-pointer border-l-2
-          ${isSelected ? 'bg-[#2C241E] text-[#EDE6DD] border-l-[#D97756]' : 'border-l-transparent text-[#AD9F91] hover:bg-[#262522]/70'}
-          ${isDragOver && node.type === 'folder' ? 'border-2 border-dashed border-[#D97756]/60 bg-[#262522]/80' : ''}
-          ${isFlashing ? 'bg-[#D97756]/20 animate-pulse' : ''}
+          ${isSelected ? 'bg-[#252526] text-[#F3F3F3] border-l-[#C5C5C5]' : 'border-l-transparent text-[#CCCCCC] hover:bg-[#2A2D2E]'}
+          ${isDragOver && node.type === 'folder' ? 'border-2 border-dashed border-[#6A6A6A] bg-[#252526]' : ''}
+          ${isFlashing ? 'bg-[#37373D] animate-pulse' : ''}
         `}
         style={{ paddingLeft: `${node.depth * 12 + 4}px` }}
       >
@@ -214,7 +214,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
           {node.type === 'folder' ? (
             <button
               onClick={handleArrowToggle}
-              className="p-0.5 hover:bg-[#262522]/80 rounded text-[#A89F93] hover:text-[#EDE6DD] flex items-center justify-center cursor-pointer"
+              className="p-0.5 hover:bg-[#2A2D2E] rounded text-[#8C8C8C] hover:text-[#F3F3F3] flex items-center justify-center cursor-pointer"
             >
               <div className={`transition-transform duration-150 ${node.isOpen ? 'rotate-90' : 'rotate-0'}`}>
                 <ChevronRight size={13} strokeWidth={2.5} />
@@ -230,7 +230,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
               className="w-1.5 h-1.5 rounded-full shrink-0"
               style={{
                 backgroundColor: node.agentStatus === 'done' ? '#4ade80' :
-                                 node.agentStatus === 'needs_review' ? '#f87171' : '#eab308'
+                                 node.agentStatus === 'needs_review' ? '#f87171' : '#c8a86b'
               }}
               title={`Created by ${node.agentId}${node.agentStatus === 'pending' ? ' (pending integration)' : node.agentStatus === 'needs_review' ? ' (needs review)' : ' (verified)'}`}
             />
@@ -249,10 +249,10 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
                 onKeyDown={handleInputKeyDown}
                 onChange={(e) => onChangeInput(e.target.value, isRenamingActive, node)}
                 placeholder={isCreatingActive ? (node.isCreatingType === 'folder' ? 'folder' : 'file') : ''}
-                className="bg-[#1D1C1A] border border-[#D97756] text-[#EDE6DD] text-[13px] h-[18px] px-1 outline-none w-36 font-sans select-text rounded-sm placeholder-[#635F59]"
+                className="bg-[#1E1E1E] border border-[#5A5A5A] text-[#F3F3F3] text-[13px] h-[18px] px-1 outline-none w-36 font-sans select-text rounded-sm placeholder-[#6A6A6A]"
               />
               {validationError && (
-                <div className="absolute left-0 top-[19px] z-[999] bg-[#3B1E1E] border border-[#E05A47] text-[#F3D5D1] text-[11px] px-1.5 py-0.5 shadow-xl whitespace-nowrap font-sans rounded-sm">
+                <div className="absolute left-0 top-[19px] z-[999] bg-[#3A1F1F] border border-[#C75D5D] text-[#F3D5D1] text-[11px] px-1.5 py-0.5 shadow-xl whitespace-nowrap font-sans rounded-sm">
                   {validationError}
                 </div>
               )}
@@ -270,14 +270,14 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
                 <button
                   onClick={(e) => { e.stopPropagation(); triggerCreateInside(node, 'file'); }}
                   title="New File..."
-                  className="p-0.5 hover:bg-[#2C241E] hover:text-[#EDE6DD] rounded"
+                  className="p-0.5 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded"
                 >
                   <FilePlus size={13} />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); triggerCreateInside(node, 'folder'); }}
                   title="New Folder..."
-                  className="p-0.5 hover:bg-[#2C241E] hover:text-[#EDE6DD] rounded"
+                  className="p-0.5 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded"
                 >
                   <FolderPlus size={13} />
                 </button>
@@ -286,14 +286,14 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
             <button
               onClick={(e) => { e.stopPropagation(); triggerRename(node); }}
               title="Rename (F2)"
-              className="p-0.5 hover:bg-[#2C241E] hover:text-[#EDE6DD] rounded"
+              className="p-0.5 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded"
             >
               <Edit3 size={13} />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); triggerDelete(node); }}
               title={node.type === 'folder' ? "Delete Directory..." : "Delete File"}
-              className="p-0.5 hover:bg-[#2C241E] hover:text-[#E05A47] rounded"
+              className="p-0.5 hover:bg-[#2A2D2E] hover:text-[#E57373] rounded"
             >
               <Trash2 size={13} />
             </button>
@@ -306,7 +306,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = React.memo(({
         <div className="relative w-full">
           {/* Vertical Guide Line */}
           <div 
-            className="absolute top-0 bottom-0 border-l border-[#232220]" 
+            className="absolute top-0 bottom-0 border-l border-[#252526]" 
             style={{ left: `${node.depth * 12 + 12}px` }} 
           />
           {node.children.map(child => (
@@ -355,6 +355,7 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
   const [flatFiles, setFlatFiles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   
   // Selection and folder states
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -377,6 +378,7 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
   // Floating context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const fetchRequestIdRef = useRef(0);
   
   // Local Lightweight Toasts
   const [toasts, setToasts] = useState<ExplorerToast[]>([]);
@@ -393,6 +395,7 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
   const fetchWorkspace = useCallback(async () => {
     if (!workspaceRootPath) return;
     setIsLoading(true);
+    const requestId = ++fetchRequestIdRef.current;
     try {
       const response = await fetch('/api/fs/list', {
         method: 'POST',
@@ -405,13 +408,17 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
           // Exclude dot-folders or specific project configs to keep layout pure, or keep everything
           return f.relativePath !== '';
         });
-        setFlatFiles(files);
+        if (requestId === fetchRequestIdRef.current) {
+          setFlatFiles(files);
+        }
       }
     } catch (e) {
       console.error(e);
       addToast("Failed to fetch project files", "error");
     } finally {
-      setIsLoading(false);
+      if (requestId === fetchRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [addToast, workspaceRootPath]);
 
@@ -563,6 +570,20 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
       });
     }
   }, [onSelectFile]);
+
+  const expandAncestors = useCallback((nodeId: string) => {
+    const parts = nodeId.split('/').filter(Boolean);
+    if (parts.length <= 1) return;
+    setExpandedPaths(prev => {
+      const next = new Set(prev);
+      let current = '';
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        current = current ? `${current}/${parts[i]}` : parts[i];
+        next.add(current);
+      }
+      return next;
+    });
+  }, []);
 
   const handleToggleExpandDir = useCallback((node: TreeNode) => {
     setExpandedPaths(prev => {
@@ -1075,11 +1096,25 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
   // ==================== FUZZY SEARCH MATCH RENDERERS ====================
   
   const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const q = searchQuery.toLowerCase();
+    if (!deferredSearchQuery.trim()) return [];
+    const q = deferredSearchQuery.toLowerCase();
     
     // Filter matching results
-    const matches = flatFiles.filter(f => f.name.toLowerCase().includes(q));
+    const matches = flatFiles
+      .filter(f =>
+        f.name.toLowerCase().includes(q) ||
+        String(f.relativePath || '').toLowerCase().includes(q)
+      )
+      .sort((a, b) => {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        const aStarts = aName.startsWith(q) ? 0 : 1;
+        const bStarts = bName.startsWith(q) ? 0 : 1;
+        if (aStarts !== bStarts) return aStarts - bStarts;
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return String(a.relativePath || '').localeCompare(String(b.relativePath || ''), undefined, { numeric: true, sensitivity: 'base' });
+      })
+      .slice(0, 150);
     
     return matches.map(f => {
       const parentId = getParentPath(f.relativePath);
@@ -1092,7 +1127,7 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
         depth: 0
       };
     });
-  }, [flatFiles, searchQuery]);
+  }, [deferredSearchQuery, flatFiles]);
 
   const renderHighlightedText = (text: string, query: string) => {
     if (!query) return <span>{text}</span>;
@@ -1116,45 +1151,50 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
     <div 
       tabIndex={0}
       onKeyDown={handleTreeKeyDown}
-      className="flex-1 flex flex-col h-full bg-[#11100F] select-none text-[#AD9F91] font-sans overflow-hidden focus:outline-none"
+      className="flex-1 flex flex-col h-full bg-[#1E1E1E] select-none text-[#CCCCCC] font-sans overflow-hidden focus:outline-none"
     >
       {/* TOOLBAR */}
-      <div className="flex items-center justify-between h-[30px] px-3 bg-[#11100F] border-b border-[#232220] shrink-0 select-none">
-        <span className="text-[10px] tracking-wider font-semibold uppercase text-[#A89F93]">
-          EXPLORER
-        </span>
-        <div className="flex items-center gap-1.5 text-[#A89F93]">
+      <div className="flex items-center justify-between h-[30px] px-3 bg-[#1E1E1E] border-b border-[#2A2A2A] shrink-0 select-none">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] tracking-wider font-medium uppercase text-[#CCCCCC]">
+            Explorer
+          </span>
+          <span className="text-[9px] font-mono text-[#7D7D7D] truncate">
+            {flatFiles.length} items
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[#8C8C8C]">
           <button 
             onClick={() => triggerGlobalCreate('file')}
-            className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
+            className="p-1 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded transition-colors cursor-pointer"
             title="New File..."
           >
             <FilePlus size={14} />
           </button>
           <button 
             onClick={() => triggerGlobalCreate('folder')}
-            className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
+            className="p-1 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded transition-colors cursor-pointer"
             title="New Folder..."
           >
             <FolderPlus size={14} />
           </button>
           <button 
             onClick={handleCollapseAll}
-            className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
+            className="p-1 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded transition-colors cursor-pointer"
             title="Collapse All Folders"
           >
             <FolderTree size={14} />
           </button>
           <button 
             onClick={handleRefreshWorkspace}
-            className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
+            className="p-1 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded transition-colors cursor-pointer"
             title="Refresh Explorer"
           >
             <RefreshCw size={13} />
           </button>
           <button 
             onClick={handleOpenFolder}
-            className="p-1 hover:bg-[#262522] hover:text-[#EDE6DD] rounded transition-colors cursor-pointer"
+            className="p-1 hover:bg-[#2A2D2E] hover:text-[#F3F3F3] rounded transition-colors cursor-pointer"
             title="Open Folder (set workspace root)"
           >
             <FolderOpen size={13} />
@@ -1163,19 +1203,19 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
       </div>
 
       {/* FILTER SEARCH AREA */}
-      <div className="px-3.5 py-1.5 bg-[#11100F] border-b border-[#232220] shrink-0">
-        <div className="relative flex items-center bg-[#1D1C1A] border border-[#2C2B27] focus-within:border-[#D97756] transition-colors pl-2.5 h-[24px]">
-          <Search size={12} className="text-[#635F59] shrink-0 mr-1" />
+      <div className="px-3.5 py-1.5 bg-[#1E1E1E] border-b border-[#2A2A2A] shrink-0">
+        <div className="relative flex items-center bg-[#252526] border border-[#313131] focus-within:border-[#5A5A5A] transition-colors pl-2.5 h-[24px] rounded-sm">
+          <Search size={12} className="text-[#7D7D7D] shrink-0 mr-1" />
           <input 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search / Filter files..."
-            className="w-full bg-[#1D1C1A] outline-none border-none text-[12px] text-[#EDE6DD] placeholder-[#635F59] h-full"
+            placeholder="Quick Open files..."
+            className="w-full bg-[#252526] outline-none border-none text-[12px] text-[#F3F3F3] placeholder-[#7D7D7D] h-full"
           />
           {searchQuery && (
             <button 
               onClick={() => setSearchQuery('')}
-              className="p-1 text-[#A89F93] hover:text-[#EDE6DD] h-full flex items-center justify-center mr-1"
+              className="p-1 text-[#8C8C8C] hover:text-[#F3F3F3] h-full flex items-center justify-center mr-1"
             >
               <X size={12} />
             </button>
@@ -1183,21 +1223,30 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
         </div>
       </div>
 
+      {workspaceRootPath && (
+        <div className="px-3.5 py-2 border-b border-[#2A2A2A] bg-[#1E1E1E] shrink-0">
+          <div className="text-[9px] uppercase tracking-[0.18em] text-[#7D7D7D] mb-1">Workspace</div>
+          <div className="text-[11px] font-semibold text-[#FFFFFF] truncate" title={workspaceRootPath}>
+            {workspaceRootPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || workspaceRootPath}
+          </div>
+        </div>
+      )}
+
       {/* MAIN LIST TREE CONTENT */}
       <div 
-        className="flex-1 overflow-y-auto custom-scrollbar bg-[#11100F] select-none py-1 relative"
+        className="flex-1 overflow-y-auto custom-scrollbar bg-[#1E1E1E] select-none py-1 relative"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => handleDropItem(e, 'root')}
       >
         {isLoading && flatFiles.length === 0 ? (
-          <div className="flex items-center gap-2 text-[12px] text-[#A89F93] px-4 py-3 font-sans">
-            <RefreshCw size={12} className="animate-spin text-[#D97756]" />
+          <div className="flex items-center gap-2 text-[12px] text-[#8C8C8C] px-4 py-3 font-sans">
+            <RefreshCw size={12} className="animate-spin text-[#C5A46D]" />
             <span>Scanning workspace...</span>
           </div>
-        ) : searchQuery.trim() !== '' ? (
+        ) : deferredSearchQuery.trim() !== '' ? (
           /* FUZZY SEARCH RESULTS RENDERING PANEL */
           searchResults.length === 0 ? (
-            <div className="text-[12px] text-[#635F59] italic px-4 py-4">
+            <div className="text-[12px] text-[#7D7D7D] italic px-4 py-4">
               No matching files found.
             </div>
           ) : (
@@ -1206,17 +1255,18 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
                 key={match.id}
                 onClick={() => {
                   setSelectedId(match.id);
+                  expandAncestors(match.id);
                   if (match.type === 'file') onSelectFile(match.path);
                 }}
                 className={`flex flex-col py-1.5 px-3 border-b border-[#232220] cursor-pointer hover:bg-[#262522] 
-                  ${selectedId === match.id ? 'bg-[#2C241E] text-[#EDE6DD] border-l-2 border-l-[#D97756]' : 'text-[#AD9F91]'}
+                  ${selectedId === match.id ? 'bg-[#252526] text-[#F3F3F3] border-l-2 border-l-[#C5C5C5]' : 'text-[#CCCCCC] hover:bg-[#2A2D2E]'}
                 `}
               >
                 <div className="flex items-center gap-2">
                   {getFileIcon(match.name, match.type, false)}
                   <span className="text-[13px]">{renderHighlightedText(match.name, searchQuery)}</span>
                 </div>
-                <span className="text-[11px] text-[#635F59] pl-5 truncate font-mono">
+                <span className="text-[11px] text-[#7D7D7D] pl-5 truncate font-mono">
                   {match.id}
                 </span>
               </div>
@@ -1224,29 +1274,29 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
           )
         ) : !workspaceRootPath ? (
           <div className="flex flex-col items-center gap-3 text-center px-4 py-8">
-            <div className="w-12 h-12 rounded-xl border border-zinc-800 bg-zinc-900/50 flex items-center justify-center">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-zinc-600">
+            <div className="w-12 h-12 rounded-xl border border-[#2A2A2A] bg-[#252526] flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6 text-[#7D7D7D]">
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
               </svg>
             </div>
-            <div className="text-[12px] text-[#635F59]">
+            <div className="text-[12px] text-[#7D7D7D]">
               No folder open
             </div>
             <div className="flex flex-col gap-2 w-full px-2">
               <button
                 onClick={handleOpenFolder}
-                className="text-[11px] w-full py-1.5 rounded-md bg-[#0F0D0C] text-[#AD9F91] border border-[#2D241E] hover:bg-[#1D1917] transition-all cursor-pointer font-medium"
+                className="text-[11px] w-full py-1.5 rounded-md bg-[#252526] text-[#CCCCCC] border border-[#313131] hover:bg-[#2A2D2E] transition-all cursor-pointer font-medium"
               >
                 Open Folder
               </button>
             </div>
           </div>
         ) : treeStructure.length === 0 ? (
-          <div className="text-[11px] text-[#635F59] italic px-4 py-4 text-center">
+          <div className="text-[11px] text-[#7D7D7D] italic px-4 py-4 text-center">
             Workspace is empty.<br/>
             <button 
               onClick={() => triggerGlobalCreate('file')}
-              className="mt-2 text-[12px] text-[#D97756] hover:underline font-semibold cursor-pointer"
+              className="mt-2 text-[12px] text-[#D7BA7D] hover:underline font-semibold cursor-pointer"
             >
               Create first file
             </button>
@@ -1285,25 +1335,25 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
       {/* PORTALS LAYER - INLINE DELETE MODAL BANNER confirmation */}
       {pendingDeleteNode && createPortal(
         <div className="fixed inset-0 bg-zinc-950/75 z-[250] flex items-center justify-center p-4 animate-fade-in select-text">
-          <div className="bg-[#1B1A18] border border-[#2A2925] text-[#AD9F91] p-4 w-full max-w-xs flex flex-col gap-4 shadow-2xl rounded-md">
+          <div className="bg-[#252526] border border-[#313131] text-[#CCCCCC] p-4 w-full max-w-xs flex flex-col gap-4 shadow-2xl rounded-md">
             <div className="flex flex-col gap-2">
-              <h4 className="text-[13px] font-bold text-[#E05A47] flex items-center gap-1.5">
+              <h4 className="text-[13px] font-bold text-[#E57373] flex items-center gap-1.5">
                 <Trash2 size={15} /> Delete Directory?
               </h4>
-              <p className="text-[12px] text-[#635F59] leading-relaxed">
-                Delete <strong className="text-[#EDE6DD] font-mono break-all bg-[#262522] px-1 rounded-sm">'{pendingDeleteNode.name}'</strong> and all its contents? This action cannot be undone.
+              <p className="text-[12px] text-[#A0A0A0] leading-relaxed">
+                Delete <strong className="text-[#FFFFFF] font-mono break-all bg-[#2A2D2E] px-1 rounded-sm">'{pendingDeleteNode.name}'</strong> and all its contents? This action cannot be undone.
               </p>
             </div>
             <div className="flex gap-2 justify-end">
               <button 
                 onClick={() => setPendingDeleteNode(null)}
-                className="px-3 py-1.5 bg-[#262522] hover:bg-[#2C241E] text-[#EDE6DD] text-[12px] font-medium transition-colors cursor-pointer rounded-md border border-[#2C2B27]"
+                className="px-3 py-1.5 bg-[#2A2D2E] hover:bg-[#33373A] text-[#F3F3F3] text-[12px] font-medium transition-colors cursor-pointer rounded-md border border-[#313131]"
               >
                 Cancel
               </button>
               <button 
                 onClick={confirmDeleteFolder}
-                className="px-3 py-1.5 bg-[#E05A47] hover:bg-[#C84F3E] text-white text-[12px] font-medium transition-colors cursor-pointer rounded-md"
+                className="px-3 py-1.5 bg-[#C75D5D] hover:bg-[#B84F4F] text-white text-[12px] font-medium transition-colors cursor-pointer rounded-md"
               >
                 Delete
               </button>
@@ -1317,7 +1367,7 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
       {contextMenu && createPortal(
         <div 
           ref={menuRef}
-          className="fixed bg-[#1B1A18] border border-[#2A2925] text-[#AD9F91] shadow-2xl py-1 z-[1000] w-52 text-[13px] font-sans rounded-md"
+          className="fixed bg-[#252526] border border-[#313131] text-[#CCCCCC] shadow-2xl py-1 z-[1000] w-52 text-[13px] font-sans rounded-md"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -1325,13 +1375,13 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
             <>
               <button 
                 onClick={() => { setContextMenu(null); triggerCreateInside(contextMenu.node, 'file'); }} 
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#262522] text-[#EDE6DD] text-left cursor-pointer transition-colors"
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2A2D2E] text-[#F3F3F3] text-left cursor-pointer transition-colors"
               >
                 <FilePlus size={14} className="text-[#635F59]" /> New File...
               </button>
               <button 
                 onClick={() => { setContextMenu(null); triggerCreateInside(contextMenu.node, 'folder'); }} 
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#262522] text-[#EDE6DD] text-left cursor-pointer transition-colors"
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2A2D2E] text-[#F3F3F3] text-left cursor-pointer transition-colors"
               >
                 <FolderPlus size={14} className="text-[#635F59]" /> New Folder...
               </button>
@@ -1340,13 +1390,13 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
             <>
               <button 
                 onClick={() => { setContextMenu(null); triggerCreateInside({ ...contextMenu.node, id: contextMenu.node.parentId || '' }, 'file'); }} 
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#262522] text-[#EDE6DD] text-left cursor-pointer transition-colors"
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2A2D2E] text-[#F3F3F3] text-left cursor-pointer transition-colors"
               >
                 <FilePlus size={14} className="text-[#635F59]" /> New Sibling File...
               </button>
               <button 
                 onClick={() => { setContextMenu(null); triggerCreateInside({ ...contextMenu.node, id: contextMenu.node.parentId || '' }, 'folder'); }} 
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#262522] text-[#EDE6DD] text-left cursor-pointer transition-colors"
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2A2D2E] text-[#F3F3F3] text-left cursor-pointer transition-colors"
               >
                 <FolderPlus size={14} className="text-[#635F59]" /> New Sibling Folder...
               </button>
@@ -1354,30 +1404,30 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
           )}
           <button 
             onClick={() => { setContextMenu(null); triggerRename(contextMenu.node); }} 
-            className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-[#262522] text-[#EDE6DD] text-left cursor-pointer transition-colors"
+            className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-[#2A2D2E] text-[#F3F3F3] text-left cursor-pointer transition-colors"
           >
-            <span className="flex items-center gap-2.5"><Edit3 size={14} className="text-[#635F59]" /> Rename...</span>
-            <span className="text-[10px] text-[#635F59] font-mono pr-1">F2</span>
+            <span className="flex items-center gap-2.5"><Edit3 size={14} className="text-[#7D7D7D]" /> Rename...</span>
+            <span className="text-[10px] text-[#7D7D7D] font-mono pr-1">F2</span>
           </button>
           <button 
             onClick={() => { setContextMenu(null); triggerDelete(contextMenu.node); }} 
-            className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-[#262522]/80 hover:text-white hover:bg-[#E05A47]/20 text-[#E05A47] text-left cursor-pointer transition-colors"
+            className="w-full flex items-center justify-between px-3 py-1.5 hover:text-white hover:bg-[#C75D5D]/20 text-[#E57373] text-left cursor-pointer transition-colors"
           >
             <span className="flex items-center gap-2.5"><Trash2 size={14} /> Delete</span>
-            <span className="text-[10px] text-[#E05A47]/70 font-mono pr-1">Del</span>
+            <span className="text-[10px] text-[#E57373]/70 font-mono pr-1">Del</span>
           </button>
-          <div className="my-1 border-t border-[#2A2925]" />
+          <div className="my-1 border-t border-[#313131]" />
           <button 
             onClick={() => { setContextMenu(null); handleCopyPath(contextMenu.node); }} 
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#262522] text-[#EDE6DD] text-left cursor-pointer transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2A2D2E] text-[#F3F3F3] text-left cursor-pointer transition-colors"
           >
-            <Copy size={14} className="text-[#635F59]" /> Copy Full Path
+            <Copy size={14} className="text-[#7D7D7D]" /> Copy Full Path
           </button>
           <button 
             onClick={() => { setContextMenu(null); handleCopyRelativePath(contextMenu.node); }} 
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#262522] text-[#EDE6DD] text-left cursor-pointer transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-[#2A2D2E] text-[#F3F3F3] text-left cursor-pointer transition-colors"
           >
-            <Copy size={14} className="text-[#635F59]" /> Copy Relative Path
+            <Copy size={14} className="text-[#7D7D7D]" /> Copy Relative Path
           </button>
         </div>,
         document.body
@@ -1387,8 +1437,8 @@ const CoderLeftExplorerComponent: React.FC<CoderLeftExplorerProps> = ({
       {createPortal(
         <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm pointer-events-none select-text">
           {toasts.map(toast => {
-            let bg = 'bg-[#1e1e1e] border-[#3c3c3c] text-[#cccccc]';
-            let outline = 'border-[#3c3c3c]';
+            let bg = 'bg-[#252526] border-[#313131] text-[#cccccc]';
+            let outline = 'border-[#313131]';
             let iconText = 'ℹ';
             
             if (toast.type === 'success') {

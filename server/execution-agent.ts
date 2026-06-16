@@ -1,27 +1,11 @@
-/**
- * execution-agent.ts
- * ─────────────────────────────────────────────────────────────────────────────
- * Execution / Worker Agent — handles tasks delegated by the Boop dispatcher.
- *
- * Design rules:
- *   • All destructive/side-effectful outputs (file writes, git commits, etc.)
- *     must be staged via save_draft and returned for user approval first.
- *   • Read-only tools (read_file, glob, grep, web_scrape, search) can run freely.
- *   • Every run is recorded in Convex (executionAgents + agentLogs tables).
- *
- * The LLM brain is the Anthropic SDK pointed at Lumina's proxy server via
- * bridge-client.ts — exactly the same routing path as the Master agent.
- */
-
-import * as fs from 'fs';
-import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import { chatCompletion, DEFAULT_AGENT_MODEL } from './bridge-client.js';
-import { getConvexClient } from './convex-client.js';
-import { api } from '../convex/_generated/api.js';
-import { deliverToTelegram } from './telegram-delivery.js';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
+import * as fs from "fs";
+import * as path from "path";
+import { v4 as uuidv4 } from "uuid";
+import { chatCompletion, DEFAULT_AGENT_MODEL } from "./bridge-client.js";
+import { getConvexClient } from "./convex-client.js";
+import { api } from "../convex/_generated/api.js";
+import { deliverToTelegram } from "./telegram-delivery.js";
+import { broadcast } from "./broadcast.js";
 
 export interface ExecutionAgentOptions {
   agentId: string;
@@ -32,420 +16,341 @@ export interface ExecutionAgentOptions {
   telegramChatId?: number;
 }
 
-// ── In-flight registry (allows cancellation checks) ───────────────────────────
+export interface SpawnOptions {
+  task: string;
+  integrations: string[];
+  conversationId?: string;
+  name?: string;
+}
+
+export interface SpawnResult {
+  agentId: string;
+  result: string;
+  status: "completed" | "failed" | "cancelled";
+}
 
 const activeAgents = new Set<string>();
-export function isAgentActive(agentId: string): boolean {
-  return activeAgents.has(agentId);
-}
-export function cancelAgent(agentId: string): void {
-  activeAgents.delete(agentId);
-}
 
-// ── System prompt ─────────────────────────────────────────────────────────────
+const EXECUTION_SYSTEM_PROMPT = `You are a focused execution agent inside Lumina.
 
-const EXECUTION_SYSTEM_PROMPT = `\
-You are a specialised Execution Agent inside Lumina.
-
-YOUR ROLE
-─────────
-• Complete the task delegated to you by the Master Agent (Boop).
-• You have access to workspace tools: read files, search, web scrape, run shell
-  commands (read-only), and grep code.
-• NEVER directly write, delete, or execute mutating commands without first
-  staging the change with save_draft.
-
-TOOL PROTOCOL
-──────────────
-read_file       – Read a file's content (safe, unrestricted).
-write_draft     – Stage a proposed file write/command for user approval.
-glob_tool       – List files matching a glob pattern.
-grep_tool       – Search file content for a pattern.
-run_command     – Execute a read-only shell command (ls, cat, find, git log…).
-web_scrape      – Fetch and parse a URL.
-web_search      – Run a web search query.
-complete_task   – Signal task completion with a summary result.
-
-SAFETY
-──────
-1. Use write_draft for ALL content that would mutate state.
-2. Do not run commands with side-effects (rm, git push, curl -X POST, etc.)
-   without explicit write_draft staging first.
-3. Keep each tool call focused and atomic.
+Your role:
+- Complete the delegated task end to end.
+- Use read-only workspace and web tools when needed.
+- Do not directly perform destructive or mutating actions.
+- If the task implies a code or file change, inspect first and summarize clearly.
 `;
-
-// ── Tool definitions ───────────────────────────────────────────────────────────
 
 const EXECUTION_TOOLS = [
   {
-    name: 'read_file',
-    description: 'Read the content of a file at the given path.',
+    name: "read_file",
+    description: "Read a file from disk.",
     input_schema: {
-      type: 'object' as const,
-      properties: {
-        path: { type: 'string', description: 'Absolute or relative file path' },
-      },
-      required: ['path'],
+      type: "object" as const,
+      properties: { path: { type: "string" } },
+      required: ["path"],
     },
   },
   {
-    name: 'write_draft',
-    description: 'Stage a proposed file write or destructive command for user approval. Does NOT execute it.',
+    name: "glob_tool",
+    description: "List files matching a path fragment or extension.",
     input_schema: {
-      type: 'object' as const,
+      type: "object" as const,
       properties: {
-        description: { type: 'string', description: 'Human-readable description of what this change does' },
-        action: { type: 'string', enum: ['write_file', 'run_command', 'delete_file'] },
-        path: { type: 'string', description: 'File path (for write_file / delete_file)' },
-        content: { type: 'string', description: 'New file content (for write_file)' },
-        command: { type: 'string', description: 'Shell command (for run_command)' },
+        pattern: { type: "string" },
       },
-      required: ['description', 'action'],
+      required: ["pattern"],
     },
   },
   {
-    name: 'glob_tool',
-    description: 'List files matching a glob pattern in a directory.',
+    name: "grep_tool",
+    description: "Search file contents for a pattern.",
     input_schema: {
-      type: 'object' as const,
+      type: "object" as const,
       properties: {
-        pattern: { type: 'string', description: 'Glob pattern (e.g. src/**/*.ts)' },
-        cwd: { type: 'string', description: 'Working directory (optional)' },
+        pattern: { type: "string" },
+        directory: { type: "string" },
       },
-      required: ['pattern'],
+      required: ["pattern"],
     },
   },
   {
-    name: 'grep_tool',
-    description: 'Search for a string or regex pattern in files.',
+    name: "run_command",
+    description: "Run a read-only shell command.",
     input_schema: {
-      type: 'object' as const,
+      type: "object" as const,
       properties: {
-        pattern: { type: 'string', description: 'Search pattern' },
-        directory: { type: 'string', description: 'Directory to search in' },
-        fileGlob: { type: 'string', description: 'File extension filter (e.g. *.ts)' },
-        caseSensitive: { type: 'boolean' },
+        command: { type: "string" },
+        cwd: { type: "string" },
       },
-      required: ['pattern'],
+      required: ["command"],
     },
   },
   {
-    name: 'run_command',
-    description: 'Run a read-only shell command and return its stdout.',
+    name: "web_scrape",
+    description: "Fetch a web page and extract text.",
     input_schema: {
-      type: 'object' as const,
+      type: "object" as const,
       properties: {
-        command: { type: 'string' },
-        cwd: { type: 'string' },
+        url: { type: "string" },
       },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'web_scrape',
-    description: 'Fetch and extract text from a URL.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        url: { type: 'string' },
-      },
-      required: ['url'],
-    },
-  },
-  {
-    name: 'web_search',
-    description: 'Run a web search and return top results.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        query: { type: 'string' },
-        numResults: { type: 'number' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'complete_task',
-    description: 'Signal that the task is complete and return the final result summary.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        result: { type: 'string', description: 'Summary of what was accomplished' },
-        drafts: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'List of draft IDs staged for user approval',
-        },
-      },
-      required: ['result'],
+      required: ["url"],
     },
   },
 ] as const;
 
-// ── Tool execution ─────────────────────────────────────────────────────────────
+const BLOCKED_COMMANDS = ["rm ", "rmdir", "git push", "git reset", "del ", "curl -x", "wget "];
 
-const BLOCKED_COMMANDS = ['rm ', 'rmdir', 'curl -X', 'wget ', 'git push', 'git reset', 'dd ', 'mkfs', 'sudo '];
+function safeRead(filePath: string): string {
+  const resolved = path.resolve(process.cwd(), filePath);
+  if (!fs.existsSync(resolved)) {
+    return `File not found: ${resolved}`;
+  }
+  return fs.readFileSync(resolved, "utf8").slice(0, 12000);
+}
 
 async function executeTool(
   toolName: string,
   toolInput: Record<string, any>,
-  agentId: string
-): Promise<{ result: string; completed?: boolean; finalResult?: string }> {
+  agentId: string,
+): Promise<string> {
   const convex = getConvexClient();
-
-  // Log tool use
   await convex.mutation(api.agents.addLog, {
     agentId,
-    logType: 'tool_use',
+    logType: "tool_use",
     toolName,
-    content: JSON.stringify(toolInput).slice(0, 500),
+    content: JSON.stringify(toolInput).slice(0, 1000),
   });
 
   try {
     switch (toolName) {
-      case 'read_file': {
-        const filePath = path.resolve(process.cwd(), toolInput.path as string);
-        if (!fs.existsSync(filePath)) return { result: `File not found: ${filePath}` };
-        const content = fs.readFileSync(filePath, 'utf8');
-        const truncated = content.length > 8000 ? content.slice(0, 8000) + '\n… (truncated)' : content;
-        return { result: truncated };
+      case "read_file":
+        return safeRead(String(toolInput.path || ""));
+
+      case "glob_tool": {
+        const pattern = String(toolInput.pattern || "").toLowerCase();
+        const results: string[] = [];
+        const walk = (dir: string) => {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") continue;
+            const full = path.join(dir, entry.name);
+            const relative = path.relative(process.cwd(), full).replace(/\\/g, "/");
+            if (entry.isDirectory()) {
+              walk(full);
+            } else if (relative.toLowerCase().includes(pattern.replace(/\*/g, ""))) {
+              results.push(relative);
+            }
+            if (results.length >= 100) return;
+          }
+        };
+        walk(process.cwd());
+        return results.length ? results.join("\n") : "No files matched.";
       }
 
-      case 'write_draft': {
-        const draftId = `draft_${agentId}_${Date.now()}`;
-        const record = { ...toolInput, draftId, agentId, createdAt: new Date().toISOString() };
-        const draftPath = path.join(process.cwd(), '.lumina', 'drafts');
-        fs.mkdirSync(draftPath, { recursive: true });
-        fs.writeFileSync(path.join(draftPath, `${draftId}.json`), JSON.stringify(record, null, 2));
-        return { result: `Draft staged (ID: ${draftId}) — "${toolInput.description}"` };
+      case "grep_tool": {
+        const pattern = String(toolInput.pattern || "").toLowerCase();
+        const directory = path.resolve(process.cwd(), String(toolInput.directory || "."));
+        const matches: string[] = [];
+        const walk = (dir: string) => {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") continue;
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              walk(full);
+            } else {
+              try {
+                const content = fs.readFileSync(full, "utf8");
+                const lines = content.split(/\r?\n/);
+                lines.forEach((line, index) => {
+                  if (line.toLowerCase().includes(pattern) && matches.length < 100) {
+                    matches.push(`${path.relative(process.cwd(), full)}:${index + 1}:${line.trim()}`);
+                  }
+                });
+              } catch {
+                // Ignore non-text files.
+              }
+            }
+            if (matches.length >= 100) return;
+          }
+        };
+        walk(directory);
+        return matches.length ? matches.join("\n") : "No matches found.";
       }
 
-      case 'glob_tool': {
-        const { execSync } = await import('child_process');
-        const cwd = (toolInput.cwd as string) ?? process.cwd();
-        const pattern = toolInput.pattern as string;
-        // Convert simple glob pattern to a find command
-        // e.g. "src/**/*.ts" → find src -name "*.ts"
-        const parts = pattern.split('/');
-        const namePart = parts[parts.length - 1];
-        const dirPart = parts.slice(0, -1).join('/').replace(/\*\*/g, '').replace(/\/\//g, '/').replace(/\/$/, '') || '.';
-        const findCmd = `find "${cwd}/${dirPart}" -name "${namePart}" -maxdepth 10 2>/dev/null | head -100`;
-        const output = execSync(findCmd, { encoding: 'utf8', timeout: 15_000 }).trim();
-        return { result: output || 'No files matched.' };
-      }
-
-      case 'grep_tool': {
-        const { execSync } = await import('child_process');
-        const flags = toolInput.caseSensitive ? '' : '-i';
-        const dir = toolInput.directory ?? '.';
-        const include = toolInput.fileGlob ? `--include="${toolInput.fileGlob}"` : '';
-        const cmd = `grep -r ${flags} ${include} "${toolInput.pattern}" "${dir}" --line-number 2>/dev/null | head -60`;
-        const output = execSync(cmd, { encoding: 'utf8', timeout: 15_000 }).trim();
-        return { result: output || 'No matches found.' };
-      }
-
-      case 'run_command': {
-        const cmd = toolInput.command as string;
-        // Safety check — block destructive patterns
-        const blocked = BLOCKED_COMMANDS.find(b => cmd.toLowerCase().includes(b.toLowerCase()));
-        if (blocked) {
-          return { result: `BLOCKED: Command contains disallowed pattern "${blocked}". Use write_draft to stage mutations.` };
+      case "run_command": {
+        const command = String(toolInput.command || "");
+        const lower = command.toLowerCase();
+        if (BLOCKED_COMMANDS.some((blocked) => lower.includes(blocked))) {
+          return "Blocked potentially mutating command.";
         }
-        const { execSync } = await import('child_process');
-        const cwd = toolInput.cwd as string ?? process.cwd();
-        const output = execSync(cmd, { encoding: 'utf8', cwd, timeout: 30_000 }).trim();
-        return { result: output.slice(0, 6000) || '(no output)' };
+        const { execSync } = await import("child_process");
+        return execSync(command, {
+          cwd: toolInput.cwd ? path.resolve(process.cwd(), String(toolInput.cwd)) : process.cwd(),
+          encoding: "utf8",
+          timeout: 30000,
+        }).slice(0, 12000);
       }
 
-      case 'web_scrape': {
-        const res = await fetch(toolInput.url as string, {
-          headers: { 'User-Agent': 'Lumina-Agent/1.0' },
-          signal: AbortSignal.timeout(20_000),
+      case "web_scrape": {
+        const response = await fetch(String(toolInput.url || ""), {
+          headers: { "User-Agent": "Lumina-Agent/1.0" },
+          signal: AbortSignal.timeout(20000),
         });
-        const text = await res.text();
-        // Strip tags roughly
-        const stripped = text.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim();
-        return { result: stripped.slice(0, 6000) };
-      }
-
-      case 'web_search': {
-        // Delegate to the existing Lumina search endpoint
-        const query = encodeURIComponent(toolInput.query as string);
-        const num = (toolInput.numResults as number) ?? 5;
-        const LUMINA_PORT = process.env.LUMINA_PORT ?? '3000';
-        const res = await fetch(
-          `http://127.0.0.1:${LUMINA_PORT}/api/search?q=${query}&num=${num}`,
-          { signal: AbortSignal.timeout(20_000) }
-        );
-        if (!res.ok) return { result: `Search failed: ${res.status}` };
-        const data = await res.json();
-        const results = (data.results ?? data.data ?? []).slice(0, num);
-        return {
-          result: results
-            .map((r: any) => `• ${r.title ?? ''}\n  ${r.url ?? ''}\n  ${r.snippet ?? ''}`)
-            .join('\n\n') || 'No results.',
-        };
-      }
-
-      case 'complete_task': {
-        return {
-          result: toolInput.result as string,
-          completed: true,
-          finalResult: toolInput.result as string,
-        };
+        const text = await response.text();
+        return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 12000);
       }
 
       default:
-        return { result: `Unknown tool: ${toolName}` };
+        return `Unknown tool: ${toolName}`;
     }
-  } catch (err: any) {
-    const errMsg = `Tool "${toolName}" error: ${err.message ?? String(err)}`;
+  } catch (error: any) {
+    const message = `Tool "${toolName}" failed: ${error?.message || String(error)}`;
     await convex.mutation(api.agents.addLog, {
       agentId,
-      logType: 'error',
+      logType: "error",
       toolName,
-      content: errMsg,
+      content: message,
     });
-    return { result: errMsg };
+    return message;
   }
 }
 
-// ── Main runner ───────────────────────────────────────────────────────────────
-
-/**
- * Run an Execution Agent to completion.  Persists progress to Convex and
- * optionally delivers the result to Telegram.
- */
 export async function runExecutionAgent(opts: ExecutionAgentOptions): Promise<string> {
-  const { agentId, name, task, integrations, conversationId, telegramChatId } = opts;
   const convex = getConvexClient();
 
-  // Register in Convex
   await convex.mutation(api.agents.create, {
-    agentId,
-    name,
-    task,
-    integrations,
-    conversationId,
+    agentId: opts.agentId,
+    name: opts.name,
+    task: opts.task,
+    integrations: opts.integrations,
+    conversationId: opts.conversationId,
   });
-  await convex.mutation(api.agents.update, { agentId, status: 'running' });
-  activeAgents.add(agentId);
+  await convex.mutation(api.agents.update, {
+    agentId: opts.agentId,
+    status: "running",
+  });
 
-  console.log(`[ExecutionAgent] Starting agent "${name}" (${agentId})`);
+  activeAgents.add(opts.agentId);
+  broadcast("agent_spawned", {
+    agentId: opts.agentId,
+    name: opts.name,
+    task: opts.task,
+  });
 
-  const messages: { role: 'user' | 'assistant'; content: any }[] = [
+  const messages: Array<{ role: "user" | "assistant"; content: any }> = [
     {
-      role: 'user',
-      content: `Complete the following task:\n\n${task}\n\nAgent ID: ${agentId}`,
+      role: "user",
+      content: opts.task,
     },
   ];
 
-  let finalResult = '';
-  const MAX_TURNS = 15;
+  let finalResult = "";
 
   try {
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
-      if (!activeAgents.has(agentId)) {
-        finalResult = 'Agent was cancelled.';
+    for (let turn = 0; turn < 10; turn += 1) {
+      if (!activeAgents.has(opts.agentId)) {
+        finalResult = "Agent was cancelled.";
         break;
       }
 
-      let response: any;
-      try {
-        response = await chatCompletion(messages as any, {
-          model: DEFAULT_AGENT_MODEL,
-          maxTokens: 4096,
-          systemPrompt: EXECUTION_SYSTEM_PROMPT,
-          tools: EXECUTION_TOOLS as any,
-        });
-      } catch (err: any) {
-        finalResult = `LLM error: ${err.message}`;
-        break;
-      }
+      const response: any = await chatCompletion(messages as any, {
+        model: DEFAULT_AGENT_MODEL,
+        maxTokens: 4096,
+        systemPrompt: EXECUTION_SYSTEM_PROMPT,
+        tools: EXECUTION_TOOLS as any,
+      });
 
-      // Log any text output
-      const textBlocks = (response.content ?? []).filter((b: any) => b.type === 'text');
-      for (const tb of textBlocks) {
+      const textBlocks = (response.content ?? []).filter((block: any) => block.type === "text");
+      for (const block of textBlocks) {
         await convex.mutation(api.agents.addLog, {
-          agentId,
-          logType: 'text',
-          content: tb.text,
+          agentId: opts.agentId,
+          logType: "text",
+          content: block.text,
         });
       }
 
-      if (response.stop_reason === 'end_turn') {
-        finalResult = textBlocks.map((b: any) => b.text).join('\n') || 'Task completed.';
+      const toolUseBlocks = (response.content ?? []).filter((block: any) => block.type === "tool_use");
+      if (response.stop_reason === "end_turn" || toolUseBlocks.length === 0) {
+        finalResult = textBlocks.map((block: any) => block.text).join("\n").trim() || "Task completed.";
         break;
       }
 
-      // Process tool calls
-      const toolUseBlocks = (response.content ?? []).filter((b: any) => b.type === 'tool_use');
-      if (toolUseBlocks.length === 0) {
-        finalResult = textBlocks.map((b: any) => b.text).join('\n') || 'Task completed.';
-        break;
-      }
-
-      messages.push({ role: 'assistant', content: response.content });
-
-      const toolResults: any[] = [];
+      messages.push({ role: "assistant", content: response.content });
+      const toolResults = [];
       for (const toolBlock of toolUseBlocks) {
-        const { result, completed, finalResult: fr } = await executeTool(
-          toolBlock.name,
-          toolBlock.input ?? {},
-          agentId
-        );
+        const result = await executeTool(toolBlock.name, toolBlock.input ?? {}, opts.agentId);
         await convex.mutation(api.agents.addLog, {
-          agentId,
-          logType: 'tool_result',
+          agentId: opts.agentId,
+          logType: "tool_result",
           toolName: toolBlock.name,
-          content: result.slice(0, 1000),
+          content: result.slice(0, 2000),
+        });
+        broadcast("agent_tool", {
+          agentId: opts.agentId,
+          toolName: toolBlock.name,
         });
         toolResults.push({
-          type: 'tool_result',
+          type: "tool_result",
           tool_use_id: toolBlock.id,
           content: result,
         });
-        if (completed) {
-          finalResult = fr ?? result;
-          // Push tool result then break
-          messages.push({ role: 'user', content: toolResults });
-          break;
-        }
       }
-
-      if (finalResult) break;
-
-      messages.push({ role: 'user', content: toolResults });
+      messages.push({ role: "user", content: toolResults });
     }
 
-    if (!finalResult) finalResult = 'Task completed (max turns reached).';
-
     await convex.mutation(api.agents.update, {
-      agentId,
-      status: 'completed',
-      result: finalResult.slice(0, 2000),
+      agentId: opts.agentId,
+      status: "completed",
+      result: finalResult.slice(0, 4000),
       completedAt: Date.now(),
     });
-
-  } catch (err: any) {
-    const errMsg = `Agent failed: ${err.message ?? String(err)}`;
-    console.error(`[ExecutionAgent] ${agentId} error:`, err);
+    broadcast("agent_done", {
+      agentId: opts.agentId,
+      status: "completed",
+      result: finalResult.slice(0, 500),
+    });
+  } catch (error: any) {
+    finalResult = `Agent failed: ${error?.message || String(error)}`;
     await convex.mutation(api.agents.update, {
-      agentId,
-      status: 'failed',
-      error: errMsg,
+      agentId: opts.agentId,
+      status: "failed",
+      error: finalResult,
       completedAt: Date.now(),
     });
-    finalResult = errMsg;
+    broadcast("agent_done", {
+      agentId: opts.agentId,
+      status: "failed",
+      result: finalResult,
+    });
   } finally {
-    activeAgents.delete(agentId);
+    activeAgents.delete(opts.agentId);
   }
 
-  // Deliver to Telegram if a chat ID was provided
-  if (telegramChatId) {
-    await deliverToTelegram(telegramChatId, `✅ Agent **${name}** completed:\n\n${finalResult.slice(0, 3500)}`);
+  if (opts.telegramChatId) {
+    await deliverToTelegram(opts.telegramChatId, finalResult.slice(0, 3500) || "Task completed.");
   }
 
-  console.log(`[ExecutionAgent] "${name}" (${agentId}) done.`);
-  return finalResult;
+  return finalResult || "Task completed.";
+}
+
+export async function spawnExecutionAgent(opts: SpawnOptions): Promise<SpawnResult> {
+  const agentId = `agent_${uuidv4().replace(/-/g, "").slice(0, 12)}`;
+  const result = await runExecutionAgent({
+    agentId,
+    name: opts.name ?? (opts.integrations.join("+") || "general"),
+    task: opts.task,
+    integrations: opts.integrations,
+    conversationId: opts.conversationId,
+  });
+  const convex = getConvexClient();
+  const agent = await convex.query(api.agents.get, { agentId });
+  const status = (agent?.status ?? "completed") as "completed" | "failed" | "cancelled";
+  return { agentId, result, status };
+}
+
+export function cancelAgent(agentId: string): void {
+  activeAgents.delete(agentId);
+}
+
+export function availableIntegrations(): string[] {
+  return ["filesystem", "shell", "web"];
 }

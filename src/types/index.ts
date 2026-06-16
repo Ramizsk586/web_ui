@@ -15,6 +15,8 @@ export interface ToolCallNode {
   filePath?: string;
   addedCount?: number;
   removedCount?: number;
+  liveAddedCount?: number;
+  liveRemovedCount?: number;
   oldContent?: string;
   newContent?: string;
   toolCategory?: 'discovery' | 'read' | 'write' | 'execute' | 'delegate' | 'web' | 'question' | 'workflow' | 'other';

@@ -184,25 +184,23 @@ export const RealtimeEditCounter = ({ node }: RealtimeEditCounterProps) => {
   const isEditing = node.status === 'active';
   const isComplete = node.status === 'complete';
   
-  const targetAdded = node.addedCount ?? 0;
-  const targetRemoved = node.removedCount ?? 0;
+  const targetAdded = isEditing ? (node.liveAddedCount ?? node.addedCount ?? 0) : (node.addedCount ?? 0);
+  const targetRemoved = isEditing ? (node.liveRemovedCount ?? node.removedCount ?? 0) : (node.removedCount ?? 0);
 
   useEffect(() => {
     if (isEditing) {
       const interval = setInterval(() => {
         setAdded(prev => {
-          if (prev < targetAdded) {
-            return prev + Math.floor(Math.random() * 3) + 1;
-          }
-          return prev + (Math.random() > 0.6 ? 1 : Math.random() > 0.8 ? -1 : 0);
+          if (prev === targetAdded) return prev;
+          const delta = targetAdded - prev;
+          return prev + Math.sign(delta) * Math.max(1, Math.ceil(Math.abs(delta) / 3));
         });
         setRemoved(prev => {
-          if (prev < targetRemoved) {
-            return prev + Math.floor(Math.random() * 2) + 1;
-          }
-          return prev + (Math.random() > 0.6 ? 1 : Math.random() > 0.8 ? -1 : 0);
+          if (prev === targetRemoved) return prev;
+          const delta = targetRemoved - prev;
+          return prev + Math.sign(delta) * Math.max(1, Math.ceil(Math.abs(delta) / 3));
         });
-      }, 150);
+      }, 60);
       
       return () => clearInterval(interval);
     } else if (isComplete) {

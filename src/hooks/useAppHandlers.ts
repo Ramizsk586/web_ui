@@ -1630,6 +1630,8 @@ ${JSON.stringify(parsed.memories, null, 2)}`
                 if (result.addedCount !== undefined) {
                   node.addedCount = result.addedCount;
                   node.removedCount = result.removedCount;
+                  node.liveAddedCount = result.addedCount;
+                  node.liveRemovedCount = result.removedCount;
                 }
                 if (result.oldContent !== undefined) {
                   node.oldContent = result.oldContent;
@@ -1694,18 +1696,56 @@ ${JSON.stringify(parsed.memories, null, 2)}`
           break;
         }
 
+        case 'tool_call_progress': {
+          const node = toolCallNodes.find(n => n.id === event.toolCallId) ||
+                       toolCallNodes.find(n => n.toolName === event.toolName && n.status === 'active');
+          if (node && event.progress) {
+            if (event.progress.filePath) {
+              node.filePath = event.progress.filePath;
+            }
+            if (event.progress.addedCount !== undefined) {
+              node.liveAddedCount = event.progress.addedCount;
+            }
+            if (event.progress.removedCount !== undefined) {
+              node.liveRemovedCount = event.progress.removedCount;
+            }
+            currentToolCalls = [...toolCallNodes];
+          }
+          break;
+        }
+
         case 'text': {
-          targetContent += event.content || '';
+          const nextText = event.content || '';
+          if (nextText) {
+            closeInlineThinking();
+            if (inlineNarrativeMode !== 'text') {
+              appendInlineSeparator();
+              inlineNarrativeMode = 'text';
+            }
+            targetContent += nextText;
+            hasStreamedText = true;
+          }
           break;
         }
 
         case 'thinking': {
-          targetThinkContent += event.content || '';
+          const nextThinking = event.content || '';
+          if (nextThinking) {
+            openInlineThinking();
+            targetContent += nextThinking;
+            targetThinkContent += nextThinking;
+          }
           break;
         }
 
         case 'done': {
+          closeInlineThinking();
           finalEventResultText = event.result?.text;
+          if (!hasStreamedText && finalEventResultText) {
+            appendInlineSeparator();
+            targetContent += finalEventResultText;
+            hasStreamedText = true;
+          }
           isDone = true;
           triggerWorkspaceRefresh();
           break;
@@ -1794,8 +1834,8 @@ ${JSON.stringify(parsed.memories, null, 2)}`
               messages: chat.messages.map(m => m.id === thinkingId ? {
                 ...m,
                 content: displayedContent,
-                thinkContent: displayedThinkContent || undefined,
-                isThinking: !isDone && (displayedThinkContent.length > 0 || m.isThinking),
+                thinkContent: undefined,
+                isThinking: !isDone && (inlineThinkingOpen || (!displayedContent.trim() && currentToolCalls.length === 0)),
                 isStreaming: !isDone,
                 toolCalls: [...currentToolCalls],
                 ...(isDone && displayedContent.length === targetContent.length && displayedThinkContent.length === targetThinkContent.length ? {

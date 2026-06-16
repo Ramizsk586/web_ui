@@ -1,7 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 
-// ─── Agents ──────────────────────────────────────────────────────────────────
 export const create = mutation({
   args: {
     agentId: v.string(),
@@ -17,10 +16,12 @@ export const create = mutation({
       name: args.name,
       task: args.task,
       status: "spawned",
-      mcpServers: [],
+      mcpServers: args.integrations,
       integrations: args.integrations,
       inputTokens: 0,
       outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
       costUsd: 0,
       startedAt: Date.now(),
     });
@@ -38,6 +39,8 @@ export const update = mutation({
     error: v.optional(v.string()),
     inputTokens: v.optional(v.number()),
     outputTokens: v.optional(v.number()),
+    cacheReadTokens: v.optional(v.number()),
+    cacheCreationTokens: v.optional(v.number()),
     costUsd: v.optional(v.number()),
     completedAt: v.optional(v.number()),
   },
@@ -46,19 +49,21 @@ export const update = mutation({
       .withIndex("by_agent_id", (q) => q.eq("agentId", args.agentId))
       .unique();
     if (!agent) throw new Error(`Agent ${args.agentId} not found`);
-    if (agent.status === "cancelled") return;
     const patch: Record<string, any> = {};
-    if (args.status) patch.status = args.status;
+    if (args.status !== undefined) patch.status = args.status;
     if (args.result !== undefined) patch.result = args.result;
     if (args.error !== undefined) patch.error = args.error;
     if (args.inputTokens !== undefined) patch.inputTokens = args.inputTokens;
     if (args.outputTokens !== undefined) patch.outputTokens = args.outputTokens;
+    if (args.cacheReadTokens !== undefined) patch.cacheReadTokens = args.cacheReadTokens;
+    if (args.cacheCreationTokens !== undefined) patch.cacheCreationTokens = args.cacheCreationTokens;
     if (args.costUsd !== undefined) patch.costUsd = args.costUsd;
     if (args.completedAt !== undefined) patch.completedAt = args.completedAt;
     if (args.status === "completed" || args.status === "failed" || args.status === "cancelled") {
       patch.completedAt = args.completedAt ?? Date.now();
     }
     await ctx.db.patch(agent._id, patch);
+    return true;
   },
 });
 
@@ -96,7 +101,7 @@ export const list = query({
   handler: async (ctx, args) => {
     if (args.status) {
       return await ctx.db.query("executionAgents")
-        .withIndex("by_status", (q) => q.eq("status", args.status!))
+        .withIndex("by_status", (q) => q.eq("status", args.status))
         .order("desc").take(args.limit ?? 50);
     }
     return await ctx.db.query("executionAgents").order("desc").take(args.limit ?? 50);
@@ -128,29 +133,31 @@ export const remove = mutation({
     const agent = await ctx.db.query("executionAgents")
       .withIndex("by_agent_id", (q) => q.eq("agentId", args.agentId))
       .unique();
-    if (!agent) return;
+    if (!agent) return { deleted: 0 };
     const logs = await ctx.db.query("agentLogs")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
       .collect();
     for (const log of logs) await ctx.db.delete(log._id);
     await ctx.db.delete(agent._id);
+    return { deleted: 1 };
   },
 });
 
 export const cleanupFinished = mutation({
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const agents = await ctx.db.query("executionAgents").collect();
-    let count = 0;
+    let deleted = 0;
     for (const agent of agents) {
-      if (["completed", "failed", "cancelled"].includes(agent.status) && count < 500) {
-        const logs = await ctx.db.query("agentLogs")
-          .withIndex("by_agent", (q) => q.eq("agentId", agent.agentId))
-          .collect();
-        for (const log of logs) await ctx.db.delete(log._id);
-        await ctx.db.delete(agent._id);
-        count++;
-      }
+      if (!["completed", "failed", "cancelled"].includes(agent.status)) continue;
+      if (deleted >= (args.limit ?? 500)) break;
+      const logs = await ctx.db.query("agentLogs")
+        .withIndex("by_agent", (q) => q.eq("agentId", agent.agentId))
+        .collect();
+      for (const log of logs) await ctx.db.delete(log._id);
+      await ctx.db.delete(agent._id);
+      deleted += 1;
     }
-    return count;
+    return { deleted };
   },
 });

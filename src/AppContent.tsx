@@ -2579,7 +2579,6 @@ const startCoderPreview = useCallback(async () => {
                         { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
                         { id: 'lumina_agent', label: 'Lumina Agent', icon: <Bot size={16} className="text-emerald-500" />, onClick: () => { setIsLuminaMemoryOpen(false); setIsLuminaAgentOpen(true); setIsHeaderMenuOpen(false); } },
-                        { id: 'lumina_memory', label: 'Memory Panel', icon: <Brain size={16} className="text-cyan-400" />, onClick: () => { setIsLuminaAgentOpen(false); setIsLuminaMemoryOpen(true); setIsHeaderMenuOpen(false); } },
                         
                       ].map((item) => (
                         <button
@@ -2868,7 +2867,7 @@ const startCoderPreview = useCallback(async () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 12 }}
                 transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-zinc-950"
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
               >
                 <LuminaAgentPanel
                   onClose={() => setIsLuminaAgentOpen(false)}
@@ -2889,7 +2888,7 @@ const startCoderPreview = useCallback(async () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 12 }}
                 transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-zinc-950"
+                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
               >
                 <LuminaMemoryPanel
                   onClose={() => setIsLuminaMemoryOpen(false)}
