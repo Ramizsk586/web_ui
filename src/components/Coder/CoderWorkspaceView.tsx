@@ -1,31 +1,30 @@
 import React, { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { 
-  Sidebar as SidebarIcon, 
   Sparkles, 
   Trash2, 
-  Terminal, 
   Play, 
-  Palette, 
-  RefreshCw, 
-  Code, 
-  Activity, 
-  FileText, 
-  FileJson,
-  GitBranch,
+  Folder,
   ChevronDown,
-  Check,
-  Search
+  Search,
+  Code
 } from 'lucide-react';
-import { CoderLeftExplorer } from '../CoderLeftExplorer';
+import { CoderSidebar } from './CoderSidebar';
+import { CoderInputBox } from './CoderInputBox';
 import { MessageItem } from '../Chat/MessageItem';
 import { LivePreviewPanel } from '../LivePreviewPanel';
-import { FloatingCodeEditor } from '../FloatingCodeEditor';
-import { invokeTauri, isTauriDesktop, safeConfirm } from '../../utils/tauriDesktop';
+import { safeConfirm } from '../../utils/tauriDesktop';
 
 import { Message, Chat } from '../../types';
 
 const STABLE_NOOP = () => {};
+
+interface Project {
+  id: string;
+  name: string;
+  path: string;
+  description?: string;
+}
 
 interface CoderWorkspaceViewProps {
   isCoderLeftPanelOpen: boolean;
@@ -83,6 +82,24 @@ interface CoderWorkspaceViewProps {
   handleModelSelect: (id: string) => void;
   modelSelectorMode: 'popup' | 'drawer';
   setIsModelDrawerOpen: (open: boolean) => void;
+  projectFolders: Project[];
+  setProjectFolders: React.Dispatch<React.SetStateAction<Project[]>>;
+  activeProjectId: string | null;
+  setActiveProjectId: (id: string | null) => void;
+  createNewChat: (projectId?: string | null, isCoder?: boolean, isResearch?: boolean, agentId?: string) => void;
+  onOpenSettings?: () => void;
+  onSelectChat?: (chatId: string) => void;
+  // Chat input props
+  input: string;
+  setInput: (val: string) => void;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  adjustTextareaHeight: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  isTyping: boolean;
+  abortControllerRef: React.MutableRefObject<AbortController | null>;
+  isVoiceListening?: boolean;
+  startVoiceDictation?: (locale?: string) => void;
+  stopVoiceDictation?: (autoSend?: boolean) => void;
 }
 
 export default function CoderWorkspaceView({
@@ -141,199 +158,109 @@ export default function CoderWorkspaceView({
   handleModelSelect,
   modelSelectorMode,
   setIsModelDrawerOpen,
+  projectFolders,
+  setProjectFolders,
+  activeProjectId,
+  setActiveProjectId,
+  createNewChat,
+  onOpenSettings,
+  onSelectChat,
+  input,
+  setInput,
+  inputRef,
+  handleKeyDown,
+  adjustTextareaHeight,
+  isTyping,
+  abortControllerRef,
+  isVoiceListening,
+  startVoiceDictation,
+  stopVoiceDictation
 }: CoderWorkspaceViewProps) {
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [explorerWidth, setExplorerWidth] = useState(280);
-  const [isExplorerResizing, setIsExplorerResizing] = useState(false);
-
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  React.useEffect(() => {
-    if (modelSelectorMode === 'drawer') {
-      setIsDropdownOpen(false);
-    }
-  }, [modelSelectorMode]);
-
-  React.useEffect(() => {
-    (window as any).openFileInPreview = (filePath: string) => {
-      setRightPanelTab(filePath);
-    };
-    return () => {
-      delete (window as any).openFileInPreview;
-    };
-  }, []);
-
-  const filteredModelList = React.useMemo(() => {
-    if (!activeModelList) return [];
-    return activeModelList.filter((model: any) => {
-      const name = (model.name || '').toLowerCase();
-      const id = (model.id || '').toLowerCase();
-      const q = searchQuery.toLowerCase();
-      return name.includes(q) || id.includes(q);
-    });
-  }, [activeModelList, searchQuery]);
-
-  const handleOpenNativeTerminal = React.useCallback(async () => {
-    if (!isTauriDesktop()) {
-      showToast('Native terminal launch is available in the desktop app only.');
-      return;
-    }
-
-    try {
-      await invokeTauri('open_native_terminal', {
-        cwd: coderWorkspacePath || undefined,
-      });
-      showToast('Opened Windows terminal in the project directory.');
-    } catch (error) {
-      console.error('Failed to open native terminal', error);
-      showToast('Could not open the native terminal.');
-    }
-  }, [coderWorkspacePath, showToast]);
-
-  const handleExplorerResizeStart = (e: React.PointerEvent) => {
-    e.preventDefault();
-    setIsExplorerResizing(true);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const handleMove = (e: PointerEvent) => {
-      const newWidth = e.clientX;
-      
-      // Look up current width of the right preview panel
-      let rightPanelWidth = 0;
-      if (isCoderRightPanelOpen) {
-        const rightPanelEl = document.getElementById('live-preview-panel');
-        if (rightPanelEl) {
-          rightPanelWidth = rightPanelEl.getBoundingClientRect().width;
-        } else {
-          rightPanelWidth = 450; // default state fallback
-        }
-      }
-      
-      const maxLeftWidth = window.innerWidth - rightPanelWidth - 550; // Keep at least 550px for center chat area
-      const finalLeftWidth = Math.min(600, Math.max(200, maxLeftWidth));
-
-      if (newWidth >= 200 && newWidth <= finalLeftWidth) {
-        setExplorerWidth(newWidth);
-      }
-    };
-    const handleUp = () => {
-      setIsExplorerResizing(false);
-      document.body.style.cursor = 'default';
-      document.body.style.userSelect = 'auto';
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
-    };
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
-  };
+  const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
 
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
-      {/* LEFT PANEL: File Explorer (VS Code Styled collapsible sidebar) */}
+      {/* LEFT SIDEBAR: Project Navigation */}
       <AnimatePresence>
         {isCoderLeftPanelOpen && (
           <motion.div
             initial={{ width: 0, opacity: 0 }}
-            animate={{ width: explorerWidth, opacity: 1 }}
+            animate={{ width: 280, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: isExplorerResizing ? 0 : 0.22, ease: 'easeOut' }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
             className="h-full border-r border-[#221B17] bg-[#110E0D] flex flex-col overflow-hidden shrink-0 z-10 shadow-xl relative"
           >
-            <CoderLeftExplorer 
+            <CoderSidebar 
               workspaceRefreshKey={workspaceRefreshKey}
               triggerWorkspaceRefresh={triggerWorkspaceRefresh}
               showToast={showToast}
               workspaceRootPath={coderWorkspacePath}
               onWorkspaceRootPathChange={setCoderWorkspacePath}
-              onSelectFile={(filePath) => {
-                setFloatingEditFile(filePath);
-                const rel = filePath.replace(/\\/g, '/').split('coder/').pop() || '';
-                if (rel) {
-                  setRightPreviewSubpath(rel);
-                }
+              chats={chats}
+              setChats={setChats}
+              currentChatId={currentChatId}
+              onSelectChat={(chatId) => {
+                if (onSelectChat) onSelectChat(chatId);
               }}
-              fileAttributions={orchestrationState.isActive ? orchestrationState.agents.flatMap((a: any) =>
-                a.filesCreated.map((fp: string) => ({
-                  relativePath: fp.replace(/\\/g, '/'),
-                  agentId: a.id,
-                  status: a.status === 'done' ? ('done' as const) : a.status === 'needs_review' ? ('needs_review' as const) : ('pending' as const)
-                }))
-              ) : undefined}
+              onNewChat={(projId) => {
+                if (createNewChat) createNewChat(projId, true, false);
+              }}
               onClose={() => setIsCoderLeftPanelOpen(false)}
+              projectFolders={projectFolders}
+              setProjectFolders={setProjectFolders}
+              activeProjectId={activeProjectId}
+              setActiveProjectId={setActiveProjectId}
+              onOpenSettings={onOpenSettings}
             />
-            <div
-              onPointerDown={handleExplorerResizeStart}
-              className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-500/20 active:bg-blue-500/40 transition-colors z-20 group/resizer"
-            >
-              <div className={`absolute top-0 right-0 w-[2px] h-full transition-colors ${isExplorerResizing ? 'bg-blue-500' : 'bg-transparent group-hover/resizer:bg-blue-500/50'}`} />
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* CENTER PANEL: Standard & customized Coder chat and text layout */}
-      <div id="coder-chat-area" className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0A0908] min-w-[550px]">
-        
-        {/* Coder Top Navigation Bar */}
-        <div className="h-12 border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 bg-[#151211] backdrop-blur-md relative z-[150]" style={{ backgroundColor: '#151211' }}>
+      {/* CENTER PANEL: Chat Area */}
+      <div id="coder-chat-area" className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0A0908] min-w-[400px]">
+        {/* Top Bar */}
+        <div className="h-12 border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 bg-[#151211] backdrop-blur-md relative z-[150]">
           <div className="flex items-center gap-3">
-            {/* Coder Panel Toggles */}
-            <div className="flex items-center gap-2 border-r border-[#261E1A] pr-3 mr-1 select-none">
+            {/* Sidebar toggle */}
+            {!isCoderLeftPanelOpen && (
               <button
-                onClick={() => {
-                  if (isSidebarOpen) {
-                    setIsSidebarOpen(false);
-                    setIsCoderLeftPanelOpen(true);
-                  } else {
-                    setIsCoderLeftPanelOpen(!isCoderLeftPanelOpen);
-                  }
-                }}
-                className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
-                  isCoderLeftPanelOpen 
-                    ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
-                    : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
-                }`}
-                title="Toggle Workspace Files Left Sidebar"
+                onClick={() => setIsCoderLeftPanelOpen(true)}
+                className="p-1.5 rounded-lg border border-[#2C241E] bg-[#0E0B0A]/50 text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#1D1917] transition-all cursor-pointer flex items-center justify-center mr-1"
+                title="Expand Sidebar"
               >
-                <SidebarIcon size={14} />
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="w-3.5 h-3.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M9 3v18" />
+                </svg>
               </button>
+            )}
 
-              <button
-                onClick={() => {
-                  if (isCoderLeftPanelOpen) {
-                    setIsCoderLeftPanelOpen(false);
-                    setIsSidebarOpen(true);
-                  } else {
-                    setIsSidebarOpen(!isSidebarOpen);
-                  }
-                }}
-                className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
-                  isSidebarOpen 
-                    ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
-                    : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
-                }`}
-                title={isSidebarOpen ? "Collapse AI Chat Assistant Panel" : "Expand AI Chat Assistant Panel"}
-              >
-                <Sparkles size={14} className={isSidebarOpen ? 'animate-pulse text-[#D97756]' : ''} />
-              </button>
-            </div>
+            {/* Active Project & Chat Session Path */}
+            {(() => {
+              const activeProj = projectFolders.find(p => p.id === activeProjectId);
+              const activeChat = chats.find(c => c.id === currentChatId);
+              if (activeProj) {
+                return (
+                  <div className="flex items-center gap-1.5 text-xs text-[#7F7469] font-semibold select-none">
+                    <Folder size={12} className="text-[#D97756]" />
+                    <span className="text-[#EDE6DD]">{activeProj.name}</span>
+                    <span>/</span>
+                    <span className="text-[#7F7469] font-medium truncate max-w-[180px]">{activeChat?.title || 'New Session'}</span>
+                  </div>
+                );
+              }
+              return (
+                <div className="flex items-center gap-1.5 text-xs text-[#7F7469] font-semibold select-none">
+                  <Code size={12} className="text-[#D97756]" />
+                  <span className="text-[#EDE6DD]">Lumina Coder</span>
+                </div>
+              );
+            })()}
 
-            {/* Actions for current workspace */}
-            <div className="flex items-center gap-1.5 select-none">
+            {/* Actions */}
+            <div className="flex items-center gap-1.5 select-none border-l border-[#261E1A] pl-3">
               <button 
                 onClick={() => {
                   const targetId = currentChatId || (chats.length > 0 ? chats[0].id : null);
@@ -345,184 +272,16 @@ export default function CoderWorkspaceView({
                     handleClearChat();
                   }
                 }}
-                className="p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E] active:scale-95"
+                className="p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] active:scale-95"
                 title="Clear current chat messages"
               >
-                <Trash2 size={14} />
+                <Trash2 size={13} />
               </button>
             </div>
           </div>
 
-          {/* Center section: Model button and workspace active status */}
-          <div className="flex items-center gap-4">
-
-            {/* Workspace-level Model Selector */}
-            <div className="relative inline-block text-left" ref={dropdownRef}>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (modelSelectorMode === 'drawer') {
-                    setIsDropdownOpen(false);
-                    setIsModelDrawerOpen(true);
-                    return;
-                  }
-                  setIsDropdownOpen(!isDropdownOpen);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0E0C0B]/70 hover:bg-[#1D1917] border border-[#2C241E] rounded-full transition-all text-[11px] font-semibold text-[#EDE6DD] cursor-pointer select-none max-w-[210px] shadow-sm font-sans"
-                title="Change active model"
-              >
-                <Sparkles size={11} className="text-amber-500 shrink-0" />
-                <span className="truncate max-w-[120px]">
-                  {(() => {
-                    const matched = activeModelList.find((m) => m.id === activeModelId);
-                    if (matched) return matched.name;
-                    let name = activeModelId;
-                    if (name.includes("/")) {
-                      name = name.split("/").slice(-1)[0];
-                    }
-                    return (
-                      name
-                        .replace(/[-_]/g, " ")
-                        .replace(/\bgguf\b/gi, "")
-                        .trim() || activeModelId
-                    );
-                  })()}
-                </span>
-                <ChevronDown
-                  size={11}
-                  className={`text-[#9B8C7D] shrink-0 transition-transform duration-150 ${isDropdownOpen && modelSelectorMode !== 'drawer' ? "rotate-180" : ""}`}
-                />
-              </button>
-
-              <AnimatePresence>
-                {isDropdownOpen && modelSelectorMode !== 'drawer' && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                    className="absolute left-1/2 -translate-x-1/2 mt-2 w-[280px] bg-[#151211] border border-[#2C241E] rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
-                  >
-                    {/* Header Label Info */}
-                    <div className="px-3.5 pt-3 pb-1 select-none flex items-center justify-between shrink-0">
-                      <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-[#9B8C7D]">
-                        System Model Cores
-                      </span>
-                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-[#0E0C0B] font-bold text-[#D97756]">
-                        {filteredModelList.length} Active
-                      </span>
-                    </div>
-
-                    {availableModels.length > 5 && (
-                      <div className="px-3 py-1.5 bg-[#151211] shrink-0">
-                        <div className="relative group">
-                          <Search
-                            size={12}
-                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9B8C7D] group-focus-within:text-[#D97756] transition-colors"
-                          />
-                          <input
-                            type="text"
-                            placeholder="Filter model name..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-full h-8 pl-8 pr-3 bg-[#0E0C0B] border border-[#2C241E] rounded-xl text-[11px] outline-none placeholder-[#635F59] focus:border-[#D97756] focus:ring-1 focus:ring-[#D97756]/15 text-[#EDE6DD] font-medium transition-all"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="max-h-[230px] overflow-y-auto p-1.5 space-y-1 custom-scrollbar shrink-0 border-t border-[#2C241E]/40 mt-1">
-                      {filteredModelList.length > 0 ? (
-                        filteredModelList.map((model) => {
-                          const isSelected = activeModelId === model.id;
-                          const isLocal = model.id.toLowerCase().includes("gguf");
-
-                          return (
-                            <button
-                              key={model.id}
-                              onClick={() => {
-                                handleModelSelect(model.id);
-                                setIsDropdownOpen(false);
-                              }}
-                              className={`w-full min-h-[40px] flex items-center gap-3 px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all shrink-0 border-l-[3px] cursor-pointer ${
-                                isSelected
-                                  ? "bg-[#1D1917] text-[#EDE6DD] border-[#D97756] shadow-sm"
-                                  : "text-[#9B8C7D] hover:bg-[#0E0C0B]/60 hover:text-[#EDE6DD] border-transparent"
-                              }`}
-                            >
-                              <div className="flex-1 text-left min-w-0">
-                                <span className={`block truncate ${isSelected ? "font-bold text-[#EDE6DD]" : "font-semibold text-[#9B8C7D]"}`}>
-                                  {model.name}
-                                </span>
-                                <span className="block text-[8px] font-mono text-[#635F59] truncate uppercase tracking-tight">
-                                  {isLocal ? "LOCAL GGUF • HOSTED" : model.id.split("/").slice(-1)[0]}
-                                </span>
-                              </div>
-
-                              {isSelected && (
-                                <div className="w-4 h-4 rounded-full bg-[#D97756]/10 flex items-center justify-center ml-auto shrink-0">
-                                  <Check size={11} className="text-[#D97756]" strokeWidth={3} />
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div className="py-8 text-center text-[11px] text-[#635F59] select-none">
-                          No cores match criteria
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-
-          {/* Right side live preview panel toggle */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsWhiteboardOpen(!isWhiteboardOpen)}
-              className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
-                isWhiteboardOpen 
-                  ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
-                  : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
-              }`}
-              title={isWhiteboardOpen ? "Collapse Whiteboard Panel" : "Expand Whiteboard Panel"}
-            >
-              <Palette size={14} className={isWhiteboardOpen ? 'text-[#D97756]' : ''} />
-            </button>
-
-            <button
-              onClick={handleOpenNativeTerminal}
-              className="p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]"
-              title="Open Windows terminal in the project folder"
-            >
-              <Terminal size={14} />
-            </button>
-
-            <button
-              onClick={() => {
-                if (!isCoderRightPanelOpen) {
-                  setIsCoderRightPanelOpen(true);
-                  setRightPanelTab('review');
-                } else if (rightPanelTab === 'review') {
-                  setIsCoderRightPanelOpen(false);
-                } else {
-                  setRightPanelTab('review');
-                }
-              }}
-              className={`p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
-                isCoderRightPanelOpen && rightPanelTab === 'review'
-                  ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
-                  : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
-              }`}
-              title={isCoderRightPanelOpen && rightPanelTab === 'review' ? "Collapse Changes Review" : "Expand Changes Review"}
-            >
-              <GitBranch size={14} className={isCoderRightPanelOpen && rightPanelTab === 'review' ? 'text-[#D97756]' : ''} />
-            </button>
-
+            {/* Preview toggle */}
             <button
               onClick={() => {
                 if (!isCoderRightPanelOpen) {
@@ -539,14 +298,14 @@ export default function CoderWorkspaceView({
                   ? 'bg-[#D97756]/15 text-[#D97756] border-[#D97756]/40 shadow-inner scale-95' 
                   : 'bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]'
               }`}
-              title={isCoderRightPanelOpen && rightPanelTab === 'overview' ? "Collapse App Live Preview" : "Expand App Live Preview"}
+              title="Toggle Live Preview"
             >
               <Play size={14} className={isCoderRightPanelOpen && rightPanelTab === 'overview' ? 'animate-pulse text-[#D97756]' : ''} />
             </button>
           </div>
         </div>
 
-        {/* Chat View, Centered Watermarked / Mockup Interface */}
+        {/* Chat Messages Area */}
         <div className="flex-1 flex flex-col overflow-hidden relative bg-[#131210]" style={{ backgroundColor: '#131210' }}>
           <div 
             ref={scrollRef}
@@ -589,20 +348,40 @@ export default function CoderWorkspaceView({
             </div>
           </div>
 
+          {/* New Coder Input Box */}
           <div className="px-6 pb-6 pt-2 z-30 shrink-0 bg-transparent border-transparent">
             <div className={`mx-auto relative transition-all duration-300 ${
               messages.length === 0 
                 ? 'max-w-xl md:max-w-2xl' 
                 : 'max-w-4xl xl:max-w-[1100px]'
             }`}>
-              {renderChatBox(messages.length === 0)}
+              <CoderInputBox
+                activeModelId={activeModelId}
+                activeModelList={activeModelList}
+                availableModels={availableModels}
+                handleModelSelect={handleModelSelect}
+                coderWorkspacePath={coderWorkspacePath}
+                isCoderMode={true}
+                input={input}
+                setInput={setInput}
+                inputRef={inputRef}
+                handleKeyDown={handleKeyDown}
+                handleSend={() => handleSend()}
+                adjustTextareaHeight={adjustTextareaHeight}
+                isTyping={isTyping}
+                abortControllerRef={abortControllerRef}
+                showToast={showToast}
+                isVoiceListening={isVoiceListening}
+                startVoiceDictation={startVoiceDictation}
+                stopVoiceDictation={stopVoiceDictation}
+                isCenteredState={messages.length === 0}
+              />
             </div>
           </div>
         </div>
-
       </div>
 
-      {/* RIGHT PANEL: Live App Preview Frame (collapsible sidebar) */}
+      {/* RIGHT PANEL: Live Preview */}
       <AnimatePresence>
         <LivePreviewPanel
           isCoderRightPanelOpen={isCoderRightPanelOpen}
@@ -630,19 +409,11 @@ export default function CoderWorkspaceView({
           orchestrationState={orchestrationState}
           onOpenFile={setFloatingEditFile}
           isCoderLeftPanelOpen={isCoderLeftPanelOpen}
-          explorerWidth={explorerWidth}
+          explorerWidth={280}
+          openFileTabs={openFileTabs}
+          setOpenFileTabs={setOpenFileTabs}
         />
       </AnimatePresence>
-
-      {floatingEditFile && (
-        <FloatingCodeEditor 
-          filePath={floatingEditFile}
-          onClose={() => setFloatingEditFile(null)}
-          showToast={showToast}
-          triggerWorkspaceRefresh={triggerWorkspaceRefresh}
-          workspaceRootPath={coderWorkspacePath}
-        />
-      )}
     </div>
   );
 }

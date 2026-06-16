@@ -3,16 +3,6 @@ import { computeLineDiff } from '../components/NodeGraph/FileDiffNode';
 import { parseThinkTags, turboQuantCompress } from '../utils/textUtils';
 import { extractArtifacts } from '../utils/artifactUtils';
 import { extractYouTubeId, fetchYouTubeTranscript } from '../utils/youtubeUtils';
-import {
-  DEEP_RESEARCH_SYSTEM_PROMPT,
-  createDeepResearchReportTitle,
-  deepResearchTools,
-  formatDeepResearchSearchResults,
-  formatDeepResearchVisitResult,
-  getDeepResearchMinimums,
-  getDeepResearchPresetPrompt,
-  sanitizeDeepResearchReport
-} from '../utils/deepResearchWorkflow';
 import { SKILLS } from '../constants';
 import { Chat, Message, ToolCallNode } from '../types';
 import { CoderPermissionMode } from '../types';
@@ -734,9 +724,6 @@ export interface UseAppHandlersParams {
   currentChatId: string | null;
   setCurrentChatId: (v: string | null) => void;
   isWebSearchEnabled: boolean;
-  isDeepSearchEnabled: boolean;
-  setIsDeepSearchEnabled: (v: boolean) => void;
-  researchMode: any;
   isVoiceListening: boolean;
   stopVoiceDictation: () => void;
   attachedFiles: File[];
@@ -1028,8 +1015,6 @@ export function useAppHandlers(params: UseAppHandlersParams) {
     chats, setChats,
     currentChatId, setCurrentChatId,
     isWebSearchEnabled,
-    isDeepSearchEnabled, setIsDeepSearchEnabled,
-    researchMode,
     isVoiceListening, stopVoiceDictation,
     attachedFiles, setAttachedFiles,
     attachedUrlDocs, setAttachedUrlDocs,
@@ -2390,87 +2375,7 @@ ${JSON.stringify(parsed.memories, null, 2)}`
     let searchResults: any[] = [];
     let searchProviderVal = "";
 
-    if (isDeepSearchEnabled) {
-      try {
-        setChats(prev => prev.map(chat => {
-          if (chat.id !== chatId) return chat;
-          return {
-            ...chat,
-            messages: chat.messages.map(m => m.id === thinkingId
-              ? { ...m, thinking: 'Orchestrating Deep Multi-Agent Research...', isSearching: true }
-              : m)
-          };
-        }));
-
-        // Launch the UI Research simulation
-        if (researchMode) {
-          researchMode.setIsResearchActive(false);
-          setTimeout(() => {
-            researchMode.setCustomQueries(content);
-            // researchMode.setIsResearchMode(true);
-            // setIsSidebarOpen(false);
-            researchMode.setIsResearchActive(true);
-            researchMode.setResearchLogs([
-              `[${new Date().toLocaleTimeString()}] [Orchestrator] Deep recursive search triggered via Chat Toggle: "${content}"`,
-              `[${new Date().toLocaleTimeString()}] [System] Allocating multi-agent parallel loops...`
-            ]);
-            // researchMode.setIsResearchWorkspaceOpen(true);
-          }, 100);
-        }
-
-        const hasTavilyKey = tavilyApiKey && tavilyApiKey.trim().length > 0;
-        const hasSerpKey = serpApiKey && serpApiKey.trim().length > 0;
-        
-        let providerName = 'DuckDuckGo';
-        if (searchProvider === 'tavily' && hasTavilyKey) {
-          providerName = 'Tavily';
-        } else if (searchProvider === 'serpapi' && hasSerpKey) {
-          providerName = 'SerpApi';
-        } else if (hasTavilyKey) {
-          providerName = 'Tavily';
-        } else if (hasSerpKey) {
-          providerName = 'SerpApi';
-        }
-
-        const searchData = await runPreferredWebSearch({
-          content,
-          tavilyApiKey,
-          serpApiKey,
-          searchProvider,
-          selectedProvider,
-          apiKey,
-          signal
-        });
-        
-        if (searchData.ok) {
-          searchResults = searchData.results || [];
-          searchProviderVal = searchData.provider === 'Ollama Web Search'
-            ? 'Deep Research Engine (Ollama Web Search)'
-            : "Deep Research Engine (" + providerName + ")";
-        } else {
-          console.warn('Backend search failed, no further fallback available.');
-        }
-
-        if (searchResults.length > 0) {
-          setChats(prev => prev.map(chat => {
-            if (chat.id === chatId) {
-              return {
-                ...chat,
-                messages: chat.messages.map(m => m.id === thinkingId ? { 
-                  ...m, 
-                  isSearching: true, 
-                  thinking: `Synthesizing deep results and Agent claims (${searchProviderVal})...`,
-                  sources: searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) 
-                } : m),
-              };
-            }
-            return chat;
-          }));
-        }
-      } catch (err) {
-        console.error('Deep search error:', err);
-      }
-    } else if (isWebSearchEnabled) {
+    if (isWebSearchEnabled) {
       try {
         setChats(prev => prev.map(chat => {
           if (chat.id !== chatId) return chat;
@@ -2563,14 +2468,6 @@ ${JSON.stringify(parsed.memories, null, 2)}`
       const chatContext = chats.find(c => c.id === chatId)?.messages || [];
       
       let activeTools = buildActiveTools();
-      if (isDeepSearchEnabled && !effectiveCoderMode) {
-        const existingNames = new Set(activeTools.map((tool: any) => tool?.function?.name).filter(Boolean));
-        for (const tool of deepResearchTools) {
-          if (!existingNames.has(tool.function.name)) {
-            activeTools.push(tool);
-          }
-        }
-      }
       if (effectiveCoderMode) {
         activeTools.push(
           ...[
@@ -3009,12 +2906,6 @@ For this request, you MUST use the available web tools before answering if the u
         }
       }
 
-      const deepResearchPreset = (researchMode?.depthPreset || 'standard') as 'standard' | 'extreme';
-      const deepResearchMinimums = getDeepResearchMinimums(deepResearchPreset);
-      if (isDeepSearchEnabled && !isCoderMode) {
-        systemPrompt += `\n\n${DEEP_RESEARCH_SYSTEM_PROMPT}${getDeepResearchPresetPrompt(deepResearchPreset)}\nCurrent date: ${new Date().toISOString().slice(0, 10)}\nDeep research preset: ${deepResearchPreset === 'extreme' ? 'Advanced' : 'Normal'}\nMinimum wiki searches: ${deepResearchMinimums.minWikiSearches}\nMinimum visit calls: ${deepResearchMinimums.minVisits}\nMinimum search calls: ${deepResearchMinimums.minSearchCalls}`;
-      }
-
       if (isCoderMode) {
         const osName = (navigator as any)?.platform || 'unknown';
         if (!shouldRunCoderAgent) {
@@ -3309,201 +3200,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         }
         console.log('[LUMINA_DEBUG] Final apiMessages structure:', JSON.stringify(logSafe, null, 2));
       }
-
-      if (isDeepSearchEnabled && !isCoderMode) {
-        setChats(prev => prev.map(chat => {
-          if (chat.id !== chatId) return chat;
-          return {
-            ...chat,
-            messages: chat.messages.map(m => m.id === thinkingId
-              ? { ...m, thinking: 'Running Deep Research agent...', isSearching: true }
-              : m)
-          };
-        }));
-
-        const deepResearchResponse = await fetch('/api/deep-research/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: content,
-            preset: researchMode?.depthPreset || 'standard',
-            tavilyKey: tavilyApiKey,
-            serpKey: serpApiKey,
-            provider: selectedProvider,
-            model: selectedModel || activeModelId,
-            apiKey,
-            baseUrl: serverUrl
-          }),
-          signal
-        });
-
-        if (!deepResearchResponse.ok) {
-          const errorPayload = await deepResearchResponse.json().catch(() => ({}));
-          throw new Error(errorPayload?.error || 'Deep Research request failed');
-        }
-
-        const reader = deepResearchResponse.body?.getReader();
-        if (!reader) {
-          throw new Error('Deep Research stream was not available');
-        }
-
-        const decoder = new TextDecoder();
-        let streamBuffer = '';
-        let deepResearchData: any = null;
-        let streamedReport = '';
-        const toolCallNodeMap = new Map<string, ToolCallNode>();
-        const buildToolNode = (tc: any, idx = 0): ToolCallNode => ({
-          id: tc.id || `deep-tool-${idx}`,
-          type: tc.type === 'ai' ? 'ai' : 'tool',
-          label: tc.label || tc.toolName || 'deep research step',
-          status: tc.status === 'failed' ? 'failed' : tc.status === 'active' ? 'active' : 'complete',
-          toolName: tc.toolName,
-          argsCount: tc.argsCount,
-          resultSummary: tc.resultSummary,
-          icon: tc.icon || (
-            (tc.toolName || '').includes('search') ? 'search' :
-            (tc.toolName || '').includes('wiki') || (tc.toolName || '').includes('visit') || (tc.toolName || '').includes('scrape') ? 'globe' :
-            'sparkles'
-          )
-        });
-        const syncThinkingMessage = (contentValue: string, toolCallsValue: ToolCallNode[], isFinal = false) => {
-          setChats(prev => prev.map(chat => {
-            if (chat.id !== chatId) return chat;
-            return {
-              ...chat,
-              messages: chat.messages.map(m => m.id === thinkingId ? {
-                ...m,
-                content: contentValue || m.content,
-                thinking: isFinal ? undefined : 'Running Deep Research pipeline...',
-                isSearching: !isFinal,
-                isThinking: !isFinal,
-                toolCalls: toolCallsValue,
-                isStreaming: !isFinal,
-                timestamp: isFinal ? new Date() : m.timestamp
-              } : m)
-            };
-          }));
-        };
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          streamBuffer += decoder.decode(value, { stream: true });
-          const lines = streamBuffer.split('\n');
-          streamBuffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            const evt = JSON.parse(trimmed);
-
-            if (evt.type === 'pipeline' && evt.node) {
-              const nextNode = buildToolNode(evt.node, toolCallNodeMap.size);
-              toolCallNodeMap.set(nextNode.id, {
-                ...(toolCallNodeMap.get(nextNode.id) || {}),
-                ...nextNode
-              });
-              syncThinkingMessage(streamedReport, [...toolCallNodeMap.values()]);
-            } else if (evt.type === 'report') {
-              streamedReport = sanitizeDeepResearchReport(evt.report || `${streamedReport}${evt.chunk || ''}`);
-              syncThinkingMessage(streamedReport, [...toolCallNodeMap.values()]);
-            } else if (evt.type === 'final' && evt.result) {
-              deepResearchData = evt.result;
-            } else if (evt.type === 'done' && evt.result) {
-              deepResearchData = evt.result;
-            } else if (evt.type === 'error') {
-              throw new Error(evt.error || 'Deep Research stream failed');
-            }
-          }
-        }
-
-        if (!deepResearchData) {
-          throw new Error('Deep Research completed without a final result');
-        }
-
-        const toolCallNodes: ToolCallNode[] = Array.isArray(deepResearchData.toolCalls)
-          ? deepResearchData.toolCalls.map((tc: any, idx: number) => buildToolNode(tc, idx))
-          : [...toolCallNodeMap.values()];
-        const finalContent = sanitizeDeepResearchReport(deepResearchData.report || streamedReport || 'Deep Research completed, but no final report text was returned.');
-        const thinkTagMatch = finalContent.match(/<think>[\s\S]*?<\/think>/);
-        const finalThinkContent = thinkTagMatch ? thinkTagMatch[0] : '';
-        const finalDisplayContent = finalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-        if (signal.aborted) {
-          return;
-        }
-
-        let finalArtifacts = extractArtifacts(finalDisplayContent, effectiveWritingStyle, chats, chatId);
-        const cleanReport = sanitizeDeepResearchReport(finalDisplayContent || finalContent);
-        const cleanHtmlReport = String(deepResearchData.htmlReport || '').trim();
-        if (cleanReport.length > 80) {
-          const reportTitle = createDeepResearchReportTitle(cleanReport);
-          const prioritizedArtifacts: any[] = [];
-          if (cleanHtmlReport) {
-            prioritizedArtifacts.push({
-              id: 'deep-research-html-report-' + Date.now().toString(36),
-              title: `${reportTitle} Visual Report`,
-              language: 'html',
-              content: cleanHtmlReport,
-              type: 'html'
-            });
-          }
-          prioritizedArtifacts.push({
-            id: 'deep-research-report-' + Date.now().toString(36),
-            title: reportTitle,
-            language: 'markdown',
-            content: cleanReport,
-            type: 'report'
-          });
-          finalArtifacts = [
-            ...prioritizedArtifacts,
-            ...finalArtifacts.filter(artifact => !['report', 'markdown', 'html'].includes(artifact.type))
-          ];
-        }
-
-        if (finalArtifacts.length > 0) {
-          setActiveArtifact(finalArtifacts[0]);
-          setIsCanvasOpen(true);
-          setCanvasView(['html', 'markdown', 'report'].includes(finalArtifacts[0].type) ? 'preview' : 'code');
-        }
-
-        try {
-          triggerBackgroundMemoryExtraction(content, finalDisplayContent || finalContent.trim());
-        } catch (err) {
-          console.warn('Memory extraction invocation failed:', err);
-        }
-
-        setChats(prev => prev.map(chat => {
-          if (chat.id === chatId) {
-            return {
-              ...chat,
-              messages: chat.messages.map(m =>
-                m.id === thinkingId
-                  ? {
-                    ...m,
-                      content: finalDisplayContent || finalContent.trim(),
-                      thinkContent: finalThinkContent.replace(/<\/?think>/g, '').trim() || undefined,
-                      isThinking: false,
-                      streamPos: undefined,
-                      thinking: undefined,
-                      toolCalls: toolCallNodes,
-                      isStreaming: false,
-                      sources: searchResults.length > 0 ? searchResults.slice(0, 10).map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) : undefined,
-                      images: undefined,
-                      searchQuery: userMessage.content,
-                      isSearching: false,
-                      timestamp: new Date(),
-                      artifacts: finalArtifacts.length > 0 ? finalArtifacts : undefined
-                    }
-                  : m
-              ),
-              updatedAt: new Date(),
-            };
-          }
-          return chat;
-        }));
-        return;
-      }
       
       // Coder Mode: delegate all heavy lifting to the Pi Agent
       // The UI is just a wrapper — pi agent handles tool execution, streaming, and finalization
@@ -3549,7 +3245,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         let successfulWikiSearchCount = 0;
         let successfulVisitCount = 0;
         let successfulSearchCallCount = 0;
-        let hasDeepResearchTimeToolRun = false;
         let loopCount = 0;
         const turnToolResultCache = new Map<string, any>();
         const maxLoops = 20;
@@ -3766,11 +3461,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 throw new Error("Coder tools are disabled when Coder Mode is inactive (Chat Mode).");
               } else {
                 const workspaceArg = coderWorkspacePath ? { workspaceRoot: coderWorkspacePath } : {};
-                if (isDeepSearchEnabled && !isCoderMode && loopCount === 1 && !hasDeepResearchTimeToolRun && name !== 'current_time') {
-                  resultValue = {
-                    error: 'Deep research must start with current_time as the first tool call. Call current_time first, then create a brief research plan, then continue.'
-                  };
-                } else if (name === 'current_time') {
+                if (name === 'current_time') {
                   const now = new Date();
                   resultValue = {
                     iso: now.toISOString(),
@@ -3782,7 +3473,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     utcOffsetMinutes: -now.getTimezoneOffset(),
                     dayOfWeek: now.toLocaleDateString(undefined, { weekday: 'long' })
                   };
-                  hasDeepResearchTimeToolRun = true;
                   const currentN = toolCallNodes.find(n => n.id === tc.id);
                   if (currentN) {
                     currentN.resultSummary = `Current time loaded: ${resultValue.iso}`;
@@ -4370,61 +4060,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 const searchData = await searchRes.json();
                 const sliced = (searchData.results || []).slice(0, maxRes);
                 resultValue = { query: searchQueryVal, provider: searchData.provider, count: sliced.length, results: sliced };
-              } else if (name === 'deep_search') {
-                const searchQueryVal = String(args.query || '');
-                const depthPresetVal = String(args.depth || 'standard');
-                if (!searchQueryVal) throw new Error("Deep search requires a query parameter.");
-
-                // Trigger the UI Deep Research scanner simulation
-                if (researchMode) {
-                  researchMode.setIsResearchActive(false);
-                  setTimeout(() => {
-                    researchMode.setCustomQueries(searchQueryVal);
-                    if (depthPresetVal === 'extreme') {
-                      researchMode.setDepthPreset('extreme');
-                    } else {
-                      researchMode.setDepthPreset('standard');
-                    }
-                    researchMode.setIsResearchActive(true);
-                    researchMode.setResearchLogs([
-                      `[${new Date().toLocaleTimeString()}] [Orchestrator] Deep recursive search triggered via tool call: "${searchQueryVal}"`,
-                      `[${new Date().toLocaleTimeString()}] [System] Allocating multi-agent parallel loops...`
-                    ]);
-                    // researchMode.setIsResearchWorkspaceOpen(true);
-                  }, 100);
-                }
-
-                showToast(`Launching Deep Research: ${searchQueryVal.substring(0, 40)}`);
-
-                // Fetch real background results
-                const key = searchProvider === 'serpapi' ? serpApiKey : tavilyApiKey;
-                let results = [];
-                if (key && key.trim()) {
-                  try {
-                    const searchRes = await fetch('/api/search', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ query: searchQueryVal, tavilyKey: tavilyApiKey, serpKey: serpApiKey, provider: searchProvider }),
-                      signal
-                    });
-                    const searchData = await searchRes.json();
-                    results = (searchData.results || []).slice(0, 8);
-                  } catch (err) {
-                    console.error('Deep search background fetch failed', err);
-                  }
-                }
-
-                resultValue = {
-                  query: searchQueryVal,
-                  researchEngine: "Deep Research Multi-Agent Core",
-                  depth: depthPresetVal,
-                  status: "Complete",
-                  durationMs: depthPresetVal === 'extreme' ? 4500 : 2500,
-                  verifiedClaimsCount: results.length,
-                  results: results.length > 0 ? results : [
-                    { title: `${searchQueryVal} Synthesis Report`, url: `https://intel.local/report`, snippet: `Synthesized findings on ${searchQueryVal}. Agents Alpha, Beta, and Gamma processed parameters recursively.` }
-                  ]
-                };
               } else if (name.startsWith('spawn_')) {
                 const agentToolName = name.replace('spawn_', '') + '-agent';
                 const taskText = String(args.task || '');
@@ -4845,7 +4480,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                   const searchData = await searchResp.json();
                   const results = searchData.results || [];
                   collectedResults.push(...results);
-                  batchedResults.push(formatDeepResearchSearchResults(effectiveQuery, results));
+                  batchedResults.push(`Search results for '${effectiveQuery}': ${results.length} results found.`);
                 }
 
                 if (collectedResults.length > 0) {
@@ -4890,7 +4525,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     extractTables: false,
                     outputFormat: 'markdown'
                   });
-                  visitOutputs.push(formatDeepResearchVisitResult(targetUrl, goal, scrapeResult, useTurboQuant ? 4000 : 6000));
+                  const content = String((scrapeResult as any)?.data?.markdown || (scrapeResult as any)?.data?.text || scrapeResult?.error || 'No content available').slice(0, useTurboQuant ? 4000 : 6000);
+                  visitOutputs.push(`Visit: ${targetUrl}\nGoal: ${goal}\nContent:\n${content}`);
                 }
 
                 resultValue = visitOutputs.join('\n=======\n');
@@ -5181,33 +4817,6 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             }));
           }
 
-          if (isDeepSearchEnabled && !isCoderMode) {
-            const unmetRequirements: string[] = [];
-            if (!hasDeepResearchTimeToolRun) {
-              unmetRequirements.push('Call current_time first.');
-            }
-            if (successfulSearchCallCount < deepResearchMinimums.minSearchCalls) {
-              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minSearchCalls} successful search or scholar discovery calls. Current count: ${successfulSearchCallCount}.`);
-            }
-            if (successfulWikiSearchCount < deepResearchMinimums.minWikiSearches) {
-              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minWikiSearches} successful wiki_search calls. Current count: ${successfulWikiSearchCount}.`);
-            }
-            if (successfulVisitCount < deepResearchMinimums.minVisits) {
-              unmetRequirements.push(`Complete at least ${deepResearchMinimums.minVisits} successful visit calls. Current count: ${successfulVisitCount}.`);
-            }
-
-            if (unmetRequirements.length > 0) {
-              apiMessages.push({
-                role: 'system',
-                content: [
-                  'Deep research requirements are not satisfied yet.',
-                  ...unmetRequirements,
-                  'Do not finalize. Continue with planning or additional research tool calls until all requirements are satisfied.'
-                ].join('\n')
-              });
-            }
-          }
-
           apiMessages.push(choice);
           apiMessages.push(...toolResultMessages);
 
@@ -5259,11 +4868,9 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
 
       const responseContent = choice?.content;
       const hasAskUser = toolCallsRaw && toolCallsRaw.some((tc: any) => tc.function?.name === 'ask_user');
-      const finalContent = isDeepSearchEnabled && !isCoderMode
-        ? (sanitizeDeepResearchReport(responseContent || agentTraceContent) || 'Deep Research completed, but no final report text was returned.')
-        : ([agentTraceContent, responseContent]
-          .filter((part, idx, arr) => part && (idx === 0 || part !== arr[0]))
-          .join('\n\n') || (toolCallsRaw?.length > 0 && !hasAskUser ? `Running ${toolCallsRaw.length} tool(s)...` : ''));
+      const finalContent = ([agentTraceContent, responseContent]
+        .filter((part, idx, arr) => part && (idx === 0 || part !== arr[0]))
+        .join('\n\n') || (toolCallsRaw?.length > 0 && !hasAskUser ? `Running ${toolCallsRaw.length} tool(s)...` : ''));
       
       const scavengedImages: any[] = [];
       toolCallNodes.forEach(tc => {
@@ -5448,22 +5055,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
         return;
       }
 
-      let finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, effectiveWritingStyle, chats, chatId);
-      if (isDeepSearchEnabled && !isCoderMode) {
-        const cleanReport = sanitizeDeepResearchReport(finalDisplayContent || finalContent);
-        if (cleanReport.length > 80) {
-          finalArtifacts = [
-            {
-              id: 'deep-research-report-' + Date.now().toString(36),
-              title: createDeepResearchReportTitle(cleanReport),
-              language: 'markdown',
-              content: cleanReport,
-              type: 'report'
-            },
-            ...finalArtifacts.filter(artifact => artifact.type !== 'report' && artifact.type !== 'markdown')
-          ];
-        }
-      }
+      const finalArtifacts = isCoderMode ? [] : extractArtifacts(finalDisplayContent, effectiveWritingStyle, chats, chatId);
       if (finalArtifacts.length > 0) {
         setActiveArtifact(finalArtifacts[0]);
         setIsCanvasOpen(true);

@@ -781,7 +781,7 @@ export const Canvas = ({
                             <article className="mx-auto max-w-4xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm rounded-lg px-6 py-7 md:px-10 md:py-10 select-text text-left">
                               <div className="mb-8 border-b border-zinc-200 dark:border-zinc-800 pb-5">
                                 <div className="text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-2">
-                                  {artifact.type === 'report' ? 'Deep Research Report' : 'Markdown Document'}
+                                  {artifact.type === 'report' ? 'Report' : 'Markdown Document'}
                                 </div>
                                 <h1 className="text-2xl md:text-3xl font-bold tracking-normal text-zinc-950 dark:text-zinc-50 leading-tight">
                                   {artifact.title}

@@ -98,7 +98,6 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const [transcriptionOptionsDoc, setTranscriptionOptionsDoc] = useState<any | null>(null);
 
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
-  const [isDeepSearchEnabled, setIsDeepSearchEnabled] = useState(false);
 
   const [isVoiceListening, setIsVoiceListening] = useState(false);
   const [isVoicePanelOpen, setIsVoicePanelOpen] = useState(false);
@@ -444,7 +443,6 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,
-    isDeepSearchEnabled, setIsDeepSearchEnabled,
     isVoiceListening, setIsVoiceListening,
     isVoicePanelOpen, setIsVoicePanelOpen,
     voiceInterimText, setVoiceInterimText,

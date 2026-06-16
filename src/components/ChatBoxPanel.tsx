@@ -57,10 +57,10 @@ export interface ChatBoxPanelProps {
   isCenteredState?: boolean;
   theme: { id: string };
   writingStyle: string;
+  isWritingCanvasOpen: boolean;
+  setIsWritingCanvasOpen: (open: boolean) => void;
   isWebSearchEnabled: boolean;
   setIsWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  isDeepSearchEnabled: boolean;
-  setIsDeepSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   activeSkills: string[];
   setActiveSkills: React.Dispatch<React.SetStateAction<string[]>>;
   useTurboQuant: boolean;
@@ -194,7 +194,6 @@ export interface ChatBoxPanelProps {
   useLocalModelsOnly?: boolean;
   isVoicePanelOpen?: boolean;
   setIsVoicePanelOpen?: (open: boolean) => void;
-  researchState?: any;
 }
 
 const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
@@ -202,14 +201,11 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
   theme,
   isWhiteboardOpen,
   setIsWhiteboardOpen,
-  researchState,
   writingStyle,
   isWritingCanvasOpen,
   setIsWritingCanvasOpen,
   isWebSearchEnabled,
   setIsWebSearchEnabled,
-  isDeepSearchEnabled,
-  setIsDeepSearchEnabled,
   activeSkills,
   setActiveSkills,
   useTurboQuant,
@@ -349,8 +345,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
   const hasModelSearch = normalizedModelSearchQuery.length > 0;
 
   const [isRagSelectorOpen, setIsRagSelectorOpen] = React.useState(false);
-  const [isDeepResearchPresetOpen, setIsDeepResearchPresetOpen] = React.useState(false);
-  const deepResearchPresetRef = React.useRef<HTMLDivElement | null>(null);
   const [ollamaWebSearchEnabled, setOllamaWebSearchEnabled] = React.useState(() => {
     try {
       return localStorage.getItem('lumina_ollama_web_search_enabled') === 'true';
@@ -537,17 +531,10 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
       ) {
         setIsPlusMenuOpen(false);
       }
-      if (
-        isDeepResearchPresetOpen &&
-        deepResearchPresetRef.current &&
-        !deepResearchPresetRef.current.contains(target)
-      ) {
-        setIsDeepResearchPresetOpen(false);
-      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isGridMenuOpen, isPlusMenuOpen, plusMenuRef, menuContentRef, isDeepResearchPresetOpen, deepResearchPresetRef]);
+  }, [isGridMenuOpen, isPlusMenuOpen, plusMenuRef, menuContentRef]);
 
   const permissionOptions: Array<{
     id: CoderPermissionMode;
@@ -664,7 +651,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
       <AnimatePresence mode="popLayout">
         {(writingStyle !== "default" ||
           isWebSearchEnabled ||
-          isDeepSearchEnabled ||
           luminaTools.some((t) => t.enabled) ||
           bridgeTools.some((t) => t.enabled) ||
           activeSkills.length > 0 ||
@@ -707,25 +693,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
               >
                 <Globe size={13} />
                 <span>Web Search</span>
-              </motion.button>
-            )}
-            {isDeepSearchEnabled && (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsPlusMenuOpen(true);
-                  setActivePlusSubMenu("main");
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/30 shadow-xs cursor-pointer hover:bg-purple-500/25 text-xs font-semibold"
-              >
-                <Bot size={13} className="animate-pulse text-purple-400" />
-                <span className="flex items-center gap-1">
-                  Deep Search
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping" />
-                </span>
               </motion.button>
             )}
             {(() => {
@@ -1677,12 +1644,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                             icon: <Search size={16} className="text-emerald-400" />,
                             isSelected: ollamaWebSearchEnabled,
                           }] : []),
-                          {
-                            id: "deep_research",
-                            label: "Deep Research",
-                            icon: <GraduationCap size={16} className="text-purple-400" />,
-                            isSelected: isDeepSearchEnabled,
-                          },
                         ].map((item) => (
                           <button
                             key={item.id}
@@ -1708,7 +1669,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                                   (() => {
                                     const newVal = !isWebSearchEnabled;
                                     setIsWebSearchEnabled(newVal);
-                                    if (newVal) setIsDeepSearchEnabled(false);
                                     if (!newVal && isOllamaProvider) setOllamaWebSearchEnabled(false);
                                   })();
                                   break;
@@ -1718,20 +1678,8 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                                     const nextVal = !prev;
                                     if (nextVal) {
                                       setIsWebSearchEnabled(true);
-                                      setIsDeepSearchEnabled(false);
                                     }
                                     showToast(nextVal ? 'Ollama web search enabled.' : 'Ollama web search disabled.');
-                                    return nextVal;
-                                  });
-                                  break;
-                                case "deep_research":
-                                  setIsPlusMenuOpen(false);
-                                  setIsDeepSearchEnabled((prev) => {
-                                    const nextVal = !prev;
-                                    if (nextVal) {
-                                      setIsWebSearchEnabled(false);
-                                      setOllamaWebSearchEnabled(false);
-                                    }
                                     return nextVal;
                                   });
                                   break;
@@ -1740,13 +1688,13 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                             className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)] transition-colors group/item"
                           >
                             <div className="flex items-center gap-3">
-                              <span className={`transition-colors ${(item as any).isSelected ? (item.id === "deep_research" ? "text-purple-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500") : "group-hover/item:text-[var(--theme-primary)]"}`}>
+                              <span className={`transition-colors ${(item as any).isSelected ? (item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500") : "group-hover/item:text-[var(--theme-primary)]"}`}>
                                 {item.icon}
                               </span>
                               {item.label}
                             </div>
                             {(item as any).isSelected && (
-                              <Check size={14} className={item.id === "deep_research" ? "text-purple-500" : item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500"} />
+                              <Check size={14} className={item.id === "ollama_web_search" ? "text-emerald-500" : "text-blue-500"} />
                             )}
                           </button>
                         ))}
@@ -2095,101 +2043,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
               </AnimatePresence>
             </div>
 
-            {/* Deep Research Premium Segment */}
-            {isDeepSearchEnabled && (
-              <div className="flex items-center gap-1 border border-[var(--theme-border)] bg-[var(--theme-surface)]/40 rounded-xl p-0.5">
-                <motion.button
-                  whileTap={{ scale: 0.95 }}
-                  type="button"
-                  onClick={() => {
-                    const nextVal = !isDeepSearchEnabled;
-                    setIsDeepSearchEnabled(nextVal);
-                    if (nextVal) {
-                      setIsWebSearchEnabled(false);
-                    }
-                  }}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none ${
-                    isDeepSearchEnabled
-                      ? "bg-purple-500/10 text-purple-400 border border-purple-500/10"
-                      : "text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)] border border-transparent"
-                  }`}
-                  title="Toggle Deep Research Mode"
-                >
-                  <GraduationCap size={14} className={isDeepSearchEnabled ? "animate-pulse" : ""} />
-                  <span>Deep Research</span>
-                </motion.button>
-
-                <div className="relative" ref={deepResearchPresetRef}>
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    type="button"
-                    onClick={() => setIsDeepResearchPresetOpen(!isDeepResearchPresetOpen)}
-                    className="flex items-center gap-0.5 px-1 py-1 hover:bg-[var(--theme-hover-bg)] rounded-lg text-xs font-semibold text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-all cursor-pointer select-none"
-                  >
-                    <span>{researchState?.depthPreset === "extreme" ? "Advanced" : "Normal"}</span>
-                    <ChevronDown
-                      size={11}
-                      className="text-[var(--theme-muted)] transition-transform duration-200"
-                      style={{ transform: isDeepResearchPresetOpen ? "rotate(180deg)" : "rotate(0deg)" }}
-                    />
-                  </motion.button>
-                  <AnimatePresence>
-                    {isDeepResearchPresetOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                        className="absolute bottom-full left-0 mb-2 w-64 bg-[var(--theme-surface)] border border-[var(--theme-border)] rounded-2xl shadow-2xl z-[190] p-1.5 text-left"
-                      >
-                        {[
-                          {
-                            id: "standard",
-                            label: "Normal",
-                            icon: <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0 mt-1.5 ml-1" />,
-                            desc: "Fast, reliable responses for quick tasks."
-                          },
-                          {
-                            id: "extreme",
-                            label: "Advanced",
-                            icon: <Workflow size={11} className="text-purple-400 shrink-0 mt-0.5" />,
-                            desc: "Devoting extra time to a deeper analysis."
-                          }
-                        ].map((item) => {
-                          const isActive = (researchState?.depthPreset || "standard") === item.id;
-                          return (
-                            <button
-                              key={item.id}
-                              type="button"
-                              onClick={() => {
-                                researchState?.setDepthPreset(item.id as "standard" | "extreme");
-                                setIsDeepResearchPresetOpen(false);
-                              }}
-                              className={`w-full flex items-start gap-2 px-2.5 py-2 rounded-xl text-left transition-colors cursor-pointer ${
-                                isActive
-                                  ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)]"
-                                  : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)] hover:text-[var(--theme-primary)]"
-                              }`}
-                            >
-                              <span className="flex-shrink-0 mt-0.5">
-                                {item.icon}
-                              </span>
-                              <div className="flex-1 flex flex-col min-w-0">
-                                <span className="text-xs font-semibold">{item.label}</span>
-                                <span className="text-[10px] text-[var(--theme-muted)] font-normal leading-tight">{item.desc}</span>
-                              </div>
-                              {isActive && (
-                                <Check size={11} className="text-[var(--theme-accent)] self-center flex-shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            )}
-
             {/* Vertical separator */}
             <div className="w-[1px] h-4 bg-[var(--theme-border)] mx-0.5 opacity-60 shrink-0" />
 
@@ -2205,7 +2058,7 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                 className={`p-2 rounded-2xl transition-all ${
                   isGridMenuOpen
                     ? "text-blue-500 bg-blue-500/10 hover:bg-blue-500/20"
-                    : isWebSearchEnabled || isDeepSearchEnabled || activeSkills.length > 0 || ragEnabled
+                    : isWebSearchEnabled || activeSkills.length > 0 || ragEnabled
                       ? "text-blue-500 bg-blue-500/5 hover:bg-blue-500/15"
                       : "text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-hover-bg)]"
                 }`}

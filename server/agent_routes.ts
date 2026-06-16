@@ -3,7 +3,6 @@ import path from 'path';
 import fs from 'fs';
 import axios from 'axios';
 import { spawn } from 'child_process';
-import { runDeepResearch } from './deepResearchAgent.js';
 import { loadOpenCodeWorkspaceContext, resolveOpenCodeAgentProfile } from './opencode.js';
 import { runConsolidation } from './consolidation.js';
 import { handleUserMessage } from './interaction-agent.js';
@@ -771,39 +770,6 @@ export function setupAgentRoutes(app: express.Express) {
     } catch (err: any) {
       console.error('[/api/consolidate]', err);
       res.status(500).json({ error: err.message ?? 'Consolidation failed' });
-    }
-  });
-
-  app.post("/api/deep-research/run", async (req, res) => {
-    const {
-      query,
-      preset = "standard",
-      tavilyKey,
-      serpKey,
-      provider,
-      model,
-      apiKey,
-      baseUrl
-    } = req.body || {};
-
-    if (!query || !String(query).trim()) {
-      return res.status(400).json({ error: "query is required" });
-    }
-
-    try {
-      const result = await runDeepResearch({
-        query: String(query),
-        preset: preset === "extreme" ? "extreme" : "standard",
-        tavilyKey: typeof tavilyKey === "string" ? tavilyKey : undefined,
-        serpKey: typeof serpKey === "string" ? serpKey : undefined,
-        provider: typeof provider === "string" ? provider : undefined,
-        model: typeof model === "string" ? model : undefined,
-        apiKey: typeof apiKey === "string" ? apiKey : undefined,
-        baseUrl: typeof baseUrl === "string" ? baseUrl : undefined,
-      });
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: "Failed to run deep research", detail: err.message });
     }
   });
 

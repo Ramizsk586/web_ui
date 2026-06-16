@@ -59,7 +59,6 @@ import {
 } from 'lucide-react';
 
 import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
-import ResearchWorkspacePanel from './components/ResearchWorkspacePanel';
 import { FloatingCodeEditor } from './components/FloatingCodeEditor';
 
 import Whiteboard from './components/Whiteboard';
@@ -138,7 +137,7 @@ interface AppContentProps {
   inputState: any;
   workspace: any;
   uiState: any;
-  coderMode: any; researchMode: any;
+  coderMode: any;
   askAi: any;
   sendMessageRef: React.MutableRefObject<((content: string) => void) | undefined>;
   rightPanel: any;
@@ -167,7 +166,7 @@ export default function AppContent({
   inputState,
   workspace,
   uiState,
-  coderMode, researchMode,
+  coderMode,
   askAi,
   sendMessageRef,
   rightPanel,
@@ -343,7 +342,6 @@ export default function AppContent({
     selectedTranscriptDoc, setSelectedTranscriptDoc,
     transcriptionOptionsDoc, setTranscriptionOptionsDoc,
     isWebSearchEnabled, setIsWebSearchEnabled,
-    isDeepSearchEnabled, setIsDeepSearchEnabled,
     isVoiceListening, setIsVoiceListening,
     isVoicePanelOpen, setIsVoicePanelOpen,
     voiceInterimText, setVoiceInterimText,
@@ -577,7 +575,7 @@ export default function AppContent({
     todoCollapsed, setTodoCollapsed,
     orchestrationState, setOrchestrationState,
     orchestrationCollapsed, setOrchestrationCollapsed
-  } = coderMode; const { isResearchMode, setIsResearchMode, isResearchWorkspaceOpen, setIsResearchWorkspaceOpen } = researchMode;
+  } = coderMode;
 
   const {
     askAiQuestions,
@@ -1141,7 +1139,7 @@ export default function AppContent({
 
     // Search/research toggles should always expose the core web tools, even if the
     // manual Lumina tool toggles were left off.
-    if (isWebSearchEnabled || isDeepSearchEnabled) {
+    if (isWebSearchEnabled) {
       pushTool(
         'web_search',
         'Search the web for current information.',
@@ -1170,7 +1168,7 @@ export default function AppContent({
     }
 
     return active;
-  }, [luminaTools, composioTools, useBridgeTools, bridgeTools, isWebSearchEnabled, isDeepSearchEnabled, composioConnections]);
+  }, [luminaTools, composioTools, useBridgeTools, bridgeTools, isWebSearchEnabled, composioConnections]);
 
   const renderActiveQuestionContent = () => {
     const activeQuestion = askAiQuestions[currentQuestionIndex];
@@ -1495,7 +1493,7 @@ const startCoderPreview = useCallback(async () => {
     selectedCommandIndex, setSelectedCommandIndex,
     setTypingMessageId,
     callLlamaBridge,
-    persona, writingStyle, useTurboQuant, isDeepSearchEnabled, setIsDeepSearchEnabled, researchMode,
+    persona, writingStyle, useTurboQuant,
     tavilyApiKey, serpApiKey, searchProvider,
     selectedModel, activeModelId, activeModelList,
     serverUrl, apiKey, selectedProvider,
@@ -1838,11 +1836,12 @@ const startCoderPreview = useCallback(async () => {
     return (
       <ChatBoxPanel
         activeModelId={activeModelId}
-        researchState={researchMode}
         isCenteredState={isCenteredState}
         theme={theme}
         writingStyle={writingStyle}
-        isWebSearchEnabled={isWebSearchEnabled} isDeepSearchEnabled={isDeepSearchEnabled} setIsDeepSearchEnabled={setIsDeepSearchEnabled}
+        isWritingCanvasOpen={isWritingCanvasOpen}
+        setIsWritingCanvasOpen={setIsWritingCanvasOpen}
+        isWebSearchEnabled={isWebSearchEnabled}
         setIsWebSearchEnabled={setIsWebSearchEnabled}
         activeSkills={activeSkills}
         setActiveSkills={setActiveSkills}
@@ -2095,7 +2094,6 @@ const startCoderPreview = useCallback(async () => {
                     setIsSettingsOpen(false);
                     setIsRagPanelOpen(false);
                     setShowAgentCreation(false);
-                    setIsResearchMode(false);
                     setIsMobileMenuOpen(false);
                     return true;
                   });
@@ -2107,7 +2105,6 @@ const startCoderPreview = useCallback(async () => {
                     setIsSettingsOpen(false);
                     setIsRagPanelOpen(false);
                     setShowAgentCreation(false);
-                    setIsResearchMode(false);
                   }
                   setShowProjectsPage(nextShowProjects);
                   setIsMobileMenuOpen(false);
@@ -2189,7 +2186,6 @@ const startCoderPreview = useCallback(async () => {
                 setIsSettingsOpen(false);
                 setIsRagPanelOpen(false);
                 setShowAgentCreation(false);
-                setIsResearchMode(false);
               }
               setShowProjectsPage(nextShowProjects);
             }}
@@ -2214,7 +2210,6 @@ const startCoderPreview = useCallback(async () => {
                 setIsSettingsOpen(false);
                 setIsRagPanelOpen(false);
                 setShowAgentCreation(false);
-                setIsResearchMode(false);
                 return true;
               });
             }}
@@ -2522,20 +2517,7 @@ const startCoderPreview = useCallback(async () => {
                   </button>
                 </div>
 
-              {isCoderMode && (
-                <button
-                  onClick={() => setIsCoderWorkspacePanelOpen(!isCoderWorkspacePanelOpen)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-xs font-semibold shadow-sm cursor-pointer border ${
-                    isCoderWorkspacePanelOpen 
-                      ? 'bg-teal-500 text-slate-950 border-teal-400' 
-                      : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:text-white'
-                  }`}
-                  title="Toggle Coder Workspace Side Panel"
-                >
-                  <Code size={13} className={isCoderWorkspacePanelOpen ? 'animate-pulse' : ''} />
-                  <span>Workspace Panel</span>
-                </button>
-              )}
+              {/* Workspace Panel toggle removed - code editor removed from coder mode */}
               <div className="relative" ref={headerMenuRef}>
                 <button 
                   onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}
@@ -2555,7 +2537,6 @@ const startCoderPreview = useCallback(async () => {
                         { id: 'coder_mode', label: isCoderMode ? 'Turn off Coder Mode' : 'Turn on Coder Mode', icon: <Code size={16} className={isCoderMode ? 'text-teal-500' : ''} />, onClick: () => { 
                           const nextState = !isCoderMode;
                           setIsCoderMode(nextState);
-                          setIsCoderWorkspacePanelOpen(nextState);
                           if (nextState) {
                             setIsSidebarOpen(false);
                           }
@@ -2574,7 +2555,6 @@ const startCoderPreview = useCallback(async () => {
                           }
                           setIsHeaderMenuOpen(false);
                         } },
-                        { id: 'research_mode', label: isResearchMode ? 'Turn off Research Mode' : 'Turn on Deep Research', icon: <Bot size={16} className={isResearchMode ? 'text-teal-500' : ''} />, onClick: () => { const nextState = !isResearchMode; setIsResearchMode(nextState); setIsResearchWorkspaceOpen(nextState); if (nextState) { setIsCoderMode(false); setIsSidebarOpen(false); } createNewChat(null, false, nextState); setIsHeaderMenuOpen(false); } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen((prev: boolean) => !prev); setIsHeaderMenuOpen(false); } },
                         { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
@@ -2608,26 +2588,7 @@ const startCoderPreview = useCallback(async () => {
           </header>
         )}
 
-        {isResearchMode && !isSettingsOpen && !isRagPanelOpen && !showAgentCreation ? (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface-alt)]"
-          >
-            <div className="flex-1 h-full min-w-0">
-              <ResearchWorkspacePanel 
-                researchState={researchMode}
-                showToast={showToast}
-                onClose={() => {
-                  setIsResearchMode(false);
-                  setIsSidebarOpen(true);
-                }}
-              />
-            </div>
-          </motion.div>
-        ) : isCoderMode && !isSettingsOpen && !isRagPanelOpen && !showAgentCreation ? (
+        {isCoderMode && !isSettingsOpen && !isRagPanelOpen && !showAgentCreation ? (
           <CoderWorkspaceView
             isCoderLeftPanelOpen={isCoderLeftPanelOpen}
             setIsCoderLeftPanelOpen={setIsCoderLeftPanelOpen}
@@ -2684,6 +2645,34 @@ const startCoderPreview = useCallback(async () => {
             handleModelSelect={handleModelSelect}
             modelSelectorMode={modelSelectorMode}
             setIsModelDrawerOpen={setIsModelDrawerOpen}
+            projectFolders={projectFolders}
+            setProjectFolders={setProjectFolders}
+            activeProjectId={activeProjectId}
+            setActiveProjectId={setActiveProjectId}
+            createNewChat={(projId, isCoder, isResearch, agentId) => {
+              createNewChat(projId, isCoder, isResearch, agentId);
+            }}
+            onOpenSettings={(tab?: any) => {
+              setIsSettingsOpen(true);
+              if (tab) setActiveSettingsTab(tab);
+            }}
+            onSelectChat={(chatId) => {
+              setCurrentChatId(chatId);
+              const chat = chats.find(c => c.id === chatId);
+              if (chat?.projectId && setActiveProjectId) {
+                setActiveProjectId(chat.projectId);
+              }
+            }}
+            input={input}
+            setInput={setInput}
+            inputRef={inputRef}
+            handleKeyDown={handleKeyDown}
+            adjustTextareaHeight={adjustTextareaHeight}
+            isTyping={isTyping}
+            abortControllerRef={abortControllerRef}
+            isVoiceListening={isVoiceListening}
+            startVoiceDictation={startVoiceDictation}
+            stopVoiceDictation={stopVoiceDictation}
           />) : (
           <>
             {showAgentCreation ? (
@@ -3079,21 +3068,7 @@ const startCoderPreview = useCallback(async () => {
               </AnimatePresence>
 
 
-              {isCoderMode && isCoderWorkspacePanelOpen && (
-                <div className="w-[450px] lg:w-[500px] h-full shrink-0 border-l border-[var(--theme-border)] bg-[var(--theme-surface-alt)] z-10">
-                  <CoderWorkspacePanel 
-                    workspaceRefreshKey={workspaceRefreshKey} 
-                    triggerWorkspaceRefresh={triggerWorkspaceRefresh}
-                    showToast={showToast}
-                    workspaceRootPath={coderWorkspacePath}
-                    onInsertAttachedText={insertAttachedContent}
-                    orchestrationState={orchestrationState}
-                    orchestrationCollapsed={orchestrationCollapsed}
-                    setOrchestrationCollapsed={setOrchestrationCollapsed}
-                    onClose={() => setIsCoderWorkspacePanelOpen(false)}
-                  />
-                </div>
-              )}
+              {/* CoderWorkspacePanel removed - code editor removed from coder mode */}
 
             </div>
 
@@ -3790,16 +3765,7 @@ const startCoderPreview = useCallback(async () => {
         setSelectedTranscriptDoc={setSelectedTranscriptDoc}
       />
 
-      {/* Floating manual code editor in non-coder mode */}
-      {!isCoderMode && floatingEditFile && (
-        <FloatingCodeEditor
-          filePath={floatingEditFile}
-          onClose={() => setFloatingEditFile(null)}
-          showToast={showToast}
-          triggerWorkspaceRefresh={triggerWorkspaceRefresh}
-          workspaceRootPath={coderWorkspacePath}
-        />
-      )}
+      {/* Floating code editor removed */}
 
       {/* AI Writing Canvas removed — content now goes to main Canvas panel */}
 
