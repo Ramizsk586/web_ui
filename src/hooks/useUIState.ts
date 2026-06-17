@@ -431,7 +431,6 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
@@ -479,7 +478,6 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     attachedFiles, setAttachedFiles,
     searchQuery, setSearchQuery,
     showScrollButton, setShowScrollButton,
-    isModelDropdownOpen, setIsModelDropdownOpen,
     isModeDropdownOpen, setIsModeDropdownOpen,
     isPlusMenuOpen, setIsPlusMenuOpen,
     isHeaderMenuOpen, setIsHeaderMenuOpen,

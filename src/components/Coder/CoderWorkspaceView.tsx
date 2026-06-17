@@ -74,6 +74,11 @@ interface CoderWorkspaceViewProps {
   setIsModelDrawerOpen: (open: boolean) => void;
   activeAssistantMode: 'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester' | 'plain';
   setActiveAssistantMode: (mode: 'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester' | 'plain') => void;
+  showTodoPanel: boolean;
+  setShowTodoPanel: (show: boolean) => void;
+  coderTodos: Array<{ id: string; content: string; status: string }>;
+  todoCollapsed: boolean;
+  setTodoCollapsed: (collapsed: boolean) => void;
   createNewChat: (projectId?: string | null, isCoder?: boolean, isResearch?: boolean, agentId?: string) => void;
   onSelectChat?: (chatId: string) => void;
   // Chat input props
@@ -153,6 +158,11 @@ export default function CoderWorkspaceView({
   setIsModelDrawerOpen,
   activeAssistantMode,
   setActiveAssistantMode,
+  showTodoPanel,
+  setShowTodoPanel,
+  coderTodos,
+  todoCollapsed,
+  setTodoCollapsed,
   createNewChat,
   onSelectChat,
   input,
@@ -414,6 +424,11 @@ export default function CoderWorkspaceView({
                 handleFileAttach={handleFileAttach}
                 coderPermissionMode={coderPermissionMode}
                 setCoderPermissionMode={setCoderPermissionMode}
+                showTodoPanel={showTodoPanel}
+                setShowTodoPanel={setShowTodoPanel}
+                coderTodos={coderTodos}
+                todoCollapsed={todoCollapsed}
+                setTodoCollapsed={setTodoCollapsed}
               />
             </div>
           </div>

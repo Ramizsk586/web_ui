@@ -10,6 +10,7 @@ export function useSocket(onEvent?: (e: SocketEvent) => void) {
   const [connected, setConnected] = useState(false);
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
+  const reconnectAttemptsRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,16 +25,22 @@ export function useSocket(onEvent?: (e: SocketEvent) => void) {
       ws = new WebSocket(url);
       
       ws.onopen = () => {
+        reconnectAttemptsRef.current = 0;
         setConnected(true);
       };
       
       ws.onclose = () => {
         setConnected(false);
-        reconnectTimer = setTimeout(connect, 1500);
+        if (!cancelled) {
+          const delay = Math.min(1500 * (reconnectAttemptsRef.current + 1), 5000);
+          reconnectAttemptsRef.current += 1;
+          reconnectTimer = setTimeout(connect, delay);
+        }
       };
       
       ws.onerror = () => {
-        ws?.close();
+        // Let the browser drive the close lifecycle; force-closing while the
+        // socket is still connecting causes noisy "closed before established" warnings.
       };
       
       ws.onmessage = (evt) => {
@@ -51,7 +58,15 @@ export function useSocket(onEvent?: (e: SocketEvent) => void) {
     return () => {
       cancelled = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
+      if (ws) {
+        ws.onopen = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      }
     };
   }, []);
 

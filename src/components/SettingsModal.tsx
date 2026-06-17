@@ -840,6 +840,8 @@ export function SettingsModal({
   // Detail viewing / caching
   const [detailedModel, setDetailedModel] = React.useState<any>(null);
   const [isDetailLoading, setIsDetailLoading] = React.useState(false);
+  const modelDetailsCacheRef = React.useRef<Record<string, any>>({});
+  const detailRequestIdRef = React.useRef(0);
 
   // Download simulation state
   const [activeDownloadFile, setActiveDownloadFile] = React.useState<string>('');
@@ -847,6 +849,8 @@ export function SettingsModal({
   const [hfDownloadStatus, setHfDownloadStatus] = React.useState<'idle' | 'downloading' | 'extracting' | 'verifying' | 'completed'>('idle');
   const [hfDownloadLogs, setHfDownloadLogs] = React.useState<string[]>([]);
   const [hfDownloadMetrics, setHfDownloadMetrics] = React.useState({ speed: '0 MB/s', downloaded: '0 MB', total: '0 MB', percent: 0 });
+  const deferredModelsFilterQuery = React.useDeferredValue(modelsFilterQuery);
+  const deferredHfSearchQuery = React.useDeferredValue(hfSearchQuery);
 
   const parseModelSizeGb = React.useCallback((value: string): number | null => {
     const match = String(value || '').match(/\(([\d.]+)\s*(GB|MB)\)/i) || String(value || '').match(/([\d.]+)\s*(GB|MB)/i);
@@ -933,6 +937,71 @@ export function SettingsModal({
     return kvCacheGb + runtimeOverheadGb;
   }, []);
 
+  const filteredDownloadedModels = React.useMemo(() => {
+    const query = deferredModelsFilterQuery.trim().toLowerCase();
+    if (!query) return downloadedModelsList;
+    return downloadedModelsList.filter((model) =>
+      model.id.toLowerCase().includes(query) ||
+      model.name.toLowerCase().includes(query) ||
+      (model.publisher && model.publisher.toLowerCase().includes(query))
+    );
+  }, [deferredModelsFilterQuery, downloadedModelsList]);
+
+  const downloadedModelsTotalSizeGb = React.useMemo(() => {
+    return downloadedModelsList.reduce((acc, model) => {
+      const rawSize = String(model.size || '');
+      const numeric = parseFloat(rawSize);
+      if (!Number.isFinite(numeric)) return acc;
+      return acc + (rawSize.toUpperCase().includes('MB') ? numeric / 1024 : numeric);
+    }, 0);
+  }, [downloadedModelsList]);
+
+  const exploreSourceModels = React.useMemo(() => {
+    return deferredHfSearchQuery.trim() ? hfModels : curators;
+  }, [curators, deferredHfSearchQuery, hfModels]);
+
+  const visibleExploreModels = React.useMemo(() => {
+    const showStaffOnly = !deferredHfSearchQuery && hfSelectedFilter === 'staff';
+    return exploreSourceModels
+      .filter((model) => {
+        if (showStaffOnly && !model.isStaffPick) return false;
+        if (hfSortOption !== 'vram_fit') return true;
+        const minSizeGb = getSmallestModelSizeGb(model);
+        const kvAndOverhead = getKvCacheAndOverheadGb(model);
+        return minSizeGb + kvAndOverhead <= detectedVramGb;
+      })
+      .map((model) => {
+        const minSizeGb = getSmallestModelSizeGb(model);
+        const kvAndOverhead = getKvCacheAndOverheadGb(model);
+        const totalVramNeeded = minSizeGb + kvAndOverhead;
+        return {
+          model,
+          minSizeGb,
+          totalVramNeeded,
+          fits: totalVramNeeded <= detectedVramGb,
+          supportsVision: model.capabilities?.includes('Vision'),
+          supportsTools: model.capabilities?.includes('Tool Use'),
+          supportsReasoning: model.capabilities?.includes('Reasoning'),
+        };
+      });
+  }, [
+    deferredHfSearchQuery,
+    detectedVramGb,
+    exploreSourceModels,
+    getKvCacheAndOverheadGb,
+    getSmallestModelSizeGb,
+    hfSelectedFilter,
+    hfSortOption,
+  ]);
+
+  const activeDownloadFit = React.useMemo(() => {
+    return activeDownloadFile ? estimateGpuOffloadFit(activeDownloadFile) : null;
+  }, [activeDownloadFile, estimateGpuOffloadFit]);
+
+  const formatRepoFileLabel = React.useCallback((file: string) => {
+    return file.replace(/\s*\([^)]*\)\s*$/, '').split('/').pop() || file;
+  }, []);
+
   // Initialize detailedModel on first mount and fetch real GGUF files and sizes
   React.useEffect(() => {
     if (curators && curators.length > 0) {
@@ -943,9 +1012,16 @@ export function SettingsModal({
   }, [curators]);
 
   // Load details / siblings for a model repo
-  const fetchModelDetails = async (baseModel: any) => {
+  const fetchModelDetails = React.useCallback(async (baseModel: any) => {
+    const requestId = ++detailRequestIdRef.current;
+    const cached = modelDetailsCacheRef.current[baseModel.id];
     setIsDetailLoading(true);
-    setDetailedModel(baseModel);
+    setDetailedModel(cached || baseModel);
+    if (cached) {
+      setActiveDownloadFile((prev) => (prev && cached.files?.includes(prev) ? prev : cached.files?.[0] || ''));
+      setIsDetailLoading(false);
+      return;
+    }
     
     try {
       // 1. Fetch main repo metadata
@@ -1145,6 +1221,8 @@ export function SettingsModal({
         readme: baseModel.readme || `Model card can be found at https://huggingface.co/${baseModel.id}`
       };
 
+      if (requestId !== detailRequestIdRef.current) return;
+      modelDetailsCacheRef.current[baseModel.id] = updated;
       setDetailedModel(updated);
       setActiveDownloadFile(filesList[0]);
     } catch (e) {
@@ -1162,21 +1240,26 @@ export function SettingsModal({
         ? (baseModel.projectors || [`${baseModel.id.split('/').pop()}-mmproj-f16.gguf (168 MB)`])
         : [];
 
-      setDetailedModel({
+      const fallbackModel = {
         ...baseModel,
         files: fallbackFiles,
         projectors: fallbackProjectors,
         capabilities: isVisionFallback ? ["Vision", "Reasoning"] : (baseModel.capabilities || ["Reasoning"])
-      });
+      };
+      if (requestId !== detailRequestIdRef.current) return;
+      modelDetailsCacheRef.current[baseModel.id] = fallbackModel;
+      setDetailedModel(fallbackModel);
       setActiveDownloadFile(fallbackFiles[0]);
     } finally {
-      setIsDetailLoading(false);
+      if (requestId === detailRequestIdRef.current) {
+        setIsDetailLoading(false);
+      }
     }
-  };
+  }, []);
 
   // Fetch from HF with debounce on hfSearchQuery
   React.useEffect(() => {
-    if (!hfSearchQuery.trim()) {
+    if (!deferredHfSearchQuery.trim()) {
       setHfModels([]);
       const defaultCurated = curators.find(m => m.id === selectedModelId) || curators[0];
       setDetailedModel(defaultCurated);
@@ -1189,7 +1272,7 @@ export function SettingsModal({
       try {
         const fetchSort = hfSortOption === 'vram_fit' ? 'downloads' : hfSortOption;
         const fetchLimit = hfSortOption === 'vram_fit' ? 40 : 15;
-        const res = await fetch(`https://huggingface.co/api/models?limit=${fetchLimit}&search=${encodeURIComponent(hfSearchQuery)}&filter=gguf&sort=${fetchSort}&direction=-1`);
+        const res = await fetch(`https://huggingface.co/api/models?limit=${fetchLimit}&search=${encodeURIComponent(deferredHfSearchQuery)}&filter=gguf&sort=${fetchSort}&direction=-1`);
         if (!res.ok) throw new Error(`HF Hub returned status ${res.status}`);
         const data = await res.json();
         
@@ -1262,7 +1345,7 @@ export function SettingsModal({
     }, 600);
 
     return () => clearTimeout(delayDebounce);
-  }, [hfSearchQuery, hfSortOption]);
+  }, [curators, deferredHfSearchQuery, fetchModelDetails, hfSortOption, selectedModelId]);
 
   const handleDownloadHfModel = async () => {
     if (!detailedModel) return;
@@ -1571,8 +1654,8 @@ export function SettingsModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: asset.url,
-          fileName: asset.name,
+          browserDownloadUrl: asset.url,
+          assetName: asset.name,
           releaseTag,
         }),
       });
@@ -2070,28 +2153,10 @@ export function SettingsModal({
                      <div className="flex items-center justify-between gap-4">
                        <div>
                          <div className="font-medium text-sm">Model Selector</div>
-                         <div className="text-xs text-gray-400">Choose popup menu or right slide panel</div>
+                         <div className="text-xs text-gray-400">Model selection uses the slide panel.</div>
                        </div>
-                       <div className="flex p-1 rounded-xl bg-gray-100 dark:bg-zinc-950 border border-gray-100 dark:border-white/10 shrink-0">
-                         {[
-                           { id: 'popup' as const, label: 'Popup' },
-                           { id: 'drawer' as const, label: 'Slide' }
-                         ].map(option => (
-                           <button
-                             key={option.id}
-                             onClick={() => {
-                               setModelSelectorMode(option.id);
-                               localStorage.setItem('lumina_model_selector_mode', option.id);
-                             }}
-                             className={`h-8 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                               modelSelectorMode === option.id
-                                 ? 'bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm'
-                                 : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-                             }`}
-                           >
-                             {option.label}
-                           </button>
-                         ))}
+                       <div className="h-8 px-3 rounded-lg text-xs font-semibold flex items-center bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm shrink-0">
+                         Slide
                        </div>
                      </div>
                   </div>
@@ -3359,12 +3424,7 @@ export function SettingsModal({
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 dark:divide-white/5">
-                              {downloadedModelsList
-                                .filter(m => 
-                                  m.id.toLowerCase().includes(modelsFilterQuery.toLowerCase()) || 
-                                  m.name.toLowerCase().includes(modelsFilterQuery.toLowerCase()) ||
-                                  (m.publisher && m.publisher.toLowerCase().includes(modelsFilterQuery.toLowerCase()))
-                                )
+                              {filteredDownloadedModels
                                 .map((model) => {
                                   const isActive = activeModelId === model.id;
                                   const isLoaded = loadedLocalModelId === model.id;
@@ -3510,10 +3570,7 @@ export function SettingsModal({
                                     </tr>
                                   );
                                 })}
-                              {downloadedModelsList.filter(m => 
-                                m.id.toLowerCase().includes(modelsFilterQuery.toLowerCase()) || 
-                                m.name.toLowerCase().includes(modelsFilterQuery.toLowerCase())
-                              ).length === 0 && (
+                              {filteredDownloadedModels.length === 0 && (
                                 <tr>
                                   <td colSpan={5} className="py-12 text-center text-zinc-400">
                                     No models found match filter query. 
@@ -3530,7 +3587,7 @@ export function SettingsModal({
                         {/* TABLE LOWER FOOTER AND SOURCE DIRECTORY BOX */}
                         <div className="mt-4 p-3 bg-gray-50/50 dark:bg-zinc-950/20 border border-gray-100 dark:border-white/15 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
                           <span className="text-[11px] font-medium text-zinc-400 select-none">
-                            You have {downloadedModelsList.length} local model{downloadedModelsList.length === 1 ? '' : 's'}, taking up {(downloadedModelsList.reduce((acc, m) => acc + parseFloat(m.size), 0)).toFixed(2)} GB of disk space
+                            You have {downloadedModelsList.length} local model{downloadedModelsList.length === 1 ? '' : 's'}, taking up {downloadedModelsTotalSizeGb.toFixed(2)} GB of disk space
                           </span>
 
                           <div className="flex items-center gap-1 w-full md:w-auto">
@@ -3608,14 +3665,14 @@ export function SettingsModal({
                               <div className="flex items-center gap-1.5">
                                 <button
                                   onClick={() => { setHfSelectedFilter('staff'); setHfSearchQuery(''); }}
-                                  className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'staff' && !hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
+                                  className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'staff' && !deferredHfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
                                 >
                                   Curator picks
                                 </button>
                                 <span>•</span>
                                 <button
                                   onClick={() => setHfSelectedFilter('all')}
-                                  className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'all' || hfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
+                                  className={`hover:text-[var(--theme-accent)] transition-all ${hfSelectedFilter === 'all' || deferredHfSearchQuery ? 'text-[var(--theme-accent)]' : ''}`}
                                 >
                                   All Hub
                                 </button>
@@ -3649,98 +3706,77 @@ export function SettingsModal({
                                 <div className="p-4 rounded-xl text-center text-xs border text-amber-500 bg-amber-500/5" style={{ borderColor: 'var(--theme-border)' }}>
                                   {hfError}
                                 </div>
+                              ) : visibleExploreModels.length === 0 ? (
+                                <div className="py-12 text-center text-xs text-zinc-400 space-y-1.5 border border-dashed rounded-xl border-[var(--theme-border)]">
+                                  <Cpu size={24} className="mx-auto text-zinc-300 dark:text-zinc-700" />
+                                  <p className="font-semibold">No models fit your VRAM ({detectedVramGb.toFixed(1)} GB) criteria.</p>
+                                  <p className="text-[10px] text-zinc-500">Try changing filter type to "Popularity" or "Latest".</p>
+                                </div>
                               ) : (
-                                (() => {
-                                  const listToRender = hfSearchQuery.trim() ? hfModels : curators;
-                                  const filtered = listToRender.filter(m => {
-                                    if (!hfSearchQuery && hfSelectedFilter === 'staff') {
-                                      if (!m.isStaffPick) return false;
-                                    }
-                                    if (hfSortOption === 'vram_fit') {
-                                      const minSizeGb = getSmallestModelSizeGb(m);
-                                      const kvAndOverhead = getKvCacheAndOverheadGb(m);
-                                      const totalVramNeeded = minSizeGb + kvAndOverhead;
-                                      return totalVramNeeded <= detectedVramGb;
-                                    }
-                                    return true;
-                                  });
-
-                                  if (filtered.length === 0) {
-                                    return (
-                                      <div className="py-12 text-center text-xs text-zinc-400 space-y-1.5 border border-dashed rounded-xl border-[var(--theme-border)]">
-                                        <Cpu size={24} className="mx-auto text-zinc-300 dark:text-zinc-700" />
-                                        <p className="font-semibold">No models fit your VRAM ({detectedVramGb.toFixed(1)} GB) criteria.</p>
-                                        <p className="text-[10px] text-zinc-500">Try changing filter type to "Popularity" or "Latest".</p>
-                                      </div>
-                                    );
-                                  }
-
-                                  return filtered.map((model) => {
-                                    const isSelected = selectedModelId === model.id;
-                                    const minSizeGb = getSmallestModelSizeGb(model);
-                                    const kvAndOverhead = getKvCacheAndOverheadGb(model);
-                                    const totalVramNeeded = minSizeGb + kvAndOverhead;
-                                    const fits = totalVramNeeded <= detectedVramGb;
-
-                                    const supportsVision = model.capabilities?.includes('Vision');
-                                    const supportsTools = model.capabilities?.includes('Tool Use');
-                                    const supportsReasoning = model.capabilities?.includes('Reasoning');
-                                    return (
-                                      <button
-                                        key={model.id}
-                                        onClick={() => {
-                                          setSelectedModelId(model.id);
-                                          fetchModelDetails(model);
-                                        }}
-                                        className="w-full p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all outline-none leading-none shadow-sm hover:translate-y-[-1px]"
-                                        style={{
-                                          borderColor: isSelected ? 'var(--theme-accent)' : 'var(--theme-border)',
-                                          background: isSelected ? 'var(--theme-surface-alt)' : 'var(--theme-surface)'
-                                        }}
-                                      >
-                                        {renderModelLogo(model.author || '', model.id)}
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex items-center gap-1">
-                                            <span className="font-semibold text-xs truncate text-zinc-800 dark:text-zinc-200">
-                                              {model.name}
-                                            </span>
-                                            {model.isStaffPick && <span className="w-3 h-3 rounded-full bg-blue-500 text-white flex items-center justify-center text-[7px] font-bold shadow-sm" title="Verified">✓</span>}
-                                          </div>
-                                          <p className="text-[10px] text-zinc-400 truncate mt-0.5 leading-tight">{model.description}</p>
-                                          <div className="flex flex-wrap gap-1 mt-2">
-                                            {supportsVision && (
-                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-400 text-[8px] font-bold uppercase tracking-wide">
-                                                <Eye size={10} />
+                                visibleExploreModels.map(({ model, totalVramNeeded, fits, supportsVision, supportsTools, supportsReasoning }) => {
+                                  const isSelected = selectedModelId === model.id;
+                                  return (
+                                    <button
+                                      key={model.id}
+                                      onClick={() => {
+                                        setSelectedModelId(model.id);
+                                        fetchModelDetails(model);
+                                      }}
+                                      className="w-full p-3.5 rounded-2xl border text-left flex items-start gap-3 transition-all outline-none leading-none shadow-sm hover:translate-y-[-1px] hover:shadow-md"
+                                      style={{
+                                        borderColor: isSelected ? 'var(--theme-accent)' : 'var(--theme-border)',
+                                        background: isSelected ? 'var(--theme-surface-alt)' : 'var(--theme-surface)'
+                                      }}
+                                    >
+                                      {renderModelLogo(model.author || '', model.id)}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="min-w-0">
+                                            <div className="flex items-center gap-1">
+                                              <span className="font-semibold text-xs truncate text-zinc-800 dark:text-zinc-200">
+                                                {model.name}
                                               </span>
-                                            )}
-                                            {supportsTools && (
-                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
-                                                <Hammer size={10} />
-                                              </span>
-                                            )}
-                                            {supportsReasoning && (
-                                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 text-[8px] font-bold uppercase tracking-wide">
-                                                <Brain size={10} />
-                                              </span>
-                                            )}
-                                            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[8px] font-mono font-bold uppercase tracking-wide ${
-                                              fits 
-                                                ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400' 
-                                                : 'border-red-500/25 bg-red-500/10 text-red-400'
-                                            }`}>
-                                              <Cpu size={10} />
-                                              {totalVramNeeded.toFixed(1)} GB
-                                            </span>
+                                              {model.isStaffPick && <span className="w-3 h-3 rounded-full bg-blue-500 text-white flex items-center justify-center text-[7px] font-bold shadow-sm" title="Verified">✓</span>}
+                                            </div>
+                                            <p className="text-[10px] text-zinc-400 truncate mt-0.5 leading-tight">{model.description}</p>
                                           </div>
-                                          <div className="flex items-center justify-between gap-2 mt-2 font-mono text-[9px] text-zinc-500">
-                                            <span>{model.downloads?.toLocaleString() || 0} dl</span>
-                                            <span>{model.lastUpdated}</span>
-                                          </div>
+                                          <span className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[8px] font-mono font-bold uppercase tracking-wide ${
+                                            fits 
+                                              ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400' 
+                                              : 'border-red-500/25 bg-red-500/10 text-red-400'
+                                          }`}>
+                                            <Cpu size={10} />
+                                            {totalVramNeeded.toFixed(1)} GB
+                                          </span>
                                         </div>
-                                      </button>
-                                    );
-                                  });
-                                })()
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                          {supportsVision && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-emerald-500/25 bg-emerald-500/10 text-emerald-400 text-[8px] font-bold uppercase tracking-wide">
+                                              <Eye size={10} />
+                                              Vision
+                                            </span>
+                                          )}
+                                          {supportsTools && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-violet-500/25 bg-violet-500/10 text-violet-400 text-[8px] font-bold uppercase tracking-wide">
+                                              <Hammer size={10} />
+                                              Tools
+                                            </span>
+                                          )}
+                                          {supportsReasoning && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-amber-500/25 bg-amber-500/10 text-amber-400 text-[8px] font-bold uppercase tracking-wide">
+                                              <Brain size={10} />
+                                              Reasoning
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center justify-between gap-2 mt-2 font-mono text-[9px] text-zinc-500">
+                                          <span>{model.downloads?.toLocaleString() || 0} downloads</span>
+                                          <span>{model.lastUpdated}</span>
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                })
                               )}
                             </div>
                           </div>
@@ -3772,9 +3808,9 @@ export function SettingsModal({
                                           <Brain size={12} />
                                         </span>
                                       )}
-                                      {activeDownloadFile && (
-                                        <span className={`px-1.5 py-0.5 rounded-md border text-[8px] font-bold uppercase tracking-wide ${estimateGpuOffloadFit(activeDownloadFile).className}`}>
-                                          {estimateGpuOffloadFit(activeDownloadFile).label}
+                                      {activeDownloadFit && (
+                                        <span className={`px-1.5 py-0.5 rounded-md border text-[8px] font-bold uppercase tracking-wide ${activeDownloadFit.className}`}>
+                                          {activeDownloadFit.label}
                                         </span>
                                       )}
                                     </div>
@@ -3822,32 +3858,6 @@ export function SettingsModal({
                                   </div>
                                 ) : (
                                   <div className="space-y-3">
-                                    {activeDownloadFile && (
-                                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-semibold ${estimateGpuOffloadFit(activeDownloadFile).className}`}>
-                                        <Cpu size={12} />
-                                        {estimateGpuOffloadFit(activeDownloadFile).label}
-                                      </div>
-                                    )}
-
-                                    <select
-                                      disabled
-                                      value={activeDownloadFile}
-                                      onChange={(e) => setActiveDownloadFile(e.target.value)}
-                                      className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs font-semibold rounded-xl outline-none border cursor-default bg-[var(--theme-surface-alt,rgba(0,0,0,0.05))] border-[var(--theme-border)] text-[var(--theme-primary)] opacity-95 pointer-events-none select-none transition-all relative font-sans shadow-inner shrink-0"
-                                      style={{
-                                        backgroundImage: `url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23a1a1aa' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`,
-                                        backgroundPosition: 'right 12px center',
-                                        backgroundSize: '16px',
-                                        backgroundRepeat: 'no-repeat'
-                                      }}
-                                    >
-                                      {detailedModel.files && detailedModel.files.map((file: string, idx: number) => (
-                                        <option key={idx} value={file} className="bg-[var(--theme-surface)] text-[var(--theme-primary)] dark:bg-zinc-900 dark:text-zinc-100 font-semibold py-2">
-                                          {file}
-                                        </option>
-                                      ))}
-                                    </select>
-
                                     {detailedModel.files && detailedModel.files.length > 0 && (
                                       <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--theme-border)' }}>
                                         <div className="px-3 py-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider bg-zinc-500/5">
@@ -3872,7 +3882,7 @@ export function SettingsModal({
                                                 <span className="px-1.5 py-0.5 rounded-md bg-blue-500 text-white text-[9px] font-bold">GGUF</span>
                                                 <span className="flex-1 min-w-0">
                                                   <span className="block text-xs font-semibold text-zinc-700 dark:text-zinc-200 truncate">
-                                                    {file.replace(/\s*\([^)]*\)\s*$/, '').split('/').pop()}
+                                                    {formatRepoFileLabel(file)}
                                                   </span>
                                                   <span className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-md border text-[9px] font-semibold ${fit.className}`}>
                                                     <Cpu size={10} />

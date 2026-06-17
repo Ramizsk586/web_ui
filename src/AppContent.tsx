@@ -55,12 +55,16 @@ import {
   Activity,
   Compass,
   MousePointerClick,
-  FileText
+  FileText,
+  Star,
+  History,
+  Eye
 } from 'lucide-react';
 
 
 import Whiteboard from './components/Whiteboard';
 import { ChatsManagerPanel } from './components/ChatsManagerPanel';
+import type { AiProviderProfile } from './hooks/useAppSettings';
 
 const clampContextMenuPosition = (
   x: number,
@@ -356,7 +360,6 @@ export default function AppContent({
     attachedFiles, setAttachedFiles,
     searchQuery, setSearchQuery,
     showScrollButton, setShowScrollButton,
-    isModelDropdownOpen, setIsModelDropdownOpen,
     isModeDropdownOpen, setIsModeDropdownOpen,
     isPlusMenuOpen, setIsPlusMenuOpen,
     isHeaderMenuOpen, setIsHeaderMenuOpen,
@@ -634,8 +637,6 @@ export default function AppContent({
   const menuContentRef = useRef<HTMLDivElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
   const modeDropdownContentRef = useRef<HTMLDivElement>(null);
-  const modelDropdownContentRef = useRef<HTMLDivElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -678,9 +679,15 @@ export default function AppContent({
       return [];
     }
   });
+  const [recentModelIds, setRecentModelIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lumina_recent_models') || '[]');
+    } catch {
+      return [];
+    }
+  });
   const [isFavoritesCollapsed, setIsFavoritesCollapsed] = useState(false);
   const [collapsedModelCategories, setCollapsedModelCategories] = useState<Record<string, boolean>>({});
-
   // Downloaded local models list (synced from localStorage + server scan)
   const [downloadedModels, setDownloadedModels] = useState<any[]>(() => {
     try {
@@ -774,7 +781,7 @@ export default function AppContent({
     }
     
     // Scan all provider profiles (active or inactive) to find the correct matching profile
-    const matchedProfile = aiProviderProfiles.find(profile =>
+    const matchedProfile = aiProviderProfiles.find((profile: AiProviderProfile) =>
       (profile.models || []).some((model: any) => model.id === id)
     );
     if (matchedProfile && handleSelectAiProfileModel) {
@@ -788,7 +795,7 @@ export default function AppContent({
   const isModelSelected = (model: any) => {
     return activeModelId === model.id && (
       !model.providerProfileId || 
-      aiProviderProfiles.find(p => p.active)?.id === model.providerProfileId
+      aiProviderProfiles.find((p: AiProviderProfile) => p.active)?.id === model.providerProfileId
     );
   };
 
@@ -811,6 +818,10 @@ export default function AppContent({
     localStorage.setItem('lumina_favorite_models', JSON.stringify(favoriteModelIds.slice(0, 20)));
   }, [favoriteModelIds]);
 
+  useEffect(() => {
+    localStorage.setItem('lumina_recent_models', JSON.stringify(recentModelIds.slice(0, 12)));
+  }, [recentModelIds]);
+
   const toggleFavoriteModel = useCallback((modelId: string) => {
     setFavoriteModelIds(prev => {
       if (prev.includes(modelId)) {
@@ -828,6 +839,11 @@ export default function AppContent({
     const byId = new Map(activeModelList.map(model => [model.id, model]));
     return favoriteModelIds.map(id => byId.get(id)).filter(Boolean);
   }, [favoriteModelIds, activeModelList]);
+
+  const recentModels = useMemo(() => {
+    const byId = new Map(activeModelList.map(model => [model.id, model]));
+    return recentModelIds.map(id => byId.get(id)).filter(Boolean);
+  }, [recentModelIds, activeModelList]);
 
   const providerModelCategories = useMemo(() => {
     const groups = new Map<string, { id: string; label: string; active: boolean; models: any[] }>();
@@ -877,7 +893,7 @@ export default function AppContent({
   const favoriteModelIdSet = useMemo(() => new Set(favoriteModelIds), [favoriteModelIds]);
 
   const toggleModelCategory = useCallback((categoryId: string) => {
-    const profile = aiProviderProfiles.find(p => p.id === categoryId);
+    const profile = aiProviderProfiles.find((p: AiProviderProfile) => p.id === categoryId);
     if (profile && !profile.active) {
       if (profile.models?.[0] && handleSelectAiProfileModel) {
         handleSelectAiProfileModel(profile.models[0].id, categoryId);
@@ -930,8 +946,8 @@ export default function AppContent({
   const handleModelSelect = (id: string, providerProfileId?: string) => {
     // Check ifSelected model is local model (GGUF etc)
     const isLocal = useLocalModelsOnly || id.toLowerCase().includes('gguf');
+    setRecentModelIds(prev => [id, ...prev.filter(existingId => existingId !== id)].slice(0, 12));
     setActiveModelId(id, providerProfileId);
-    setIsModelDropdownOpen(false);
     setIsModelDrawerOpen(false);
     setModelSearchQuery('');
     
@@ -953,13 +969,6 @@ export default function AppContent({
     popupRef: modeDropdownContentRef,
     isOpen: isModeDropdownOpen,
     align: 'right'
-  });
-
-  const modelDropdownPosition = useSmartPopupPosition({
-    triggerRef: dropdownRef,
-    popupRef: modelDropdownContentRef,
-    isOpen: isModelDropdownOpen,
-    align: 'left'
   });
 
   // UI Handlers & Helper functions
@@ -1181,29 +1190,29 @@ export default function AppContent({
     if (activeQuestion.type === 'single_choice') {
       const isCustom = currentAnswer && !activeQuestion.options?.includes(currentAnswer);
       return (
-        <div className="flex flex-col gap-2.5 w-full">
-          <div className="grid grid-cols-3 gap-2">
-            {activeQuestion.options?.slice(0, 3).map((opt: string) => (
+        <div className="flex flex-col gap-3 w-full">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {activeQuestion.options?.map((opt: string) => (
               <button
                 key={opt}
                 onClick={() => { setTextInputAnswer(''); handleSelectAnswer(qId, opt); }}
-                className={`p-3 rounded-xl border text-sm font-semibold transition-all text-center leading-tight ${
+                className={`w-full px-4 py-3 rounded-2xl border text-sm font-medium transition-all text-left leading-tight ${
                   currentAnswer === opt
-                    ? 'border-[var(--theme-accent)] bg-[var(--theme-accent-dim)] text-[var(--theme-accent-text)] shadow-sm'
-                    : 'border-border bg-transparent hover:bg-[var(--theme-hover)] hover:border-[var(--theme-accent)]/40 text-[var(--theme-text)]'
+                    ? 'border-[var(--theme-accent)]/45 bg-[var(--theme-surface-alt)] text-[var(--theme-primary)]'
+                    : 'border-border bg-transparent hover:bg-[var(--theme-surface-alt)]/45 hover:border-[var(--theme-accent)]/25 text-[var(--theme-text)]'
                 }`}
               >
                 {opt}
               </button>
             ))}
           </div>
-          <div className={`flex items-center gap-2 p-3 rounded-xl border text-sm transition-all ${
+          <div className={`flex items-center gap-2 p-3 rounded-2xl border text-sm transition-all ${
             isCustom
-              ? 'border-[var(--theme-accent)] bg-[var(--theme-accent-dim)]'
-              : 'border-border bg-transparent hover:border-[var(--theme-accent)]/40'
+              ? 'border-[var(--theme-accent)]/45 bg-[var(--theme-surface-alt)]'
+              : 'border-border bg-transparent hover:bg-[var(--theme-surface-alt)]/35'
           }`}>
-            <span className="shrink-0 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-muted)]">
-              Custom
+            <span className="shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--theme-muted)]">
+              Other
             </span>
             <input
               type="text"
@@ -1219,15 +1228,15 @@ export default function AppContent({
                   handleSelectAnswer(qId, textInputAnswer.trim());
                 }
               }}
-              placeholder="Type your own answer..."
+              placeholder="Type your answer"
               className="flex-1 bg-transparent outline-none text-sm text-[var(--theme-primary)] placeholder-[var(--theme-muted)]"
             />
             <button
               onClick={(e) => { e.stopPropagation(); if (textInputAnswer.trim()) handleSelectAnswer(qId, textInputAnswer.trim()); }}
               disabled={!textInputAnswer.trim()}
-              className="px-3 py-1.5 bg-[var(--theme-accent)] text-white rounded-lg text-xs font-bold disabled:opacity-40 transition-all shrink-0 cursor-pointer"
+              className="px-3 py-2 bg-[var(--theme-accent)] text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition-all shrink-0 cursor-pointer"
             >
-              Save
+              Continue
             </button>
           </div>
         </div>
@@ -1250,10 +1259,10 @@ export default function AppContent({
               <button
                 key={opt}
                 onClick={() => handleToggle(opt)}
-                className={`w-full text-left p-3 rounded-lg border text-sm font-medium transition-all flex items-center justify-between ${
+                className={`w-full text-left px-4 py-3 rounded-2xl border text-sm font-medium transition-all flex items-center justify-between ${
                   isSelected
-                    ? 'border-[var(--theme-accent)] bg-[var(--theme-accent-dim)] text-[var(--theme-accent-text)]'
-                    : 'border-border bg-transparent hover:bg-[var(--theme-hover)] text-[var(--theme-text)]'
+                    ? 'border-[var(--theme-accent)]/45 bg-[var(--theme-surface-alt)] text-[var(--theme-primary)]'
+                    : 'border-border bg-transparent hover:bg-[var(--theme-surface-alt)]/45 text-[var(--theme-text)]'
                 }`}
               >
                 <span>{opt}</span>
@@ -1269,15 +1278,15 @@ export default function AppContent({
 
     if (activeQuestion.type === 'scale') {
       return (
-        <div className="flex gap-2 w-full justify-between items-center sm:px-4 py-2">
+        <div className="flex gap-2 w-full justify-between items-center py-2">
           {[1, 2, 3, 4, 5].map((val) => (
             <button
               key={val}
               onClick={() => handleSelectAnswer(qId, String(val))}
-              className={`w-10 h-10 rounded-full border text-sm font-semibold flex items-center justify-center transition-all ${
+              className={`w-11 h-11 rounded-2xl border text-sm font-medium flex items-center justify-center transition-all ${
                 currentAnswer === String(val)
-                  ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-white shadow-sm'
-                  : 'border-border bg-transparent hover:bg-[var(--theme-hover)] text-[var(--theme-text)]'
+                  ? 'border-[var(--theme-accent)]/45 bg-[var(--theme-surface-alt)] text-[var(--theme-primary)]'
+                  : 'border-border bg-transparent hover:bg-[var(--theme-surface-alt)]/45 text-[var(--theme-text)]'
               }`}
             >
               {val}
@@ -1289,15 +1298,15 @@ export default function AppContent({
 
     if (activeQuestion.type === 'confirm') {
       return (
-        <div className="flex gap-4 w-full justify-center items-center py-2">
+        <div className="grid grid-cols-2 gap-3 w-full py-2">
           {['Yes', 'No'].map((opt) => (
             <button
               key={opt}
               onClick={() => handleSelectAnswer(qId, opt)}
-              className={`px-6 py-2.5 rounded-lg border text-sm font-medium transition-all w-1/2 ${
+              className={`px-4 py-3 rounded-2xl border text-sm font-medium transition-all ${
                 currentAnswer === opt
-                  ? 'border-[var(--theme-accent)] bg-[var(--theme-accent)] text-white shadow-sm'
-                  : 'border-border bg-transparent hover:bg-[var(--theme-hover)] text-[var(--theme-text)]'
+                  ? 'border-[var(--theme-accent)]/45 bg-[var(--theme-surface-alt)] text-[var(--theme-primary)]'
+                  : 'border-border bg-transparent hover:bg-[var(--theme-surface-alt)]/45 text-[var(--theme-text)]'
               }`}
             >
               {opt}
@@ -1309,19 +1318,19 @@ export default function AppContent({
 
     if (activeQuestion.type === 'text_input') {
       return (
-        <div className="flex flex-col gap-2 w-full">
+        <div className="flex flex-col gap-3 w-full">
           <textarea
             value={textInputAnswer}
             onChange={(e) => setTextInputAnswer(e.target.value)}
-            placeholder="Type your detailed requirements here..."
-            className="w-full h-24 p-3 rounded-lg border bg-transparent font-sans text-sm focus:outline-none focus:ring-1 focus:ring-[var(--theme-accent)] resize-none"
+            placeholder="Type your answer"
+            className="w-full h-24 p-3 rounded-2xl border bg-transparent font-sans text-sm text-[var(--theme-primary)] placeholder-[var(--theme-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--theme-accent)]/35 resize-none"
           />
           <button
             onClick={() => handleSelectAnswer(qId, textInputAnswer)}
             disabled={!textInputAnswer.trim()}
-            className="px-4 py-2 bg-[var(--theme-accent)] text-white rounded-lg text-xs font-semibold disabled:opacity-50 tracking-tight transition-all"
+            className="self-end px-4 py-2 bg-[var(--theme-accent)] text-white rounded-xl text-xs font-semibold disabled:opacity-50 tracking-tight transition-all"
           >
-            Save Answer
+            Continue
           </button>
         </div>
       );
@@ -1954,8 +1963,6 @@ const startCoderPreview = useCallback(async () => {
         modeDropdownContentRef={modeDropdownContentRef}
         modeDropdownPosition={modeDropdownPosition}
         setActiveAssistantMode={setActiveAssistantMode}
-        modelSelectorMode={modelSelectorMode}
-        setIsModelDrawerOpen={setIsModelDrawerOpen}
         activeModelList={activeModelList}
         availableModels={availableModels}
         modelSearchQuery={modelSearchQuery}
@@ -1974,20 +1981,10 @@ const startCoderPreview = useCallback(async () => {
         setIsTyping={setIsTyping}
         abortControllerRef={abortControllerRef}
         handleSend={handleSend}
-        dropdownRef={dropdownRef}
-        modelDropdownPosition={modelDropdownPosition}
         showToast={showToast}
-        setIsModelDropdownOpen={setIsModelDropdownOpen}
         setWritingStyle={setWritingStyle}
-        isModelDropdownOpen={isModelDropdownOpen}
-        modelDropdownContentRef={modelDropdownContentRef}
         isWhiteboardOpen={isWhiteboardOpen}
         setIsWhiteboardOpen={setIsWhiteboardOpen}
-        onOpenLocalModelConfig={handleOpenLocalModelConfig}
-        localModelLoadingId={localModelLoadingId}
-        localModelLoadingProgress={localModelLoadingProgress}
-        loadedLocalModelId={loadedLocalModelId}
-        useLocalModelsOnly={useLocalModelsOnly}
       />
     );
   };
@@ -2337,7 +2334,7 @@ const startCoderPreview = useCallback(async () => {
               </h2>
             </div>
             {/* Center section: Model button */}
-            <div className="flex-none flex items-center justify-center" ref={dropdownRef}>
+            <div className="flex-none flex items-center justify-center">
               <div className="relative">
                 <button
                   onClick={(e) => {
@@ -2347,10 +2344,7 @@ const startCoderPreview = useCallback(async () => {
                       activeModelId.toLowerCase().includes("gguf");
                     if (isLocal && handleOpenLocalModelConfig) {
                       handleOpenLocalModelConfig(activeModelId);
-                    } else if (modelSelectorMode === "drawer") {
                       setIsModelDrawerOpen(true);
-                    } else {
-                      setIsModelDropdownOpen(!isModelDropdownOpen);
                     }
                   }}
                   className="flex items-center gap-2 px-3 py-1.5 bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-gray-200/90 dark:hover:bg-zinc-700/90 border border-gray-200 dark:border-zinc-700/60 rounded-full transition-all text-xs font-bold shadow-sm cursor-pointer select-none max-w-[210px]"
@@ -2377,7 +2371,7 @@ const startCoderPreview = useCallback(async () => {
                   </span>
                   <ChevronDown
                     size={11}
-                    className={`text-gray-400 shrink-0 transition-transform duration-150 ${(modelSelectorMode === "drawer" ? isModelDrawerOpen : isModelDropdownOpen) ? "rotate-180" : ""}`}
+                    className={`text-gray-400 shrink-0 transition-transform duration-150 ${isModelDrawerOpen ? "rotate-180" : ""}`}
                   />
                 </button>
 
@@ -2391,100 +2385,6 @@ const startCoderPreview = useCallback(async () => {
                   </div>
                 )}
               </div>
-
-              <AnimatePresence>
-                {isModelDropdownOpen && (
-                  <motion.div
-                    ref={modelDropdownContentRef as any}
-                    style={modelDropdownPosition.style}
-                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                    className="fixed w-[280px] bg-white dark:bg-zinc-900 border border-gray-105 dark:border-white/10 rounded-2xl shadow-2xl z-[180] flex flex-col overflow-hidden text-left"
-                  >
-                    {/* Header Label Info */}
-                    <div className="px-3.5 pt-3 pb-1 select-none flex items-center justify-between shrink-0">
-                      <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-gray-400 dark:text-zinc-500">
-                        System Model Cores
-                      </span>
-                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-gray-50 dark:bg-zinc-800 font-bold text-blue-500">
-                        {filteredModelList.length} Active
-                      </span>
-                    </div>
-
-                    {availableModels.length > 5 && (
-                      <div className="px-3 py-1.5 bg-white dark:bg-zinc-900 shrink-0">
-                        <div className="relative group">
-                          <Search
-                            size={12}
-                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"
-                          />
-                          <input
-                            type="text"
-                            placeholder="Filter model name..."
-                            value={modelSearchQuery}
-                            onChange={(e) => setModelSearchQuery(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-full h-8 pl-8 pr-3 bg-gray-50 dark:bg-zinc-800 border border-gray-100 dark:border-zinc-700/60 rounded-xl text-[11px] outline-none placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/15 text-gray-800 dark:text-zinc-200 font-medium transition-all"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="h-[230px] overflow-y-auto p-1.5 space-y-1 custom-scrollbar shrink-0 border-t border-gray-100 dark:border-white/5 mt-1">
-                      {filteredModelList.length > 0 ? (
-                        filteredModelList.map((model) => {
-                          const isSelected = activeModelId === model.id;
-                          const isLocal = model.id.toLowerCase().includes("gguf");
-
-                          return (
-                            <button
-                              key={model.id}
-                              onClick={() => handleModelSelect(model.id)}
-                              className={`w-full min-h-[40px] flex items-center gap-3 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 border-l-[3px] cursor-pointer ${
-                                isSelected
-                                  ? "bg-gray-50 dark:bg-zinc-800 text-gray-950 dark:text-white border-blue-500 shadow-sm"
-                                  : "text-gray-500 hover:bg-gray-50/60 dark:hover:bg-zinc-800/60 hover:text-gray-800 dark:hover:text-zinc-200 border-transparent"
-                              }`}
-                            >
-                              <div
-                                className={`p-1 rounded-lg flex items-center justify-center shrink-0 ${
-                                  isSelected ? "bg-white dark:bg-zinc-900 shadow-sm" : "bg-gray-50 dark:bg-zinc-800/40"
-                                }`}
-                              >
-                                {renderAppModelLogo(model.author || model.providerProfileName || model.id.split('/')[0] || '', model.id, model.icon)}
-                              </div>
-
-                              <div className="flex-1 text-left min-w-0">
-                                <span className={`block truncate ${isSelected ? "font-bold" : "font-semibold"}`}>
-                                  {model.name}
-                                </span>
-                                <span className="block text-[8px] font-mono text-gray-400 dark:text-zinc-500 truncate uppercase tracking-tight">
-                                  {isLocal ? "LOCAL GGUF • HOSTED" : model.id.split("/").slice(-1)[0]}
-                                </span>
-                              </div>
-
-                              {isSelected && (
-                                <motion.div
-                                  layoutId="activeModelCheckmark"
-                                  className="w-4 h-4 rounded-full bg-blue-500/10 flex items-center justify-center ml-auto shrink-0"
-                                >
-                                  <Check size={11} className="text-blue-500" strokeWidth={3} />
-                                </motion.div>
-                              )}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div className="py-8 text-center text-[11px] text-gray-400 select-none">
-                          No cores match criteria
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
 
             {/* Right section */}
@@ -2660,6 +2560,11 @@ const startCoderPreview = useCallback(async () => {
             setIsModelDrawerOpen={setIsModelDrawerOpen}
             activeAssistantMode={activeAssistantMode}
             setActiveAssistantMode={setActiveAssistantMode}
+            showTodoPanel={showTodoPanel}
+            setShowTodoPanel={setShowTodoPanel}
+            coderTodos={coderTodos}
+            todoCollapsed={todoCollapsed}
+            setTodoCollapsed={setTodoCollapsed}
             createNewChat={(projId, isCoder, isResearch, agentId) => {
               createNewChat(projId, isCoder, isResearch, agentId);
             }}
@@ -2925,7 +2830,7 @@ const startCoderPreview = useCallback(async () => {
               </motion.div>
             ) : (
               <>
-                <div className={`flex-1 flex overflow-hidden ${isModelDropdownOpen || isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
+                <div className={`flex-1 flex overflow-hidden ${isPlusMenuOpen ? 'relative z-20' : 'z-auto'}`}>
               <div 
                 ref={scrollRef}
                 className={`flex-1 overflow-y-auto py-8 custom-scrollbar scroll-smooth ${chatColumnShellClass} ${chatSplitGapClass}`}

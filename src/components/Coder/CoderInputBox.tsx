@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Plus, X, ShieldCheck, Shield, Hand, Check, ChevronDown, ArrowUp, Pause, Bot, Layers, Bug, Eye, ShieldAlert, MessageSquare } from 'lucide-react';
+import { Plus, X, ShieldCheck, Shield, Hand, Check, ChevronDown, ArrowUp, Pause, Bot, Layers, Bug, Eye, ShieldAlert, MessageSquare, ClipboardList } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { CoderPermissionMode } from '../../types';
 import { permissionModeLabel } from '../../utils/permissionUtils';
 
@@ -23,6 +24,11 @@ interface CoderInputBoxProps {
   handleFileAttach?: (files: File[]) => void;
   coderPermissionMode: CoderPermissionMode;
   setCoderPermissionMode: (mode: CoderPermissionMode) => void;
+  showTodoPanel?: boolean;
+  setShowTodoPanel?: (show: boolean) => void;
+  coderTodos?: Array<{ id: string; content: string; status: string }>;
+  todoCollapsed?: boolean;
+  setTodoCollapsed?: (collapsed: boolean) => void;
 }
 
 const getAssistantModeLabel = (mode: string) => {
@@ -64,7 +70,12 @@ export function CoderInputBox({
   setAttachedFiles,
   handleFileAttach,
   coderPermissionMode,
-  setCoderPermissionMode
+  setCoderPermissionMode,
+  showTodoPanel = false,
+  setShowTodoPanel = () => {},
+  coderTodos = [],
+  todoCollapsed = false,
+  setTodoCollapsed = () => {}
 }: CoderInputBoxProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const permissionRef = useRef<HTMLDivElement | null>(null);
@@ -90,9 +101,92 @@ export function CoderInputBox({
     adjustTextareaHeight(e);
   };
 
+  const completedTodoCount = coderTodos.filter(todo => todo.status === 'completed').length;
+  const activeTodo = coderTodos.find(todo => todo.status === 'in_progress') || coderTodos[coderTodos.length - 1];
+
   return (
-    <div className="w-full max-w-3xl mx-auto">
-      <div className={`rounded-[26px] bg-[#23211F] border border-[#2E2A27] shadow-[0_22px_60px_rgba(0,0,0,0.3)] ${isCenteredState ? 'min-h-[134px]' : ''}`}>
+    <div className="w-full max-w-3xl mx-auto relative pt-0">
+      <AnimatePresence initial={false}>
+        {showTodoPanel && coderTodos.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 28, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 24, scale: 0.98 }}
+            transition={{ duration: 0.26, ease: 'easeOut' }}
+            className="relative z-20 w-[92%] mx-auto mb-3"
+          >
+            <div className="rounded-[26px] bg-[#23211F] border border-[#2E2A27] shadow-[0_22px_60px_rgba(0,0,0,0.3)] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setTodoCollapsed(!todoCollapsed)}
+                className="w-full px-4 py-3 flex items-center gap-3 text-left bg-transparent hover:bg-[#2A2724] transition-colors cursor-pointer"
+              >
+                <div className="w-8 h-8 rounded-xl bg-[#2A2724] border border-[#3A342F] flex items-center justify-center text-[#C9BCAB] shrink-0">
+                  <ClipboardList size={15} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-[#EDE6DD]">Todo Progress...</div>
+                  <div className="text-[11px] text-[#8A8178] truncate">
+                    {activeTodo?.content || `${coderTodos.length} active tasks`}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] font-semibold text-[#B7AA9B]">
+                    {completedTodoCount}/{coderTodos.length}
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    className="text-[#8A8178] transition-transform duration-200"
+                    style={{ transform: todoCollapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}
+                  />
+                </div>
+              </button>
+
+              {!todoCollapsed && (
+                <div className="px-3 pb-3 pt-2 max-h-[248px] overflow-y-auto custom-scrollbar border-t border-[#2E2A27]/55">
+                  <div className="space-y-1.5">
+                    {coderTodos.map((todo) => {
+                      const isDone = todo.status === 'completed';
+                      const isActive = todo.status === 'in_progress';
+                      return (
+                        <div
+                          key={todo.id}
+                          className={`flex items-start gap-2.5 px-2.5 py-2 rounded-xl transition-colors ${
+                            isActive ? 'bg-[#2A2724]' : 'bg-transparent'
+                          }`}
+                        >
+                          <div className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${
+                            isDone
+                              ? 'bg-emerald-500 border-emerald-400 text-white'
+                              : isActive
+                                ? 'border-emerald-500/60 text-emerald-400'
+                                : 'border-[#4A433D] text-[#72695F]'
+                          }`}>
+                            {isDone ? <Check size={11} strokeWidth={3} /> : <span className="text-[10px] font-bold">{todo.id}</span>}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className={`text-[13px] leading-relaxed ${
+                              isDone
+                                ? 'text-[#8F8479] line-through'
+                                : isActive
+                                  ? 'text-[#F3ECE4]'
+                                  : 'text-[#C1B6A8]'
+                            }`}>
+                              {todo.content}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className={`relative z-10 rounded-[26px] bg-[#23211F] border border-[#2E2A27] shadow-[0_22px_60px_rgba(0,0,0,0.3)] ${isCenteredState ? 'min-h-[134px]' : ''}`}>
         <div className="px-5 pt-4 pb-3 relative flex flex-col justify-between min-h-[inherit]">
           {/* File Attachment Previews */}
           {attachedFiles && attachedFiles.length > 0 && (

@@ -8,6 +8,7 @@ export interface UseSmartPopupPositionProps {
   preferredDirection?: 'up' | 'down';
   margin?: number;
   viewportPadding?: number;
+  matchTriggerWidth?: boolean;
   dependencies?: any[];
 }
 
@@ -19,6 +20,7 @@ export function useSmartPopupPosition({
   preferredDirection = 'up',
   margin = 12,
   viewportPadding = 12,
+  matchTriggerWidth = false,
   dependencies = [],
 }: UseSmartPopupPositionProps) {
   const [coords, setCoords] = useState<React.CSSProperties>({
@@ -37,9 +39,10 @@ export function useSmartPopupPosition({
     const triggerRect = trigger.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
+    const popupMinWidth = matchTriggerWidth ? triggerRect.width : 0;
 
     // Get popup dimension
-    const popupWidth = popup.offsetWidth || 256;
+    const popupWidth = Math.max(popup.offsetWidth || 256, popupMinWidth);
     // We measure scrollHeight to get the full unconstrained height we want, 
     // or offsetHeight if it is already rendered correctly.
     const popupHeight = popup.scrollHeight || popup.offsetHeight || 380;
@@ -103,9 +106,10 @@ export function useSmartPopupPosition({
       top: topVal !== undefined ? `${topVal}px` : 'auto',
       bottom: bottomVal !== undefined ? `${bottomVal}px` : 'auto',
       maxHeight: `${maxHeightVal}px`,
+      minWidth: matchTriggerWidth ? `${triggerRect.width}px` : undefined,
       visibility: 'visible',
     });
-  }, [triggerRef, popupRef, isOpen, align, preferredDirection, margin, viewportPadding]);
+  }, [triggerRef, popupRef, isOpen, align, preferredDirection, margin, viewportPadding, matchTriggerWidth]);
 
   useEffect(() => {
     if (!isOpen) {

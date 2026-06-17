@@ -17,22 +17,61 @@ const getLlamaInstallDir = () => {
 
 const extractZip = async (zipPath: string, destDir: string): Promise<void> => {
   fs.mkdirSync(destDir, { recursive: true });
-  if (process.platform === 'win32') {
+  const isTarGz = zipPath.endsWith('.tar.gz') || zipPath.endsWith('.tgz');
+
+  if (isTarGz) {
     await new Promise<void>((resolve, reject) => {
-      const ps = spawn('powershell', [
-        '-NoProfile', '-NonInteractive',
-        '-Command',
-        `Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force`
-      ]);
-      ps.on('close', (code) => code === 0 ? resolve() : reject(new Error(`Expand-Archive exited with code ${code}`)));
-      ps.on('error', reject);
-    });
-  } else {
-    await new Promise<void>((resolve, reject) => {
-      const proc = spawn('unzip', ['-o', zipPath, '-d', destDir]);
-      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`unzip exited with code ${code}`)));
+      const proc = spawn('tar', ['-xzf', zipPath, '-C', destDir]);
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`tar exited with code ${code}`));
+      });
       proc.on('error', reject);
     });
+  } else {
+    if (process.platform === 'win32') {
+      await new Promise<void>((resolve, reject) => {
+        const ps = spawn('powershell', [
+          '-NoProfile', '-NonInteractive',
+          '-Command',
+          `Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force`
+        ]);
+        ps.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`Expand-Archive exited with code ${code}`));
+        });
+        ps.on('error', reject);
+      });
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('unzip', ['-o', zipPath, '-d', destDir]);
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else {
+            // Fallback to tar if unzip is not installed/fails
+            const fallback = spawn('tar', ['-xf', zipPath, '-C', destDir]);
+            fallback.on('close', (fCode) => {
+              if (fCode === 0) resolve();
+              else reject(new Error(`unzip (code ${code}) and tar (code ${fCode}) both failed to extract ${zipPath}`));
+            });
+            fallback.on('error', (err) => {
+              reject(new Error(`unzip exited with code ${code} and tar fallback failed: ${err.message}`));
+            });
+          }
+        });
+        proc.on('error', (err) => {
+          // If unzip command itself wasn't found (ENOENT), fallback to tar
+          const fallback = spawn('tar', ['-xf', zipPath, '-C', destDir]);
+          fallback.on('close', (fCode) => {
+            if (fCode === 0) resolve();
+            else reject(new Error(`unzip failed with ${err.message} and tar exited with code ${fCode}`));
+          });
+          fallback.on('error', (fErr) => {
+            reject(new Error(`unzip failed with ${err.message} and tar failed with ${fErr.message}`));
+          });
+        });
+      });
+    }
   }
 };
 
@@ -159,7 +198,7 @@ export function setupLlamaRoutes(app: express.Express) {
             results.push(...findBinaries(fullPath));
           } else if (entry.isFile()) {
             const lower = entry.name.toLowerCase();
-            if (lower.includes('llama-') || lower.endsWith('.exe')) {
+            if (lower.includes('llama-') || lower.endsWith('.exe') || lower === 'server') {
               results.push(fullPath.replace(/\\/g, '/'));
             }
           }
@@ -169,6 +208,18 @@ export function setupLlamaRoutes(app: express.Express) {
 
       const binaries = findBinaries(releaseDir);
       addLog(`Found ${binaries.length} binaries.`);
+
+      // Ensure execute permissions on Unix-like systems
+      if (process.platform !== 'win32') {
+        for (const bin of binaries) {
+          try {
+            fs.chmodSync(bin, 0o755);
+            addLog(`Set executable permissions on ${path.basename(bin)}`);
+          } catch (chmodErr: any) {
+            addLog(`Warning: Failed to set executable permission on ${path.basename(bin)}: ${chmodErr.message}`);
+          }
+        }
+      }
 
       // Clean up zip file
       try { fs.unlinkSync(zipPath); } catch {}
@@ -340,6 +391,14 @@ export function setupLlamaRoutes(app: express.Express) {
           console.log('[llama-server] Found and attaching multimodal projector:', projPath);
         }
       } catch {}
+
+      if (process.platform !== 'win32' && llamaServerBin) {
+        try {
+          fs.chmodSync(llamaServerBin, 0o755);
+        } catch (chmodErr) {
+          console.warn(`Failed to set execution permissions on ${llamaServerBin}:`, chmodErr);
+        }
+      }
 
       console.log('[llama-server] Spawning:', llamaServerBin, args.join(' '));
 

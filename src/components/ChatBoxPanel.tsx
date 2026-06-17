@@ -157,8 +157,6 @@ export interface ChatBoxPanelProps {
   modeDropdownContentRef: React.RefObject<HTMLDivElement | null>;
   modeDropdownPosition: { style: React.CSSProperties };
   setActiveAssistantMode: (mode: any) => void;
-  modelSelectorMode: string;
-  setIsModelDrawerOpen: (open: boolean) => void;
   activeModelList: any[];
   activeModelId: string;
   availableModels: any[];
@@ -178,20 +176,10 @@ export interface ChatBoxPanelProps {
   setIsTyping: (typing: boolean) => void;
   abortControllerRef: React.MutableRefObject<AbortController | null>;
   handleSend: () => void;
-  dropdownRef: React.RefObject<HTMLDivElement | null>;
-  modelDropdownPosition: { style: React.CSSProperties };
   showToast: (msg: string) => void;
-  setIsModelDropdownOpen: (open: boolean) => void;
   setWritingStyle: (style: string) => void;
-  isModelDropdownOpen: boolean;
-  modelDropdownContentRef: React.RefObject<HTMLDivElement | null>;
   isWhiteboardOpen?: boolean;
   setIsWhiteboardOpen?: (open: boolean) => void;
-  onOpenLocalModelConfig?: (id: string) => void;
-  localModelLoadingId?: string | null;
-  localModelLoadingProgress?: number;
-  loadedLocalModelId?: string | null;
-  useLocalModelsOnly?: boolean;
   isVoicePanelOpen?: boolean;
   setIsVoicePanelOpen?: (open: boolean) => void;
 }
@@ -300,8 +288,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
   modeDropdownContentRef,
   modeDropdownPosition,
   setActiveAssistantMode,
-  modelSelectorMode,
-  setIsModelDrawerOpen,
   activeModelList,
   activeModelId,
   availableModels,
@@ -321,18 +307,8 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
   setIsTyping,
   abortControllerRef,
   handleSend,
-  dropdownRef,
-  modelDropdownPosition,
   showToast,
-  setIsModelDropdownOpen,
   setWritingStyle,
-  isModelDropdownOpen,
-  modelDropdownContentRef,
-  onOpenLocalModelConfig,
-  localModelLoadingId,
-  localModelLoadingProgress,
-  loadedLocalModelId,
-  useLocalModelsOnly,
   isVoicePanelOpen,
   setIsVoicePanelOpen,
 }) => {
@@ -401,14 +377,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
     }
   }, [activeModelId]);
 
-  const selectedActiveModel = React.useMemo(
-    () => activeModelList.find((model) => model.id === activeModelId) ?? null,
-    [activeModelId, activeModelList],
-  );
-  const selectedActiveModelName = selectedActiveModel?.name || activeModelId || 'Select model';
-  const selectedActiveModelShortId = activeModelId
-    ? activeModelId.split("/").slice(-1)[0]
-    : "model selector";
   const favoriteModelIdSet = React.useMemo(
     () => new Set(favoriteModelIds),
     [favoriteModelIds],
@@ -503,7 +471,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
     isOpen: isGridMenuOpen,
     align: "left",
   });
-
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -566,31 +533,31 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
 
   const renderCategorizedModels = () => (
     <>
-      <div className="px-2 pt-1 flex items-center justify-between">
-        <span className="text-[8px] font-bold uppercase tracking-widest text-[var(--theme-muted)]">Categories</span>
-        <span className="text-[8px] font-mono text-[var(--theme-secondary)]">{favoriteModelIds.length}/20 Favorites</span>
+      <div className="px-1 pt-1 flex items-center justify-between">
+        <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[var(--theme-muted)]">Pinned</span>
+        <span className="text-[9px] text-[var(--theme-muted)]">{favoriteModelIds.length}/20</span>
       </div>
 
-      <div className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
-        <button onClick={() => setIsFavoritesCollapsed(!isFavoritesCollapsed)} className="w-full h-8 px-2.5 flex items-center gap-2 text-[10px] font-bold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]">
+      <div className="rounded-2xl border border-[var(--theme-border)]/70 bg-[var(--theme-surface-alt)]/35 overflow-hidden">
+        <button onClick={() => setIsFavoritesCollapsed(!isFavoritesCollapsed)} className="w-full h-9 px-3 flex items-center gap-2 text-[11px] font-semibold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]/45">
           {isFavoritesCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
           <Sparkles size={12} className="text-[var(--theme-accent)]" />
           <span className="flex-1 text-left">Favorites</span>
-          <span className="text-[8px] text-[var(--theme-secondary)]">{favoriteModels.length}</span>
+          <span className="text-[9px] text-[var(--theme-secondary)]">{favoriteModels.length}</span>
         </button>
         {!isFavoritesCollapsed && (
-          <div className="p-1 space-y-1">
+          <div className="p-1.5 space-y-1">
             {favoriteModels.length > 0 ? favoriteModels.map((model) => (
-              <button key={`fav-${model.id}`} onClick={() => handleModelSelect(model.id)} className={`w-full min-h-[36px] flex items-center gap-2 px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${activeModelId === model.id ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)]" : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)]/60 hover:text-[var(--theme-primary)]"}`}>
+              <button key={`fav-${model.id}`} onClick={() => handleModelSelect(model.id)} className={`w-full min-h-[40px] flex items-center gap-2.5 px-3 py-2 rounded-xl text-[12px] transition-all border ${activeModelId === model.id ? "bg-[var(--theme-hover-bg)]/75 text-[var(--theme-primary)] border-[var(--theme-accent)]/35" : "text-[var(--theme-secondary)] border-transparent hover:bg-[var(--theme-hover-bg)]/55 hover:text-[var(--theme-primary)]"}`}>
                 <Sparkles size={12} className="text-[var(--theme-accent)] shrink-0" />
                 <span className="flex-1 text-left min-w-0">
-                  <span className="block truncate">{model.name}</span>
-                  <span className="block text-[8px] font-mono text-[var(--theme-secondary)]/60 truncate uppercase tracking-tight">{model.id.split("/").slice(-1)[0]}</span>
+                  <span className="block truncate font-medium">{model.name}</span>
+                  <span className="block text-[10px] text-[var(--theme-muted)] truncate">{model.id.split("/").slice(-1)[0]}</span>
                 </span>
                 {activeModelId === model.id && <Check size={11} className="text-[var(--theme-accent)] shrink-0" strokeWidth={3} />}
               </button>
             )) : (
-              <div className="py-4 text-center text-[10px] text-[var(--theme-muted)]">No favorite models yet</div>
+              <div className="py-4 text-center text-[10px] text-[var(--theme-muted)]">No favorites yet</div>
             )}
           </div>
         )}
@@ -598,30 +565,30 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
 
       {preparedProviderCategories.map(category => {
         return (
-          <div key={category.id} className="rounded-xl border border-[var(--theme-border)] overflow-hidden">
-            <button onClick={() => toggleModelCategory(category.id)} className="w-full h-8 px-2.5 flex items-center gap-2 text-[10px] font-bold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]">
+          <div key={category.id} className="rounded-2xl border border-[var(--theme-border)]/70 bg-[var(--theme-surface-alt)]/25 overflow-hidden">
+            <button onClick={() => toggleModelCategory(category.id)} className="w-full h-9 px-3 flex items-center gap-2 text-[11px] font-semibold text-[var(--theme-primary)] bg-[var(--theme-hover-bg)]/35">
               {category.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
               <span className="flex-1 text-left truncate">{category.label}</span>
-              <span className="text-[8px] text-[var(--theme-secondary)]">{category.categoryModels.length}</span>
+              <span className="text-[9px] text-[var(--theme-secondary)]">{category.categoryModels.length}</span>
             </button>
             {!category.collapsed && (
-              <div className="p-1 space-y-1">
+              <div className="p-1.5 space-y-1">
                 {category.visibleModels.map((model) => {
                   const isSelected = activeModelId === model.id;
                   const isLocal = model.id.toLowerCase().includes("gguf");
                   const isFavorite = favoriteModelIdSet.has(model.id);
                   return (
-                    <div key={`${category.id}-${model.id}`} className={`w-full min-h-[40px] flex items-center gap-2 px-2 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 border-l-[3px] ${isSelected ? "bg-[var(--theme-hover-bg)] text-[var(--theme-primary)] border-[var(--theme-accent)] shadow-sm" : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)]/60 hover:text-[var(--theme-primary)] border-transparent"}`}>
-                      <button onClick={() => handleModelSelect(model.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left">
-                        <div className={`p-1 rounded-lg flex items-center justify-center shrink-0 ${isSelected ? "bg-[var(--theme-surface)] shadow-sm" : "bg-[var(--theme-surface-alt)]"}`}>
+                    <div key={`${category.id}-${model.id}`} className={`w-full min-h-[46px] flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-all shrink-0 border ${isSelected ? "bg-[var(--theme-hover-bg)]/75 text-[var(--theme-primary)] border-[var(--theme-accent)]/35 shadow-sm" : "text-[var(--theme-secondary)] hover:bg-[var(--theme-hover-bg)]/50 hover:text-[var(--theme-primary)] border-transparent"}`}>
+                      <button onClick={() => handleModelSelect(model.id)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                        <div className={`h-8 w-8 p-1 rounded-xl flex items-center justify-center shrink-0 ${isSelected ? "bg-[var(--theme-surface)] shadow-sm" : "bg-[var(--theme-surface-alt)]/90"}`}>
                           {renderAppModelLogo(model.author || model.providerProfileName || model.id.split('/')[0] || '', model.id, model.icon)}
                         </div>
                         <span className="flex-1 text-left min-w-0">
-                          <span className={`block truncate ${isSelected ? "font-bold" : "font-semibold"}`}>{model.name}</span>
-                          <span className="block text-[8px] font-mono text-[var(--theme-secondary)]/60 truncate uppercase tracking-tight">{isLocal ? "LOCAL GGUF - HOSTED" : model.id.split("/").slice(-1)[0]}</span>
+                          <span className={`block truncate text-[12px] ${isSelected ? "font-semibold" : "font-medium"}`}>{model.name}</span>
+                          <span className="block text-[10px] text-[var(--theme-muted)] truncate">{isLocal ? "Local GGUF" : model.id.split("/").slice(-1)[0]}</span>
                         </span>
                       </button>
-                      <button onClick={() => toggleFavoriteModel(model.id)} className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-colors ${isFavorite ? "text-[var(--theme-accent)] bg-[var(--theme-accent)]/10" : "text-[var(--theme-muted)] hover:text-[var(--theme-accent)] hover:bg-[var(--theme-hover-bg)]"}`} title={isFavorite ? "Remove favorite" : "Add favorite"}>
+                      <button onClick={() => toggleFavoriteModel(model.id)} className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${isFavorite ? "text-[var(--theme-accent)] bg-[var(--theme-accent)]/10" : "text-[var(--theme-muted)] hover:text-[var(--theme-accent)] hover:bg-[var(--theme-hover-bg)]"}`} title={isFavorite ? "Remove favorite" : "Add favorite"}>
                         <Sparkles size={12} />
                       </button>
                       {isSelected && <Check size={11} className="text-[var(--theme-accent)] shrink-0" strokeWidth={3} />}
@@ -634,7 +601,7 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                   </div>
                 )}
                 {!hasModelSearch && category.hiddenCount > 0 && (
-                  <div className="px-2 py-2 text-[10px] text-center text-[var(--theme-muted)] border border-dashed border-[var(--theme-border)] rounded-lg bg-[var(--theme-surface-alt)]/60">
+                  <div className="px-3 py-2 text-[10px] text-center text-[var(--theme-muted)] border border-dashed border-[var(--theme-border)]/70 rounded-xl bg-[var(--theme-surface-alt)]/45">
                     Showing {category.visibleModels.length} of {category.categoryModels.length} models. Search a model name to reveal the rest.
                   </div>
                 )}
@@ -925,18 +892,22 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
         <AnimatePresence>
           {showAskAiPanel && askAiQuestions.length > 0 && (
             <motion.div
-              initial={{ opacity: 0, height: 0, y: -10 }}
-              animate={{ opacity: 1, height: "auto", y: 0 }}
-              exit={{ opacity: 0, height: 0, y: -10 }}
-              transition={{ type: "spring", stiffness: 320, damping: 26 }}
-              className="overflow-hidden w-full border-b border-[var(--theme-border)]/45 pb-3.5 mb-3 flex flex-col gap-2.5 shrink-0"
+              initial={{ opacity: 0, y: 28, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 24, scale: 0.98 }}
+              transition={{ duration: 0.26, ease: "easeOut" }}
+              className="relative z-0 w-[92%] mx-auto mb-[-18px] shrink-0"
             >
-              <div className="flex flex-col bg-[var(--theme-surface-alt)]/35 hover:bg-[var(--theme-surface-alt)]/55 backdrop-blur-md transition-all p-4.5 rounded-2xl border border-[var(--theme-border)]/45 text-left min-h-[250px] max-h-[380px] h-auto overflow-hidden select-none mx-1 mt-1 shadow-md">
-                {/* Header: Progress & Close */}
-                <div className="flex items-center justify-between shrink-0 mb-3 font-sans">
-                  {/* Progress Dots */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 bg-[var(--theme-border)]/15 px-2 py-1 rounded-xl">
+              <div className="rounded-[26px] bg-[var(--theme-input-bg)] border border-[var(--theme-input-border)] shadow-[0_22px_60px_rgba(0,0,0,0.3)] overflow-hidden">
+                <div className="w-full px-4 py-3 flex items-center gap-3 text-left bg-transparent border-b border-[var(--theme-input-border)]/55">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold text-[var(--theme-primary)]">Question</div>
+                    <div className="text-[11px] text-[var(--theme-muted)]">
+                      Step {currentQuestionIndex + 1} of {askAiQuestions.length}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5 rounded-xl border border-[var(--theme-input-border)]/70 bg-[var(--theme-surface-alt)]/45 px-2 py-1">
                       {askAiQuestions.map((q, idx) => {
                         const isAnswered = askAiAnswers[q.id] !== undefined;
                         const isActive = idx === currentQuestionIndex;
@@ -946,9 +917,9 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                             type="button"
                             onClick={() => handleDotClick(idx)}
                             disabled={!isAnswered && idx > currentQuestionIndex}
-                            className={`w-2.5 h-2.5 rounded-full transition-all duration-350 cursor-pointer ${
+                            className={`w-2 h-2 rounded-full transition-all duration-300 cursor-pointer ${
                               isActive
-                                ? "bg-[var(--theme-accent)] scale-110 shadow-[0_0_10px_var(--theme-accent)]"
+                                ? "bg-[var(--theme-accent)] scale-110"
                                 : isAnswered
                                   ? "bg-[var(--theme-accent)]/55 hover:bg-[var(--theme-accent)]"
                                   : "bg-[var(--theme-border)] hover:bg-[var(--theme-secondary)]/30 disabled:pointer-events-none"
@@ -958,24 +929,18 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                         );
                       })}
                     </div>
-                    <span className="text-[10px] text-[var(--theme-accent)] font-mono font-bold tracking-widest uppercase bg-[var(--theme-accent)]/10 border border-[var(--theme-accent)]/20 px-2 py-0.5 rounded-full select-none">
-                      Q{currentQuestionIndex + 1}/{askAiQuestions.length}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleFinishQuestions(true)}
+                      className="h-8 w-8 rounded-xl border border-[var(--theme-input-border)]/70 text-[var(--theme-muted)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-surface-alt)]/45 transition-colors cursor-pointer flex items-center justify-center"
+                      title="Skip questions"
+                    >
+                      <X size={13} />
+                    </button>
                   </div>
-
-                  {/* Skip All Button */}
-                  <button
-                    type="button"
-                    onClick={() => handleFinishQuestions(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold tracking-tight text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] hover:bg-[var(--theme-border)]/20 border border-[var(--theme-border)]/25 rounded-xl transition-all cursor-pointer"
-                  >
-                    <X size={12} />
-                    <span>Skip Quiz</span>
-                  </button>
                 </div>
 
-                {/* Main Question Block */}
-                <div className="flex-1 flex flex-col justify-center min-h-0 py-1.5">
+                <div className="px-4 py-4 min-h-[220px] max-h-[380px] overflow-y-auto custom-scrollbar">
                   <AnimatePresence mode="wait">
                     {!isTransitioningQuestion &&
                       !isGeneratingQuestions &&
@@ -986,11 +951,11 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                           animate={{ y: 0, opacity: 1 }}
                           exit={{ y: -20, opacity: 0 }}
                           transition={{ duration: 0.2, ease: "easeInOut" }}
-                          className="flex flex-col h-full justify-between gap-3.5"
+                          className="flex flex-col gap-4"
                         >
                           {/* Question Text */}
-                          <div className="text-[14px] leading-normal tracking-tight flex flex-col gap-1 select-none font-sans">
-                            <span className="text-[var(--theme-primary)] font-semibold text-sm sm:text-base">
+                          <div className="flex flex-col gap-1.5 text-left">
+                            <span className="text-[15px] leading-6 text-[var(--theme-primary)] font-semibold">
                               {askAiQuestions[currentQuestionIndex].question}
                             </span>
                             {askAiQuestions[currentQuestionIndex].purpose && (
@@ -1005,7 +970,7 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                           </div>
 
                           {/* Question Content Types */}
-                          <div className="flex-1 flex items-center min-h-0 select-none">
+                          <div className="min-h-0 select-none">
                             {renderActiveQuestionContent()}
                           </div>
                         </motion.div>
