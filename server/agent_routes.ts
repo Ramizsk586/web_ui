@@ -888,6 +888,21 @@ export function setupAgentRoutes(app: express.Express) {
       model = req.body.modelId || '';
     }
 
+    const normalizedModel = typeof model === 'string' ? model.trim() : '';
+    const normalizedProvider = typeof provider === 'string' ? provider.trim().toLowerCase() : '';
+    if (normalizedModel && normalizedModel.toLowerCase().includes('gguf')) {
+      const suppliedBaseUrl = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+      provider = 'openai-compatible';
+      baseUrl = suppliedBaseUrl || 'http://127.0.0.1:1234/v1';
+      model = normalizedModel;
+      if (!apiKey && req.body.apiKey == null) {
+        req.body.apiKey = 'llama-server';
+      }
+      console.log('[coder-agent] Detected GGUF/local model. Forcing local openai-compatible endpoint:', baseUrl, 'model:', model);
+    } else if (normalizedProvider === 'openrouter' && typeof baseUrl === 'string' && /127\.0\.0\.1|localhost/.test(baseUrl)) {
+      provider = 'openai-compatible';
+    }
+
     const workspaceRoot = req.body.workspaceRoot || req.body.workspacePath;
     if (!task) {
       return res.status(400).json({ error: 'task is required' });

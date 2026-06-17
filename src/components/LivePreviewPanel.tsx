@@ -67,6 +67,8 @@ interface LivePreviewPanelProps {
   explorerWidth?: number;
   onInsertAttachedText?: (text: string) => void;
   showToast?: (msg: string) => void;
+  floatingEditFile?: string | null;
+  setFloatingEditFile?: (filePath: string | null) => void;
 }
 
 interface DiffLine {
@@ -146,6 +148,19 @@ const buildWorkspaceTree = (files: any[]): WorkspaceTreeNode[] => {
 
   sortNodes(root);
   return root;
+};
+
+const getDefaultPanelWidth = (
+  activeTab: string,
+  rightViewportMode: 'desktop' | 'tablet' | 'mobile'
+) => {
+  if (activeTab === 'overview') {
+    return rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440;
+  }
+  if (activeTab === 'data' && typeof window !== 'undefined') {
+    return Math.round(window.innerWidth * 0.6);
+  }
+  return 540;
 };
 
 export function parseGitDiff(diffText: string): DiffLine[] {
@@ -258,7 +273,9 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   onOpenFile,
   isCoderLeftPanelOpen,
   explorerWidth,
-  showToast
+  showToast,
+  floatingEditFile,
+  setFloatingEditFile
 }) => {
   const [gitChanges, setGitChanges] = useState<any[]>([]);
   const [fileDiffs, setFileDiffs] = useState<Record<string, string>>({});
@@ -281,9 +298,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   const [dataViewMode, setDataViewMode] = useState<'code' | 'preview'>('code');
   const [isSavingDataFile, setIsSavingDataFile] = useState(false);
 
-  const [panelWidth, setPanelWidth] = useState(() => activeTab === 'overview'
-    ? (rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440)
-    : 540);
+  const [panelWidth, setPanelWidth] = useState(() => getDefaultPanelWidth(activeTab, rightViewportMode));
   const [isResizing, setIsResizing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -329,6 +344,17 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       window.removeEventListener('pointercancel', handleResizeEnd);
     };
   }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+  useEffect(() => {
+    if (!isCoderRightPanelOpen || activeTab !== 'data') return;
+    const leftWidth = isCoderLeftPanelOpen ? (explorerWidth ?? 280) : 0;
+    const maxRightWidth = window.innerWidth - leftWidth - 550;
+    const finalRightWidth = Math.min(maxRightWidth, window.innerWidth - 280);
+    const targetWidth = Math.round(window.innerWidth * 0.6);
+    if (finalRightWidth >= 280) {
+      setPanelWidth(Math.max(280, Math.min(finalRightWidth, targetWidth)));
+    }
+  }, [activeTab, isCoderRightPanelOpen, isCoderLeftPanelOpen, explorerWidth]);
 
   const fetchGitChanges = async () => {
     setLoadingChanges(true);
@@ -511,6 +537,30 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       setDataEditorValue(fileContents[filePath] || '');
     }
   };
+
+  useEffect(() => {
+    if (!floatingEditFile || !workspaceRootPath) return;
+
+    const normalizedWorkspace = workspaceRootPath.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedFile = floatingEditFile.replace(/\\/g, '/');
+    const relativeFile = normalizedFile.startsWith(normalizedWorkspace + '/')
+      ? normalizedFile.slice(normalizedWorkspace.length + 1)
+      : normalizedFile.replace(/^\.\/+/, '').replace(/^\/+/, '');
+
+    setActiveTab('data');
+    if (!isCoderRightPanelOpen) {
+      setIsCoderRightPanelOpen(true);
+    }
+    openDataFile(relativeFile);
+    setFloatingEditFile?.(null);
+  }, [
+    floatingEditFile,
+    workspaceRootPath,
+    isCoderRightPanelOpen,
+    setActiveTab,
+    setIsCoderRightPanelOpen,
+    setFloatingEditFile
+  ]);
 
   const saveDataFile = async () => {
     if (!activeDataFile) return;
@@ -1691,7 +1741,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
               </div>
             )}
 
-            <div className="flex-1 overflow-hidden flex flex-col bg-[#070606]">
+            <div className="flex-1 overflow-hidden flex flex-col bg-[#131210]">
               {viewMode === 'rendered' ? (
                 loadingContents[activeTab] ? (
                   <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-2 p-12">
@@ -1699,7 +1749,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                     <span className="text-xs font-mono">Loading file contents...</span>
                   </div>
                 ) : fileContents[activeTab] !== undefined ? (
-                  <div className="p-6 text-left select-text markdown-body overflow-y-auto h-full text-zinc-300 font-sans space-y-4 max-w-3xl mx-auto custom-scrollbar [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-white [&_h1]:border-b [&_h1]:border-zinc-850 [&_h1]:pb-2 [&_h1]:mb-4 [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-zinc-100 [&_h2]:mt-4 [&_h2]:mb-2 [&_p]:text-sm [&_p]:text-zinc-300 [&_ul]:space-y-2.5 [&_li]:list-none [&_li]:flex [&_li]:items-start [&_li]:gap-3 [&_li]:text-sm [&_li]:text-zinc-300 [&_input[type=checkbox]]:mt-1 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:rounded [&_input[type=checkbox]]:border-zinc-750 [&_input[type=checkbox]]:bg-zinc-900 [&_input[type=checkbox]]:text-[#D97756] [&_input[type=checkbox]]:focus:ring-0 [&_input[type=checkbox]]:pointer-events-none">
+                  <div className="p-6 text-left select-text markdown-body overflow-y-auto h-full text-zinc-300 font-sans space-y-4 max-w-3xl mx-auto custom-scrollbar bg-[#131210] [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-white [&_h1]:border-b [&_h1]:border-[#2C241E] [&_h1]:pb-2 [&_h1]:mb-4 [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-zinc-100 [&_h2]:mt-4 [&_h2]:mb-2 [&_p]:text-sm [&_p]:text-zinc-300 [&_ul]:space-y-2.5 [&_li]:list-none [&_li]:flex [&_li]:items-start [&_li]:gap-3 [&_li]:text-sm [&_li]:text-zinc-300 [&_input[type=checkbox]]:mt-1 [&_input[type=checkbox]]:w-4 [&_input[type=checkbox]]:h-4 [&_input[type=checkbox]]:rounded [&_input[type=checkbox]]:border-[#355A41] [&_input[type=checkbox]]:bg-[#1B1A18] [&_input[type=checkbox]]:text-emerald-500 [&_input[type=checkbox]]:accent-emerald-500 [&_input[type=checkbox]]:focus:ring-0 [&_input[type=checkbox]]:pointer-events-none">
                     <Markdown 
                       remarkPlugins={[remarkGfm]}
                       components={{
@@ -1708,7 +1758,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
                             return (
                               <input
                                 {...props}
-                                className={`w-4 h-4 rounded border-zinc-750 bg-zinc-900 text-[#D97756] focus:ring-0 pointer-events-none ${props.className || ''}`}
+                                className={`w-4 h-4 rounded border-[#355A41] bg-[#1B1A18] text-emerald-500 accent-emerald-500 focus:ring-0 pointer-events-none ${props.className || ''}`}
                                 readOnly
                               />
                             );

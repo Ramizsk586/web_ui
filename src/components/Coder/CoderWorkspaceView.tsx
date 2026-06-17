@@ -99,9 +99,12 @@ interface CoderWorkspaceViewProps {
   handleFileAttach?: (files: File[]) => void;
   localElementAttachments: any[];
   setLocalElementAttachments: React.Dispatch<React.SetStateAction<any[]>>;
+  setSelectedModalAttachment?: (attachment: any) => void;
   coderPermissionMode: CoderPermissionMode;
   setCoderPermissionMode: (mode: CoderPermissionMode) => void;
   onExitCoderMode?: () => void;
+  floatingEditFile?: string | null;
+  setFloatingEditFile?: (filePath: string | null) => void;
 }
 
 export default function CoderWorkspaceView({
@@ -184,9 +187,12 @@ export default function CoderWorkspaceView({
   handleFileAttach,
   localElementAttachments,
   setLocalElementAttachments,
+  setSelectedModalAttachment,
   coderPermissionMode,
   setCoderPermissionMode,
-  onExitCoderMode
+  onExitCoderMode,
+  floatingEditFile,
+  setFloatingEditFile
 }: CoderWorkspaceViewProps) {
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -424,6 +430,7 @@ export default function CoderWorkspaceView({
                 handleFileAttach={handleFileAttach}
                 localElementAttachments={localElementAttachments}
                 setLocalElementAttachments={setLocalElementAttachments}
+                setSelectedModalAttachment={setSelectedModalAttachment}
                 coderPermissionMode={coderPermissionMode}
                 setCoderPermissionMode={setCoderPermissionMode}
                 showTodoPanel={showTodoPanel}
@@ -467,6 +474,8 @@ export default function CoderWorkspaceView({
           isCoderLeftPanelOpen={isCoderLeftPanelOpen}
           explorerWidth={280}
           showToast={showToast}
+          floatingEditFile={floatingEditFile}
+          setFloatingEditFile={setFloatingEditFile}
           openFileTabs={openFileTabs}
           setOpenFileTabs={setOpenFileTabs}
         />

@@ -60,6 +60,25 @@ export function useRightPanel({
         const data = await response.json();
         const analysis = data?.analysis || (data?.success && data?.found ? data : null);
         if (analysis) {
+          const normalizedConnections = (analysis.connections || analysis.linkedAssets || []).map((connection: any) => {
+            const resolvedPath = connection.filePath || connection.relativePath || connection.path || connection.name || '';
+            return {
+              ...connection,
+              filePath: resolvedPath,
+              fileName:
+                connection.fileName ||
+                connection.name ||
+                connection.relativePath?.split('/')?.pop() ||
+                connection.filePath?.split('/')?.pop() ||
+                'Connected file',
+              specificCode:
+                connection.specificCode ||
+                connection.code ||
+                connection.snippet ||
+                connection.content ||
+                '',
+            };
+          });
           const newAtt = {
             id: createAttachmentId(),
             fileName:
@@ -73,7 +92,7 @@ export function useRightPanel({
             lineNumber: analysis.lineNumber,
             lineRangeStart: analysis.lineRangeStart,
             lineRangeEnd: analysis.lineRangeEnd,
-            connections: analysis.connections || analysis.linkedAssets || [],
+            connections: normalizedConnections,
             elementWork: analysis.elementWork || analysis.elementWorkDescription || `Selected <${metadata.tag || 'element'}> from preview`
           };
           setLocalElementAttachments(prev => [...prev, newAtt]);

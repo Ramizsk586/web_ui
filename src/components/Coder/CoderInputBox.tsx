@@ -24,6 +24,7 @@ interface CoderInputBoxProps {
   handleFileAttach?: (files: File[]) => void;
   localElementAttachments?: any[];
   setLocalElementAttachments?: React.Dispatch<React.SetStateAction<any[]>>;
+  setSelectedModalAttachment?: (attachment: any) => void;
   coderPermissionMode: CoderPermissionMode;
   setCoderPermissionMode: (mode: CoderPermissionMode) => void;
   showTodoPanel?: boolean;
@@ -73,6 +74,7 @@ export function CoderInputBox({
   handleFileAttach,
   localElementAttachments = [],
   setLocalElementAttachments = () => {},
+  setSelectedModalAttachment = () => {},
   coderPermissionMode,
   setCoderPermissionMode,
   showTodoPanel = false,
@@ -299,7 +301,8 @@ export function CoderInputBox({
                   key={att.id || `${att.filePath || 'element'}-${idx}`}
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="relative flex items-center gap-2 px-2.5 py-1 rounded-xl border border-teal-500/35 bg-teal-500/10 text-teal-200 max-w-[240px] h-10 shadow-sm"
+                  onClick={() => setSelectedModalAttachment(att)}
+                  className="relative flex items-center justify-center w-10 h-10 rounded-xl border-2 border-teal-500/45 bg-teal-500/10 text-teal-200 shadow-sm hover:border-teal-400 hover:bg-teal-500/18 transition-all cursor-pointer shrink-0"
                   title={att.filePath || 'Attached inspected element'}
                 >
                   <button
@@ -314,14 +317,6 @@ export function CoderInputBox({
                   </button>
                   <div className="w-6 h-6 rounded-lg bg-teal-500/15 border border-teal-500/30 flex items-center justify-center shrink-0">
                     <MousePointerClick size={13} className="text-teal-300" />
-                  </div>
-                  <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center text-left">
-                    <div className="truncate font-semibold text-[11px] text-teal-100 leading-none">
-                      {att.fileName || att.filePath?.split('/').pop() || 'Selected element'}
-                    </div>
-                    <div className="truncate text-[10px] text-teal-300/80 font-medium leading-none mt-1">
-                      {att.elementWork || att.filePath || 'Element attached from preview'}
-                    </div>
                   </div>
                 </motion.div>
               ))}

@@ -31,7 +31,38 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     return [];
   });
 
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('lumina_current_chat_id');
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (chats.length === 0) {
+      if (currentChatId !== null) {
+        setCurrentChatId(null);
+      }
+      return;
+    }
+
+    if (currentChatId && chats.some(chat => chat.id === currentChatId)) {
+      return;
+    }
+
+    try {
+      const savedChatId = localStorage.getItem('lumina_current_chat_id');
+      if (savedChatId && chats.some(chat => chat.id === savedChatId)) {
+        setCurrentChatId(savedChatId);
+        return;
+      }
+    } catch {
+      // Ignore storage read failures and fall back to the first chat below.
+    }
+
+    setCurrentChatId(chats[0].id);
+  }, [chats, currentChatId]);
 
   useEffect(() => {
     try {

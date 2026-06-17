@@ -624,9 +624,12 @@ export default function AppContent({
       if (selectedChat) {
         const isCoder = Boolean(selectedChat.isCoderMode);
         setIsCoderMode(isCoder);
+        if (isCoder && selectedChat.workspacePath) {
+          setCoderWorkspacePath(String(selectedChat.workspacePath).replace(/\\/g, '/').trim());
+        }
       }
     }
-  }, [chats, setCurrentChatId, setIsCoderMode]);
+  }, [chats, setCurrentChatId, setIsCoderMode, setCoderWorkspacePath]);
 
 
 
@@ -726,9 +729,14 @@ export default function AppContent({
 
   const activeSources = activeSourcesMessage?.sources || [];
   const handleEditorRemovedNotice = useCallback((filePath?: string | null) => {
+    if (isCoderMode && filePath) {
+      setFloatingEditFile(filePath);
+      setIsCoderRightPanelOpen(true);
+      return;
+    }
     const fileName = String(filePath || '').replace(/\\/g, '/').split('/').filter(Boolean).slice(-1)[0] || 'file';
     showToast(`Built-in editor removed. Use your external editor for "${fileName}".`);
-  }, [showToast]);
+  }, [isCoderMode, setFloatingEditFile, setIsCoderRightPanelOpen, showToast]);
 
   // Pre-compiled regex patterns for model name cleaning (performance optimization)
   const MODEL_NAME_PATTERNS = useMemo(() => [
@@ -2580,8 +2588,11 @@ const startCoderPreview = useCallback(async () => {
             handleFileAttach={handleFileAttach}
             localElementAttachments={localElementAttachments}
             setLocalElementAttachments={setLocalElementAttachments}
+            setSelectedModalAttachment={setSelectedModalAttachment}
             coderPermissionMode={coderPermissionMode}
             setCoderPermissionMode={setCoderPermissionMode}
+            floatingEditFile={workspace.floatingEditFile}
+            setFloatingEditFile={setFloatingEditFile}
             onExitCoderMode={() => {
               setIsCoderMode(false);
               createNewChat(null, false);

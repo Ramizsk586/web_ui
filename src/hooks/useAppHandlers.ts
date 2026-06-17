@@ -1784,7 +1784,9 @@ ${JSON.stringify(parsed.memories, null, 2)}`
       return chunk;
     };
 
+    let resolveTypingPromise: (() => void) | null = null;
     const runPromise = new Promise<void>((resolve) => {
+      resolveTypingPromise = resolve;
       typingInterval = setInterval(() => {
         let contentChanged = false;
         let thinkContentChanged = false;
@@ -1843,7 +1845,23 @@ ${JSON.stringify(parsed.memories, null, 2)}`
     });
 
     const abortHandler = () => {
+      isDone = true;
       clearInterval(typingInterval);
+      setChats(prev => prev.map(chat => {
+        if (chat.id !== chatId) return chat;
+        return {
+          ...chat,
+          messages: chat.messages.map(m => m.id === thinkingId ? {
+            ...m,
+            content: displayedContent || targetContent || m.content,
+            isThinking: false,
+            isStreaming: false,
+            thinking: undefined,
+            timestamp: new Date()
+          } : m)
+        };
+      }));
+      resolveTypingPromise?.();
     };
     if (signal) {
       signal.addEventListener('abort', abortHandler);

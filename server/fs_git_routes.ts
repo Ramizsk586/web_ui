@@ -826,6 +826,116 @@ if (btn) {
       );
     };
 
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const getSnippetWindow = (content: string, startLine: number, endLine: number, padding = 18) => {
+      const lines = content.split(/\r?\n/);
+      const safeStart = Math.max(1, startLine - padding);
+      const safeEnd = Math.min(lines.length, endLine + padding);
+      return {
+        snippet: lines.slice(safeStart - 1, safeEnd).join('\n'),
+        lineRangeStart: safeStart,
+        lineRangeEnd: safeEnd
+      };
+    };
+
+    const buildRelatedAssetConnection = (assetPath: string, kind: 'script' | 'style') => {
+      try {
+        const assetContent = fs.readFileSync(assetPath, 'utf8');
+        if (!assetContent || assetContent.length > 800 * 1024) return null;
+
+        const relPath = path.relative(previewRoot, assetPath).replace(/\\/g, '/');
+        const lines = assetContent.split(/\r?\n/);
+        const classTokens = String(classes || '').split(/\s+/).filter(Boolean).slice(0, 8);
+        const idTokens = id ? [String(id)] : [];
+        const attrTokens = Object.entries(dataAttributes as Record<string, string>)
+          .map(([name, value]) => `${name}="${value}"`)
+          .slice(0, 8);
+        const textTokens = [normalizeText(text), normalizeText(ariaLabel), normalizeText(title)]
+          .filter(Boolean)
+          .filter(token => token.length >= 3 && token.length < 80)
+          .slice(0, 6);
+
+        let bestMatch:
+          | {
+              score: number;
+              lineNumber: number;
+              lineRangeStart: number;
+              lineRangeEnd: number;
+              specificCode: string;
+            }
+          | null = null;
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const lower = line.toLowerCase();
+          let score = 0;
+
+          for (const cls of classTokens) {
+            if (lower.includes(`.${cls.toLowerCase()}`)) score += kind === 'style' ? 180 : 40;
+            if (lower.includes(`"${cls.toLowerCase()}"`) || lower.includes(`'${cls.toLowerCase()}'`)) score += kind === 'script' ? 140 : 20;
+          }
+          for (const token of idTokens) {
+            if (lower.includes(`#${token.toLowerCase()}`)) score += kind === 'style' ? 220 : 30;
+            if (lower.includes(`"${token.toLowerCase()}"`) || lower.includes(`'${token.toLowerCase()}'`)) score += kind === 'script' ? 170 : 25;
+          }
+          for (const token of attrTokens) {
+            if (lower.includes(token.toLowerCase())) score += 120;
+          }
+          for (const token of textTokens) {
+            if (lower.includes(token.toLowerCase())) score += 45;
+          }
+
+          if (kind === 'script') {
+            if (tag && lower.includes(`queryselector`) && classTokens.some(cls => lower.includes(cls.toLowerCase()))) score += 150;
+            if (tag && lower.includes(`getelementbyid`) && idTokens.some(token => lower.includes(token.toLowerCase()))) score += 190;
+            if (selectorPath && lower.includes('queryselector') && lower.includes(tag.toLowerCase())) score += 60;
+          }
+
+          if (score <= 0) continue;
+
+          const startLine = i + 1;
+          const endLine = Math.min(lines.length, startLine + (kind === 'script' ? 10 : 14));
+          const snippetWindow = getSnippetWindow(assetContent, startLine, endLine, kind === 'script' ? 8 : 10);
+          const candidate = {
+            score,
+            lineNumber: startLine,
+            lineRangeStart: snippetWindow.lineRangeStart,
+            lineRangeEnd: snippetWindow.lineRangeEnd,
+            specificCode: snippetWindow.snippet
+          };
+
+          if (!bestMatch || candidate.score > bestMatch.score) {
+            bestMatch = candidate;
+          }
+        }
+
+        if (!bestMatch) {
+          const fallbackWindow = getSnippetWindow(assetContent, 1, Math.min(lines.length, 24), 0);
+          bestMatch = {
+            score: 1,
+            lineNumber: 1,
+            lineRangeStart: fallbackWindow.lineRangeStart,
+            lineRangeEnd: fallbackWindow.lineRangeEnd,
+            specificCode: fallbackWindow.snippet
+          };
+        }
+
+        return {
+          fileName: path.basename(assetPath),
+          filePath: assetPath.replace(/\\/g, '/'),
+          relativePath: relPath,
+          kind,
+          lineNumber: bestMatch.lineNumber,
+          lineRangeStart: bestMatch.lineRangeStart,
+          lineRangeEnd: bestMatch.lineRangeEnd,
+          specificCode: bestMatch.specificCode
+        };
+      } catch {
+        return null;
+      }
+    };
+
     const runtimeHintTerms = (() => {
       const values = [
         tag,
@@ -981,6 +1091,9 @@ if (btn) {
         const linkedAssets = bestFileMatch.name.endsWith('.html')
           ? extractStaticLinkedAssets(fullContent)
           : [];
+        const relatedConnections = linkedAssets
+          .map((asset) => buildRelatedAssetConnection(asset.path, asset.kind))
+          .filter(Boolean);
 
         const elementWorkDescription = buildElementWork();
 
@@ -996,6 +1109,7 @@ if (btn) {
           surroundingSnippet,
           matchScore: maxTotalScore,
           elementWorkDescription,
+          connections: relatedConnections,
           linkedAssets: linkedAssets.map(asset => ({
             filePath: asset.path.replace(/\\/g, '/'),
             relativePath: path.relative(previewRoot, asset.path).replace(/\\/g, '/'),

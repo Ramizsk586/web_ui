@@ -57,6 +57,13 @@ export interface CoderAgentConfig {
   thinkingLevel?: ThinkingLevel;
 }
 
+interface ResolvedProviderTarget {
+  provider: string;
+  endpoint: string;
+  apiKey: string;
+  modelId: string;
+}
+
 interface RunningRequest {
   controller: AbortController;
   reader: ReadableStreamDefaultReader<Uint8Array>;
@@ -86,7 +93,43 @@ declare module './coderAgentService' {
 /**
  * Resolve the correct provider profile for a given model ID from localStorage.
  */
-function resolveProviderForModel(modelId: string, fallbackProvider?: string, fallbackEndpoint?: string, fallbackApiKey?: string) {
+function resolveLocalLlamaTarget(modelId: string): ResolvedProviderTarget | null {
+  const lowerModelId = String(modelId || '').toLowerCase();
+  const useLocalModelsOnly = localStorage.getItem('lumina_use_local_models_only') === 'true';
+  const isLocalModel = useLocalModelsOnly || lowerModelId.includes('gguf');
+
+  if (!isLocalModel) {
+    return null;
+  }
+
+  let endpoint = localStorage.getItem('lumina_llama_url') || 'http://127.0.0.1:1234/v1';
+
+  try {
+    const stored = localStorage.getItem(`lumina_model_settings_${modelId}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      const localHost = parsed?.localHost || '127.0.0.1';
+      const localPort = parsed?.localPort || 1234;
+      endpoint = `http://${localHost}:${localPort}/v1`;
+    }
+  } catch (e) {
+    console.warn('[CoderAgent Service] Failed to parse local llama model settings:', e);
+  }
+
+  return {
+    provider: 'openai-compatible',
+    endpoint,
+    apiKey: 'llama-server',
+    modelId,
+  };
+}
+
+function resolveProviderForModel(modelId: string, fallbackProvider?: string, fallbackEndpoint?: string, fallbackApiKey?: string): ResolvedProviderTarget {
+  const localTarget = resolveLocalLlamaTarget(modelId);
+  if (localTarget) {
+    return localTarget;
+  }
+
   try {
     const profilesRaw = localStorage.getItem('lumina_ai_provider_profiles');
     if (profilesRaw) {
@@ -254,7 +297,7 @@ export async function runCoderAgent(
   if (signal) {
     signal.addEventListener('abort', () => {
       controller.abort();
-    });
+    }, { once: true });
   }
 
   try {
@@ -283,6 +326,9 @@ export async function runCoderAgent(
     let buffer = '';
 
     while (true) {
+      if (controller.signal.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
       const { done, value } = await reader.read();
       
       if (done) {
@@ -295,6 +341,9 @@ export async function runCoderAgent(
       buffer = lines.pop() || '';
 
       for (const line of lines) {
+        if (controller.signal.aborted) {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
         if (!line.trim()) continue;
         
         let parsedLine = line;
