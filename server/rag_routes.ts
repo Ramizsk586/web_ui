@@ -1,9 +1,7 @@
 import express from 'express';
 import mammoth from 'mammoth';
-import { createRequire } from 'module';
 import { RagBackendService } from '../src/services/ragBackendService.js';
 
-const require = createRequire(import.meta.url);
 // @ts-ignore
 const pdf = require('pdf-parse');
 

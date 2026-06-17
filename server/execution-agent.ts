@@ -6,8 +6,8 @@ import { getConvexClient } from "./convex-client.js";
 import { api } from "../convex/_generated/api.js";
 import { deliverToTelegram } from "./telegram-delivery.js";
 import { broadcast } from "./broadcast.js";
-import { query, createSdkMcpServer, tool, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 export interface ExecutionAgentOptions {
   agentId: string;
@@ -61,6 +61,32 @@ Your role:
 
 const BLOCKED_COMMANDS = ["rm ", "rmdir", "git push", "git reset", "del ", "curl -x", "wget "];
 
+type ClaudeAgentSdk = {
+  query: typeof import("@anthropic-ai/claude-agent-sdk").query;
+  createSdkMcpServer: typeof import("@anthropic-ai/claude-agent-sdk").createSdkMcpServer;
+  tool: typeof import("@anthropic-ai/claude-agent-sdk").tool;
+};
+
+let claudeAgentSdkPromise: Promise<ClaudeAgentSdk> | null = null;
+
+async function loadClaudeAgentSdk(): Promise<ClaudeAgentSdk> {
+  if (!claudeAgentSdkPromise) {
+    claudeAgentSdkPromise = import("@anthropic-ai/claude-agent-sdk")
+      .then((mod) => ({
+        query: mod.query,
+        createSdkMcpServer: mod.createSdkMcpServer,
+        tool: mod.tool,
+      }))
+      .catch((error: any) => {
+        claudeAgentSdkPromise = null;
+        throw new Error(
+          `Execution agent dependencies are unavailable in this build: ${error?.message || String(error)}`
+        );
+      });
+  }
+  return claudeAgentSdkPromise;
+}
+
 function safeRead(filePath: string): string {
   const resolved = path.resolve(process.cwd(), filePath);
   if (!fs.existsSync(resolved)) {
@@ -75,7 +101,8 @@ function mcpText(text: string) {
   };
 }
 
-export function createLuminaCoreMcp() {
+export async function createLuminaCoreMcp() {
+  const { createSdkMcpServer, tool } = await loadClaudeAgentSdk();
   return createSdkMcpServer({
     name: "lumina-core-tools",
     version: "0.1.0",
@@ -266,7 +293,7 @@ export async function runExecutionAgent(opts: ExecutionAgentOptions): Promise<st
   });
 
   const mcpServers: Record<string, any> = {
-    "lumina-core-tools": createLuminaCoreMcp(),
+    "lumina-core-tools": await createLuminaCoreMcp(),
   };
 
   const allowedTools = [
@@ -279,6 +306,7 @@ export async function runExecutionAgent(opts: ExecutionAgentOptions): Promise<st
   let finalResult = "";
 
   try {
+    const { query } = await loadClaudeAgentSdk();
     for await (const msg of query({
       prompt: opts.task,
       options: {

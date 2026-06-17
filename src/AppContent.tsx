@@ -107,7 +107,7 @@ import { LocalModelConfigModal } from './components/LocalModelConfigModal';
 
 import { Canvas } from './components/Canvas/Canvas';
 
-import { invokeTauri, isTauriDesktop, listenTauriEvent, safeConfirm } from './utils/tauriDesktop';
+import { getCurrentTauriWindow, invokeTauri, isTauriDesktop, listenTauriEvent, safeConfirm } from './utils/tauriDesktop';
 import { OnboardingModal } from './components/OnboardingModal';
 import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
 import { SettingsModal } from './components/SettingsModal';
@@ -1631,8 +1631,13 @@ const startCoderPreview = useCallback(async () => {
     if (!isDesktopShell) return;
 
     let unlisten: (() => void) | undefined;
+    const tauriWindow = getCurrentTauriWindow();
 
-    invokeTauri<boolean>('is_window_maximized')
+    const maximizedPromise = tauriWindow?.isMaximized
+      ? tauriWindow.isMaximized()
+      : invokeTauri<boolean>('is_window_maximized');
+
+    maximizedPromise
       .then((maximized) => setIsMaximized(Boolean(maximized)))
       .catch(() => {});
 
@@ -1682,15 +1687,52 @@ const startCoderPreview = useCallback(async () => {
   const handleDesktopWindowAction = useCallback(async (action: 'close_window' | 'minimize_window' | 'maximize_window') => {
     if (!isDesktopShell) return;
     try {
-      await invokeTauri(action);
+      const tauriWindow = getCurrentTauriWindow();
+      if (tauriWindow) {
+        if (action === 'close_window' && tauriWindow.close) {
+          await tauriWindow.close();
+        } else if (action === 'minimize_window' && tauriWindow.minimize) {
+          await tauriWindow.minimize();
+        } else if (action === 'maximize_window') {
+          const maximized = tauriWindow.isMaximized ? await tauriWindow.isMaximized() : false;
+          if (maximized && tauriWindow.unmaximize) {
+            await tauriWindow.unmaximize();
+          } else if (tauriWindow.maximize) {
+            await tauriWindow.maximize();
+          }
+        } else {
+          await invokeTauri(action);
+        }
+      } else {
+        await invokeTauri(action);
+      }
+
       if (action === 'maximize_window') {
-        const maximized = await invokeTauri<boolean>('is_window_maximized');
+        const maximized = tauriWindow?.isMaximized
+          ? await tauriWindow.isMaximized()
+          : await invokeTauri<boolean>('is_window_maximized');
         setIsMaximized(Boolean(maximized));
       }
     } catch (error) {
       console.error(`Desktop action failed: ${action}`, error);
     }
   }, [isDesktopShell]);
+
+  const stopDesktopDragPropagation = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  }, []);
+
+  const stopDesktopPointerPropagation = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  }, []);
+
+  const handleDesktopWindowButton = useCallback(async (
+    event: React.MouseEvent<HTMLButtonElement>,
+    action: 'close_window' | 'minimize_window' | 'maximize_window'
+  ) => {
+    event.stopPropagation();
+    await handleDesktopWindowAction(action);
+  }, [handleDesktopWindowAction]);
 
   const handleDesktopContextAction = useCallback(async (
     action: 'zoom_in' | 'zoom_out' | 'zoom_reset' | 'inspect' | 'reload' | 'copy' | 'paste' | 'cut'
@@ -2029,30 +2071,45 @@ const startCoderPreview = useCallback(async () => {
     <div className="flex flex-col h-screen w-full bg-[var(--theme-bg)] text-[var(--theme-primary)] overflow-hidden relative">
 
       {isDesktopShell && (
-        <div className="h-9 shrink-0 flex items-center px-4 relative z-50" style={{ WebkitAppRegion: 'drag' } as any}>
-          <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as any}>
+        <div className="h-9 shrink-0 flex items-center px-4 relative z-50" data-tauri-drag-region>
+          <div
+            className="flex items-center gap-2 pointer-events-auto select-none"
+            style={{ pointerEvents: 'auto' } as any}
+          >
             <button
-              onClick={() => handleDesktopWindowAction('close_window')}
+              type="button"
+              onMouseDown={stopDesktopDragPropagation}
+              onPointerDown={stopDesktopPointerPropagation}
+              onClick={(event) => void handleDesktopWindowButton(event, 'close_window')}
               className="w-3 h-3 rounded-full bg-red-500 hover:brightness-110 transition-all flex items-center justify-center group"
               title="Close"
+              style={{ pointerEvents: 'auto' } as any}
             >
               <svg width="8" height="8" viewBox="0 0 8 8" className="opacity-0 group-hover:opacity-100 transition-opacity">
                 <path d="M1.5 1.5L6.5 6.5M6.5 1.5L1.5 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="text-red-900" />
               </svg>
             </button>
             <button
-              onClick={() => handleDesktopWindowAction('minimize_window')}
+              type="button"
+              onMouseDown={stopDesktopDragPropagation}
+              onPointerDown={stopDesktopPointerPropagation}
+              onClick={(event) => void handleDesktopWindowButton(event, 'minimize_window')}
               className="w-3 h-3 rounded-full bg-yellow-500 hover:brightness-110 transition-all flex items-center justify-center group"
               title="Minimize"
+              style={{ pointerEvents: 'auto' } as any}
             >
               <svg width="8" height="8" viewBox="0 0 8 8" className="opacity-0 group-hover:opacity-100 transition-opacity">
                 <line x1="2" y1="4" x2="6" y2="4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="text-yellow-900" />
               </svg>
             </button>
             <button
-              onClick={() => handleDesktopWindowAction('maximize_window')}
+              type="button"
+              onMouseDown={stopDesktopDragPropagation}
+              onPointerDown={stopDesktopPointerPropagation}
+              onClick={(event) => void handleDesktopWindowButton(event, 'maximize_window')}
               className="w-3 h-3 rounded-full bg-green-500 hover:brightness-110 transition-all flex items-center justify-center group"
               title={isMaximized ? 'Restore' : 'Maximize'}
+              style={{ pointerEvents: 'auto' } as any}
             >
               {isMaximized ? (
                 <svg width="7" height="7" viewBox="0 1 8 8" className="opacity-0 group-hover:opacity-100 transition-opacity">

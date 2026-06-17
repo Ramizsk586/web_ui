@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{
@@ -19,25 +19,29 @@ html,body{width:100%;height:100%;background:#09090b;overflow:hidden;display:flex
 @keyframes spin{to{transform:rotate(360deg)}}
 .title{color:#fafafa;font-size:20px;font-weight:600;margin-bottom:4px;letter-spacing:.2px}
 #status{color:#52525b;font-size:12px;min-height:18px;transition:color .2s}
+.logbox{margin-top:20px;width:min(620px,calc(100vw - 44px));height:230px;padding:14px 14px 12px;border-radius:16px;background:linear-gradient(180deg,rgba(24,24,27,0.96),rgba(15,15,18,0.94));border:1px solid rgba(96,165,250,0.14);box-shadow:0 18px 50px rgba(0,0,0,0.28),inset 0 1px 0 rgba(255,255,255,0.04);overflow:hidden;display:flex;flex-direction:column}
+.logheader{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.loglabel{color:#7c8aa5;font-size:10px;font-weight:700;letter-spacing:.24em;text-transform:uppercase}
+.loghint{color:#525f7a;font-size:10px}
+#logs{flex:1;overflow:auto;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);color:#c7d2e4;font-size:11.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;user-select:text;cursor:text}
+#logs::-webkit-scrollbar{width:10px}
+#logs::-webkit-scrollbar-track{background:transparent}
+#logs::-webkit-scrollbar-thumb{background:linear-gradient(180deg,rgba(96,165,250,0.55),rgba(139,92,246,0.5));border-radius:999px;border:2px solid rgba(15,15,18,0.9)}
+#logs::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,rgba(96,165,250,0.78),rgba(139,92,246,0.72))}
+#logs{scrollbar-color:rgba(96,165,250,0.65) rgba(0,0,0,0);scrollbar-width:thin}
 </style></head><body>
 <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" width="28" height="28"><path d="M12 2L2 7v10c0 5.55 3.84 9.74 9 11 5.16-1.26 9-5.45 9-11V7l-10-5z"/><path d="M12 8v4l3 3" stroke-width="1.8"/></svg></div>
 <div class="spinner"></div>
 <div class="title">Lumina</div>
 <div id="status">Starting server...</div>
+<div class="logbox">
+  <div class="logheader">
+    <div class="loglabel">Server Logs</div>
+    <div class="loghint">Selectable and copyable</div>
+  </div>
+  <div id="logs">Waiting for hidden server logs...</div>
+</div>
 </body></html>"#;
-
-fn resolve_loading_template_path() -> Option<PathBuf> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let candidates = [
-        manifest_dir.join("..").join("loading.html"),
-        PathBuf::from("loading.html"),
-        exe_dir.join("loading.html"),
-        exe_dir.join("_up_").join("loading.html"),
-    ];
-
-    candidates.into_iter().find(|path| Path::new(path).exists())
-}
 
 // ── Managed state ──────────────────────────────────────────────────────
 struct ServerProcess(Mutex<Option<Child>>);
@@ -246,6 +250,11 @@ fn displayable_windows_path(cwd: &Path) -> String {
 }
 
 #[cfg(target_os = "windows")]
+fn normalized_windows_path_buf(path: &Path) -> PathBuf {
+    PathBuf::from(displayable_windows_path(path))
+}
+
+#[cfg(target_os = "windows")]
 fn try_spawn_windows_terminal(cwd: &Path) -> Result<(), String> {
     // Use `cmd /c start` to launch Windows Terminal as a fully detached process.
     // This avoids inheriting the parent's console (e.g. VS Code integrated terminal).
@@ -315,34 +324,113 @@ fn open_native_terminal(cwd: Option<String>) -> Result<(), String> {
 // ── Server management ──────────────────────────────────────────────────
 
 fn start_server_process_with_error(app: &tauri::AppHandle) -> Result<Child, String> {
-    let mut candidates = Vec::new();
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|err| format!("Failed to resolve app resource directory: {err}"))?;
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()));
 
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        candidates.push(resource_dir.join("dist").join("server.mjs"));
-        candidates.push(resource_dir.join("server.mjs"));
+    let mut server_candidates = vec![
+        resource_dir.join("dist").join("server.cjs"),
+        resource_dir.join("server.cjs"),
+        resource_dir.join("dist").join("server.mjs"),
+        resource_dir.join("server.mjs"),
+        resource_dir.join("_up_").join("dist").join("server.cjs"),
+        resource_dir.join("_up_").join("server.cjs"),
+        resource_dir.join("_up_").join("dist").join("server.mjs"),
+        resource_dir.join("_up_").join("server.mjs"),
+    ];
+    if let Some(ref exe_dir) = exe_dir {
+        server_candidates.extend([
+            exe_dir.join("dist").join("server.cjs"),
+            exe_dir.join("server.cjs"),
+            exe_dir.join("dist").join("server.mjs"),
+            exe_dir.join("server.mjs"),
+            exe_dir.join("_up_").join("dist").join("server.cjs"),
+            exe_dir.join("_up_").join("server.cjs"),
+            exe_dir.join("_up_").join("dist").join("server.mjs"),
+            exe_dir.join("_up_").join("server.mjs"),
+            exe_dir.join("resources").join("dist").join("server.cjs"),
+            exe_dir.join("resources").join("dist").join("server.mjs"),
+        ]);
     }
-
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            candidates.push(exe_dir.join("dist").join("server.mjs"));
-            candidates.push(exe_dir.join("server.mjs"));
-            candidates.push(exe_dir.join("_up_").join("dist").join("server.mjs"));
-            candidates.push(exe_dir.join("_up_").join("server.mjs"));
-        }
-    }
-
-    candidates.push(PathBuf::from("dist").join("server.mjs"));
-    candidates.push(PathBuf::from("server.mjs"));
-
-    let server_path = candidates
+    let server_path = server_candidates
         .into_iter()
         .find(|path| path.exists())
-        .ok_or_else(|| "Bundled server file was not found in the installed app.".to_string())?;
+        .ok_or_else(|| "Bundled server file was not found in the installed app resources.".to_string())?;
 
-    Command::new("node")
+    let mut node_candidates = vec![
+        resource_dir.join("runtime").join("node.exe"),
+        resource_dir.join("node.exe"),
+        resource_dir.join("_up_").join("resources").join("runtime").join("node.exe"),
+        resource_dir.join("_up_").join("runtime").join("node.exe"),
+    ];
+    if let Some(ref exe_dir) = exe_dir {
+        node_candidates.extend([
+            exe_dir.join("resources").join("runtime").join("node.exe"),
+            exe_dir.join("runtime").join("node.exe"),
+            exe_dir.join("_up_").join("resources").join("runtime").join("node.exe"),
+            exe_dir.join("_up_").join("runtime").join("node.exe"),
+        ]);
+    }
+    let node_path = node_candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| "Bundled Node runtime was not found in the installed app resources.".to_string())?;
+
+    let server_workdir = server_path
+        .parent()
+        .and_then(|parent| parent.parent())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resource_dir.clone());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let node_path = normalized_windows_path_buf(&node_path);
+        let server_path = normalized_windows_path_buf(&server_path);
+        let server_workdir = normalized_windows_path_buf(&server_workdir);
+
+        let log_dir = app
+            .path()
+            .app_log_dir()
+            .or_else(|_| app.path().app_data_dir())
+            .unwrap_or_else(|_| server_workdir.clone());
+        let _ = std::fs::create_dir_all(&log_dir);
+        let stdout_log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("lumina-server.stdout.log"))
+            .map_err(|err| format!("Failed to open server stdout log: {err}"))?;
+        let stderr_log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("lumina-server.stderr.log"))
+            .map_err(|err| format!("Failed to open server stderr log: {err}"))?;
+
+        return Command::new(node_path)
+            .arg(&server_path)
+            .env("PORT", "3000")
+            .env("NODE_ENV", "production")
+            .current_dir(&server_workdir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout_log))
+            .stderr(Stdio::from(stderr_log))
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|err| err.to_string());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    Command::new(node_path)
         .arg(&server_path)
         .env("PORT", "3000")
         .env("NODE_ENV", "production")
+        .current_dir(server_workdir)
         .spawn()
         .map_err(|err| err.to_string())
 }
@@ -362,25 +450,34 @@ fn wait_for_server(timeout_secs: u64) -> bool {
     false
 }
 
-fn write_loading_page() -> Option<PathBuf> {
-    let temp_dir = std::env::temp_dir().join("lumina-tauri");
-    std::fs::create_dir_all(&temp_dir).ok()?;
-    let path = temp_dir.join("loading.html");
-    let loading_html = resolve_loading_template_path()
-        .and_then(|source| std::fs::read_to_string(source).ok())
-        .unwrap_or_else(|| LOADING_HTML.to_string());
-    std::fs::write(&path, loading_html).ok()?;
-    Some(path)
+fn server_log_dir(app: &tauri::AppHandle, fallback: &PathBuf) -> PathBuf {
+    app.path()
+        .app_log_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_else(|_| fallback.clone())
+}
+
+fn read_tail(path: &PathBuf, max_lines: usize) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    let tail = lines[start..].join("\n").trim().to_string();
+    if tail.is_empty() { None } else { Some(tail) }
+}
+
+fn latest_server_log_snippet(app: &tauri::AppHandle, fallback: &PathBuf) -> Option<String> {
+    let log_dir = server_log_dir(app, fallback);
+    let stderr_path = log_dir.join("lumina-server.stderr.log");
+    let stdout_path = log_dir.join("lumina-server.stdout.log");
+
+    read_tail(&stderr_path, 10)
+        .or_else(|| read_tail(&stdout_path, 10))
 }
 
 fn navigate_to_loading(window: &tauri::WebviewWindow) {
-    if let Some(loading_path) = write_loading_page() {
-        let url = format!(
-            "file:///{}",
-            loading_path.display().to_string().replace('\\', "/")
-        );
-        let _ = window.navigate(url.parse().unwrap());
-    }
+    let encoded = urlencoding::encode(LOADING_HTML);
+    let url = format!("data:text/html;charset=utf-8,{}", encoded);
+    let _ = window.navigate(url.parse().unwrap());
 }
 
 fn update_loading_status(window: &tauri::WebviewWindow, status: &str, is_error: bool) {
@@ -393,6 +490,19 @@ fn update_loading_status(window: &tauri::WebviewWindow, status: &str, is_error: 
     let script = format!(
         "(() => {{ const el = document.getElementById('status'); if (el) {{ el.textContent = '{}'; el.style.color = '{}'; }} }})()",
         escaped, color
+    );
+    let _ = window.eval(&script);
+}
+
+fn update_loading_logs(window: &tauri::WebviewWindow, logs: &str) {
+    let escaped = logs
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "");
+    let script = format!(
+        "(() => {{ const el = document.getElementById('logs'); if (el) {{ el.textContent = '{}'; }} }})()",
+        escaped
     );
     let _ = window.eval(&script);
 }
@@ -475,6 +585,11 @@ pub fn run() {
             let handle = app.handle().clone();
 
             tauri::async_runtime::spawn(async move {
+                let log_fallback_dir = handle
+                    .path()
+                    .app_data_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."));
+
                 if cfg!(not(debug_assertions)) {
                     if let Some(window) = handle.get_webview_window("main") {
                         update_loading_status(&window, "Starting bundled server...", false);
@@ -501,6 +616,18 @@ pub fn run() {
                     update_loading_status(&window, "Waiting for server on http://localhost:3000...", false);
                 }
 
+                let log_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    for _ in 0..120 {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        if let Some(window) = log_handle.get_webview_window("main") {
+                            if let Some(logs) = latest_server_log_snippet(&log_handle, &log_fallback_dir) {
+                                update_loading_logs(&window, &logs);
+                            }
+                        }
+                    }
+                });
+
                 let ready = tokio::task::spawn_blocking(|| wait_for_server(60)).await;
 
                 if let Ok(true) = ready {
@@ -510,7 +637,7 @@ pub fn run() {
                 } else if let Some(window) = handle.get_webview_window("main") {
                     update_loading_status(
                         &window,
-                        "Server did not respond on port 3000. Check whether Node.js is installed and restart the app.",
+                        "Server did not respond on port 3000. Restart Lumina or reinstall the app if this keeps happening.",
                         true,
                     );
                 }

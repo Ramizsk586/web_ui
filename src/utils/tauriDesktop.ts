@@ -1,5 +1,13 @@
 type TauriEventUnlisten = () => void;
 
+type TauriWindowApi = {
+  minimize?: () => Promise<void>;
+  maximize?: () => Promise<void>;
+  unmaximize?: () => Promise<void>;
+  close?: () => Promise<void>;
+  isMaximized?: () => Promise<boolean>;
+};
+
 declare global {
   interface Window {
     __TAURI__?: {
@@ -11,6 +19,9 @@ declare global {
           event: string,
           handler: (payload: { payload: T }) => void
         ) => Promise<TauriEventUnlisten>;
+      };
+      window?: {
+        getCurrentWindow?: () => TauriWindowApi;
       };
     };
     __TAURI_INTERNALS__?: {
@@ -45,6 +56,10 @@ export const listenTauriEvent = async <T = unknown>(
     return () => {};
   }
   return listen<T>(eventName, (event) => handler(event.payload));
+};
+
+export const getCurrentTauriWindow = (): TauriWindowApi | null => {
+  return window.__TAURI__?.window?.getCurrentWindow?.() || null;
 };
 
 export const safeConfirm = (message: string): boolean => {

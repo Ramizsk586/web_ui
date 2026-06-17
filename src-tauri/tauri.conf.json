@@ -37,7 +37,8 @@
     ],
     "targets": "all",
     "resources": [
-      "../dist/server.mjs"
+      "../dist",
+      "resources/runtime/node.exe"
     ]
   }
 }

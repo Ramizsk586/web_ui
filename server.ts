@@ -26,8 +26,6 @@ import { startTelegram } from "./server/telegram.js";
 dotenv.config();
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local"), override: true });
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const isDev = process.env.NODE_ENV !== "production";
 const PORT = Number(process.env.PORT ?? 3000);
 

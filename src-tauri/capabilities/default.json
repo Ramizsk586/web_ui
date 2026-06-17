@@ -2,14 +2,21 @@
   "identifier": "default",
   "description": "Default capabilities for Lumina AI Chat",
   "windows": ["main"],
+  "local": true,
+  "remote": {
+    "urls": ["http://localhost:3000", "http://localhost:3000/*"]
+  },
   "permissions": [
     "core:default",
     "dialog:default",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:default",
     "shell:default",
     "shell:allow-open",
+    "core:webview:allow-internal-toggle-devtools",
     "core:window:default",
     "core:window:allow-close",
     "core:window:allow-minimize",

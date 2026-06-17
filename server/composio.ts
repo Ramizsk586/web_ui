@@ -1,6 +1,3 @@
-import { Composio } from "@composio/core";
-import { ClaudeAgentSDKProvider } from "@composio/claude-agent-sdk";
-
 export type ToolkitAuthMode = "managed" | "byo";
 
 export interface CuratedToolkit {
@@ -34,8 +31,35 @@ export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
 ];
 
-let singleton: Composio<ClaudeAgentSDKProvider> | null = null;
+type ComposioInstance = any;
+type ComposioSdk = {
+  Composio: new (args: { apiKey: string; provider: any }) => ComposioInstance;
+  ClaudeAgentSDKProvider: new () => any;
+};
+
+let singleton: ComposioInstance | null = null;
 let overrideApiKey: string | null = null;
+let composioSdkPromise: Promise<ComposioSdk> | null = null;
+
+async function loadComposioSdk(): Promise<ComposioSdk> {
+  if (!composioSdkPromise) {
+    composioSdkPromise = Promise.all([
+      import("@composio/core"),
+      import("@composio/claude-agent-sdk"),
+    ])
+      .then(([core, provider]) => ({
+        Composio: core.Composio,
+        ClaudeAgentSDKProvider: provider.ClaudeAgentSDKProvider,
+      }))
+      .catch((error: any) => {
+        composioSdkPromise = null;
+        throw new Error(
+          `Composio dependencies are unavailable in this build: ${error?.message || String(error)}`
+        );
+      });
+  }
+  return composioSdkPromise;
+}
 
 export function setApiKey(key: string): void {
   overrideApiKey = key;
@@ -58,16 +82,21 @@ export function getSafeKeyLog(key: string): string {
   return `${trimmed.substring(0, 4)}...${trimmed.substring(trimmed.length - 4)} (length: ${trimmed.length})`;
 }
 
-export function getComposio(): Composio<ClaudeAgentSDKProvider> | null {
+async function getOrCreateComposio(): Promise<ComposioInstance | null> {
   if (singleton) return singleton;
   const raw = overrideApiKey || process.env.COMPOSIO_API_KEY;
   if (!raw) return null;
   const apiKey = cleanApiKey(raw);
   if (!apiKey) return null;
-  singleton = new Composio<ClaudeAgentSDKProvider>({
+  const { Composio, ClaudeAgentSDKProvider } = await loadComposioSdk();
+  singleton = new Composio({
     apiKey,
     provider: new ClaudeAgentSDKProvider(),
   });
+  return singleton;
+}
+
+export function getComposio(): ComposioInstance | null {
   return singleton;
 }
 
@@ -93,7 +122,7 @@ export interface ConnectedToolkit {
 }
 
 export async function listConnectedToolkits(): Promise<ConnectedToolkit[]> {
-  const composio = getComposio();
+  const composio = await getOrCreateComposio();
   if (!composio) return [];
   try {
     const resp = await composio.connectedAccounts.list({ userIds: [luminaUserId()] });
@@ -119,7 +148,7 @@ export async function authorizeToolkit(
   slug: string,
   opts?: { callbackUrl?: string; alias?: string },
 ): Promise<{ redirectUrl: string | null; connectionId: string }> {
-  const composio = getComposio();
+  const composio = await getOrCreateComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
 
   let authConfigId: string;
@@ -142,13 +171,13 @@ export async function authorizeToolkit(
 }
 
 export async function disconnectToolkit(connectionId: string): Promise<void> {
-  const composio = getComposio();
+  const composio = await getOrCreateComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
   await composio.connectedAccounts.delete(connectionId);
 }
 
 export async function renameConnection(connectionId: string, alias: string): Promise<void> {
-  const composio = getComposio();
+  const composio = await getOrCreateComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
   await composio.connectedAccounts.update(connectionId, { alias } as never);
 }
@@ -159,7 +188,8 @@ export async function verifyApiKey(apiKey: string): Promise<{ valid: boolean; er
   console.log(`[composio] verifyApiKey initiating connection test with API key: ${safeLog}`);
 
   try {
-    const testComposio = new Composio<ClaudeAgentSDKProvider>({
+    const { Composio, ClaudeAgentSDKProvider } = await loadComposioSdk();
+    const testComposio = new Composio({
       apiKey: cleanedKey,
       provider: new ClaudeAgentSDKProvider(),
     });
@@ -178,7 +208,7 @@ export async function verifyApiKey(apiKey: string): Promise<{ valid: boolean; er
 }
 
 export async function listToolkitTools(slug: string): Promise<Array<{ name: string; description: string; parameters: any }>> {
-  const composio = getComposio();
+  const composio = await getOrCreateComposio();
   if (!composio) return [];
   try {
     const tools = await composio.tools.get(luminaUserId(), { toolkits: [slug] });
@@ -199,7 +229,7 @@ export async function executeComposioTool(
   args: Record<string, any>,
   connectedAccountId?: string,
 ): Promise<{ successful: boolean; data: any; error?: string }> {
-  const composio = getComposio();
+  const composio = await getOrCreateComposio();
   if (!composio) throw new Error("COMPOSIO_API_KEY not set");
   try {
     const result = await composio.tools.execute(toolSlug, {
@@ -209,8 +239,6 @@ export async function executeComposioTool(
       dangerouslySkipVersionCheck: true,
     }) as any;
 
-    // Composio SDK returns: { successful: boolean, data: {...}, error?: string }
-    // Normalize into a consistent shape.
     const successful = result?.successful ?? result?.success ?? true;
     const data = result?.data ?? result?.result ?? result ?? null;
     const error = result?.error ?? undefined;
