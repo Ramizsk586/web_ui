@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Plus, X, ShieldCheck, Shield, Hand, Check, ChevronDown, ArrowUp, Pause, Bot, Layers, Bug, Eye, ShieldAlert, MessageSquare, ClipboardList } from 'lucide-react';
+import { Plus, X, ShieldCheck, Shield, Hand, Check, ChevronDown, ArrowUp, Pause, Bot, Layers, Bug, Eye, ShieldAlert, MessageSquare, ClipboardList, MousePointerClick } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { CoderPermissionMode } from '../../types';
 import { permissionModeLabel } from '../../utils/permissionUtils';
@@ -22,11 +22,13 @@ interface CoderInputBoxProps {
   attachedFiles: File[];
   setAttachedFiles: React.Dispatch<React.SetStateAction<File[]>>;
   handleFileAttach?: (files: File[]) => void;
+  localElementAttachments?: any[];
+  setLocalElementAttachments?: React.Dispatch<React.SetStateAction<any[]>>;
   coderPermissionMode: CoderPermissionMode;
   setCoderPermissionMode: (mode: CoderPermissionMode) => void;
   showTodoPanel?: boolean;
   setShowTodoPanel?: (show: boolean) => void;
-  coderTodos?: Array<{ id: string; content: string; status: string }>;
+  coderTodos?: Array<{ id: string; content?: string; text?: string; status: string }>;
   todoCollapsed?: boolean;
   setTodoCollapsed?: (collapsed: boolean) => void;
 }
@@ -69,6 +71,8 @@ export function CoderInputBox({
   attachedFiles = [],
   setAttachedFiles,
   handleFileAttach,
+  localElementAttachments = [],
+  setLocalElementAttachments = () => {},
   coderPermissionMode,
   setCoderPermissionMode,
   showTodoPanel = false,
@@ -101,12 +105,69 @@ export function CoderInputBox({
     adjustTextareaHeight(e);
   };
 
-  const completedTodoCount = coderTodos.filter(todo => todo.status === 'completed').length;
+  const completedTodoCount = coderTodos.filter(todo => todo.status === 'completed' || todo.status === 'complete').length;
   const activeTodo = coderTodos.find(todo => todo.status === 'in_progress') || coderTodos[coderTodos.length - 1];
+  const shouldShowImmediateProcessing = isTyping && coderTodos.length === 0;
 
   return (
     <div className="w-full max-w-3xl mx-auto relative pt-0">
       <AnimatePresence initial={false}>
+        {shouldShowImmediateProcessing && (
+          <motion.div
+            initial={{ opacity: 0, y: 24, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 18, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="relative z-20 w-[92%] mx-auto mb-3"
+          >
+            <div className="rounded-[26px] bg-[#23211F] border border-[#2E2A27] shadow-[0_22px_60px_rgba(0,0,0,0.3)] overflow-hidden">
+              <div className="px-4 py-3 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-[#2A2724] border border-[#3A342F] flex items-center justify-center shrink-0">
+                  <div className="flex items-end gap-0.5 h-4">
+                    <motion.span
+                      className="w-1.5 rounded-full bg-[#D97756]"
+                      animate={{ height: [6, 14, 8] }}
+                      transition={{ duration: 0.75, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                    <motion.span
+                      className="w-1.5 rounded-full bg-[#E8A87C]"
+                      animate={{ height: [10, 6, 14] }}
+                      transition={{ duration: 0.75, repeat: Infinity, ease: 'easeInOut', delay: 0.1 }}
+                    />
+                    <motion.span
+                      className="w-1.5 rounded-full bg-[#F3C8A2]"
+                      animate={{ height: [7, 13, 9] }}
+                      transition={{ duration: 0.75, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
+                    />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-[#EDE6DD]">Processing request...</div>
+                  <div className="text-[11px] text-[#8A8178] truncate">
+                    Activating coder workflow and preparing the first engineering steps.
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 pr-0.5">
+                  <motion.span
+                    className="w-1.5 h-1.5 rounded-full bg-[#D97756]"
+                    animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1.15, 0.85] }}
+                    transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                  <motion.span
+                    className="w-1.5 h-1.5 rounded-full bg-[#D97756]"
+                    animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1.15, 0.85] }}
+                    transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut', delay: 0.15 }}
+                  />
+                  <motion.span
+                    className="w-1.5 h-1.5 rounded-full bg-[#D97756]"
+                    animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1.15, 0.85] }}
+                    transition={{ duration: 0.9, repeat: Infinity, ease: 'easeInOut', delay: 0.3 }}
+                  />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
         {showTodoPanel && coderTodos.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 28, scale: 0.98 }}
@@ -127,7 +188,7 @@ export function CoderInputBox({
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-semibold text-[#EDE6DD]">Todo Progress...</div>
                   <div className="text-[11px] text-[#8A8178] truncate">
-                    {activeTodo?.content || `${coderTodos.length} active tasks`}
+                    {activeTodo?.content || activeTodo?.text || `${coderTodos.length} active tasks`}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -146,7 +207,7 @@ export function CoderInputBox({
                 <div className="px-3 pb-3 pt-2 max-h-[248px] overflow-y-auto custom-scrollbar border-t border-[#2E2A27]/55">
                   <div className="space-y-1.5">
                     {coderTodos.map((todo) => {
-                      const isDone = todo.status === 'completed';
+                      const isDone = todo.status === 'completed' || todo.status === 'complete';
                       const isActive = todo.status === 'in_progress';
                       return (
                         <div
@@ -172,7 +233,7 @@ export function CoderInputBox({
                                   ? 'text-[#F3ECE4]'
                                   : 'text-[#C1B6A8]'
                             }`}>
-                              {todo.content}
+                              {todo.content || todo.text}
                             </div>
                           </div>
                         </div>
@@ -189,7 +250,7 @@ export function CoderInputBox({
       <div className={`relative z-10 rounded-[26px] bg-[#23211F] border border-[#2E2A27] shadow-[0_22px_60px_rgba(0,0,0,0.3)] ${isCenteredState ? 'min-h-[134px]' : ''}`}>
         <div className="px-5 pt-4 pb-3 relative flex flex-col justify-between min-h-[inherit]">
           {/* File Attachment Previews */}
-          {attachedFiles && attachedFiles.length > 0 && (
+          {(attachedFiles && attachedFiles.length > 0) || localElementAttachments.length > 0 ? (
             <div className="flex flex-wrap gap-2 pb-3 items-center">
               {attachedFiles.map((file, idx) => {
                 const isImage = file.type.startsWith("image/");
@@ -232,8 +293,40 @@ export function CoderInputBox({
                   </div>
                 );
               })}
+
+              {localElementAttachments.map((att, idx) => (
+                <motion.div
+                  key={att.id || `${att.filePath || 'element'}-${idx}`}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="relative flex items-center gap-2 px-2.5 py-1 rounded-xl border border-teal-500/35 bg-teal-500/10 text-teal-200 max-w-[240px] h-10 shadow-sm"
+                  title={att.filePath || 'Attached inspected element'}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLocalElementAttachments(prev => prev.filter((_, i) => i !== idx));
+                    }}
+                    className="absolute -top-1 -right-1 w-4.5 h-4.5 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-teal-500/50 text-teal-200 hover:text-white flex items-center justify-center transition-all z-10 cursor-pointer"
+                  >
+                    <X size={10} />
+                  </button>
+                  <div className="w-6 h-6 rounded-lg bg-teal-500/15 border border-teal-500/30 flex items-center justify-center shrink-0">
+                    <MousePointerClick size={13} className="text-teal-300" />
+                  </div>
+                  <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center text-left">
+                    <div className="truncate font-semibold text-[11px] text-teal-100 leading-none">
+                      {att.fileName || att.filePath?.split('/').pop() || 'Selected element'}
+                    </div>
+                    <div className="truncate text-[10px] text-teal-300/80 font-medium leading-none mt-1">
+                      {att.elementWork || att.filePath || 'Element attached from preview'}
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
             </div>
-          )}
+          ) : null}
 
           <textarea
             ref={inputRef}

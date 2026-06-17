@@ -24,10 +24,17 @@ import {
   Search,
   AlertCircle,
   Settings,
-  Activity
+  Activity,
+  Database,
+  FolderTree,
+  FileCode2,
+  Eye,
+  Save
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface LivePreviewPanelProps {
   isCoderRightPanelOpen: boolean;
@@ -73,6 +80,73 @@ interface AndroidTimeState {
   hours: string;
   minutes: string;
 }
+
+interface WorkspaceTreeNode {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children?: WorkspaceTreeNode[];
+}
+
+const TEXT_CODE_EXTENSIONS = new Set([
+  'ts', 'tsx', 'js', 'jsx', 'json', 'css', 'scss', 'html', 'md', 'py', 'java', 'go', 'rs', 'sql', 'yaml', 'yml', 'sh', 'txt'
+]);
+
+const getLanguageFromPath = (filePath: string) => {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  if (ext === 'tsx') return 'tsx';
+  if (ext === 'ts') return 'typescript';
+  if (ext === 'jsx') return 'jsx';
+  if (ext === 'js') return 'javascript';
+  if (ext === 'md') return 'markdown';
+  if (ext === 'py') return 'python';
+  if (ext === 'rs') return 'rust';
+  if (ext === 'yml') return 'yaml';
+  return ext || 'text';
+};
+
+const buildWorkspaceTree = (files: any[]): WorkspaceTreeNode[] => {
+  const root: WorkspaceTreeNode[] = [];
+
+  const ensureDir = (segments: string[]) => {
+    let level = root;
+    let currentPath = '';
+    for (const segment of segments) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      let existing = level.find(node => node.name === segment && node.isDirectory);
+      if (!existing) {
+        existing = { name: segment, path: currentPath, isDirectory: true, children: [] };
+        level.push(existing);
+      }
+      level = existing.children!;
+    }
+    return level;
+  };
+
+  files.forEach((file) => {
+    const relPath = String(file.relativePath || file.path || '').replace(/\\/g, '/');
+    if (!relPath) return;
+    const parts = relPath.split('/').filter(Boolean);
+    const parent = ensureDir(parts.slice(0, -1));
+    parent.push({
+      name: parts[parts.length - 1],
+      path: relPath,
+      isDirectory: !!file.isDirectory,
+      children: file.isDirectory ? [] : undefined
+    });
+  });
+
+  const sortNodes = (nodes: WorkspaceTreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    nodes.forEach(node => node.children && sortNodes(node.children));
+  };
+
+  sortNodes(root);
+  return root;
+};
 
 export function parseGitDiff(diffText: string): DiffLine[] {
   if (!diffText) return [];
@@ -183,7 +257,8 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   orchestrationState,
   onOpenFile,
   isCoderLeftPanelOpen,
-  explorerWidth
+  explorerWidth,
+  showToast
 }) => {
   const [gitChanges, setGitChanges] = useState<any[]>([]);
   const [fileDiffs, setFileDiffs] = useState<Record<string, string>>({});
@@ -197,6 +272,14 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   const [androidTime, setAndroidTime] = useState<AndroidTimeState>(getCurrentTime);
   const [artifacts, setArtifacts] = useState<any[]>([]);
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
+  const [workspaceTree, setWorkspaceTree] = useState<WorkspaceTreeNode[]>([]);
+  const [loadingDataTree, setLoadingDataTree] = useState(false);
+  const [expandedDataDirs, setExpandedDataDirs] = useState<Record<string, boolean>>({});
+  const [activeDataFile, setActiveDataFile] = useState('');
+  const [dataEditorValue, setDataEditorValue] = useState('');
+  const [dataDirtyFiles, setDataDirtyFiles] = useState<Record<string, boolean>>({});
+  const [dataViewMode, setDataViewMode] = useState<'code' | 'preview'>('code');
+  const [isSavingDataFile, setIsSavingDataFile] = useState(false);
 
   const [panelWidth, setPanelWidth] = useState(() => activeTab === 'overview'
     ? (rightViewportMode === 'desktop' ? 480 : rightViewportMode === 'tablet' ? 820 : 440)
@@ -290,6 +373,36 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
     }
   };
 
+  const fetchDataTree = async () => {
+    setLoadingDataTree(true);
+    try {
+      const res = await fetch('/api/fs/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderPath: '.', workspaceRoot: workspaceRootPath || '.' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const allFiles = Array.isArray(data.files) ? data.files : [];
+        const filtered = allFiles.filter((file: any) => {
+          const rel = String(file.relativePath || file.path || '').replace(/\\/g, '/');
+          const name = String(file.name || '').toLowerCase();
+          if (rel.includes('/node_modules/') || rel.startsWith('node_modules/')) return false;
+          if (rel.includes('/dist/') || rel.startsWith('dist/')) return false;
+          if (rel.includes('/.git/') || rel.startsWith('.git/')) return false;
+          if (file.isDirectory) return true;
+          const ext = name.split('.').pop() || '';
+          return TEXT_CODE_EXTENSIONS.has(ext);
+        });
+        setWorkspaceTree(buildWorkspaceTree(filtered));
+      }
+    } catch (err) {
+      console.error('Failed to fetch data tree:', err);
+    } finally {
+      setLoadingDataTree(false);
+    }
+  };
+
   const fetchFileDiff = async (filePath: string) => {
     setLoadingDiff(prev => ({ ...prev, [filePath]: true }));
     try {
@@ -336,6 +449,8 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
       if (activeTab === 'workflow') {
         fetchGitChanges();
         fetchArtifacts();
+      } else if (activeTab === 'data') {
+        fetchDataTree();
       } else if (activeTab === 'review') {
         fetchGitChanges();
       } else if (activeTab !== 'overview') {
@@ -347,7 +462,7 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
 
   // Live-update polling for .md files (especially TODO.md)
   useEffect(() => {
-    if (!isCoderRightPanelOpen || activeTab === 'overview' || activeTab === 'review' || activeTab === 'workflow') return;
+    if (!isCoderRightPanelOpen || activeTab === 'overview' || activeTab === 'review' || activeTab === 'workflow' || activeTab === 'data') return;
     if (!activeTab.toLowerCase().endsWith('.md')) return;
 
     const pollInterval = setInterval(() => {
@@ -360,6 +475,104 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   const isDesktop = rightViewportMode === 'desktop';
   const isMobile = rightViewportMode === 'mobile';
   const isTablet = rightViewportMode === 'tablet';
+
+  useEffect(() => {
+    if (activeTab !== 'data') return;
+    if (activeDataFile || workspaceTree.length === 0) return;
+    const findFirstFile = (nodes: WorkspaceTreeNode[]): string => {
+      for (const node of nodes) {
+        if (!node.isDirectory) return node.path;
+        if (node.children?.length) {
+          const nested = findFirstFile(node.children);
+          if (nested) return nested;
+        }
+      }
+      return '';
+    };
+    const first = findFirstFile(workspaceTree);
+    if (first) {
+      setActiveDataFile(first);
+      void fetchFileContent(first);
+    }
+  }, [activeTab, activeDataFile, workspaceTree]);
+
+  useEffect(() => {
+    if (!activeDataFile) return;
+    if (dataDirtyFiles[activeDataFile]) return;
+    setDataEditorValue(fileContents[activeDataFile] || '');
+  }, [activeDataFile, fileContents, dataDirtyFiles]);
+
+  const openDataFile = (filePath: string) => {
+    setActiveDataFile(filePath);
+    setDataViewMode(filePath.toLowerCase().endsWith('.md') ? 'preview' : 'code');
+    if (fileContents[filePath] === undefined) {
+      void fetchFileContent(filePath);
+    } else if (!dataDirtyFiles[filePath]) {
+      setDataEditorValue(fileContents[filePath] || '');
+    }
+  };
+
+  const saveDataFile = async () => {
+    if (!activeDataFile) return;
+    setIsSavingDataFile(true);
+    try {
+      const fullPath = workspaceRootPath ? `${workspaceRootPath.replace(/\\/g, '/')}/${activeDataFile}` : activeDataFile;
+      const res = await fetch('/api/fs/write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: fullPath, content: dataEditorValue, workspaceRoot: workspaceRootPath || '.' })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.detail || 'Failed to save file');
+      }
+      setFileContents(prev => ({ ...prev, [activeDataFile]: dataEditorValue }));
+      setDataDirtyFiles(prev => ({ ...prev, [activeDataFile]: false }));
+      showToast?.(`Saved ${activeDataFile}`);
+    } catch (err: any) {
+      console.error('Failed to save data file:', err);
+      showToast?.(err.message || 'Failed to save file');
+    } finally {
+      setIsSavingDataFile(false);
+    }
+  };
+
+  const renderDataTree = (nodes: WorkspaceTreeNode[], depth = 0): React.ReactNode => (
+    nodes.map((node) => {
+      const isExpanded = expandedDataDirs[node.path] ?? depth < 2;
+      const isActive = activeDataFile === node.path;
+      if (node.isDirectory) {
+        return (
+          <div key={node.path}>
+            <button
+              type="button"
+              onClick={() => setExpandedDataDirs(prev => ({ ...prev, [node.path]: !isExpanded }))}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-left hover:bg-[#201916] transition-colors cursor-pointer"
+              style={{ paddingLeft: `${10 + depth * 14}px` }}
+            >
+              <ChevronRight size={12} className="text-[#9A8E82] transition-transform" style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }} />
+              <FolderTree size={13} className="text-[#D97756]" />
+              <span className="text-[12px] font-medium text-[#EDE6DD] truncate">{node.name}</span>
+            </button>
+            {isExpanded && node.children?.length ? renderDataTree(node.children, depth + 1) : null}
+          </div>
+        );
+      }
+      return (
+        <button
+          key={node.path}
+          type="button"
+          onClick={() => openDataFile(node.path)}
+          className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-left transition-colors cursor-pointer ${isActive ? 'bg-[#2A1F1A] border border-[#D97756]/25' : 'hover:bg-[#1B1513]'}`}
+          style={{ paddingLeft: `${24 + depth * 14}px` }}
+        >
+          <FileCode2 size={13} className={isActive ? 'text-[#F0AA8F]' : 'text-[#9A8E82]'} />
+          <span className={`text-[12px] truncate ${isActive ? 'text-[#F7EFE7]' : 'text-[#C7BCAF]'}`}>{node.name}</span>
+          {dataDirtyFiles[node.path] ? <span className="text-[10px] text-[#D97756] ml-auto">●</span> : null}
+        </button>
+      );
+    })
+  );
 
   const getViewportDimensions = () => {
     if (isDesktop) {
@@ -697,6 +910,21 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
             Workflow
           </button>
 
+          <button
+            onClick={() => {
+              setActiveTab('data');
+              fetchDataTree();
+            }}
+            className={`px-3 py-3.5 text-xs font-semibold flex items-center gap-1.5 transition-all border-b-2 cursor-pointer ${
+              activeTab === 'data'
+                ? 'border-[#D97756] text-[#D97756]'
+                : 'border-transparent text-zinc-400 hover:text-white'
+            }`}
+          >
+            <Database size={12} />
+            Data
+          </button>
+
           {openFileTabs.map(filePath => {
             const fileName = filePath.split('/').pop() || filePath;
             const isActive = activeTab === filePath;
@@ -768,6 +996,28 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
             >
               <RefreshCw size={12} />
             </button>
+          )}
+          {activeTab === 'data' && (
+            <>
+              <button
+                onClick={() => {
+                  fetchDataTree();
+                  if (activeDataFile) void fetchFileContent(activeDataFile);
+                }}
+                className={`p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer ${loadingDataTree ? 'animate-spin' : ''}`}
+                title="Refresh data editor"
+              >
+                <RefreshCw size={12} />
+              </button>
+              <button
+                onClick={() => void saveDataFile()}
+                disabled={!activeDataFile || isSavingDataFile || !dataDirtyFiles[activeDataFile]}
+                className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Save current file"
+              >
+                <Save size={12} />
+              </button>
+            </>
           )}
 
         </div>
@@ -1304,7 +1554,109 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
         </div>
       )}
 
-      {activeTab !== 'overview' && activeTab !== 'review' && activeTab !== 'workflow' && (() => {
+      {activeTab === 'data' && (
+        <div className="flex-1 flex overflow-hidden bg-[#0E0B0A]">
+          <div className="w-[260px] shrink-0 border-r border-[#2B221D] bg-[#13100F] flex flex-col">
+            <div className="px-4 py-3 border-b border-[#2B221D]">
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#A29588]">Data Panel</div>
+              <div className="text-[10px] text-[#6F655C] mt-1">Lumina custom editor with syntax view</div>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-2 py-2">
+              {loadingDataTree ? (
+                <div className="h-full flex items-center justify-center text-[#8C8074] text-[11px] gap-2">
+                  <Loader2 size={13} className="animate-spin text-[#D97756]" />
+                  <span>Loading workspace files...</span>
+                </div>
+              ) : workspaceTree.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center text-[#7B7067] text-[11px] px-4">
+                  <FolderTree size={18} className="text-[#8D7B6E] mb-2" />
+                  <span>No readable code files found.</span>
+                </div>
+              ) : (
+                renderDataTree(workspaceTree)
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-0 flex flex-col bg-[#100D0C]">
+            <div className="h-11 px-4 border-b border-[#2B221D] bg-[#171311] flex items-center justify-between shrink-0">
+              <div className="min-w-0 flex items-center gap-2">
+                <div className="px-2 py-1 rounded-lg bg-[#221A17] border border-[#342924] text-[10px] font-mono text-[#D9A48F] shrink-0">
+                  {activeDataFile ? getLanguageFromPath(activeDataFile).toUpperCase() : 'DATA'}
+                </div>
+                <span className="text-[12px] text-[#EDE6DD] font-medium truncate">
+                  {activeDataFile || 'Select a file from the explorer'}
+                </span>
+                {activeDataFile && dataDirtyFiles[activeDataFile] ? <span className="text-[10px] text-[#D97756] font-semibold">Unsaved</span> : null}
+              </div>
+              {activeDataFile && (
+                <div className="flex items-center gap-1 bg-[#120F0E] border border-[#312722] rounded-lg p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDataViewMode('code')}
+                    className={`p-1 rounded-md transition-all cursor-pointer ${dataViewMode === 'code' ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]' : 'text-zinc-400 hover:text-[#F3ECE4] hover:bg-[#221B18]'}`}
+                    title="Code view"
+                  >
+                    <FileCode2 size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDataViewMode('preview')}
+                    className={`p-1 rounded-md transition-all cursor-pointer ${dataViewMode === 'preview' ? 'bg-[#D97756]/20 border border-[#D97756]/30 text-[#D97756]' : 'text-zinc-400 hover:text-[#F3ECE4] hover:bg-[#221B18]'}`}
+                    title="Preview view"
+                  >
+                    <Eye size={11} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-hidden bg-[#0B0908]">
+              {!activeDataFile ? (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-[#7D736A]">
+                  <FileText size={18} className="text-[#8A776B]" />
+                  <span className="text-[12px]">Choose a file to open it here.</span>
+                </div>
+              ) : loadingContents[activeDataFile] ? (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-[#8C8074]">
+                  <Loader2 size={15} className="animate-spin text-[#D97756]" />
+                  <span className="text-[12px]">Loading document...</span>
+                </div>
+              ) : dataViewMode === 'preview' && activeDataFile.toLowerCase().endsWith('.md') ? (
+                <div className="p-6 text-left select-text markdown-body overflow-y-auto h-full text-zinc-300 font-sans space-y-4 max-w-4xl mx-auto custom-scrollbar [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-white [&_h1]:border-b [&_h1]:border-zinc-850 [&_h1]:pb-2 [&_h1]:mb-4 [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-zinc-100 [&_h2]:mt-4 [&_h2]:mb-2 [&_p]:text-sm [&_p]:text-zinc-300 [&_code]:text-[#F0AA8F] [&_pre]:bg-[#16110F] [&_pre]:border [&_pre]:border-[#2B221D] [&_pre]:rounded-2xl">
+                  <Markdown remarkPlugins={[remarkGfm]}>{dataEditorValue || fileContents[activeDataFile] || ''}</Markdown>
+                </div>
+              ) : (
+                <div className="h-full overflow-auto custom-scrollbar bg-[#0B0908]">
+                  <SyntaxHighlighter
+                    language={getLanguageFromPath(activeDataFile)}
+                    style={oneDark}
+                    wrapLongLines
+                    showLineNumbers
+                    customStyle={{
+                      margin: 0,
+                      minHeight: '100%',
+                      background: '#0B0908',
+                      padding: '20px 24px',
+                      fontSize: '12px',
+                      lineHeight: '1.65'
+                    }}
+                    lineNumberStyle={{
+                      color: '#6E6257',
+                      minWidth: '2.4em',
+                      paddingRight: '16px'
+                    }}
+                  >
+                    {dataEditorValue || fileContents[activeDataFile] || ''}
+                  </SyntaxHighlighter>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab !== 'overview' && activeTab !== 'review' && activeTab !== 'workflow' && activeTab !== 'data' && (() => {
         const viewMode = fileViewMode[activeTab] || (activeTab.toLowerCase().endsWith('.md') ? 'rendered' : 'diff');
         return (
           <div className="flex-1 flex flex-col overflow-hidden bg-[#0d0c0c] text-left">

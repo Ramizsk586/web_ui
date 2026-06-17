@@ -192,7 +192,8 @@ export function useAppSettings({
   const [useLocalModelsOnly, setUseLocalModelsOnly] = useState(() => {
     return localStorage.getItem('lumina_use_local_models') === 'true';
   });
-  const [modelSelectorMode, setModelSelectorMode] = useState<'popup' | 'drawer'>('drawer');
+  const modelSelectorMode: 'drawer' = 'drawer';
+  const setModelSelectorMode = () => {};
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'anthropic'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'lumina_tools' | 'project' | 'skills' | 'style'>('main');

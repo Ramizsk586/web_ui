@@ -15,6 +15,24 @@ const getLlamaInstallDir = () => {
   return path.join(getLuminaDataDir(), 'llama');
 };
 
+const findLlamaBinaries = (dir: string): string[] => {
+  if (!fs.existsSync(dir)) return [];
+  const results: string[] = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findLlamaBinaries(fullPath));
+    } else if (entry.isFile()) {
+      const lower = entry.name.toLowerCase();
+      if (lower.includes('llama-') || lower.endsWith('.exe') || lower === 'server') {
+        results.push(fullPath.replace(/\\/g, '/'));
+      }
+    }
+  }
+  return results;
+};
+
 const extractZip = async (zipPath: string, destDir: string): Promise<void> => {
   fs.mkdirSync(destDir, { recursive: true });
   const isTarGz = zipPath.endsWith('.tar.gz') || zipPath.endsWith('.tgz');
@@ -189,24 +207,7 @@ export function setupLlamaRoutes(app: express.Express) {
       addLog(`Scanning binaries...`);
 
       // Find binaries
-      const findBinaries = (dir: string): string[] => {
-        const results: string[] = [];
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry.name);
-          if (entry.isDirectory()) {
-            results.push(...findBinaries(fullPath));
-          } else if (entry.isFile()) {
-            const lower = entry.name.toLowerCase();
-            if (lower.includes('llama-') || lower.endsWith('.exe') || lower === 'server') {
-              results.push(fullPath.replace(/\\/g, '/'));
-            }
-          }
-        }
-        return results;
-      };
-
-      const binaries = findBinaries(releaseDir);
+      const binaries = findLlamaBinaries(releaseDir);
       addLog(`Found ${binaries.length} binaries.`);
 
       // Ensure execute permissions on Unix-like systems
@@ -238,6 +239,46 @@ export function setupLlamaRoutes(app: express.Express) {
       addLog(`Error: ${err.message}`);
       sendEvent({ type: 'error', message: err.message, logs });
       res.end();
+    }
+  });
+
+  app.get("/api/llama/detect", async (_req, res) => {
+    try {
+      const installDir = getLlamaInstallDir();
+      if (!fs.existsSync(installDir)) {
+        return res.json({ success: true, found: false });
+      }
+
+      const binaries = findLlamaBinaries(installDir);
+      const binaryPath = binaries.find((b) => {
+        const base = path.basename(b).toLowerCase();
+        return base.includes('llama-server') || base === 'server.exe' || base === 'server';
+      }) || '';
+
+      if (!binaryPath) {
+        return res.json({ success: true, found: false, installDir: installDir.replace(/\\/g, '/') });
+      }
+
+      const stats = fs.statSync(binaryPath.replace(/\//g, path.sep));
+      const releaseDir = path.dirname(binaryPath).replace(/\\/g, '/');
+      const releaseTagMatch = releaseDir.match(/llama\.cpp-release-([^/]+)$/i);
+
+      return res.json({
+        success: true,
+        found: true,
+        config: {
+          version: releaseTagMatch?.[1] || 'detected',
+          releaseTag: releaseTagMatch?.[1] || 'detected',
+          assetName: path.basename(releaseDir),
+          installedAt: stats.mtime.toLocaleString(),
+          installDir: releaseDir,
+          path: releaseDir,
+          size: `${Math.max(1, Math.round(stats.size / 1024 / 1024))} MB`,
+          binaries,
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: `Failed to detect llama.cpp: ${err.message}` });
     }
   });
 
@@ -303,7 +344,7 @@ export function setupLlamaRoutes(app: express.Express) {
 
   // Start llama-server process
   app.post("/api/llama/start", async (req, res) => {
-    const { modelPath, port = 1234, ctxSize = 4096, ngl = 99, customBinaryPath } = req.body;
+    const { modelPath, port = 1234, ctxSize = 4096, ngl = 99, customBinaryPath, binaryPath } = req.body;
     if (!modelPath) {
       return res.status(400).json({ error: 'modelPath is required' });
     }
@@ -313,7 +354,7 @@ export function setupLlamaRoutes(app: express.Express) {
       llamaServerProcess = null;
 
       // Find the llama-server binary
-      let llamaServerBin = customBinaryPath || '';
+      let llamaServerBin = customBinaryPath || binaryPath || '';
       if (!llamaServerBin) {
         const installConfig = req.headers['x-llama-config']
           ? JSON.parse(req.headers['x-llama-config'] as string)
@@ -477,6 +518,8 @@ export function setupLlamaRoutes(app: express.Express) {
       res.json({
         success: true,
         message: 'llama-server started successfully',
+        pid: proc.pid || null,
+        serverUrl: `http://127.0.0.1:${port}`,
         command: isWin
           ? `& "${llamaServerBin}" ${args.map(a => (a.includes(' ') || a.includes('/') || a.includes('\\')) ? `"${a}"` : a).join(' ')}`
           : `${llamaServerBin} ${args.join(' ')}`,

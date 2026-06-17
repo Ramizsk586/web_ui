@@ -3147,7 +3147,11 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                 const lineInfo = att.lineRangeStart && att.lineRangeEnd && att.lineRangeStart !== att.lineRangeEnd
                   ? `${att.lineRangeStart}-${att.lineRangeEnd}`
                   : (att.lineNumber || att.lineRangeStart || '');
-                text += `\n- File Name: ${att.fileName}\n- File Path: ${att.filePath}\n${lineInfo ? `- Line Reference: ${lineInfo}\n` : ''}- Code Subsection:\n\`\`\`\n${att.specificCode}\n\`\`\`\n- Functional Role: ${att.elementWork}\n`;
+                text += `\n- File Name: ${att.fileName}\n- File Path: ${att.filePath}\n${lineInfo ? `- Line Reference: ${lineInfo}\n` : ''}- Exact Selected Element Code:\n\`\`\`\n${att.specificCode}\n\`\`\`\n`;
+                if (att.contextCode && att.contextCode.trim() && att.contextCode.trim() !== att.specificCode?.trim()) {
+                  text += `- Nearby Context Only:\n\`\`\`\n${att.contextCode}\n\`\`\`\n`;
+                }
+                text += `- Functional Role: ${att.elementWork}\n`;
                 if (att.connections && att.connections.length > 0) {
                   text += `- Connected File Sections:\n`;
                   att.connections.forEach((connection: any) => {

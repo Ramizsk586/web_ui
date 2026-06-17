@@ -710,7 +710,7 @@ export const LocalModelConfigModal: React.FC<LocalModelConfigModalProps> = ({
     } catch {}
 
     if (!binaryPath) {
-      binaryPath = `C:\\Users\\${osUser || 'skabd'}\\.lumina\\llama\\llama.cpp\\llama-server.exe`;
+      binaryPath = `C:\\Users\\${osUser || 'skabd'}\\.lumina\\llama\\llama.cpp-release-latest\\llama-server.exe`;
     }
 
     // PowerShell call operator formatting & "exe" -m "model" ...

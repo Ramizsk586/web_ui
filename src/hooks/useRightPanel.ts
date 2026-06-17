@@ -58,20 +58,41 @@ export function useRightPanel({
       });
       if (response.ok) {
         const data = await response.json();
-        if (data.success && data.analysis) {
+        const analysis = data?.analysis || (data?.success && data?.found ? data : null);
+        if (analysis) {
           const newAtt = {
             id: createAttachmentId(),
-            fileName: data.analysis.fileName,
-            filePath: data.analysis.filePath,
-            specificCode: data.analysis.specificCode,
-            lineNumber: data.analysis.lineNumber,
-            lineRangeStart: data.analysis.lineRangeStart,
-            lineRangeEnd: data.analysis.lineRangeEnd,
-            connections: data.analysis.connections || [],
-            elementWork: data.analysis.elementWork
+            fileName:
+              analysis.fileName ||
+              analysis.relativePath?.split('/').pop() ||
+              analysis.filePath?.split('/').pop() ||
+              `${metadata.tag || 'element'}.tsx`,
+            filePath: analysis.relativePath || analysis.filePath || '',
+            specificCode: analysis.specificCode || analysis.matchedSnippet || metadata.outerHTML || '',
+            contextCode: analysis.surroundingSnippet || '',
+            lineNumber: analysis.lineNumber,
+            lineRangeStart: analysis.lineRangeStart,
+            lineRangeEnd: analysis.lineRangeEnd,
+            connections: analysis.connections || analysis.linkedAssets || [],
+            elementWork: analysis.elementWork || analysis.elementWorkDescription || `Selected <${metadata.tag || 'element'}> from preview`
           };
           setLocalElementAttachments(prev => [...prev, newAtt]);
           showToast(`Attached selected element as a visual document badge`);
+        } else if (data?.success && data?.found === false) {
+          const fallbackAtt = {
+            id: createAttachmentId(),
+            fileName: metadata.sourceHint?.fileName?.split(/[\\/]/).pop() || `${metadata.tag || 'element'}-selection`,
+            filePath: metadata.sourceHint?.fileName || metadata.selectorPath || metadata.domPath?.join(' > ') || '',
+            specificCode: metadata.outerHTML || '',
+            contextCode: '',
+            lineNumber: metadata.sourceHint?.lineNumber,
+            lineRangeStart: metadata.sourceHint?.lineNumber,
+            lineRangeEnd: metadata.sourceHint?.lineNumber,
+            connections: [],
+            elementWork: `Selected <${metadata.tag || 'element'}> from preview. Exact source trace was not resolved, but the DOM selection context is attached for the LLM.`
+          };
+          setLocalElementAttachments(prev => [...prev, fallbackAtt]);
+          showToast("Attached selected element context from preview");
         } else {
           showToast("Automated element source trace returned an error.");
         }

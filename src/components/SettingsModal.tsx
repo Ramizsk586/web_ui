@@ -696,6 +696,88 @@ export function SettingsModal({
   const [testOutput, setTestOutput] = React.useState<string[]>([]);
   const [isRunningTest, setIsRunningTest] = React.useState(false);
 
+  const resolveInstalledServerBinary = React.useCallback((binaries?: string[]) => {
+    if (!Array.isArray(binaries)) return '';
+    return binaries.find((b: string) => {
+      const lower = String(b).toLowerCase();
+      return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
+    }) || binaries.find((b: string) => {
+      const lower = String(b).toLowerCase();
+      return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
+    }) || '';
+  }, []);
+
+  const normalizeInstalledConfig = React.useCallback((rawConfig: any, asset?: any) => {
+    const binaries = Array.isArray(rawConfig?.binaries) ? rawConfig.binaries : [];
+    const binaryPath = resolveInstalledServerBinary(binaries);
+    const installPath = rawConfig?.installDir || rawConfig?.path || '';
+    const version = rawConfig?.version || rawConfig?.releaseTag || asset?.tag_name || asset?.name || 'installed';
+    const normalized = {
+      version,
+      releaseTag: rawConfig?.releaseTag || rawConfig?.version || '',
+      assetName: rawConfig?.assetName || asset?.name || '',
+      installedAt: rawConfig?.installedAt || new Date().toLocaleString(),
+      path: installPath,
+      installDir: installPath,
+      binaryName: binaryPath ? binaryPath.split(/[\\/]/).pop() : '',
+      binaryPath,
+      size: rawConfig?.size || asset?.size || '',
+      url: rawConfig?.url || asset?.url || rawConfig?.browserDownloadUrl || '',
+      binaries,
+    };
+    return normalized;
+  }, [resolveInstalledServerBinary]);
+
+  const persistInstalledConfig = React.useCallback((rawConfig: any, asset?: any) => {
+    const normalized = normalizeInstalledConfig(rawConfig, asset);
+    localStorage.setItem('lumina_llama_installed_config', JSON.stringify(normalized));
+    localStorage.setItem('lumina_llama_url', 'http://127.0.0.1:1234/v1');
+    setInstalledConfig(normalized);
+    return normalized;
+  }, [normalizeInstalledConfig]);
+
+  React.useEffect(() => {
+    const detectExistingInstall = async () => {
+      const currentConfig = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('lumina_llama_installed_config') || 'null');
+        } catch {
+          return null;
+        }
+      })();
+
+      const currentBinaryPath = currentConfig?.binaryPath || resolveInstalledServerBinary(currentConfig?.binaries);
+      if (currentBinaryPath) {
+        try {
+          const verifyRes = await fetch('/api/llama/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ binaryPath: currentBinaryPath }),
+          });
+          const verifyResult = await verifyRes.json();
+          if (verifyResult?.success) {
+            if (!currentConfig?.binaryPath || !currentConfig?.installDir) {
+              persistInstalledConfig(currentConfig);
+            }
+            return;
+          }
+        } catch {}
+      }
+
+      try {
+        const res = await fetch('/api/llama/detect');
+        const result = await res.json();
+        if (result?.success && result?.found && result?.config) {
+          persistInstalledConfig(result.config);
+        }
+      } catch (err) {
+        console.error('Failed to auto-detect existing llama.cpp install:', err);
+      }
+    };
+
+    detectExistingInstall();
+  }, [persistInstalledConfig, resolveInstalledServerBinary]);
+
   // Hugging Face Models State
   const [hfSearchQuery, setHfSearchQuery] = React.useState('');
   const [hfSelectedFilter, setHfSelectedFilter] = React.useState<'all' | 'staff'>('staff');
@@ -1705,16 +1787,20 @@ export function SettingsModal({
                       });
                     }
                   } else if (data.type === 'complete') {
-                    config = data.config;
+                    config = data.config || data;
                     setInstallProgress(100);
                     setInstallStatus('completed');
                     setDownloadMetrics({
                       speed: 'Done',
-                      downloaded: config.size,
+                      downloaded: config.size || asset.size,
                       total: asset.size,
                       percent: 100,
                     });
-                    addLog(`Installation complete! Binaries extracted to: ${config.path}`);
+                    const persisted = persistInstalledConfig(config, asset);
+                    addLog(`Installation complete! Binaries extracted to: ${persisted.installDir || persisted.path}`);
+                    if (persisted.binaryPath) {
+                      addLog(`Detected llama-server binary: ${persisted.binaryPath}`);
+                    }
                   } else if (data.type === 'error') {
                     throw new Error(data.error || 'Unknown error');
                   }
@@ -1731,38 +1817,12 @@ export function SettingsModal({
         }
 
         showToast(`llama.cpp release ${releaseTag} installed!`);
-
-        localStorage.setItem('lumina_llama_installed_config', JSON.stringify({
-          version: config.version,
-          assetName: asset.name,
-          installedAt: config.installedAt,
-          path: config.path,
-          binaryName: (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || '',
-          size: config.size,
-          url: asset.url,
-          binaries: config.binaries,
-        }));
-        setInstalledConfig({
-          ...config,
-          binaryName: (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || '',
-          assetName: asset.name,
-        });
+        persistInstalledConfig(config, asset);
       } else {
         // Fallback for non-streaming response
         const result = await response.json();
-        const { config, logs: serverLogs } = result;
+        const config = result.config || result;
+        const serverLogs = result.logs || [];
 
         // Display server logs
         for (const log of serverLogs) {
@@ -1773,41 +1833,18 @@ export function SettingsModal({
         setInstallStatus('completed');
         setDownloadMetrics({
           speed: 'Done',
-          downloaded: config.size,
+          downloaded: config.size || asset.size,
           total: asset.size,
           percent: 100,
         });
 
-        addLog(`Installation complete! Binaries extracted to: ${config.path}`);
+        const persisted = persistInstalledConfig(config, asset);
+        addLog(`Installation complete! Binaries extracted to: ${persisted.installDir || persisted.path}`);
+        if (persisted.binaryPath) {
+          addLog(`Detected llama-server binary: ${persisted.binaryPath}`);
+        }
         showToast(`llama.cpp release ${releaseTag} installed!`);
-
-        localStorage.setItem('lumina_llama_installed_config', JSON.stringify({
-          version: config.version,
-          assetName: asset.name,
-          installedAt: config.installedAt,
-          path: config.path,
-          binaryName: (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || '',
-          size: config.size,
-          url: asset.url,
-          binaries: config.binaries,
-        }));
-        setInstalledConfig({
-          ...config,
-          binaryName: (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return (lower.includes('llama-server') && lower.endsWith('.exe')) || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || (config.binaries || []).find((b: string) => {
-            const lower = b.toLowerCase();
-            return lower.includes('llama-server') || lower.replace(/\\/g, '/').includes('/server.exe');
-          }) || '',
-          assetName: asset.name,
-        });
+        persistInstalledConfig(config, asset);
       }
     } catch (err: any) {
       addLog(`ERROR: ${err.message}`);
@@ -2149,15 +2186,6 @@ export function SettingsModal({
                            className="absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm"
                          />
                        </button>
-                     </div>
-                     <div className="flex items-center justify-between gap-4">
-                       <div>
-                         <div className="font-medium text-sm">Model Selector</div>
-                         <div className="text-xs text-gray-400">Model selection uses the slide panel.</div>
-                       </div>
-                       <div className="h-8 px-3 rounded-lg text-xs font-semibold flex items-center bg-white dark:bg-zinc-800 text-black dark:text-white shadow-sm shrink-0">
-                         Slide
-                       </div>
                      </div>
                   </div>
                 </div>

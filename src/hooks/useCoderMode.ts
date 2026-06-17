@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Chat } from '../types';
 
 export interface SubAgent {
@@ -71,7 +71,33 @@ export function useCoderMode({
   const [isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen] = useState(true);
   const [activeCommandType, setActiveCommandType] = useState<string | null>(null);
   const [activeCommandQuery, setActiveCommandQuery] = useState<string | null>(null);
-  const [coderTodos, setCoderTodos] = useState<{ id: string; text?: string; content?: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[]>([]);
+  const [coderTodos, setCoderTodosRaw] = useState<{ id: string; text?: string; content?: string; status: 'pending' | 'in_progress' | 'complete' | 'failed' }[]>([]);
+
+  const setCoderTodos = useCallback((value: any) => {
+    if (typeof value === 'function') {
+      setCoderTodosRaw((prev: any) => {
+        const res = value(prev);
+        if (Array.isArray(res)) {
+          return res.map((t: any) => ({
+            ...t,
+            content: t.content || t.text,
+            text: t.text || t.content
+          }));
+        }
+        return res;
+      });
+    } else if (Array.isArray(value)) {
+      setCoderTodosRaw(
+        value.map((t: any) => ({
+          ...t,
+          content: t.content || t.text,
+          text: t.text || t.content
+        }))
+      );
+    } else {
+      setCoderTodosRaw(value);
+    }
+  }, []);
   const [isGeneratingTodos, setIsGeneratingTodos] = useState(false);
   const [showTodoPanel, setShowTodoPanel] = useState(false);
   const [todoCollapsed, setTodoCollapsed] = useState(false);
@@ -126,6 +152,22 @@ export function useCoderMode({
       return () => clearInterval(interval);
     }
   }, [isTyping, isCoderMode, coderTodos.length]);
+
+  useEffect(() => {
+    if (!isCoderMode) return;
+    if (coderTodos.length === 0) return;
+    setShowTodoPanel(true);
+    setTodoCollapsed(false);
+  }, [isCoderMode, coderTodos.length]);
+
+  useEffect(() => {
+    if (!showTodoPanel) return;
+    if (coderTodos.length === 0) return;
+    const allDone = coderTodos.every(todo => todo.status === 'complete' || todo.status === 'completed');
+    if (allDone) {
+      setShowTodoPanel(false);
+    }
+  }, [coderTodos, showTodoPanel]);
 
   return {
     isCoderMode,

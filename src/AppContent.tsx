@@ -2339,13 +2339,7 @@ const startCoderPreview = useCallback(async () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    const isLocal =
-                      useLocalModelsOnly ||
-                      activeModelId.toLowerCase().includes("gguf");
-                    if (isLocal && handleOpenLocalModelConfig) {
-                      handleOpenLocalModelConfig(activeModelId);
-                      setIsModelDrawerOpen(true);
-                    }
+                    setIsModelDrawerOpen(true);
                   }}
                   className="flex items-center gap-2 px-3 py-1.5 bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-gray-200/90 dark:hover:bg-zinc-700/90 border border-gray-200 dark:border-zinc-700/60 rounded-full transition-all text-xs font-bold shadow-sm cursor-pointer select-none max-w-[210px]"
                   title="Change active model"
@@ -2584,6 +2578,8 @@ const startCoderPreview = useCallback(async () => {
             attachedFiles={attachedFiles}
             setAttachedFiles={setAttachedFiles}
             handleFileAttach={handleFileAttach}
+            localElementAttachments={localElementAttachments}
+            setLocalElementAttachments={setLocalElementAttachments}
             coderPermissionMode={coderPermissionMode}
             setCoderPermissionMode={setCoderPermissionMode}
             onExitCoderMode={() => {
