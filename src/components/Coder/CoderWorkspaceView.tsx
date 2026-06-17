@@ -1,21 +1,19 @@
 import React, { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { 
-  Sparkles, 
-  Trash2, 
   Play, 
   Folder,
-  ChevronDown,
-  Search,
-  Code
+  Code,
+  Terminal,
+  ChevronDown
 } from 'lucide-react';
 import { CoderSidebar } from './CoderSidebar';
 import { CoderInputBox } from './CoderInputBox';
 import { MessageItem } from '../Chat/MessageItem';
 import { LivePreviewPanel } from '../LivePreviewPanel';
-import { safeConfirm } from '../../utils/tauriDesktop';
+import { invokeTauri, isTauriDesktop } from '../../utils/tauriDesktop';
 
-import { Message, Chat } from '../../types';
+import { Message, Chat, CoderPermissionMode } from '../../types';
 
 const STABLE_NOOP = () => {};
 
@@ -82,6 +80,8 @@ interface CoderWorkspaceViewProps {
   handleModelSelect: (id: string) => void;
   modelSelectorMode: 'popup' | 'drawer';
   setIsModelDrawerOpen: (open: boolean) => void;
+  activeAssistantMode: 'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester' | 'plain';
+  setActiveAssistantMode: (mode: 'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester' | 'plain') => void;
   projectFolders: Project[];
   setProjectFolders: React.Dispatch<React.SetStateAction<Project[]>>;
   activeProjectId: string | null;
@@ -100,6 +100,13 @@ interface CoderWorkspaceViewProps {
   isVoiceListening?: boolean;
   startVoiceDictation?: (locale?: string) => void;
   stopVoiceDictation?: (autoSend?: boolean) => void;
+  voiceInterimText?: string;
+  voiceError?: string | null;
+  attachedFiles: File[];
+  setAttachedFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  handleFileAttach?: (files: File[]) => void;
+  coderPermissionMode: CoderPermissionMode;
+  setCoderPermissionMode: (mode: CoderPermissionMode) => void;
 }
 
 export default function CoderWorkspaceView({
@@ -158,6 +165,8 @@ export default function CoderWorkspaceView({
   handleModelSelect,
   modelSelectorMode,
   setIsModelDrawerOpen,
+  activeAssistantMode,
+  setActiveAssistantMode,
   projectFolders,
   setProjectFolders,
   activeProjectId,
@@ -174,11 +183,27 @@ export default function CoderWorkspaceView({
   abortControllerRef,
   isVoiceListening,
   startVoiceDictation,
-  stopVoiceDictation
+  stopVoiceDictation,
+  voiceInterimText,
+  voiceError,
+  attachedFiles,
+  setAttachedFiles,
+  handleFileAttach,
+  coderPermissionMode,
+  setCoderPermissionMode
 }: CoderWorkspaceViewProps) {
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
   const scrollRef = useRef<HTMLDivElement>(null);
   const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
+  const currentModelName = React.useMemo(() => {
+    const matched = activeModelList.find((m: any) => m.id === activeModelId);
+    if (matched) return matched.name;
+    let name = activeModelId;
+    if (name.includes('/')) {
+      name = name.split('/').slice(-1)[0];
+    }
+    return name.replace(/[-_]/g, ' ').replace(/\bgguf\b/gi, '').trim() || activeModelId;
+  }, [activeModelId, activeModelList]);
 
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
@@ -201,6 +226,7 @@ export default function CoderWorkspaceView({
               chats={chats}
               setChats={setChats}
               currentChatId={currentChatId}
+              handleClearChat={handleClearChat}
               onSelectChat={(chatId) => {
                 if (onSelectChat) onSelectChat(chatId);
               }}
@@ -221,7 +247,7 @@ export default function CoderWorkspaceView({
       {/* CENTER PANEL: Chat Area */}
       <div id="coder-chat-area" className="flex-1 flex flex-col overflow-hidden h-full relative bg-[#0A0908] min-w-[400px]">
         {/* Top Bar */}
-        <div className="h-12 border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 bg-[#151211] backdrop-blur-md relative z-[150]">
+        <div className="h-14 border-b border-[#2C241E] px-4 flex items-center justify-between shrink-0 bg-[#151211] backdrop-blur-md relative z-[150]">
           <div className="flex items-center gap-3">
             {/* Sidebar toggle */}
             {!isCoderLeftPanelOpen && (
@@ -251,36 +277,48 @@ export default function CoderWorkspaceView({
                   </div>
                 );
               }
-              return (
-                <div className="flex items-center gap-1.5 text-xs text-[#7F7469] font-semibold select-none">
-                  <Code size={12} className="text-[#D97756]" />
-                  <span className="text-[#EDE6DD]">Lumina Coder</span>
-                </div>
-              );
+              return null;
             })()}
-
-            {/* Actions */}
-            <div className="flex items-center gap-1.5 select-none border-l border-[#261E1A] pl-3">
-              <button 
-                onClick={() => {
-                  const targetId = currentChatId || (chats.length > 0 ? chats[0].id : null);
-                  if (!targetId) {
-                    showToast("No active conversation to clear.");
-                    return;
-                  }
-                  if (safeConfirm("Are you sure you want to clear all messages on the screen?")) {
-                    handleClearChat();
-                  }
-                }}
-                className="p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] active:scale-95"
-                title="Clear current chat messages"
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (modelSelectorMode === 'drawer') {
+                  setIsModelDrawerOpen(true);
+                } else {
+                  showToast('Switch model selector to drawer mode in settings to use the sidebar panel here.');
+                }
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all cursor-pointer bg-[#0E0C0B]/40 border-[#2C241E] text-[#E8DFD1] hover:text-[#F5EFE7] hover:bg-[#1D1917] hover:border-[#2C241E] max-w-[220px]"
+              title="Change active model"
+            >
+              <span className="truncate text-sm font-medium">{currentModelName}</span>
+              <ChevronDown size={12} className="text-[#8A8178] shrink-0" />
+            </button>
+
+            <button
+              onClick={async () => {
+                const targetPath = coderWorkspacePath || '.';
+
+                if (!isTauriDesktop()) {
+                  showToast('Native terminal launch is only available in the desktop app.');
+                  return;
+                }
+
+                try {
+                  await invokeTauri('open_native_terminal', { cwd: targetPath });
+                } catch (error) {
+                  console.error('Failed to open native terminal:', error);
+                  showToast('Could not open terminal for the current project.');
+                }
+              }}
+              className="p-2 rounded-lg border transition-all cursor-pointer flex items-center justify-center bg-[#0E0C0B]/40 border-[#2C241E] text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#1D1917] hover:border-[#2C241E]"
+              title="Open terminal in current project"
+            >
+              <Terminal size={14} />
+            </button>
+
             {/* Preview toggle */}
             <button
               onClick={() => {
@@ -356,10 +394,8 @@ export default function CoderWorkspaceView({
                 : 'max-w-4xl xl:max-w-[1100px]'
             }`}>
               <CoderInputBox
-                activeModelId={activeModelId}
-                activeModelList={activeModelList}
-                availableModels={availableModels}
-                handleModelSelect={handleModelSelect}
+                activeAssistantMode={activeAssistantMode}
+                setActiveAssistantMode={setActiveAssistantMode}
                 coderWorkspacePath={coderWorkspacePath}
                 isCoderMode={true}
                 input={input}
@@ -371,10 +407,12 @@ export default function CoderWorkspaceView({
                 isTyping={isTyping}
                 abortControllerRef={abortControllerRef}
                 showToast={showToast}
-                isVoiceListening={isVoiceListening}
-                startVoiceDictation={startVoiceDictation}
-                stopVoiceDictation={stopVoiceDictation}
                 isCenteredState={messages.length === 0}
+                attachedFiles={attachedFiles}
+                setAttachedFiles={setAttachedFiles}
+                handleFileAttach={handleFileAttach}
+                coderPermissionMode={coderPermissionMode}
+                setCoderPermissionMode={setCoderPermissionMode}
               />
             </div>
           </div>

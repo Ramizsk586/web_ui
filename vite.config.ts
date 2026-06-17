@@ -6,6 +6,7 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   const isProd = mode === 'production';
+  const webviewTarget = 'esnext';
   return {
     plugins: [
       {
@@ -36,7 +37,7 @@ export default defineConfig(({mode}) => {
       // JS/TS minification
       minify: 'esbuild',
       // Target modern browsers
-      target: 'es2020',
+      target: webviewTarget,
       rollupOptions: {
         output: {
           manualChunks(id) {
@@ -81,10 +82,16 @@ export default defineConfig(({mode}) => {
       transformer: 'lightningcss',
     },
     esbuild: {
+      target: webviewTarget,
       // Drop debugger statements in production
       drop: isProd ? ['debugger', 'console'] : [],
       // Tree shaking
       legalComments: 'none',
+    },
+    optimizeDeps: {
+      esbuildOptions: {
+        target: webviewTarget,
+      },
     },
 
     resolve: {

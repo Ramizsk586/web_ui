@@ -43,6 +43,9 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
   const setCoderWorkspacePath = useCallback((nextPath: string) => {
     const normalized = String(nextPath || '').trim();
     setCoderWorkspacePathState(normalized);
+    if (normalized) {
+      setIsCoderLeftPanelOpen(true);
+    }
     try {
       if (normalized) {
         localStorage.setItem('lumina_coder_workspace_user_selected', 'true');

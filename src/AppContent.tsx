@@ -646,7 +646,7 @@ export default function AppContent({
   const whiteboardAttachRef = useRef<(() => void) | null>(null);
 
   // Layout & UI helper states
-  const [activeAssistantMode, setActiveAssistantMode] = useState<'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester'>('builder');
+  const [activeAssistantMode, setActiveAssistantMode] = useState<'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester' | 'plain'>('builder');
   const [coderPermissionMode, setCoderPermissionMode] = useState<CoderPermissionMode>(() => {
     return (localStorage.getItem('lumina_coder_permission_mode') as CoderPermissionMode) || 'default';
   });
@@ -2645,6 +2645,8 @@ const startCoderPreview = useCallback(async () => {
             handleModelSelect={handleModelSelect}
             modelSelectorMode={modelSelectorMode}
             setIsModelDrawerOpen={setIsModelDrawerOpen}
+            activeAssistantMode={activeAssistantMode}
+            setActiveAssistantMode={setActiveAssistantMode}
             projectFolders={projectFolders}
             setProjectFolders={setProjectFolders}
             activeProjectId={activeProjectId}
@@ -2673,6 +2675,11 @@ const startCoderPreview = useCallback(async () => {
             isVoiceListening={isVoiceListening}
             startVoiceDictation={startVoiceDictation}
             stopVoiceDictation={stopVoiceDictation}
+            attachedFiles={attachedFiles}
+            setAttachedFiles={setAttachedFiles}
+            handleFileAttach={handleFileAttach}
+            coderPermissionMode={coderPermissionMode}
+            setCoderPermissionMode={setCoderPermissionMode}
           />) : (
           <>
             {showAgentCreation ? (

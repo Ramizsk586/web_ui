@@ -1,16 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Folder, 
-  Plus, 
-  History, 
-  Clock, 
   Settings, 
   FolderPlus, 
   SlidersHorizontal,
   ChevronDown, 
   ChevronRight,
-  ArrowLeft,
-  ArrowRight,
+  Code,
   X,
   PlusCircle,
   Play,
@@ -36,6 +32,7 @@ interface CoderSidebarProps {
   chats: Chat[];
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
   currentChatId: string | null;
+  handleClearChat: () => void;
   onSelectChat: (chatId: string) => void;
   onNewChat: (projectId?: string | null) => void;
   onClose: () => void;
@@ -55,6 +52,7 @@ export function CoderSidebar({
   chats,
   setChats,
   currentChatId,
+  handleClearChat,
   onSelectChat,
   onNewChat,
   onClose,
@@ -239,49 +237,6 @@ export function CoderSidebar({
     }
   };
 
-  // Chat Navigation History queue state
-  const [chatHistoryQueue, setChatHistoryQueue] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState<number>(-1);
-
-  useEffect(() => {
-    if (currentChatId) {
-      setChatHistoryQueue(prev => {
-        // If it's already the current index, don't change
-        if (historyIndex >= 0 && prev[historyIndex] === currentChatId) {
-          return prev;
-        }
-        
-        // Truncate forward history if we were in the middle of back navigation
-        const nextQueue = prev.slice(0, historyIndex + 1);
-        
-        // Prevent duplicate consecutive items
-        if (nextQueue[nextQueue.length - 1] === currentChatId) {
-          return nextQueue;
-        }
-
-        const newQueue = [...nextQueue, currentChatId];
-        setHistoryIndex(newQueue.length - 1);
-        return newQueue;
-      });
-    }
-  }, [currentChatId]);
-
-  const handleNavigateBack = () => {
-    if (historyIndex > 0) {
-      const prevIndex = historyIndex - 1;
-      setHistoryIndex(prevIndex);
-      onSelectChat(chatHistoryQueue[prevIndex]);
-    }
-  };
-
-  const handleNavigateForward = () => {
-    if (historyIndex < chatHistoryQueue.length - 1) {
-      const nextIndex = historyIndex + 1;
-      setHistoryIndex(nextIndex);
-      onSelectChat(chatHistoryQueue[nextIndex]);
-    }
-  };
-
   // Format dynamic relative timestamp (e.g. 5m, 1h, 2d, now)
   const getFriendlyTimestamp = (dateInput: any) => {
     if (!dateInput) return 'now';
@@ -300,8 +255,8 @@ export function CoderSidebar({
   return (
     <div className="flex flex-col h-full bg-[#110E0D] text-[#DDD2C4] font-sans select-none overflow-hidden relative border-r border-[#2C241E] w-full">
       {/* 1. Header Toolbar (Toggle Sidebar, Navigation Arrows) */}
-      <div className="flex items-center justify-between px-3.5 py-3 border-b border-[#2C241E] shrink-0 bg-[#161211]">
-        <div className="flex items-center gap-4">
+      <div className="grid grid-cols-[40px_1fr_40px] items-center px-3.5 py-3 border-b border-[#2C241E] shrink-0 bg-[#161211]">
+        <div className="flex items-center justify-start">
           <button 
             onClick={onClose}
             className="p-1.5 rounded-lg border border-[#2C241E] bg-[#0E0B0A]/50 text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#1D1917] transition-all cursor-pointer flex items-center justify-center"
@@ -313,70 +268,34 @@ export function CoderSidebar({
               <path d="M9 3v18" />
             </svg>
           </button>
-          
-          <div className="flex items-center gap-1.5">
-            <button 
-              onClick={handleNavigateBack}
-              disabled={historyIndex <= 0}
-              className="p-1.5 rounded-lg text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#1D1917] disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center"
-              title="Navigate Back"
-            >
-              <ArrowLeft size={13} strokeWidth={2.5} />
-            </button>
-            <button 
-              onClick={handleNavigateForward}
-              disabled={historyIndex >= chatHistoryQueue.length - 1}
-              className="p-1.5 rounded-lg text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#1D1917] disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer flex items-center justify-center"
-              title="Navigate Forward"
-            >
-              <ArrowRight size={13} strokeWidth={2.5} />
-            </button>
-          </div>
+        </div>
+
+        <div className="flex items-center justify-center gap-1.5 text-xs text-[#7F7469] font-semibold select-none">
+          <Code size={12} className="text-[#D97756]" />
+          <span className="text-[#EDE6DD]">Lumina Coder</span>
+        </div>
+
+        <div className="flex items-center justify-end">
+          <button
+            onClick={() => {
+              const targetId = currentChatId || (chats.length > 0 ? chats[0].id : null);
+              if (!targetId) {
+                showToast("No active conversation to clear.");
+                return;
+              }
+              if (confirm("Are you sure you want to clear all messages on the screen?")) {
+                handleClearChat();
+              }
+            }}
+            className="p-1.5 rounded-lg border border-[#2C241E] bg-[#0E0B0A]/50 text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#1D1917] transition-all cursor-pointer flex items-center justify-center"
+            title="Clear current chat messages"
+          >
+            <Trash2 size={12} />
+          </button>
         </div>
       </div>
 
-      {/* 2. New Conversation Action Button */}
-      <div className="px-3 py-3 shrink-0">
-        <button
-          onClick={() => onNewChat(activeProjectId)}
-          className="w-full h-9 flex items-center justify-center gap-2 bg-[#211B18] border border-[#2C241E] hover:bg-[#2F2521] active:scale-[0.98] text-[#EDE6DD] text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-sm"
-        >
-          <Plus size={14} className="text-[#D97756]" strokeWidth={2.5} />
-          New Conversation
-        </button>
-      </div>
-
-      {/* 3. Navigation Sidebar Menus (History, Scheduled Tasks) */}
-      <div className="px-3 pb-2 space-y-0.5 shrink-0 border-b border-[#2C241E]/40">
-        <button 
-          onClick={() => {
-            // Pick first chat that is CoderMode and doesn't belong to current project, or show all
-            const coderChats = chats.filter(c => c.isCoderMode);
-            if (coderChats.length > 0) {
-              onSelectChat(coderChats[0].id);
-            } else {
-              onNewChat(activeProjectId);
-            }
-          }}
-          className="w-full flex items-center gap-2.5 px-2.5 py-2 hover:bg-[#1D1917] text-[#AD9F91] hover:text-[#EDE6DD] rounded-lg text-xs font-semibold transition-all cursor-pointer text-left"
-        >
-          <History size={14} strokeWidth={2.2} />
-          <span>Conversation History</span>
-        </button>
-        
-        <button 
-          onClick={() => {
-            // Trigger scheduled tasks view if available
-            showToast('Scheduled Tasks dashboard is accessible in automation panel tabs.');
-          }}
-          className="w-full flex items-center gap-2.5 px-2.5 py-2 hover:bg-[#1D1917] text-[#AD9F91] hover:text-[#EDE6DD] rounded-lg text-xs font-semibold transition-all cursor-pointer text-left"
-        >
-          <Clock size={14} strokeWidth={2.2} />
-          <span>Scheduled Tasks</span>
-        </button>
-      </div>
-
-      {/* 4. Projects Header & Action Trigger */}
+      {/* 2. Projects Header & Action Trigger */}
       <div className="flex items-center justify-between px-5 pt-4 pb-2 shrink-0 select-none">
         <span className="text-[10px] font-bold uppercase tracking-wider text-[#7F7469]">Projects</span>
         <div className="flex items-center gap-2 text-[#7F7469] relative" ref={addMenuRef}>
