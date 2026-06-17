@@ -435,13 +435,15 @@ export default function App() {
     callLlamaBridge: llamaBridge.callLlamaBridge,
     createNewChat: (projId, isCoder, _isResearch, agentId) => {
       const id = Date.now().toString();
+      const activeWorkspacePath = String(workspace.coderWorkspacePath || '').replace(/\\/g, '/').trim();
       const newChat = {
         id,
-        title: agentId ? 'New Assistant Chat' : (isCoder ? 'New Coder Workspace' : 'New Chat'),
+        title: agentId ? 'New Assistant Chat' : (isCoder ? 'New Coder Chat' : 'New Chat'),
         messages: [],
         createdAt: new Date(),
         updatedAt: new Date(),
         projectId: projId || undefined,
+        workspacePath: isCoder && activeWorkspacePath ? activeWorkspacePath : undefined,
         agentId: agentId || undefined,
         isCoderMode: isCoder || undefined,
       };

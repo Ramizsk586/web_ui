@@ -1,27 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Folder, 
-  Settings, 
   FolderPlus, 
-  SlidersHorizontal,
-  ChevronDown, 
-  ChevronRight,
   Code,
   X,
-  PlusCircle,
-  Play,
-  MoreVertical,
-  Trash2
+  Trash2,
+  Plus,
+  PanelRightClose
 } from 'lucide-react';
 import { Chat } from '../../types';
 import { invokeTauri, isTauriDesktop } from '../../utils/tauriDesktop';
-
-interface Project {
-  id: string;
-  name: string;
-  path: string;
-  description?: string;
-}
+import { safeConfirm } from '../../utils/tauriDesktop';
 
 interface CoderSidebarProps {
   workspaceRefreshKey: number;
@@ -34,13 +23,10 @@ interface CoderSidebarProps {
   currentChatId: string | null;
   handleClearChat: () => void;
   onSelectChat: (chatId: string) => void;
-  onNewChat: (projectId?: string | null) => void;
+  onNewChat: () => void;
   onClose: () => void;
-  projectFolders: Project[];
-  setProjectFolders: React.Dispatch<React.SetStateAction<Project[]>>;
-  activeProjectId: string | null;
-  setActiveProjectId: (id: string | null) => void;
-  onOpenSettings?: () => void;
+  onExitCoderMode?: () => void;
+  onDeleteChat?: (chatId: string) => void;
 }
 
 export function CoderSidebar({
@@ -56,61 +42,25 @@ export function CoderSidebar({
   onSelectChat,
   onNewChat,
   onClose,
-  projectFolders,
-  setProjectFolders,
-  activeProjectId,
-  setActiveProjectId,
-  onOpenSettings
+  onExitCoderMode,
+  onDeleteChat
 }: CoderSidebarProps) {
-  const [showAddMenu, setShowAddMenu] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedFolderForModal, setSelectedFolderForModal] = useState<string>('');
-  
-  // Track expanded projects in sidebar
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
-    const initial = new Set<string>();
-    if (activeProjectId) {
-      initial.add(activeProjectId);
-    }
-    return initial;
-  });
-
-  const addMenuRef = useRef<HTMLDivElement>(null);
-
-  // Close menus on outside click
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) {
-        setShowAddMenu(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Ensure current active project is expanded
-  useEffect(() => {
-    if (activeProjectId) {
-      setExpandedProjects(prev => {
-        const next = new Set(prev);
-        next.add(activeProjectId);
-        return next;
-      });
-    }
-  }, [activeProjectId]);
-
-  const toggleProjectExpand = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpandedProjects(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  const normalizedWorkspacePath = useMemo(
+    () => String(workspaceRootPath || '').replace(/\\/g, '/').trim(),
+    [workspaceRootPath]
+  );
+  const activeFolderName = useMemo(() => {
+    if (!normalizedWorkspacePath) return '';
+    return normalizedWorkspacePath.split('/').filter(Boolean).slice(-1)[0] || normalizedWorkspacePath;
+  }, [normalizedWorkspacePath]);
+  const folderChats = useMemo(() => {
+    return chats.filter(chat =>
+      chat.isCoderMode &&
+      String(chat.workspacePath || '').replace(/\\/g, '/').trim() === normalizedWorkspacePath
+    );
+  }, [chats, normalizedWorkspacePath]);
 
   const handleSelectProjectFolder = async () => {
     try {
@@ -130,111 +80,33 @@ export function CoderSidebar({
     }
   };
 
-  const handleCreateProjectFromModal = () => {
+  const handleOpenFolder = () => {
     if (!selectedFolderForModal) {
       showToast('Please select or enter a folder path first.');
       return;
     }
 
     const path = selectedFolderForModal.replace(/\\/g, '/');
-    const folderName = path.split('/').pop() || 'Unnamed Project';
+    onWorkspaceRootPathChange(path);
+    triggerWorkspaceRefresh();
+    setShowCreateModal(false);
+    setSelectedFolderForModal('');
+    showToast(`Opened folder "${path.split('/').pop() || path}"`);
+  };
 
-    // Check duplicate path or name
-    if (projectFolders.some(p => p.path === path || p.name.toLowerCase() === folderName.toLowerCase())) {
-      showToast('A project with this folder path or name already exists.');
+  const handleRemoveOpenedFolder = () => {
+    if (!normalizedWorkspacePath) return;
+    if (!safeConfirm(`Remove the opened folder "${activeFolderName}" from Coder mode? This will not delete anything from your device.`)) {
       return;
     }
 
-    const newProj: Project = {
-      id: Date.now().toString(),
-      name: folderName,
-      path: path,
-      description: 'Local workspace project'
-    };
-
-    setProjectFolders(prev => [...prev, newProj]);
-    setActiveProjectId(newProj.id);
-    onWorkspaceRootPathChange(path);
-    triggerWorkspaceRefresh();
-    onNewChat(newProj.id);
-    setShowCreateModal(false);
-    setSelectedFolderForModal('');
-    showToast(`Added project workspace "${folderName}"`);
-  };
-
-  const handleQuickStart = () => {
-    const defaultPath = workspaceRootPath || '.';
-    const path = defaultPath.replace(/\\/g, '/');
-    const folderName = path.split('/').pop() || 'web_ui';
-
-    if (projectFolders.some(p => p.path === path)) {
-      const existing = projectFolders.find(p => p.path === path);
-      if (existing) {
-        setActiveProjectId(existing.id);
-        onWorkspaceRootPathChange(existing.path);
-        onNewChat(existing.id);
-        showToast(`Opened existing workspace "${existing.name}"`);
-        return;
-      }
+    if (currentChatId && folderChats.some(chat => chat.id === currentChatId)) {
+      onSelectChat('');
     }
 
-    const newProj: Project = {
-      id: Date.now().toString(),
-      name: folderName,
-      path: path,
-      description: 'Quick start workspace'
-    };
-
-    setProjectFolders(prev => [...prev, newProj]);
-    setActiveProjectId(newProj.id);
-    onWorkspaceRootPathChange(path);
+    onWorkspaceRootPathChange('');
     triggerWorkspaceRefresh();
-    onNewChat(newProj.id);
-    showToast(`Quick-started project workspace "${folderName}"`);
-    setShowAddMenu(false);
-  };
-
-  const handleDeleteProject = (projectId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const proj = projectFolders.find(p => p.id === projectId);
-    if (!proj) return;
-
-    if (confirm(`Are you sure you want to remove the project workspace "${proj.name}"? This will not delete the files on disk.`)) {
-      setProjectFolders(prev => prev.filter(p => p.id !== projectId));
-      
-      // Unlink chats associated with this project
-      setChats(prev => prev.map(c => {
-        if (c.projectId === projectId) {
-          return { ...c, projectId: undefined };
-        }
-        return c;
-      }));
-
-      if (activeProjectId === projectId) {
-        setActiveProjectId(null);
-      }
-      showToast(`Removed workspace "${proj.name}"`);
-    }
-  };
-
-  const handleProjectClick = (proj: Project) => {
-    setActiveProjectId(proj.id);
-    onWorkspaceRootPathChange(proj.path);
-    triggerWorkspaceRefresh();
-
-    // Check if there are existing chats for this project
-    const projChats = chats.filter(c => c.projectId === proj.id && c.isCoderMode);
-    if (projChats.length > 0) {
-      // Sort by updatedAt and open youngest
-      const sorted = [...projChats].sort((a, b) => {
-        const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-        return timeB - timeA;
-      });
-      onSelectChat(sorted[0].id);
-    } else {
-      onNewChat(proj.id);
-    }
+    showToast(`Removed folder "${activeFolderName}" from Coder mode.`);
   };
 
   // Format dynamic relative timestamp (e.g. 5m, 1h, 2d, now)
@@ -283,7 +155,7 @@ export function CoderSidebar({
                 showToast("No active conversation to clear.");
                 return;
               }
-              if (confirm("Are you sure you want to clear all messages on the screen?")) {
+              if (safeConfirm("Are you sure you want to clear all messages on the screen?")) {
                 handleClearChat();
               }
             }}
@@ -295,146 +167,116 @@ export function CoderSidebar({
         </div>
       </div>
 
-      {/* 2. Projects Header & Action Trigger */}
+      {/* 2. Folder Header & Action Trigger */}
       <div className="flex items-center justify-between px-5 pt-4 pb-2 shrink-0 select-none">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-[#7F7469]">Projects</span>
-        <div className="flex items-center gap-2 text-[#7F7469] relative" ref={addMenuRef}>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[#7F7469]">Folder</span>
+        <div className="flex items-center gap-2 text-[#7F7469] relative">
           <button 
+            onClick={() => setShowCreateModal(true)}
             className="p-1 hover:text-[#EDE6DD] transition-all cursor-pointer"
-            title="Filter/Sort Projects"
-          >
-            <SlidersHorizontal size={12} strokeWidth={2.2} />
-          </button>
-          
-          <button 
-            onClick={() => setShowAddMenu(!showAddMenu)}
-            className="p-1 hover:text-[#EDE6DD] transition-all cursor-pointer"
-            title="Add Project Folder"
+            title="Open Folder"
           >
             <FolderPlus size={12} strokeWidth={2.2} />
           </button>
-
-          {/* Popover Add Dropdown Menu */}
-          {showAddMenu && (
-            <div className="absolute right-0 top-6 w-36 rounded-lg border border-[#2C241E] bg-[#181412] shadow-2xl p-1 z-50 text-left">
-              <button
-                onClick={() => {
-                  setShowCreateModal(true);
-                  setShowAddMenu(false);
-                }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#241C18] text-xs font-semibold text-[#EDE6DD] transition-all cursor-pointer"
-              >
-                <FolderPlus size={13} className="text-[#D97756]" />
-                New Project
-              </button>
-              <button
-                onClick={handleQuickStart}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[#241C18] text-xs font-semibold text-[#EDE6DD] transition-all cursor-pointer"
-              >
-                <Play size={13} className="text-emerald-500" />
-                Quick Start
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* 5. Projects & Folders List Area */}
+      {/* 5. Current Folder & Chats */}
       <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-1.5 custom-scrollbar">
-        {projectFolders.length === 0 ? (
+        {!normalizedWorkspacePath ? (
           <div className="px-4 py-8 text-center text-xs text-[#635F59] font-medium leading-relaxed select-none">
-            No projects added.<br />Click the folder icon above to add a project folder.
+            No folder opened.<br />Click the folder icon above to open a project folder.
           </div>
         ) : (
-          projectFolders.map(proj => {
-            const isExpanded = expandedProjects.has(proj.id);
-            const isActiveProject = activeProjectId === proj.id;
-            const projChats = chats.filter(c => c.projectId === proj.id && c.isCoderMode);
-
-            return (
-              <div key={proj.id} className="space-y-1">
-                {/* Folder Header Item */}
-                <div
-                  onClick={() => handleProjectClick(proj)}
-                  className={`group w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer select-none
-                    ${isActiveProject 
-                      ? 'bg-[#1D1917]/35 border-[#2C241E] text-[#EDE6DD]' 
-                      : 'border-transparent text-[#AD9F91] hover:text-[#EDE6DD] hover:bg-[#14100E]/40'
-                    }
-                  `}
-                >
-                  <div className="flex items-center gap-2 truncate flex-1">
-                    <button
-                      onClick={(e) => toggleProjectExpand(proj.id, e)}
-                      className="p-0.5 rounded text-[#7F7469] hover:text-white transition-all cursor-pointer flex items-center justify-center"
-                    >
-                      <div className={`transition-transform duration-150 ${isExpanded ? 'rotate-90' : 'rotate-0'}`}>
-                        <ChevronRight size={12} strokeWidth={2.5} />
-                      </div>
-                    </button>
-                    <Folder size={13} className={isActiveProject ? 'text-[#D97756]' : 'text-[#7F7469]'} />
-                    <span className="truncate">{proj.name}</span>
-                  </div>
-
-                  <button
-                    onClick={(e) => handleDeleteProject(proj.id, e)}
-                    className="p-1 opacity-0 group-hover:opacity-100 hover:bg-[#2A221E] hover:text-red-400 rounded transition-all cursor-pointer text-[#7F7469]"
-                    title="Remove project workspace"
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-
-                {/* Expanded Chat Sessions List */}
-                {isExpanded && (
-                  <div className="pl-4 pr-1 space-y-1 relative">
-                    {/* Vertical line indicator */}
-                    <div className="absolute left-4.5 top-0 bottom-1.5 border-l border-[#2C241E]/50" />
-                    
-                    {projChats.length === 0 ? (
-                      <div className="pl-4 py-1.5 text-[10.5px] text-[#635F59] font-medium select-none">
-                        No conversations
-                      </div>
-                    ) : (
-                      projChats.map(chat => {
-                        const isChatActive = currentChatId === chat.id;
-                        return (
-                          <div
-                            key={chat.id}
-                            onClick={() => onSelectChat(chat.id)}
-                            className={`pl-4 pr-2 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center justify-between group
-                              ${isChatActive
-                                ? 'bg-[#211B18] text-[#EDE6DD] shadow-sm border border-[#2C241E]'
-                                : 'text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#161211]/60'
-                              }
-                            `}
-                          >
-                            <span className="truncate flex-1 pr-2">
-                              {chat.title || 'Untitled Session'}
-                            </span>
-                            <span className="text-[9px] font-mono text-[#635F59] shrink-0 font-bold uppercase">
-                              {getFriendlyTimestamp(chat.updatedAt)}
-                            </span>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
+          <div className="space-y-1">
+            <div className="group w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs font-semibold bg-[#1D1917]/35 border-[#2C241E] text-[#EDE6DD]">
+              <div className="flex items-center gap-2 truncate flex-1 min-w-0">
+                <Folder size={13} className="text-[#D97756]" />
+                <span className="truncate">{activeFolderName}</span>
               </div>
-            );
-          })
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => onNewChat()}
+                  className="p-1 hover:bg-[#2A221E] hover:text-[#EDE6DD] rounded transition-all cursor-pointer text-[#7F7469]"
+                  title="Start new chat in this folder"
+                >
+                  <Plus size={11} />
+                </button>
+                <button
+                  onClick={handleRemoveOpenedFolder}
+                  className="p-1 hover:bg-[#2A221E] hover:text-red-400 rounded transition-all cursor-pointer text-[#7F7469]"
+                  title="Remove opened folder from coder mode"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            </div>
+
+            <div className="pl-4 pr-1 space-y-1 relative">
+              <div className="absolute left-4.5 top-0 bottom-1.5 border-l border-[#2C241E]/50" />
+              <div className="pl-4 py-1 text-[9px] text-[#635F59] font-mono truncate select-text">
+                {normalizedWorkspacePath}
+              </div>
+              {folderChats.length === 0 ? (
+                <div className="pl-4 py-1.5 text-[10.5px] text-[#635F59] font-medium select-none">
+                  No conversations
+                </div>
+              ) : (
+                [...folderChats]
+                  .sort((a, b) => {
+                    const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                    const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                    return timeB - timeA;
+                  })
+                  .map(chat => {
+                    const isChatActive = currentChatId === chat.id;
+                    return (
+                      <div
+                        key={chat.id}
+                        onClick={() => onSelectChat(chat.id)}
+                        className={`pl-4 pr-2 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center justify-between group/chat
+                          ${isChatActive
+                            ? 'bg-[#211B18] text-[#EDE6DD] shadow-sm border border-[#2C241E]'
+                            : 'text-[#9B8C7D] hover:text-[#EDE6DD] hover:bg-[#161211]/60'
+                          }
+                        `}
+                      >
+                        <span className="truncate flex-1 pr-2">
+                          {chat.title || 'Untitled Session'}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[9px] font-mono text-[#635F59] font-bold uppercase group-hover/chat:hidden">
+                            {getFriendlyTimestamp(chat.updatedAt)}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onDeleteChat) onDeleteChat(chat.id);
+                            }}
+                            className="p-0.5 opacity-0 group-hover/chat:opacity-100 hover:bg-[#2A221E] hover:text-red-400 rounded transition-all cursor-pointer text-[#7F7469] hidden group-hover/chat:block"
+                            title="Delete conversation"
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
         )}
       </div>
 
-      {/* 6. Settings Sidebar Footer Item */}
+      {/* 6. Close Coder Footer Item */}
       <div className="p-3 shrink-0 border-t border-[#2C241E]/40 bg-[#141110]">
         <button 
-          onClick={onOpenSettings}
+          onClick={onExitCoderMode}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-[#1D1917] text-[#AD9F91] hover:text-[#EDE6DD] text-xs font-semibold transition-all cursor-pointer text-left"
         >
-          <Settings size={14} strokeWidth={2.2} />
-          <span>Settings</span>
+          <PanelRightClose size={14} strokeWidth={2.2} />
+          <span>Close Coder</span>
         </button>
       </div>
 
@@ -452,14 +294,14 @@ export function CoderSidebar({
               <X size={14} />
             </button>
 
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-2">Create Project</h3>
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-2">Open Folder</h3>
             <p className="text-[11px] text-[#AD9F91] mb-5 leading-normal">
-              Select or enter the absolute folder directory path of your workspace. Lumina will index this folder to continue code editing and executions.
+              Select or enter the absolute folder directory path for coder mode. Chats below will stay as history for this opened folder.
             </p>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-[#7F7469] mb-1.5">Select Folder(s)</label>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-[#7F7469] mb-1.5">Folder Path</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -477,13 +319,12 @@ export function CoderSidebar({
                 </div>
               </div>
 
-              {/* Add folder large border dotted area */}
               <div 
                 onClick={handleSelectProjectFolder}
                 className="py-8 border-2 border-dashed border-[#2C241E] hover:border-[#D97756]/40 rounded-xl bg-[#0E0C0B]/30 hover:bg-[#0E0C0B]/60 transition-all flex flex-col items-center justify-center gap-2 cursor-pointer select-none group"
               >
                 <FolderPlus size={24} className="text-[#7F7469] group-hover:text-[#D97756] transition-colors" />
-                <span className="text-xs font-semibold text-[#EDE6DD]">{selectedFolderForModal ? 'Change Folder Path' : '+ Add Folder'}</span>
+                <span className="text-xs font-semibold text-[#EDE6DD]">{selectedFolderForModal ? 'Change Folder Path' : '+ Open Folder'}</span>
                 {selectedFolderForModal && (
                   <span className="text-[9.5px] font-mono text-[#D97756] max-w-[280px] truncate">{selectedFolderForModal}</span>
                 )}
@@ -501,11 +342,11 @@ export function CoderSidebar({
                 Skip
               </button>
               <button
-                onClick={handleCreateProjectFromModal}
+                onClick={handleOpenFolder}
                 disabled={!selectedFolderForModal}
                 className="h-9 px-5 bg-[#D97756] hover:bg-[#e48f73] disabled:opacity-40 disabled:pointer-events-none text-xs font-bold text-white rounded-lg transition-all cursor-pointer shadow-md"
               >
-                Create
+                Open
               </button>
             </div>
           </div>

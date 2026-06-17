@@ -58,8 +58,6 @@ import {
   FileText
 } from 'lucide-react';
 
-import { CoderWorkspacePanel } from './components/CoderWorkspacePanel';
-import { FloatingCodeEditor } from './components/FloatingCodeEditor';
 
 import Whiteboard from './components/Whiteboard';
 import { ChatsManagerPanel } from './components/ChatsManagerPanel';
@@ -301,7 +299,7 @@ export default function AppContent({
     coderWorkspacePath, setCoderWorkspacePath,
     isCoderRightPanelOpen, setIsCoderRightPanelOpen,
     isWhiteboardOpen, setIsWhiteboardOpen,
-    floatingEditFile, setFloatingEditFile,
+    setFloatingEditFile,
     workspaceRefreshKey, setWorkspaceRefreshKey,
     iframeKey, setIframeKey,
     rightIsGridEnabled, setRightIsGridEnabled,
@@ -623,10 +621,9 @@ export default function AppContent({
       if (selectedChat) {
         const isCoder = Boolean(selectedChat.isCoderMode);
         setIsCoderMode(isCoder);
-        setIsCoderWorkspacePanelOpen(isCoder);
       }
     }
-  }, [chats, setCurrentChatId, setIsCoderMode, setIsCoderWorkspacePanelOpen]);
+  }, [chats, setCurrentChatId, setIsCoderMode]);
 
 
 
@@ -721,6 +718,10 @@ export default function AppContent({
   }, [messages, sourcesPanelMessageId]);
 
   const activeSources = activeSourcesMessage?.sources || [];
+  const handleEditorRemovedNotice = useCallback((filePath?: string | null) => {
+    const fileName = String(filePath || '').replace(/\\/g, '/').split('/').filter(Boolean).slice(-1)[0] || 'file';
+    showToast(`Built-in editor removed. Use your external editor for "${fileName}".`);
+  }, [showToast]);
 
   // Pre-compiled regex patterns for model name cleaning (performance optimization)
   const MODEL_NAME_PATTERNS = useMemo(() => [
@@ -1473,6 +1474,20 @@ const startCoderPreview = useCallback(async () => {
       setPendingCommandPermission({ command, reason, resolve });
     });
   }, []);
+
+  const resolvePendingPermission = useCallback((decision: 'allow-once' | 'allow-always' | 'deny') => {
+    if (pendingCommandPermission) {
+      pendingCommandPermission.resolve(decision);
+      setPendingCommandPermission(null);
+      showToast(
+        decision === "deny"
+          ? "Command denied."
+          : decision === "allow-always"
+            ? "Command allowed permanently."
+            : "Command allowed once."
+      );
+    }
+  }, [pendingCommandPermission, showToast]);
 
   const {
     handleSend,
@@ -2260,7 +2275,7 @@ const startCoderPreview = useCallback(async () => {
             markdownComponents={markdownComponents}
             userProfile={userProfile}
             persona={persona}
-            onOpenInEditor={setFloatingEditFile}
+            onOpenInEditor={handleEditorRemovedNotice}
           />
         ) : (
           <div className="flex-1 flex flex-row overflow-hidden w-full h-full relative">
@@ -2597,8 +2612,6 @@ const startCoderPreview = useCallback(async () => {
             showToast={showToast}
             coderWorkspacePath={coderWorkspacePath}
             setCoderWorkspacePath={setCoderWorkspacePath}
-            setFloatingEditFile={setFloatingEditFile}
-            floatingEditFile={floatingEditFile}
             setRightPreviewSubpath={setRightPreviewSubpath}
             orchestrationState={orchestrationState}
             isSidebarOpen={isSidebarOpen}
@@ -2647,23 +2660,11 @@ const startCoderPreview = useCallback(async () => {
             setIsModelDrawerOpen={setIsModelDrawerOpen}
             activeAssistantMode={activeAssistantMode}
             setActiveAssistantMode={setActiveAssistantMode}
-            projectFolders={projectFolders}
-            setProjectFolders={setProjectFolders}
-            activeProjectId={activeProjectId}
-            setActiveProjectId={setActiveProjectId}
             createNewChat={(projId, isCoder, isResearch, agentId) => {
               createNewChat(projId, isCoder, isResearch, agentId);
             }}
-            onOpenSettings={(tab?: any) => {
-              setIsSettingsOpen(true);
-              if (tab) setActiveSettingsTab(tab);
-            }}
             onSelectChat={(chatId) => {
               setCurrentChatId(chatId);
-              const chat = chats.find(c => c.id === chatId);
-              if (chat?.projectId && setActiveProjectId) {
-                setActiveProjectId(chat.projectId);
-              }
             }}
             input={input}
             setInput={setInput}
@@ -2680,6 +2681,10 @@ const startCoderPreview = useCallback(async () => {
             handleFileAttach={handleFileAttach}
             coderPermissionMode={coderPermissionMode}
             setCoderPermissionMode={setCoderPermissionMode}
+            onExitCoderMode={() => {
+              setIsCoderMode(false);
+              createNewChat(null, false);
+            }}
           />) : (
           <>
             {showAgentCreation ? (
@@ -3041,7 +3046,7 @@ const startCoderPreview = useCallback(async () => {
                           setActiveArtifact={handleSetActiveArtifact}
                           setIsCanvasOpen={handleSetIsCanvasOpen}
                           setCanvasView={handleSetCanvasView}
-                          onOpenInEditor={setFloatingEditFile}
+                          onOpenInEditor={handleEditorRemovedNotice}
                           showToast={showToast}
                           onUpdateTodoPlan={handleUpdateTodoPlan}
                           onUpdateMessage={handleUpdateMessage}
@@ -3490,7 +3495,7 @@ const startCoderPreview = useCallback(async () => {
       <ElementAnalysisModal
         attachment={selectedModalAttachment}
         onClose={() => setSelectedModalAttachment(null)}
-        onEditFile={setFloatingEditFile}
+        onEditFile={handleEditorRemovedNotice}
       />
 
       {/* Dynamic Image Lightbox Overlay Popup */}
@@ -3669,13 +3674,13 @@ const startCoderPreview = useCallback(async () => {
         >
           <button
             onClick={() => {
-              setFloatingEditFile(attachmentContextMenu.attachment.filePath);
+              handleEditorRemovedNotice(attachmentContextMenu.attachment.filePath);
               setAttachmentContextMenu({ visible: false, x: 0, y: 0, attachment: null, index: -1 });
             }}
             className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#EDE6DD] hover:bg-[#D97756]/15 hover:text-[#D97756] rounded-lg transition-all text-left cursor-pointer font-medium"
           >
             <Code size={13} className="text-zinc-500" />
-            <span>Open in Editor</span>
+            <span>Show File Path</span>
           </button>
           <button
             onClick={() => {
@@ -3768,7 +3773,7 @@ const startCoderPreview = useCallback(async () => {
         setTranscriptionOptionsDoc={setTranscriptionOptionsDoc}
         ensureTranscriptFilesOnDisk={ensureTranscriptFilesOnDisk}
         ensureScrapedFilesOnDisk={ensureScrapedFilesOnDisk}
-        setFloatingEditFile={setFloatingEditFile}
+        setFloatingEditFile={handleEditorRemovedNotice}
         setSelectedTranscriptDoc={setSelectedTranscriptDoc}
       />
 

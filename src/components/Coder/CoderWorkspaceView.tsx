@@ -12,17 +12,11 @@ import { CoderInputBox } from './CoderInputBox';
 import { MessageItem } from '../Chat/MessageItem';
 import { LivePreviewPanel } from '../LivePreviewPanel';
 import { invokeTauri, isTauriDesktop } from '../../utils/tauriDesktop';
+import { safeConfirm } from '../../utils/tauriDesktop';
 
 import { Message, Chat, CoderPermissionMode } from '../../types';
 
 const STABLE_NOOP = () => {};
-
-interface Project {
-  id: string;
-  name: string;
-  path: string;
-  description?: string;
-}
 
 interface CoderWorkspaceViewProps {
   isCoderLeftPanelOpen: boolean;
@@ -32,8 +26,6 @@ interface CoderWorkspaceViewProps {
   showToast: (msg: string) => void;
   coderWorkspacePath: string;
   setCoderWorkspacePath: (path: string) => void;
-  setFloatingEditFile: (file: string | null) => void;
-  floatingEditFile: string | null;
   setRightPreviewSubpath: (path: string) => void;
   orchestrationState: any;
   isSidebarOpen: boolean;
@@ -82,12 +74,7 @@ interface CoderWorkspaceViewProps {
   setIsModelDrawerOpen: (open: boolean) => void;
   activeAssistantMode: 'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester' | 'plain';
   setActiveAssistantMode: (mode: 'builder' | 'planner' | 'debugger' | 'reviewer' | 'tester' | 'plain') => void;
-  projectFolders: Project[];
-  setProjectFolders: React.Dispatch<React.SetStateAction<Project[]>>;
-  activeProjectId: string | null;
-  setActiveProjectId: (id: string | null) => void;
   createNewChat: (projectId?: string | null, isCoder?: boolean, isResearch?: boolean, agentId?: string) => void;
-  onOpenSettings?: () => void;
   onSelectChat?: (chatId: string) => void;
   // Chat input props
   input: string;
@@ -107,6 +94,7 @@ interface CoderWorkspaceViewProps {
   handleFileAttach?: (files: File[]) => void;
   coderPermissionMode: CoderPermissionMode;
   setCoderPermissionMode: (mode: CoderPermissionMode) => void;
+  onExitCoderMode?: () => void;
 }
 
 export default function CoderWorkspaceView({
@@ -117,8 +105,6 @@ export default function CoderWorkspaceView({
   showToast,
   coderWorkspacePath,
   setCoderWorkspacePath,
-  setFloatingEditFile,
-  floatingEditFile,
   setRightPreviewSubpath,
   orchestrationState,
   isSidebarOpen,
@@ -167,12 +153,7 @@ export default function CoderWorkspaceView({
   setIsModelDrawerOpen,
   activeAssistantMode,
   setActiveAssistantMode,
-  projectFolders,
-  setProjectFolders,
-  activeProjectId,
-  setActiveProjectId,
   createNewChat,
-  onOpenSettings,
   onSelectChat,
   input,
   setInput,
@@ -190,11 +171,16 @@ export default function CoderWorkspaceView({
   setAttachedFiles,
   handleFileAttach,
   coderPermissionMode,
-  setCoderPermissionMode
+  setCoderPermissionMode,
+  onExitCoderMode
 }: CoderWorkspaceViewProps) {
   const [rightPanelTab, setRightPanelTab] = useState<'overview' | 'review' | string>('review');
   const scrollRef = useRef<HTMLDivElement>(null);
   const [openFileTabs, setOpenFileTabs] = useState<string[]>([]);
+  const normalizedWorkspacePath = String(coderWorkspacePath || '').replace(/\\/g, '/').trim();
+  const activeFolderName = normalizedWorkspacePath
+    ? normalizedWorkspacePath.split('/').filter(Boolean).slice(-1)[0] || normalizedWorkspacePath
+    : '';
   const currentModelName = React.useMemo(() => {
     const matched = activeModelList.find((m: any) => m.id === activeModelId);
     if (matched) return matched.name;
@@ -204,6 +190,10 @@ export default function CoderWorkspaceView({
     }
     return name.replace(/[-_]/g, ' ').replace(/\bgguf\b/gi, '').trim() || activeModelId;
   }, [activeModelId, activeModelList]);
+  const handleOpenFileNotice = React.useCallback((filePath: string) => {
+    const fileName = String(filePath || '').replace(/\\/g, '/').split('/').filter(Boolean).slice(-1)[0] || filePath || 'file';
+    showToast(`Built-in editor removed. Use your external editor for "${fileName}".`);
+  }, [showToast]);
 
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0908] text-[#EDE6DD] h-full relative font-sans">
@@ -230,15 +220,36 @@ export default function CoderWorkspaceView({
               onSelectChat={(chatId) => {
                 if (onSelectChat) onSelectChat(chatId);
               }}
-              onNewChat={(projId) => {
-                if (createNewChat) createNewChat(projId, true, false);
+              onNewChat={() => {
+                if (createNewChat) createNewChat(undefined, true, false);
               }}
               onClose={() => setIsCoderLeftPanelOpen(false)}
-              projectFolders={projectFolders}
-              setProjectFolders={setProjectFolders}
-              activeProjectId={activeProjectId}
-              setActiveProjectId={setActiveProjectId}
-              onOpenSettings={onOpenSettings}
+              onExitCoderMode={onExitCoderMode}
+              onDeleteChat={(chatId) => {
+                if (safeConfirm("Are you sure you want to delete this conversation?")) {
+                  const remainingChats = chats.filter(c => c.id !== chatId);
+                  const remainingFolderChats = remainingChats
+                    .filter(chat =>
+                      chat.isCoderMode &&
+                      String(chat.workspacePath || '').replace(/\\/g, '/').trim() === normalizedWorkspacePath
+                    )
+                    .sort((a, b) => {
+                      const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                      const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                      return timeB - timeA;
+                    });
+
+                  setChats(remainingChats);
+                  if (currentChatId === chatId) {
+                    if (remainingFolderChats.length > 0) {
+                      if (onSelectChat) onSelectChat(remainingFolderChats[0].id);
+                    } else if (createNewChat) {
+                      createNewChat(undefined, true, false);
+                    }
+                  }
+                  showToast("Conversation deleted.");
+                }
+              }}
             />
           </motion.div>
         )}
@@ -263,22 +274,12 @@ export default function CoderWorkspaceView({
               </button>
             )}
 
-            {/* Active Project & Chat Session Path */}
-            {(() => {
-              const activeProj = projectFolders.find(p => p.id === activeProjectId);
-              const activeChat = chats.find(c => c.id === currentChatId);
-              if (activeProj) {
-                return (
-                  <div className="flex items-center gap-1.5 text-xs text-[#7F7469] font-semibold select-none">
-                    <Folder size={12} className="text-[#D97756]" />
-                    <span className="text-[#EDE6DD]">{activeProj.name}</span>
-                    <span>/</span>
-                    <span className="text-[#7F7469] font-medium truncate max-w-[180px]">{activeChat?.title || 'New Session'}</span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
+            {activeFolderName && (
+              <div className="flex items-center gap-1.5 text-xs text-[#7F7469] font-semibold select-none">
+                <Folder size={12} className="text-[#D97756]" />
+                <span className="text-[#EDE6DD]">{activeFolderName}</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -373,7 +374,7 @@ export default function CoderWorkspaceView({
                       setActiveArtifact={handleSetActiveArtifact}
                       setIsCanvasOpen={STABLE_NOOP}
                       setCanvasView={handleSetCanvasView}
-                      onOpenInEditor={setFloatingEditFile}
+                      onOpenInEditor={handleOpenFileNotice}
                       showToast={showToast}
                       onUpdateTodoPlan={handleUpdateTodoPlan}
                       onStartBuilding={handleStartBuildingBtn}
@@ -445,7 +446,7 @@ export default function CoderWorkspaceView({
           setActiveTab={setRightPanelTab}
           workspaceRootPath={coderWorkspacePath}
           orchestrationState={orchestrationState}
-          onOpenFile={setFloatingEditFile}
+          onOpenFile={handleOpenFileNotice}
           isCoderLeftPanelOpen={isCoderLeftPanelOpen}
           explorerWidth={280}
           openFileTabs={openFileTabs}

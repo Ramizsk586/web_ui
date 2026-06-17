@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { StopCircle, Plus, X, ShieldCheck, Shield, Hand, Check, ChevronDown } from 'lucide-react';
+import { Plus, X, ShieldCheck, Shield, Hand, Check, ChevronDown, ArrowUp, Pause, Bot, Layers, Bug, Eye, ShieldAlert, MessageSquare } from 'lucide-react';
 import { CoderPermissionMode } from '../../types';
 import { permissionModeLabel } from '../../utils/permissionUtils';
 
@@ -25,6 +25,26 @@ interface CoderInputBoxProps {
   setCoderPermissionMode: (mode: CoderPermissionMode) => void;
 }
 
+const getAssistantModeLabel = (mode: string) => {
+  if (mode === 'builder') return 'Builder';
+  if (mode === 'planner') return 'Planner';
+  if (mode === 'debugger') return 'Debugger';
+  if (mode === 'reviewer') return 'Reviewer';
+  if (mode === 'tester') return 'Tester';
+  return 'Plain';
+};
+
+const getAssistantModeIcon = (mode: string) => {
+  switch (mode) {
+    case 'builder': return <Bot size={12} className="text-orange-500" />;
+    case 'planner': return <Layers size={12} className="text-violet-500" />;
+    case 'debugger': return <Bug size={12} className="text-amber-500" />;
+    case 'reviewer': return <Eye size={12} className="text-emerald-400" />;
+    case 'tester': return <ShieldAlert size={12} className="text-rose-400" />;
+    default: return <MessageSquare size={12} className="text-zinc-400" />;
+  }
+};
+
 export function CoderInputBox({
   activeAssistantMode,
   setActiveAssistantMode,
@@ -48,12 +68,17 @@ export function CoderInputBox({
 }: CoderInputBoxProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const permissionRef = useRef<HTMLDivElement | null>(null);
+  const modeSelectorRef = useRef<HTMLDivElement | null>(null);
   const [isPermissionDropdownOpen, setIsPermissionDropdownOpen] = useState(false);
+  const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (permissionRef.current && !permissionRef.current.contains(event.target as Node)) {
         setIsPermissionDropdownOpen(false);
+      }
+      if (modeSelectorRef.current && !modeSelectorRef.current.contains(event.target as Node)) {
+        setIsModeDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -121,18 +146,19 @@ export function CoderInputBox({
             value={input}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder="Ask anything, @ to mention, / for actions"
+            placeholder={coderWorkspacePath ? "Ask anything, @ to mention, / for actions" : "Please open a folder in the project to ask queries"}
             rows={1}
-            className="w-full bg-transparent text-[#EDE6DD] text-[15px] placeholder-[#6F6860] outline-none resize-none min-h-[46px] max-h-[141px] leading-relaxed"
+            disabled={!coderWorkspacePath}
+            className={`w-full bg-transparent text-[#EDE6DD] text-[15px] placeholder-[#6F6860] outline-none resize-none min-h-[46px] max-h-[141px] leading-relaxed ${!coderWorkspacePath ? 'cursor-not-allowed opacity-50' : ''}`}
             style={{ height: 'auto' }}
           />
-
           <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#2E2A27]/30">
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="p-1.5 rounded-full hover:bg-[#2C2825] text-[#8A8178] hover:text-[#EDE6DD] transition-colors cursor-pointer"
+                disabled={!coderWorkspacePath}
+                className="p-1.5 rounded-full hover:bg-[#2C2825] text-[#8A8178] hover:text-[#EDE6DD] disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors cursor-pointer"
                 title="Upload docs or images"
               >
                 <Plus size={18} />
@@ -159,7 +185,8 @@ export function CoderInputBox({
                 <button
                   type="button"
                   onClick={() => setIsPermissionDropdownOpen(!isPermissionDropdownOpen)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-transparent hover:bg-[#2C2825] rounded-full text-[11px] font-medium text-[#8A8178] hover:text-[#EDE6DD] transition-all cursor-pointer select-none"
+                  disabled={!coderWorkspacePath}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-transparent hover:bg-[#2C2825] rounded-full text-[11px] font-medium text-[#8A8178] hover:text-[#EDE6DD] disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all cursor-pointer select-none"
                   title={`Coder permissions: ${permissionModeLabel(coderPermissionMode)}`}
                 >
                   {coderPermissionMode === "full-access" ? (
@@ -226,20 +253,103 @@ export function CoderInputBox({
               </div>
             </div>
 
-            {isTyping && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (abortControllerRef.current) {
-                    abortControllerRef.current.abort();
-                  }
-                }}
-                className="w-8 h-8 rounded-full bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors cursor-pointer flex items-center justify-center"
-                title="Stop generation"
-              >
-                <StopCircle size={14} />
-              </button>
-            )}
+            {/* Right side controls: Mode Selector & Send/Pause button */}
+            <div className="flex items-center gap-2">
+              {/* Coder Assistant Mode Selector */}
+              <div className="relative" ref={modeSelectorRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
+                  disabled={!coderWorkspacePath}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-transparent hover:bg-[#2C2825] rounded-full text-[11px] font-medium text-[#8A8178] hover:text-[#EDE6DD] disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-all cursor-pointer select-none"
+                  title={`Assistant Mode: ${getAssistantModeLabel(activeAssistantMode)}`}
+                >
+                  {getAssistantModeIcon(activeAssistantMode)}
+                  <span>
+                    {getAssistantModeLabel(activeAssistantMode)}
+                  </span>
+                  <ChevronDown
+                    size={10}
+                    className="text-[#8A8178] transition-transform duration-200"
+                    style={{
+                      transform: isModeDropdownOpen
+                        ? "rotate(180deg)"
+                        : "rotate(0deg)",
+                    }}
+                  />
+                </button>
+
+                {isModeDropdownOpen && (
+                  <div
+                    className="absolute bottom-full right-0 mb-2 w-52 bg-[#1E1D1B] border border-[#2E2A27] rounded-xl shadow-2xl z-[250] p-1 text-left flex flex-col gap-0.5"
+                  >
+                    {[
+                      { id: "builder", label: "Builder", icon: <Bot size={13} className="text-orange-500" />, desc: "Build code features and modules" },
+                      { id: "planner", label: "Planner", icon: <Layers size={13} className="text-violet-500" />, desc: "Draft high-level architecture plans" },
+                      { id: "debugger", label: "Debugger", icon: <Bug size={13} className="text-amber-500" />, desc: "Find, explain and fix code errors" },
+                      { id: "reviewer", label: "Reviewer", icon: <Eye size={13} className="text-emerald-400" />, desc: "Perform code quality/logic audit" },
+                      { id: "tester", label: "Tester", icon: <ShieldAlert size={13} className="text-rose-400" />, desc: "Write tests and assert security" },
+                      { id: "plain", label: "Plain", icon: <MessageSquare size={13} className="text-zinc-400" />, desc: "Standard chat without agent workflows" }
+                    ].map((option) => {
+                      const isActive = activeAssistantMode === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveAssistantMode(option.id as any);
+                            setIsModeDropdownOpen(false);
+                            showToast(`Assistant Mode: ${option.label}`);
+                          }}
+                          className={`w-full flex flex-col px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer text-left ${
+                            isActive
+                              ? "bg-[#2C2825] text-[#EDE6DD]"
+                              : "text-[#8A8178] hover:bg-[#2C2825] hover:text-[#EDE6DD]"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between w-full">
+                            <div className="flex items-center gap-2 font-medium text-[11px]">
+                              {option.icon}
+                              <span>{option.label}</span>
+                            </div>
+                            {isActive && <Check size={12} className="text-[#DDD2C4]" />}
+                          </div>
+                          <span className="text-[9px] text-[#8A8178] mt-0.5 font-normal leading-normal">
+                            {option.desc}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Send/Pause button */}
+              {isTyping ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (abortControllerRef.current) {
+                      abortControllerRef.current.abort();
+                    }
+                  }}
+                  className="p-1.5 rounded-full bg-transparent hover:bg-[#2C2825] text-[#8A8178] hover:text-[#EDE6DD] transition-all cursor-pointer flex items-center justify-center"
+                  title="Stop generation"
+                >
+                  <Pause size={18} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!input.trim() || !coderWorkspacePath}
+                  className="p-1.5 rounded-full bg-transparent hover:bg-[#2C2825] text-[#8A8178] hover:text-[#EDE6DD] disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[#8A8178] disabled:cursor-not-allowed transition-all cursor-pointer flex items-center justify-center"
+                  title={coderWorkspacePath ? "Send" : "Please open a folder to send"}
+                >
+                  <ArrowUp size={18} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

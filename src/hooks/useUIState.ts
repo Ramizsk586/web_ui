@@ -260,6 +260,20 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
     }
 
     try {
+      if (navigator.permissions?.query) {
+        const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        if (permissionStatus.state === 'denied') {
+          const message = 'Microphone access is denied in browser settings. Please allow it and try again.';
+          setVoiceError(message);
+          showToast(message);
+          return;
+        }
+      }
+    } catch {
+      // Some runtimes do not support querying microphone permission state.
+    }
+
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       micStreamRef.current = stream;
       audioChunksRef.current = [];
@@ -363,12 +377,19 @@ export function useUIState({ setInput, handleSend }: UseUIStateProps) {
       }
     } catch (err: any) {
       let message = err?.message || 'Failed to start local voice recording.';
+      let shouldWarnOnly = false;
       if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
-        message = 'Microphone permission is blocked. Allow microphone access and try again.';
+        message = 'Microphone access was not granted. Click Allow when prompted, or enable it in browser settings.';
+        shouldWarnOnly = true;
       } else if (err?.name === 'NotFoundError') {
         message = 'No microphone was detected. Check your input device and try again.';
+        shouldWarnOnly = true;
       }
-      console.error('Failed to start local voice recording:', message);
+      if (shouldWarnOnly) {
+        console.warn('Local voice recording unavailable:', message);
+      } else {
+        console.error('Failed to start local voice recording:', message);
+      }
       setVoiceError(message);
       showToast(message);
       setIsVoiceListening(false);

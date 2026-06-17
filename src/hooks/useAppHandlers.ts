@@ -1868,6 +1868,11 @@ ${JSON.stringify(parsed.memories, null, 2)}`
 
   const handleSend = async (contentOverride?: string) => {
     // START OF HANDLESEND METHOD
+    if (isCoderMode && !String(coderWorkspacePath || '').trim()) {
+      showToast('Open a project folder in Coder mode before sending a query.');
+      return;
+    }
+
     // INTENT INTERCEPTION FOR SUBAGENT WALKTHROUGH APPROVALS
     const cleanContent = (contentOverride || input.trim()).trim().toLowerCase().replace(/[.,!?:;]/g, '');
     const isWalkthroughApproval = ['ok', 'okay', 'continue', 'doit', 'do it', 'approve', 'go', 'yes', 'proceed', 'start', 'run', 'lets go', 'let is go', 'yea', 'yep', 'y', 'correct'].includes(cleanContent) || cleanContent.startsWith('ok ') || cleanContent.startsWith('continue ') || cleanContent.startsWith('do it ');

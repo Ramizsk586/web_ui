@@ -90,7 +90,7 @@ export function useCoderMode({
         setIsSidebarOpen(false);
       }
     } else {
-      setIsCoderMode(false);
+      setIsCoderMode(prev => prev);
     }
   }, [currentChatId, currentChatActive, setIsSidebarOpen]);
 

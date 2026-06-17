@@ -67,6 +67,7 @@ export interface Chat {
   messages: Message[];
   updatedAt: Date;
   projectId?: string;
+  workspacePath?: string;
   agentId?: string;
   isCoderMode?: boolean;
   isResearchMode?: boolean;
