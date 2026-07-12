@@ -23,6 +23,7 @@ export async function handleOpencode(
   }
 ) {
   const { model, apiKey, baseUrl, messages, stream, finalSystemPrompt } = options;
+  const resolvedApiKey = apiKey || process.env.OPENCODE_API_KEY || '';
   const MAX_RETRIES = 3;
   let lastError: any;
 
@@ -41,7 +42,7 @@ export async function handleOpencode(
   if (modelLower.startsWith('claude-')) {
     format = 'anthropic';
     targetUrl = baseUrl.includes('messages') ? baseUrl : 'https://opencode.ai/zen/v1/messages';
-    headers['x-api-key'] = apiKey;
+    headers['x-api-key'] = resolvedApiKey;
     headers['anthropic-version'] = '2023-06-01';
     requestBody = {
       model: cleanModel,
@@ -63,8 +64,8 @@ export async function handleOpencode(
       targetUrl = baseUrl.includes('chat/completions') ? baseUrl : 'https://opencode.ai/zen/v1/chat/completions';
     }
 
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
+    if (resolvedApiKey) {
+      headers['Authorization'] = `Bearer ${resolvedApiKey}`;
     }
 
     const apiMessages: any[] = [];

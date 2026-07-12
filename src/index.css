@@ -2,6 +2,33 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────
+   SPLASH & INITIAL BASE STYLES (Moved from index.html)
+   ───────────────────────────────────────── */
+html, body, #root {
+  margin: 0;
+  min-height: 100%;
+  background: #09090b;
+  color: #fafafa;
+}
+
+body {
+  overflow: hidden;
+}
+
+#root {
+  isolation: isolate;
+}
+
+/* Loading screen CSS variables — overridden by theme in ThemeProvider */
+:root, body {
+  --splash-bg: #09090b;
+  --splash-accent: #6366f1;
+  --splash-glow-color: rgba(99, 102, 241, 0.12);
+  --splash-text: #f4f4f5;
+  --splash-muted: rgba(161, 161, 170, 0.7);
+}
+
+/* ─────────────────────────────────────────
    THEME TOKENS
 ───────────────────────────────────────── */
 @theme {

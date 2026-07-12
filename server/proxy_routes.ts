@@ -8,7 +8,7 @@ import { state } from './state.js';
 const PORT = 3000;
 
 type PreviewDetection = {
-  kind: 'node' | 'static-html' | 'unknown';
+  kind: 'node' | 'static-html' | 'python' | 'c-cpp' | 'unknown';
   framework: string;
   packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun' | null;
   devCommand: string | null;
@@ -102,6 +102,42 @@ const detectPreviewProject = (workspaceRoot: string): PreviewDetection => {
       entryFile,
       notes
     };
+  }
+
+  const pythonFiles = ['main.py', 'app.py', 'run.py', 'index.py'];
+  for (const pyFile of pythonFiles) {
+    if (fileExists(path.join(workspaceRoot, pyFile))) {
+      notes.push(`Detected Python entry script: ${pyFile}`);
+      return {
+        kind: 'python',
+        framework: 'Python App',
+        packageManager: null,
+        devCommand: `python "${pyFile}"`,
+        previewUrl: null,
+        entryFile: pyFile,
+        notes
+      };
+    }
+  }
+
+  const cppFiles = ['main.cpp', 'main.c', 'app.cpp', 'app.c', 'index.cpp', 'index.c'];
+  for (const cppFile of cppFiles) {
+    if (fileExists(path.join(workspaceRoot, cppFile))) {
+      const isCpp = cppFile.endsWith('.cpp');
+      const compiler = isCpp ? 'g++' : 'gcc';
+      const outputName = process.platform === 'win32' ? 'app.exe' : './app';
+      const compileAndRunCommand = `${compiler} "${cppFile}" -o ${outputName.replace('./', '')} && ${outputName}`;
+      notes.push(`Detected ${isCpp ? 'C++' : 'C'} entry file: ${cppFile}.`);
+      return {
+        kind: 'c-cpp',
+        framework: isCpp ? 'C++ App' : 'C App',
+        packageManager: null,
+        devCommand: compileAndRunCommand,
+        previewUrl: null,
+        entryFile: cppFile,
+        notes
+      };
+    }
   }
 
   return {

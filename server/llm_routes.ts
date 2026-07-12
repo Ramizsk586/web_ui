@@ -85,7 +85,7 @@ function resolveKimchiApiKey(apiKey: string): string {
   if (apiKey && apiKey.trim() !== '') {
     return apiKey.trim();
   }
-  return process.env.KIMCHI_API_KEY || '';
+  return process.env.KIMCHI_API_KEY || process.env.CASTAI_API_KEY || '';
 }
 
 const getLlmConfig = () => {
@@ -1343,12 +1343,13 @@ ${contextStr}`;
       else if (modelLower.includes('cline')) {
         provider = 'openai-compatible';
         baseUrl = 'https://api.cline.bot/api/v1';
+        apiKey = process.env.CLINE_API_KEY || '';
       }
       // Kimchi models
       else if (modelLower.includes('kimi') || modelLower.includes('kimchi')) {
         provider = 'openai-compatible';
         baseUrl = 'https://llm.kimchi.dev/openai/v1';
-        apiKey = process.env.KIMCHI_API_KEY || '';
+        apiKey = process.env.KIMCHI_API_KEY || process.env.CASTAI_API_KEY || '';
       }
       // OpenProvider
       else if (modelLower.includes('openprovider') || modelLower.includes('auto-free')) {
@@ -1386,7 +1387,7 @@ ${contextStr}`;
         if (parts.length >= 2) {
           provider = 'openai-compatible';
         }
-        apiKey = process.env.CLINE_API_KEY || '';
+        apiKey = process.env.OPENROUTER_API_KEY || '';
       }
       // Default fallback to environment variable
       else {

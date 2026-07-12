@@ -115,6 +115,11 @@ async function embedLocal(text: string): Promise<number[]> {
 // startup — failures are logged, not thrown.
 export function preloadLocalModel(): void {
   if (process.env.VOYAGE_API_KEY || process.env.OPENAI_API_KEY) return;
+
+  // Only preload if Convex vector search features are enabled in the environment
+  const isConvexSet = Boolean(process.env.CONVEX_URL || process.env.VITE_CONVEX_URL);
+  if (!isConvexSet) return;
+
   getLocalExtractor().catch((err) => {
     console.warn("[embeddings] local model preload failed:", err);
   });

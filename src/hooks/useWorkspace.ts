@@ -139,11 +139,17 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
         return;
       }
 
+      if (!data.running && (data.detection?.kind === 'python' || data.detection?.kind === 'c-cpp')) {
+        setIsRightPreviewStarting(false);
+        return;
+      }
+
       rightPreviewPollRef.current = setInterval(async () => {
         try {
           const statusRes = await fetch(`/api/preview/status${coderWorkspacePath ? `?folderPath=${encodeURIComponent(coderWorkspacePath)}` : ''}`);
           const status = await statusRes.json();
           setRightPreviewLogs(status.logs || []);
+          
           if (status.frameUrl) {
             setDevServerUrl(status.frameUrl);
             setIframeKey(prev => prev + 1);
@@ -152,9 +158,17 @@ export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
               clearInterval(rightPreviewPollRef.current);
               rightPreviewPollRef.current = null;
             }
+          } else if (status.detection?.kind === 'python' || status.detection?.kind === 'c-cpp') {
+            if (!status.running) {
+              setIsRightPreviewStarting(false);
+              if (rightPreviewPollRef.current) {
+                clearInterval(rightPreviewPollRef.current);
+                rightPreviewPollRef.current = null;
+              }
+            }
           }
         } catch {
-          // The dev server can take a moment to emit its URL.
+          // The dev server/console script can take a moment to emit output.
         }
       }, 1200);
     } catch (err: any) {

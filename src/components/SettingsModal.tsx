@@ -4323,7 +4323,7 @@ export function SettingsModal({
 
                   <div className="space-y-4">
                     {DEFAULT_AGENTS.map((agent) => {
-                      const cfg = subagentConfigs[agent.id] || { modelId: 'openprovider/auto-free', runtime: agent.id === 'coder' ? 'pi' : 'default', systemPrompt: agent.prompt, tools: [...agent.tools] };
+                      const cfg = subagentConfigs[agent.id] || { modelId: 'openprovider/auto-free', runtime: 'default', systemPrompt: agent.prompt, tools: [...agent.tools] };
                       const isEditing = editingPromptAgent === agent.id;
                       return (
                         <div 
@@ -4341,33 +4341,7 @@ export function SettingsModal({
                               </p>
                             </div>
                             <div className="shrink-0 flex flex-col gap-2 min-w-[220px]">
-                              <div className="flex flex-col gap-1.5">
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Runtime</label>
-                                <div className="flex gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAgentRuntimeChange(agent.id, 'default')}
-                                    className={`flex-1 h-8 px-3 text-[11px] rounded-full border transition-all font-bold ${
-                                      (cfg.runtime || 'default') === 'default'
-                                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300 border-blue-400/40'
-                                        : 'bg-gray-150/80 dark:bg-zinc-800/85 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-zinc-700/60'
-                                    }`}
-                                  >
-                                    Default
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAgentRuntimeChange(agent.id, 'pi')}
-                                    className={`flex-1 h-8 px-3 text-[11px] rounded-full border transition-all font-bold ${
-                                      (cfg.runtime || 'default') === 'pi'
-                                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border-emerald-400/40'
-                                        : 'bg-gray-150/80 dark:bg-zinc-800/85 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-zinc-700/60'
-                                    }`}
-                                  >
-                                    Pi
-                                  </button>
-                                </div>
-                              </div>
+
                               <div className="flex flex-col gap-1.5 relative">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Provider</label>
                                 <button

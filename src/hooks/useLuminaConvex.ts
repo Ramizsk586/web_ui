@@ -293,6 +293,13 @@ export function useLuminaConvex() {
     if (!isConvexConnected) save('lumina_exec_agents', agents);
   }, [agents, isConvexConnected]);
 
+  // ─── Consolidation Runs State ──────────────────────────────────────────────
+  const [consolidationRuns, setConsolidationRuns] = useState<any[]>(() => load('lumina_consolidation_runs', []));
+
+  // ─── Settings State ────────────────────────────────────────────────────────
+  const [settings, setSettings] = useState<Record<string, string>>(() => load('lumina_agent_settings', { proactive_enabled: "true", user_timezone: "UTC" }));
+
+
   // Initial fetch from Convex if connected
   useEffect(() => {
     if (!isConvexConnected) return;
@@ -396,6 +403,60 @@ export function useLuminaConvex() {
                 completedAt: Date.now(),
               }
             : a
+        )
+      );
+    } else if (e.event === "consolidation_started") {
+      const data = e.data as { runId: string; trigger: string };
+      setConsolidationRuns((prev) => {
+        if (prev.some((r) => r.runId === data.runId)) return prev;
+        const newRun = {
+          runId: data.runId,
+          trigger: data.trigger,
+          status: "running",
+          proposalsCount: 0,
+          mergedCount: 0,
+          prunedCount: 0,
+          startedAt: Date.now(),
+        };
+        return [newRun, ...prev];
+      });
+    } else if (e.event === "consolidation_phase") {
+      const data = e.data as { runId: string; phase: string; proposalsCount?: number };
+      if (data.proposalsCount !== undefined) {
+        setConsolidationRuns((prev) =>
+          prev.map((r) =>
+            r.runId === data.runId ? { ...r, proposalsCount: data.proposalsCount } : r
+          )
+        );
+      }
+    } else if (e.event === "consolidation_completed") {
+      const data = e.data as { runId: string; merged: number; pruned: number; notes: string };
+      setConsolidationRuns((prev) =>
+        prev.map((r) =>
+          r.runId === data.runId
+            ? {
+                ...r,
+                status: "completed",
+                mergedCount: data.merged,
+                prunedCount: data.pruned,
+                notes: data.notes,
+                completedAt: Date.now(),
+              }
+            : r
+        )
+      );
+    } else if (e.event === "consolidation_failed") {
+      const data = e.data as { runId: string; error: string };
+      setConsolidationRuns((prev) =>
+        prev.map((r) =>
+          r.runId === data.runId
+            ? {
+                ...r,
+                status: "failed",
+                notes: data.error,
+                completedAt: Date.now(),
+              }
+            : r
         )
       );
     }
@@ -621,6 +682,69 @@ export function useLuminaConvex() {
     setEvents([]);
   }, [isConvexConnected]);
 
+  // ─── Settings sync & helpers ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!isConvexConnected) save('lumina_agent_settings', settings);
+  }, [settings, isConvexConnected]);
+
+  useEffect(() => {
+    if (!isConvexConnected) return;
+    async function syncSettings() {
+      try {
+        const list = await convexQuery('settings:all');
+        const map: Record<string, string> = {};
+        for (const s of list) {
+          map[s.key] = s.value;
+        }
+        setSettings(map);
+      } catch (err) {
+        console.error('[Settings] Sync error:', err);
+      }
+    }
+    syncSettings();
+  }, [isConvexConnected]);
+
+  const setSetting = useCallback(async (key: string, value: string) => {
+    if (isConvexConnected) {
+      await convexMutation('settings:set', { key, value });
+    }
+    setSettings(prev => {
+      const next = { ...prev, [key]: value };
+      if (!isConvexConnected) save('lumina_agent_settings', next);
+      return next;
+    });
+  }, [isConvexConnected]);
+
+  const clearSetting = useCallback(async (key: string) => {
+    if (isConvexConnected) {
+      await convexMutation('settings:clear', { key });
+    }
+    setSettings(prev => {
+      const next = { ...prev };
+      delete next[key];
+      if (!isConvexConnected) save('lumina_agent_settings', next);
+      return next;
+    });
+  }, [isConvexConnected]);
+
+  // ─── Consolidation Runs sync ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!isConvexConnected) save('lumina_consolidation_runs', consolidationRuns);
+  }, [consolidationRuns, isConvexConnected]);
+
+  useEffect(() => {
+    if (!isConvexConnected) return;
+    async function syncRuns() {
+      try {
+        const list = await convexQuery('consolidation:listRuns');
+        setConsolidationRuns(list);
+      } catch (err) {
+        console.error('[Consolidation] Sync runs error:', err);
+      }
+    }
+    syncRuns();
+  }, [isConvexConnected]);
+
   // ─── Dashboard Metrics ─────────────────────────────────────────────────────
   const metrics: DashboardMetrics = useMemo(() => ({
     messages: { count: events.length },
@@ -656,6 +780,8 @@ export function useLuminaConvex() {
     memories, addMemory, patchMemory, deleteMemory, recallMemory,
     automations, addAutomation, patchAutomation, toggleAutomation, deleteAutomation, getAutomationRuns,
     events, addEvent, deleteEvent, clearAllEvents,
+    settings, setSetting, clearSetting,
+    consolidationRuns,
     metrics,
   };
 }

@@ -56,7 +56,7 @@ const sanitizeRuntimeToolName = (rawName: string) => {
     .replace(/[|>]+/g, '')
     .trim()
     .toLowerCase();
-  const knownTools = ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool'];
+  const knownTools = ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool', 'list_directory'];
   const exact = knownTools.find(tool => normalized === tool);
   if (exact) return exact;
   const partial = knownTools.find(tool => normalized.startsWith(tool));
@@ -875,7 +875,7 @@ export function setupAgentRoutes(app: express.Express) {
   });
 
   app.post("/api/coder/run", async (req: express.Request, res: express.Response) => {
-    const { task, apiKey } = req.body;
+    const { task, apiKey, systemPrompt, thinkingLevel } = req.body;
     let provider = req.body.provider;
     let model = req.body.model;
     let baseUrl = req.body.baseUrl;
@@ -925,6 +925,8 @@ export function setupAgentRoutes(app: express.Express) {
         model: typeof model === 'string' ? model : undefined,
         apiKey,
         baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
+        systemPrompt: typeof systemPrompt === 'string' ? systemPrompt : undefined,
+        thinkingLevel: typeof thinkingLevel === 'string' ? thinkingLevel : undefined,
         onEvent: (event) => {
           res.write(`${JSON.stringify(event)}\n`);
           if ((res as any).flush) {
@@ -980,7 +982,7 @@ export function setupAgentRoutes(app: express.Express) {
           systemPrompt = customPrompt;
           configuredTools = Array.isArray(customTools) && customTools.length > 0
             ? customTools
-            : ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool'];
+            : ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool', 'list_directory'];
           if (openCodeProfile?.permissions) {
             resolvedPermissions = { ...resolvedPermissions, ...openCodeProfile.permissions };
           }
@@ -1000,7 +1002,7 @@ export function setupAgentRoutes(app: express.Express) {
           }
         } else {
           systemPrompt = `You are a specialized subagent named ${agentName}.\nRun commands and modify files to achieve the task.`;
-          configuredTools = ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool'];
+          configuredTools = ['read_file', 'write_file', 'edit_file', 'create_file', 'delete_file', 'rename_file', 'run_command', 'glob_tool', 'grep_tool', 'list_directory'];
         }
 
         const agent: RuntimeAgent = {

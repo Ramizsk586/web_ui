@@ -17,7 +17,7 @@ import Anthropic from '@anthropic-ai/sdk';
 // ── Environment ───────────────────────────────────────────────────────────────
 
 /** Port Lumina's Express server listens on (default 3000). */
-const LUMINA_PORT = process.env.LUMINA_PORT ?? '3000';
+const LUMINA_PORT = process.env.LUMINA_PORT ?? process.env.PORT ?? '3000';
 
 /** Base URL of Lumina's Anthropic proxy endpoint. */
 export const PROXY_BASE_URL = `http://127.0.0.1:${LUMINA_PORT}`;
@@ -30,12 +30,16 @@ export const PROXY_BASE_URL = `http://127.0.0.1:${LUMINA_PORT}`;
 export const DEFAULT_AGENT_MODEL = process.env.LUMINA_AGENT_MODEL ?? 'claude-3-5-sonnet-20241022';
 
 export function configureBridgeEnvironment(): void {
-  const port = process.env.LUMINA_PORT ?? '3000';
-  process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${port}/v1`;
-  process.env.ANTHROPIC_AUTH_TOKEN = 'lumina-proxy';
-  process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'claude-3-haiku-20240307';
-  process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'claude-3-5-sonnet-20241022';
-  process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'claude-3-opus-20240229';
+  const port = process.env.LUMINA_PORT ?? process.env.PORT ?? '3000';
+
+  process.env.ANTHROPIC_BASE_URL = process.env.LLAMA_BRIDGE_URL
+    ? (process.env.LLAMA_BRIDGE_URL.includes('/v1') ? process.env.LLAMA_BRIDGE_URL : `${process.env.LLAMA_BRIDGE_URL}/v1`)
+    : `http://127.0.0.1:${port}/v1`;
+
+  process.env.ANTHROPIC_AUTH_TOKEN = process.env.LLAMA_BRIDGE_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? 'lumina-proxy';
+  process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = process.env.LLAMA_BRIDGE_MODEL ?? 'claude-3-haiku-20240307';
+  process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = process.env.LLAMA_BRIDGE_MODEL ?? 'claude-3-5-sonnet-20241022';
+  process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = process.env.LLAMA_BRIDGE_MODEL ?? 'claude-3-opus-20240229';
   process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
 }
 

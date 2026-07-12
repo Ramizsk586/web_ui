@@ -5,7 +5,7 @@ export function resolveKimchiApiKey(apiKey: string): string {
   if (apiKey && apiKey.trim() !== '') {
     return apiKey.trim();
   }
-  return process.env.KIMCHI_API_KEY || '';
+  return process.env.KIMCHI_API_KEY || process.env.CASTAI_API_KEY || '';
 }
 
 export async function handleKimchi(

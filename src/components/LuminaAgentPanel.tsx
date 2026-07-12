@@ -16,8 +16,11 @@ import {
 } from 'lucide-react';
 import { Agent } from '../agents/types';
 import { EmbeddingBanner } from './EmbeddingBanner';
-import MemoryGraphView from './MemoryGraphView';
+const MemoryGraphView = React.lazy(() => import('./MemoryGraphView'));
 import { IntegrationLogo, prettyToolName } from '../utils/branding';
+import { SettingsPanel } from './SettingsPanel';
+import { EventsPanel } from './EventsPanel';
+import { ConsolidationPanel } from './ConsolidationPanel';
 
 type View = 'dashboard' | 'agents' | 'memory' | 'automations' | 'events' | 'consolidation' | 'logs' | 'settings';
 
@@ -1757,16 +1760,16 @@ export function LuminaAgentPanel({
       content = <AutomationsPanel convex={convex} />;
       break;
     case 'events':
-      content = <StubPanel title="Events" description="Events stream panel is ready for a follow-up visual pass." />;
+      content = <EventsPanel convex={convex as any} />;
       break;
     case 'consolidation':
-      content = <StubPanel title="Consolidation" description="Consolidation view can be styled to match the Llama dashboard in the next pass." />;
+      content = <ConsolidationPanel convex={convex as any} />;
       break;
     case 'logs':
       content = <StubPanel title="Traffic Logs" description="Traffic logs are still available, and this section now sits inside the same dashboard shell." />;
       break;
     case 'settings':
-      content = <StubPanel title="Settings" description="Settings remain available and can be visually aligned in a follow-up pass." />;
+      content = <SettingsPanel convex={convex as any} />;
       break;
     default:
       content = null;
@@ -1932,7 +1935,14 @@ function LuminaMemoryPanelInner({
 
       {viewMode === "graph" && (
         <div className="flex-1 min-h-0">
-          <MemoryGraphView records={allRecords as any} isDark={isDark} />
+          <React.Suspense fallback={
+            <div className="flex flex-col items-center justify-center h-full text-xs text-[var(--theme-text-muted)] gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-[var(--theme-text-muted)]" />
+              <span>Loading memory graph...</span>
+            </div>
+          }>
+            <MemoryGraphView records={allRecords as any} isDark={isDark} />
+          </React.Suspense>
         </div>
       )}
 

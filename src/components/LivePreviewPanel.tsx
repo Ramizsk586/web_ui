@@ -828,6 +828,60 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = ({
   };
 
   const renderIframeContent = () => {
+    if (projectType === 'python' || projectType === 'c-cpp') {
+      const isRunning = isRightPreviewStarting;
+      return (
+        <div className="w-full h-full bg-[#080707] flex flex-col font-mono text-zinc-300 p-4 overflow-hidden text-left select-text">
+          <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2 mb-3 select-none">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
+              <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Console Output</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={startCoderPreview}
+                disabled={isRunning}
+                className="px-2.5 py-1 text-[10px] rounded bg-[#D97756]/15 hover:bg-[#D97756]/25 text-[#D97756] border border-[#D97756]/20 font-bold transition-all disabled:opacity-40 disabled:pointer-events-none cursor-pointer flex items-center gap-1.5"
+              >
+                {isRunning ? (
+                  <>
+                    <RefreshCw size={8} className="animate-spin" />
+                    <span>Running...</span>
+                  </>
+                ) : (
+                  <span>Run App</span>
+                )}
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-1 text-[11px] selection:bg-zinc-800">
+            {rightPreviewLogs.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-zinc-600 italic select-none">
+                No logs recorded yet. Click "Run App" to execute.
+              </div>
+            ) : (
+              rightPreviewLogs.map((log, idx) => {
+                let colorClass = 'text-zinc-300';
+                if (log.toLowerCase().includes('error') || log.toLowerCase().includes('failed') || (log.includes('exited with code') && !log.includes('code 0'))) {
+                  colorClass = 'text-red-400 font-semibold';
+                } else if (log.toLowerCase().includes('warning')) {
+                  colorClass = 'text-amber-400';
+                } else if (log.startsWith('> ') || log.startsWith('Detected') || log.startsWith('Running')) {
+                  colorClass = 'text-[#D97756] font-semibold';
+                } else if (log.includes('exited with code 0')) {
+                  colorClass = 'text-emerald-400 font-semibold';
+                }
+                return (
+                  <div key={idx} className={`leading-relaxed whitespace-pre-wrap ${colorClass}`}>
+                    {log}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      );
+    }
     if (devServerUrl) {
       return (
         <iframe

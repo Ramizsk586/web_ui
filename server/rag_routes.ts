@@ -1,9 +1,8 @@
 import express from 'express';
 import mammoth from 'mammoth';
 import { RagBackendService } from '../src/services/ragBackendService.js';
+import { PDFParse } from 'pdf-parse';
 
-// @ts-ignore
-const pdf = require('pdf-parse');
 
 export const ragBackend = new RagBackendService();
 
@@ -119,8 +118,9 @@ export function setupRagRoutes(app: express.Express) {
 
       const lowerName = (fileName || '').toLowerCase();
       if (lowerName.endsWith('.pdf') || mimeType === 'application/pdf') {
-        const data = await pdf(buffer);
-        extractedText = data.text || '';
+        const parser = new PDFParse({ data: buffer });
+        const result = await parser.getText();
+        extractedText = result.text || '';
       } else if (lowerName.endsWith('.docx') || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         const result = await mammoth.extractRawText({ buffer });
         extractedText = result.value || '';

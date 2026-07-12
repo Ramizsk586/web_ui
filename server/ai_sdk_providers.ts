@@ -133,6 +133,7 @@ export function buildProviderModel(config: ProviderConfig) {
       break;
     case 'openrouter':
       finalBaseUrl = finalBaseUrl || 'https://openrouter.ai/api/v1';
+      finalApiKey = finalApiKey || process.env.OPENROUTER_API_KEY || '';
       break;
     case 'deepseek':
       finalBaseUrl = finalBaseUrl || 'https://api.deepseek.com/v1';
@@ -151,9 +152,11 @@ export function buildProviderModel(config: ProviderConfig) {
       break;
     case 'kimchi':
       finalBaseUrl = finalBaseUrl || 'https://llm.kimchi.dev/openai/v1';
+      finalApiKey = finalApiKey || process.env.KIMCHI_API_KEY || process.env.CASTAI_API_KEY || '';
       break;
     case 'cline':
       finalBaseUrl = finalBaseUrl || 'https://api.cline.bot/api/v1';
+      finalApiKey = finalApiKey || process.env.CLINE_API_KEY || '';
       break;
     case 'openprovider':
       finalBaseUrl = finalBaseUrl || 'https://openprovider.mimika.in/v1';

@@ -62,7 +62,7 @@ import {
 } from 'lucide-react';
 
 
-import Whiteboard from './components/Whiteboard';
+const Whiteboard = React.lazy(() => import('./components/Whiteboard'));
 import { ChatsManagerPanel } from './components/ChatsManagerPanel';
 import type { AiProviderProfile } from './hooks/useAppSettings';
 
@@ -105,19 +105,20 @@ import { AgentCreationModal } from './components/Agents/AgentCreationModal';
 import { AgentChatView } from './components/Agents/AgentChatView';
 import { LocalModelConfigModal } from './components/LocalModelConfigModal';
 
-import { Canvas } from './components/Canvas/Canvas';
+const Canvas = React.lazy(() => import('./components/Canvas/Canvas').then(module => ({ default: module.Canvas })));
 
 import { getCurrentTauriWindow, invokeTauri, isTauriDesktop, listenTauriEvent, safeConfirm } from './utils/tauriDesktop';
 import { OnboardingModal } from './components/OnboardingModal';
-import { VideoTranscriptStudio } from './components/VideoTranscriptStudio';
+const VideoTranscriptStudio = React.lazy(() => import('./components/VideoTranscriptStudio').then(module => ({ default: module.VideoTranscriptStudio })));
 import { SettingsModal } from './components/SettingsModal';
-import { ProjectsPage } from './components/ProjectsPage';
-import { AgentsPage } from './components/AgentsPage';
+const ProjectsPage = React.lazy(() => import('./components/ProjectsPage').then(module => ({ default: module.ProjectsPage })));
+const AgentsPage = React.lazy(() => import('./components/AgentsPage').then(module => ({ default: module.AgentsPage })));
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 
-import { LuminaAgentPanel, LuminaMemoryPanel } from './components/LuminaAgentPanel';
+const LuminaAgentPanel = React.lazy(() => import('./components/LuminaAgentPanel').then(module => ({ default: module.LuminaAgentPanel })));
+const LuminaMemoryPanel = React.lazy(() => import('./components/LuminaAgentPanel').then(module => ({ default: module.LuminaMemoryPanel })));
 
-import { RAGPanel } from './components/RAGPanel';
+const RAGPanel = React.lazy(() => import('./components/RAGPanel').then(module => ({ default: module.RAGPanel })));
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
 import TranscriptionOptionsModal from './components/TranscriptionOptionsModal';
 import CoderWorkspaceView from './components/Coder/CoderWorkspaceView';
@@ -2688,7 +2689,13 @@ const startCoderPreview = useCallback(async () => {
                 transition={{ duration: 0.22, ease: 'easeOut' }}
                 className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
               >
-                <AgentsPage
+                <React.Suspense fallback={
+                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
+                    <span>Loading agents...</span>
+                  </div>
+                }>
+                  <AgentsPage
                   agents={agents}
                   activeAgentId={activeAgent?.id || null}
                   onSelectAgent={(agent) => {
@@ -2708,6 +2715,7 @@ const startCoderPreview = useCallback(async () => {
                   showToast={showToast}
                   onOpenAgentChats={(agent) => setSelectedAgentForChats(agent)}
                 />
+                </React.Suspense>
               </motion.div>
             ) : showProjectsPage ? (
               <motion.div
@@ -2717,7 +2725,13 @@ const startCoderPreview = useCallback(async () => {
                 transition={{ duration: 0.22, ease: 'easeOut' }}
                 className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
               >
-                <ProjectsPage
+                <React.Suspense fallback={
+                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
+                    <span>Loading projects...</span>
+                  </div>
+                }>
+                  <ProjectsPage
                   projectFolders={projectFolders}
                   setProjectFolders={setProjectFolders}
                   chats={chats}
@@ -2730,6 +2744,7 @@ const startCoderPreview = useCallback(async () => {
                   showToast={showToast}
                   onOpenProjectChats={(project) => setSelectedProjectForChats(project)}
                 />
+                </React.Suspense>
               </motion.div>
             ) : isSettingsOpen ? (
               <motion.div
@@ -2827,9 +2842,16 @@ const startCoderPreview = useCallback(async () => {
                 transition={{ duration: 0.22, ease: 'easeOut' }}
                 className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
               >
-                <RAGPanel
-                  onClose={() => setIsRagPanelOpen(false)}
-                />
+                <React.Suspense fallback={
+                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
+                    <span>Loading Document RAG...</span>
+                  </div>
+                }>
+                  <RAGPanel
+                    onClose={() => setIsRagPanelOpen(false)}
+                  />
+                </React.Suspense>
               </motion.div>
             ) : isLuminaAgentOpen ? (
               <motion.div
@@ -2839,18 +2861,25 @@ const startCoderPreview = useCallback(async () => {
                 transition={{ duration: 0.22, ease: 'easeOut' }}
                 className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
               >
-                <LuminaAgentPanel
-                  onClose={() => setIsLuminaAgentOpen(false)}
-                  agents={agents}
-                  orchestrationState={orchestrationState}
-                  onOpenAgentsPage={() => {
-                    setIsLuminaAgentOpen(false);
-                    setShowAgentsPage(true);
-                  }}
-                  convex={luminaConvex}
-                  isSidebarOpen={isSidebarOpen}
-                  onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-                />
+                <React.Suspense fallback={
+                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
+                    <span>Loading Agent Dashboard...</span>
+                  </div>
+                }>
+                  <LuminaAgentPanel
+                    onClose={() => setIsLuminaAgentOpen(false)}
+                    agents={agents}
+                    orchestrationState={orchestrationState}
+                    onOpenAgentsPage={() => {
+                      setIsLuminaAgentOpen(false);
+                      setShowAgentsPage(true);
+                    }}
+                    convex={luminaConvex}
+                    isSidebarOpen={isSidebarOpen}
+                    onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+                  />
+                </React.Suspense>
               </motion.div>
             ) : isLuminaMemoryOpen ? (
               <motion.div
@@ -2860,13 +2889,20 @@ const startCoderPreview = useCallback(async () => {
                 transition={{ duration: 0.22, ease: 'easeOut' }}
                 className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
               >
-                <LuminaMemoryPanel
-                  onClose={() => setIsLuminaMemoryOpen(false)}
-                  agents={agents}
-                  convex={luminaConvex}
-                  isSidebarOpen={isSidebarOpen}
-                  onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-                />
+                <React.Suspense fallback={
+                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
+                    <span>Loading Memory Console...</span>
+                  </div>
+                }>
+                  <LuminaMemoryPanel
+                    onClose={() => setIsLuminaMemoryOpen(false)}
+                    agents={agents}
+                    convex={luminaConvex}
+                    isSidebarOpen={isSidebarOpen}
+                    onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+                  />
+                </React.Suspense>
               </motion.div>
             ) : false ? (
               <motion.div
@@ -3449,14 +3485,18 @@ const startCoderPreview = useCallback(async () => {
         </AnimatePresence>
       </div>
 
-      <Canvas 
-        artifact={activeArtifact} 
-        isOpen={isCoderMode && isCanvasOpen} 
-        onClose={() => setIsCanvasOpen(false)} 
-        view={canvasView}
-        onSetView={setCanvasView}
-        allArtifacts={chats.find((c: Chat) => c.id === currentChatId)?.messages.flatMap((m: Message) => m.artifacts || []) || []}
-      />
+      {isCanvasOpen && (
+        <React.Suspense fallback={null}>
+          <Canvas 
+            artifact={activeArtifact} 
+            isOpen={isCoderMode && isCanvasOpen} 
+            onClose={() => setIsCanvasOpen(false)} 
+            view={canvasView}
+            onSetView={setCanvasView}
+            allArtifacts={chats.find((c: Chat) => c.id === currentChatId)?.messages.flatMap((m: Message) => m.artifacts || []) || []}
+          />
+        </React.Suspense>
+      )}
 
 
 
@@ -3803,14 +3843,21 @@ const startCoderPreview = useCallback(async () => {
               </div>
 
               <div className="flex-1 min-h-0 bg-[#141211]">
-                <Whiteboard 
-                  onAttachToChat={(file) => {
-                    setAttachedFiles((prev: any[]) => [...prev, file]);
-                    showToast('Sketch attached successfully to your message compose box!');
-                  }}
-                  onClose={() => setIsWhiteboardOpen(false)}
-                  attachTriggerRef={whiteboardAttachRef}
-                />
+                <React.Suspense fallback={
+                  <div className="flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
+                    <span>Loading canvas workspace...</span>
+                  </div>
+                }>
+                  <Whiteboard 
+                    onAttachToChat={(file) => {
+                      setAttachedFiles((prev: any[]) => [...prev, file]);
+                      showToast('Sketch attached successfully to your message compose box!');
+                    }}
+                    onClose={() => setIsWhiteboardOpen(false)}
+                    attachTriggerRef={whiteboardAttachRef}
+                  />
+                </React.Suspense>
               </div>
 
               <div className="h-9 border-t border-[#2C241E] bg-[#0F0E0D] px-5 flex items-center justify-between text-[10px] text-[#7F7469] font-mono shrink-0 select-none animate-fade-in animate-duration-300">
@@ -3824,22 +3871,29 @@ const startCoderPreview = useCallback(async () => {
 
       {/* Synchronized Video Transcription Immersive Board Overlay */}
       {selectedTranscriptDoc && (
-        <VideoTranscriptStudio
-          isOpen={!!selectedTranscriptDoc}
-          onClose={() => setSelectedTranscriptDoc(null)}
-          videoUrl={selectedTranscriptDoc.url}
-          videoId={selectedTranscriptDoc.videoId || ''}
-          videoTitle={selectedTranscriptDoc.title}
-          segments={selectedTranscriptDoc.segments || []}
-          fullText={selectedTranscriptDoc.content}
-          onPasteTextToInput={(pasted) => {
-            setInput(pasted);
-            showToast('Ref text pasted into your workspace input!');
-          }}
-          callLlamaBridge={async (messagesPrompt, toolsList) => {
-            return await callLlamaBridge(messagesPrompt, toolsList);
-          }}
-        />
+          <React.Suspense fallback={
+            <div className="fixed inset-0 z-[1000] bg-black/80 backdrop-blur-md flex items-center justify-center text-xs text-[#7F7469]">
+              <Loader2 className="w-5 h-5 animate-spin text-[#D97756] mr-2" />
+              <span>Opening Transcription Studio...</span>
+            </div>
+          }>
+            <VideoTranscriptStudio
+              isOpen={!!selectedTranscriptDoc}
+              onClose={() => setSelectedTranscriptDoc(null)}
+              videoUrl={selectedTranscriptDoc.url}
+              videoId={selectedTranscriptDoc.videoId || ''}
+              videoTitle={selectedTranscriptDoc.title}
+              segments={selectedTranscriptDoc.segments || []}
+              fullText={selectedTranscriptDoc.content}
+              onPasteTextToInput={(pasted) => {
+                setInput(pasted);
+                showToast('Ref text pasted into your workspace input!');
+              }}
+              callLlamaBridge={async (messagesPrompt, toolsList) => {
+                return await callLlamaBridge(messagesPrompt, toolsList);
+              }}
+            />
+          </React.Suspense>
       )}
 
       {/* Voice Assistant Full-Screen Panel */}

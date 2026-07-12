@@ -14,8 +14,10 @@ export async function handleOpenRouter(
     finalSystemPrompt: string;
   }
 ) {
+  const apiKey = options.apiKey || process.env.OPENROUTER_API_KEY || '';
   return handleOpenAI(req, res, {
     ...options,
+    apiKey,
     baseUrl: options.baseUrl || 'https://openrouter.ai/api/v1'
   });
 }

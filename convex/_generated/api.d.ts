@@ -18,6 +18,7 @@ import type * as memory from "../memory.js";
 import type * as messages from "../messages.js";
 import type * as settings from "../settings.js";
 import type * as usageRecords from "../usageRecords.js";
+import type * as consolidation from "../consolidation.js";
 
 import type {
   ApiFromModules,
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   settings: typeof settings;
   usageRecords: typeof usageRecords;
+  consolidation: typeof consolidation;
 }>;
 
 export declare const api: FilterApi<

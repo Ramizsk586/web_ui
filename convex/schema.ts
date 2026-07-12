@@ -193,4 +193,23 @@ export default defineSchema({
     .index("by_conversation", ["conversationId"])
     .index("by_agent", ["agentId"])
     .index("by_source", ["source"]),
+
+  consolidationRuns: defineTable({
+    runId: v.string(),
+    trigger: v.string(),
+    status: v.union(
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed")
+    ),
+    proposalsCount: v.number(),
+    mergedCount: v.number(),
+    prunedCount: v.number(),
+    notes: v.optional(v.string()),
+    details: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_run_id", ["runId"])
+    .index("by_status", ["status"]),
 });

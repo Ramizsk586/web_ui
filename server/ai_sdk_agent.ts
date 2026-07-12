@@ -4,7 +4,7 @@ import { streamText, tool } from 'ai';
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
-import { execSync } from 'child_process';
+import { execSync, exec } from 'child_process';
 import { buildProviderModel } from './ai_sdk_providers.js';
 import { getFilesRecursively, matchesWorkspaceGlob } from './utils.js';
 
@@ -79,6 +79,7 @@ type WorkspaceToolResult = {
   cwd?: string;
   error?: string;
   __modelText?: string;
+  files?: string[];
 };
 
 const PI_SUPPORTED_PROVIDERS = new Set([
@@ -128,7 +129,15 @@ YOUR MANDATE:
 2. NO PREMATURE STOPPING: Do not stop after 1 or 2 tool calls just to report progress or ask the user what to do next unless you are truly blocked by a missing credential or required human input.
 3. VERIFICATION: After editing files, run build, compilation, or test commands when appropriate. If a build or test fails, use the error output to fix the issue and run verification again.
 4. ACCURACY: Always keep file modifications precise. Prefer targeted edits when possible and full rewrites only when justified.
-5. WORKSPACE SAFETY: Stay inside the provided workspace root unless the user explicitly instructs otherwise.`;
+5. WORKSPACE SAFETY: Stay inside the provided workspace root unless the user explicitly instructs otherwise.
+
+TOOL CONFIGURATION GUIDELINES:
+- To explore directory contents, use the \`list_directory\` tool or \`glob_tool\`.
+- To search for occurrences of functions, variables, or text, use the \`grep_tool\`.
+- To view file content, use the \`read_file\` tool.
+- To edit existing files, prefer the \`edit_file\` tool with precise search and replacement blocks. Make sure your target searches match the file contents exactly, including leading indentation and spacing.
+- When creating new files, use \`write_file\`.
+- When verifying, running or compiling your changes, use \`run_command\`. All commands are executed in the workspace directory.`;
 
   if (!extraPrompt || !extraPrompt.trim()) {
     return basePrompt;
@@ -398,7 +407,26 @@ async function executeEditFile(
 
   try {
     const oldContent = fs.readFileSync(resolved.absolutePath, 'utf8');
-    if (!oldContent.includes(input.target)) {
+    let target = input.target;
+    let replacement = input.replacement;
+    const isCrlf = oldContent.includes('\r\n');
+    if (isCrlf) {
+      if (target.includes('\n') && !target.includes('\r\n')) {
+        target = target.replace(/\r?\n/g, '\r\n');
+      }
+      if (replacement.includes('\n') && !replacement.includes('\r\n')) {
+        replacement = replacement.replace(/\r?\n/g, '\r\n');
+      }
+    } else {
+      if (target.includes('\r\n')) {
+        target = target.replace(/\r\n/g, '\n');
+      }
+      if (replacement.includes('\r\n')) {
+        replacement = replacement.replace(/\r\n/g, '\n');
+      }
+    }
+
+    if (!oldContent.includes(target)) {
       return {
         success: false,
         action: 'edit_failed',
@@ -408,9 +436,9 @@ async function executeEditFile(
       };
     }
 
-    const newContent = oldContent.replace(input.target, input.replacement);
-    const oldTargetLines = input.target ? input.target.split('\n').length : 0;
-    const newTargetLines = input.replacement ? input.replacement.split('\n').length : 0;
+    const newContent = oldContent.replace(target, replacement);
+    const oldTargetLines = target ? target.split('\n').length : 0;
+    const newTargetLines = replacement ? replacement.split('\n').length : 0;
     if (progress && (oldTargetLines > 0 || newTargetLines > 0)) {
       const totalSteps = Math.max(oldTargetLines, newTargetLines, 1);
       for (let step = 1; step <= totalSteps; step += 1) {
@@ -605,6 +633,69 @@ async function executeRenameFile(
   }
 }
 
+async function executeListDirectory(workspaceRoot: string, input: { path: string }): Promise<WorkspaceToolResult> {
+  const resolved = resolveWorkspacePath(workspaceRoot, input.path);
+  if (!resolved.ok) {
+    return {
+      success: false,
+      action: 'list_directory_failed',
+      filePath: input.path,
+      error: resolved.error,
+      __modelText: `Error: ${resolved.error}`
+    };
+  }
+
+  if (!fs.existsSync(resolved.absolutePath)) {
+    return {
+      success: false,
+      action: 'list_directory_failed',
+      filePath: resolved.relativePath,
+      error: `Directory not found at ${resolved.relativePath}`,
+      __modelText: `Error: Directory not found at ${resolved.relativePath}`
+    };
+  }
+
+  try {
+    const stats = fs.statSync(resolved.absolutePath);
+    if (!stats.isDirectory()) {
+      return {
+        success: false,
+        action: 'list_directory_failed',
+        filePath: resolved.relativePath,
+        error: `Path is a file, not a directory: ${resolved.relativePath}`,
+        __modelText: `Error: Path is a file, not a directory: ${resolved.relativePath}`
+      };
+    }
+
+    const items = fs.readdirSync(resolved.absolutePath);
+    const files = items.map(name => {
+      const fullPath = path.join(resolved.absolutePath, name);
+      const isDir = fs.statSync(fullPath).isDirectory();
+      return `${name}${isDir ? '/' : ''}`;
+    });
+
+    const modelText = files.length > 0 
+      ? `Contents of ${resolved.relativePath || '.'}/:\n${files.map(f => `- ${f}`).join('\n')}`
+      : `Directory ${resolved.relativePath || '.'}/ is empty.`;
+
+    return {
+      success: true,
+      action: 'list_directory',
+      filePath: resolved.relativePath,
+      files,
+      __modelText: modelText
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      action: 'list_directory_failed',
+      filePath: resolved.relativePath,
+      error: error.message,
+      __modelText: `Error listing directory: ${error.message}`
+    };
+  }
+}
+
 async function executeGlobTool(workspaceRoot: string, input: { pattern: string }): Promise<WorkspaceToolResult> {
   try {
     const files = getFilesRecursively(workspaceRoot);
@@ -693,47 +784,39 @@ async function executeRunCommand(workspaceRoot: string, input: { command: string
     };
   }
 
-  try {
-    const stdout = execSync(input.command, {
+  return new Promise((resolve) => {
+    exec(input.command, {
       cwd: workspaceRoot,
-      encoding: 'utf8',
       timeout: 30_000,
-      stdio: ['ignore', 'pipe', 'pipe']
+    }, (error: any, stdout, stderr) => {
+      const outStr = String(stdout || '');
+      const errStr = String(stderr || '');
+      
+      if (error) {
+        const message = error.message || 'Command failed';
+        resolve({
+          success: false,
+          action: 'command_failed',
+          cwd: workspaceRoot,
+          stdout: outStr,
+          stderr: errStr,
+          code: typeof error.code === 'number' ? error.code : (typeof error.status === 'number' ? error.status : 1),
+          error: message,
+          __modelText: `Command exited with error:\n${outStr || ''}${outStr && errStr ? '\n' : ''}${errStr || ''}\n${message}`.trim()
+        });
+      } else {
+        resolve({
+          success: true,
+          action: 'command_executed',
+          cwd: workspaceRoot,
+          stdout: outStr,
+          stderr: errStr,
+          code: 0,
+          __modelText: outStr || '(command executed with no output)'
+        });
+      }
     });
-
-    return {
-      success: true,
-      action: 'command_executed',
-      cwd: workspaceRoot,
-      stdout: stdout || '',
-      stderr: '',
-      code: 0,
-      __modelText: stdout || '(command executed with no output)'
-    };
-  } catch (error: any) {
-    const stdout = typeof error?.stdout === 'string'
-      ? error.stdout
-      : Buffer.isBuffer(error?.stdout)
-        ? error.stdout.toString('utf8')
-        : '';
-    const stderr = typeof error?.stderr === 'string'
-      ? error.stderr
-      : Buffer.isBuffer(error?.stderr)
-        ? error.stderr.toString('utf8')
-        : '';
-    const message = error?.message || 'Command failed';
-
-    return {
-      success: false,
-      action: 'command_failed',
-      cwd: workspaceRoot,
-      stdout,
-      stderr,
-      code: typeof error?.status === 'number' ? error.status : 1,
-      error: message,
-      __modelText: `Command exited with error:\n${stdout || ''}${stdout && stderr ? '\n' : ''}${stderr || ''}\n${message}`.trim()
-    };
-  }
+  });
 }
 
 async function executeWorkspaceTool(toolName: string, workspaceRoot: string, input: Record<string, any>) {
@@ -769,6 +852,8 @@ async function executeWorkspaceTool(toolName: string, workspaceRoot: string, inp
       });
     case 'run_command':
       return executeRunCommand(workspaceRoot, { command: String(input.command || '') });
+    case 'list_directory':
+      return executeListDirectory(workspaceRoot, { path: String(input.path || '') });
     default:
       return {
         success: false,
@@ -838,6 +923,15 @@ function createPiWorkspaceTools(workspaceRoot: string) {
         newPath: Type.String({ description: 'Target relative path of the file' }),
       }),
       execute: async (_toolCallId: string, input: any) => buildPiToolResponse(await executeWorkspaceTool('rename_file', workspaceRoot, input))
+    },
+    {
+      name: 'list_directory',
+      label: 'List Directory',
+      description: 'List all files and subdirectories within a directory in the workspace.',
+      parameters: Type.Object({
+        path: Type.String({ description: 'Relative path of the directory from the workspace root (e.g., "." or "src")' }),
+      }),
+      execute: async (_toolCallId: string, input: any) => buildPiToolResponse(await executeWorkspaceTool('list_directory', workspaceRoot, input))
     },
     {
       name: 'glob_tool',
@@ -947,6 +1041,14 @@ function createAiSdkWorkspaceTools(workspaceRoot: string) {
       z.object({
         oldPath: z.string().describe('Current relative path of the file'),
         newPath: z.string().describe('Target relative path of the file')
+      }),
+      undefined
+    ),
+    list_directory: makeTool(
+      'list_directory',
+      'List all files and subdirectories within a directory in the workspace.',
+      z.object({
+        path: z.string().describe('Relative path of the directory from the workspace root (e.g., "." or "src")')
       }),
       undefined
     ),

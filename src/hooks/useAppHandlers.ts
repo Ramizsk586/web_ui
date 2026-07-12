@@ -3237,7 +3237,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
             chatId: chatId!,
             thinkingId,
             task: content,
-            systemPrompt: '',
+            systemPrompt: systemPrompt,
             coderWorkspacePath,
             apiKey: apiKey,
             modelId: activeModelId,

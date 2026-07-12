@@ -163,11 +163,12 @@ export function useCoderMode({
   useEffect(() => {
     if (!showTodoPanel) return;
     if (coderTodos.length === 0) return;
-    const allDone = coderTodos.every(todo => todo.status === 'complete' || todo.status === 'completed');
+    const allDone = coderTodos.every(todo => todo.status === 'complete');
     if (allDone) {
       setShowTodoPanel(false);
     }
   }, [coderTodos, showTodoPanel]);
+
 
   return {
     isCoderMode,

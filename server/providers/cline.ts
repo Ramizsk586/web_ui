@@ -14,8 +14,10 @@ export async function handleCline(
     finalSystemPrompt: string;
   }
 ) {
+  const apiKey = options.apiKey || process.env.CLINE_API_KEY || '';
   return handleOpenAI(req, res, {
     ...options,
+    apiKey,
     baseUrl: options.baseUrl || 'https://api.cline.bot/api/v1'
   });
 }

@@ -42,22 +42,23 @@ export default defineConfig(({mode}) => {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
-              if (id.includes('@monaco-editor') || id.includes('monaco-editor')) {
+              const normalizedId = id.replace(/\\/g, '/');
+              if (normalizedId.includes('/@monaco-editor/') || normalizedId.includes('/monaco-editor/')) {
                 return 'monaco-suite';
               }
-              if (id.includes('react-syntax-highlighter') || id.includes('prismjs')) {
+              if (normalizedId.includes('/react-syntax-highlighter/') || normalizedId.includes('/prismjs/')) {
                 return 'syntax-highlighter-pkg';
               }
-              if (id.includes('axios')) {
+              if (normalizedId.includes('/axios/')) {
                 return 'network-libs';
               }
-              if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler') || id.includes('motion')) {
+              if (/\/node_modules\/(react|react-dom|scheduler|motion|motion\/react)\//.test(normalizedId)) {
                 return 'react-core';
               }
-              if (id.includes('lucide-react')) {
+              if (normalizedId.includes('/lucide-react/')) {
                 return 'lucide-icons';
               }
-              if (id.includes('react-markdown') || id.includes('remark-') || id.includes('turndown')) {
+              if (normalizedId.includes('/react-markdown/') || normalizedId.includes('/remark-') || normalizedId.includes('/turndown/')) {
                 return 'content-parsers-suite';
               }
               return 'vendor-libs';

@@ -25,6 +25,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { chatCompletion } from './bridge-client.js';
 import { getConvexClient } from './convex-client.js';
 import { api } from '../convex/_generated/api.js';
+import { broadcast } from './broadcast.js';
 
 // ── Model configuration ───────────────────────────────────────────────────────
 
@@ -220,6 +221,12 @@ export async function runConsolidation(trigger = 'schedule'): Promise<Consolidat
   const convex = getConvexClient();
 
   console.log(`[Consolidation:${runId}] Starting (trigger=${trigger})…`);
+  try {
+    await convex.mutation(api.consolidation.createRun, { runId, trigger });
+  } catch (err: any) {
+    console.warn('[Consolidation] Failed to create run in Convex:', err.message);
+  }
+  broadcast('consolidation_started', { runId, trigger });
 
   // ── Fetch active memories ────────────────────────────────────────────────
 
@@ -228,8 +235,18 @@ export async function runConsolidation(trigger = 'schedule'): Promise<Consolidat
     limit: 200,
   }) ?? [];
 
+  broadcast('consolidation_phase', { runId, phase: 'loaded', memoriesCount: memories.length });
+
   if (memories.length < MIN_MEMORIES) {
     console.log(`[Consolidation:${runId}] Only ${memories.length} active memories — skipping.`);
+    try {
+      await convex.mutation(api.consolidation.updateRun, {
+        runId,
+        status: 'completed',
+        notes: 'Not enough memories to consolidate',
+      });
+    } catch {}
+    broadcast('consolidation_completed', { runId, merged: 0, pruned: 0, notes: 'Not enough memories to consolidate' });
     return { trigger, memoriesScanned: memories.length, proposals: [], objections: [], verdicts: [], applied: 0, rejected: 0, runId, durationMs: Date.now() - started };
   }
 
@@ -242,6 +259,7 @@ export async function runConsolidation(trigger = 'schedule'): Promise<Consolidat
 
   // ── Stage 1: Proposer ────────────────────────────────────────────────────
 
+  broadcast('consolidation_phase', { runId, phase: 'proposing' });
   let proposals: Proposal[] = [];
   try {
     const proposerResponse = await chatCompletion(
@@ -256,13 +274,34 @@ export async function runConsolidation(trigger = 'schedule'): Promise<Consolidat
     console.error(`[Consolidation:${runId}] Proposer failed:`, err.message);
   }
 
+  broadcast('consolidation_phase', { runId, phase: 'proposed', proposalsCount: proposals.length });
+  try {
+    await convex.mutation(api.consolidation.updateRun, {
+      runId,
+      proposalsCount: proposals.length,
+      details: JSON.stringify({
+        memoriesScanned: memories.length,
+        proposals,
+      }),
+    });
+  } catch {}
+
   if (proposals.length === 0) {
     console.log(`[Consolidation:${runId}] No proposals — memories are clean.`);
+    try {
+      await convex.mutation(api.consolidation.updateRun, {
+        runId,
+        status: 'completed',
+        notes: 'No proposals',
+      });
+    } catch {}
+    broadcast('consolidation_completed', { runId, merged: 0, pruned: 0, notes: 'No proposals' });
     return { trigger, memoriesScanned: memories.length, proposals: [], objections: [], verdicts: [], applied: 0, rejected: 0, runId, durationMs: Date.now() - started };
   }
 
   // ── Stage 2: Adversary ───────────────────────────────────────────────────
 
+  broadcast('consolidation_phase', { runId, phase: 'challenging' });
   let objections: Objection[] = [];
   try {
     const adversaryInput = [
@@ -280,8 +319,21 @@ export async function runConsolidation(trigger = 'schedule'): Promise<Consolidat
     console.error(`[Consolidation:${runId}] Adversary failed (continuing without):`, err.message);
   }
 
+  broadcast('consolidation_phase', { runId, phase: 'challenged' });
+  try {
+    await convex.mutation(api.consolidation.updateRun, {
+      runId,
+      details: JSON.stringify({
+        memoriesScanned: memories.length,
+        proposals,
+        objections,
+      }),
+    });
+  } catch {}
+
   // ── Stage 3: Judge ───────────────────────────────────────────────────────
 
+  broadcast('consolidation_phase', { runId, phase: 'judging' });
   let verdicts: Verdict[] = [];
   try {
     const judgeInput = [
@@ -299,8 +351,22 @@ export async function runConsolidation(trigger = 'schedule'): Promise<Consolidat
     console.error(`[Consolidation:${runId}] Judge failed:`, err.message);
   }
 
+  broadcast('consolidation_phase', { runId, phase: 'judged' });
+  try {
+    await convex.mutation(api.consolidation.updateRun, {
+      runId,
+      details: JSON.stringify({
+        memoriesScanned: memories.length,
+        proposals,
+        objections,
+        verdicts,
+      }),
+    });
+  } catch {}
+
   // ── Apply approved verdicts ───────────────────────────────────────────────
 
+  broadcast('consolidation_phase', { runId, phase: 'applying' });
   let applied = 0;
   let rejected = 0;
 
@@ -375,6 +441,18 @@ export async function runConsolidation(trigger = 'schedule'): Promise<Consolidat
 
   const duration = Date.now() - started;
   console.log(`[Consolidation:${runId}] Done in ${duration}ms — applied=${applied} rejected=${rejected}`);
+
+  const pruneCount = proposals.filter(p => p.action === 'prune').length;
+  try {
+    await convex.mutation(api.consolidation.updateRun, {
+      runId,
+      status: 'completed',
+      mergedCount: applied,
+      prunedCount: pruneCount,
+      notes: `Applied ${applied} changes, rejected ${rejected}`,
+    });
+  } catch {}
+  broadcast('consolidation_completed', { runId, merged: applied, pruned: pruneCount, notes: `Applied ${applied} changes, rejected ${rejected}` });
 
   return { trigger, memoriesScanned: memories.length, proposals, objections, verdicts, applied, rejected, runId, durationMs: duration };
 }

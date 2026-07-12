@@ -344,7 +344,30 @@ export function setupLlamaRoutes(app: express.Express) {
 
   // Start llama-server process
   app.post("/api/llama/start", async (req, res) => {
-    const { modelPath, port = 1234, ctxSize = 4096, ngl = 99, customBinaryPath, binaryPath } = req.body;
+    const {
+      modelPath,
+      customBinaryPath,
+      binaryPath,
+      gpuOffload,
+      ngl = 99,
+      contextLength,
+      ctxSize = 4096,
+      cacheTypeK,
+      cacheTypeV,
+      threads,
+      host = '127.0.0.1',
+      port = 1234,
+      flashAttn,
+      noMmap,
+      seed,
+      maxConcurrent,
+      ropeFreqBase,
+      ropeFreqScale,
+      keepInMemory,
+      evalBatchSize,
+      physicalBatchSize,
+      mmprojPath
+    } = req.body;
     if (!modelPath) {
       return res.status(400).json({ error: 'modelPath is required' });
     }
@@ -409,29 +432,73 @@ export function setupLlamaRoutes(app: express.Express) {
         return res.status(404).json({ error: `Model file not found at: ${resolvedModel}` });
       }
 
+      const resolvedNgl = typeof gpuOffload === 'number' ? gpuOffload : (typeof ngl === 'number' ? ngl : 99);
+      const resolvedCtxSize = typeof contextLength === 'number' ? contextLength : (typeof ctxSize === 'number' ? ctxSize : 4096);
+      const resolvedParallel = typeof maxConcurrent === 'number' ? maxConcurrent : 1;
+
       const args = [
         '--model', resolvedModel,
         '--port', String(port),
-        '--ctx-size', String(ctxSize),
-        '--n-gpu-layers', String(ngl),
-        '--parallel', '1',
+        '--host', String(host),
+        '--ctx-size', String(resolvedCtxSize),
+        '--n-gpu-layers', String(resolvedNgl),
+        '--parallel', String(resolvedParallel),
       ];
 
-      // Auto-projector check
-      const dir = path.dirname(resolvedModel);
-      const isMmproj = (name: string) => {
-        const l = name.toLowerCase();
-        return l.includes('mmproj') || l.includes('projector') || l.includes('clip-vision') || l.includes('siglip');
-      };
-      try {
-        const entries = fs.readdirSync(dir);
-        const match = entries.find(e => e.toLowerCase().endsWith('.gguf') && isMmproj(e));
-        if (match) {
-          const projPath = path.join(dir, match).replace(/\\/g, '/');
-          args.push('--mmproj', projPath);
-          console.log('[llama-server] Found and attaching multimodal projector:', projPath);
-        }
-      } catch {}
+      if (cacheTypeK) {
+        args.push('--cache-type-k', String(cacheTypeK));
+      }
+      if (cacheTypeV) {
+        args.push('--cache-type-v', String(cacheTypeV));
+      }
+      if (threads) {
+        args.push('--threads', String(threads));
+      }
+      if (flashAttn) {
+        args.push('--flash-attn');
+      }
+      if (noMmap) {
+        args.push('--no-mmap');
+      }
+      if (seed !== undefined && seed !== null && seed !== '' && seed !== -1) {
+        args.push('--seed', String(seed));
+      }
+      if (ropeFreqBase) {
+        args.push('--rope-freq-base', String(ropeFreqBase));
+      }
+      if (ropeFreqScale) {
+        args.push('--rope-freq-scale', String(ropeFreqScale));
+      }
+      if (keepInMemory) {
+        args.push('--mlock');
+      }
+      if (evalBatchSize) {
+        args.push('--batch-size', String(evalBatchSize));
+      }
+      if (physicalBatchSize) {
+        args.push('--ubatch-size', String(physicalBatchSize));
+      }
+
+      // Multimodal projector check
+      if (mmprojPath && fs.existsSync(mmprojPath)) {
+        args.push('--mmproj', path.resolve(mmprojPath).replace(/\\/g, '/'));
+        console.log('[llama-server] Attaching configured multimodal projector:', mmprojPath);
+      } else {
+        const dir = path.dirname(resolvedModel);
+        const isMmproj = (name: string) => {
+          const l = name.toLowerCase();
+          return l.includes('mmproj') || l.includes('projector') || l.includes('clip-vision') || l.includes('siglip');
+        };
+        try {
+          const entries = fs.readdirSync(dir);
+          const match = entries.find(e => e.toLowerCase().endsWith('.gguf') && isMmproj(e));
+          if (match) {
+            const projPath = path.join(dir, match).replace(/\\/g, '/');
+            args.push('--mmproj', projPath);
+            console.log('[llama-server] Found and attaching multimodal projector:', projPath);
+          }
+        } catch {}
+      }
 
       if (process.platform !== 'win32' && llamaServerBin) {
         try {
@@ -492,10 +559,11 @@ export function setupLlamaRoutes(app: express.Express) {
 
       // Wait up to 30s for server health endpoint to become ready
       let ready = false;
+      const healthHost = (!host || host === '0.0.0.0') ? '127.0.0.1' : host;
       for (let i = 0; i < 60; i++) {
         if (exited) break;
         try {
-          const health = await axios.get(`http://127.0.0.1:${port}/health`, { timeout: 400 });
+          const health = await axios.get(`http://${healthHost}:${port}/health`, { timeout: 400 });
           if (health.status === 200) {
             ready = true;
             break;
@@ -519,7 +587,7 @@ export function setupLlamaRoutes(app: express.Express) {
         success: true,
         message: 'llama-server started successfully',
         pid: proc.pid || null,
-        serverUrl: `http://127.0.0.1:${port}`,
+        serverUrl: `http://${healthHost}:${port}`,
         command: isWin
           ? `& "${llamaServerBin}" ${args.map(a => (a.includes(' ') || a.includes('/') || a.includes('\\')) ? `"${a}"` : a).join(' ')}`
           : `${llamaServerBin} ${args.join(' ')}`,
