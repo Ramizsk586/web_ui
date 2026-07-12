@@ -121,13 +121,19 @@ export interface ConnectedToolkit {
   createdAt?: string;
 }
 
+let activeSlugsCache: string[] = [];
+
+export function getActiveSlugsCache(): string[] {
+  return activeSlugsCache;
+}
+
 export async function listConnectedToolkits(): Promise<ConnectedToolkit[]> {
   const composio = await getOrCreateComposio();
   if (!composio) return [];
   try {
     const resp = await composio.connectedAccounts.list({ userIds: [luminaUserId()] });
     const items = Array.isArray(resp) ? resp : (resp as any).items ?? [];
-    return items.map((it: any) => ({
+    const mapped = items.map((it: any) => ({
       slug: it.toolkit?.slug ?? it.toolkit ?? "",
       connectionId: it.id,
       status: it.status,
@@ -138,6 +144,8 @@ export async function listConnectedToolkits(): Promise<ConnectedToolkit[]> {
       accountAvatarUrl: undefined,
       createdAt: it.createdAt,
     }));
+    activeSlugsCache = mapped.filter((c: any) => c.status === "ACTIVE").map((c: any) => c.slug);
+    return mapped;
   } catch (err) {
     console.error("[composio] listConnectedToolkits failed", err);
     return [];
@@ -250,4 +258,45 @@ export async function executeComposioTool(
     console.error(`[composio] execute ${toolSlug} THREW:`, msg);
     throw new Error(`Composio tool execution failed: ${msg}`);
   }
+}
+
+let claudeAgentSdkPromise: Promise<any> | null = null;
+async function loadClaudeAgentSdk(): Promise<any> {
+  if (!claudeAgentSdkPromise) {
+    claudeAgentSdkPromise = import("@anthropic-ai/claude-agent-sdk")
+      .catch((error) => {
+        claudeAgentSdkPromise = null;
+        throw error;
+      });
+  }
+  return claudeAgentSdkPromise;
+}
+
+export async function buildComposioMcpServer(slug: string): Promise<any> {
+  const composio = await getOrCreateComposio();
+  if (!composio) {
+    throw new Error(`[composio] cannot build ${slug} — COMPOSIO_API_KEY not set`);
+  }
+  const { createSdkMcpServer } = await loadClaudeAgentSdk();
+
+  const connected = await listConnectedToolkits();
+  const activeCount = connected.filter(
+    (c) => c.slug === slug && c.status === "ACTIVE"
+  ).length;
+
+  const authConfig = (await composio.authConfigs.list({ toolkit: slug })).items?.[0];
+  const session = await composio.create(luminaUserId(), {
+    toolkits: [slug],
+    manageConnections: false,
+    ...(authConfig ? { authConfigs: { [slug]: authConfig.id } } : {}),
+    ...(activeCount >= 2
+      ? { multiAccount: { enable: true, requireExplicitSelection: true } }
+      : {}),
+  });
+  const tools = await session.tools();
+  return createSdkMcpServer({
+    name: slug,
+    version: "0.1.0",
+    tools,
+  });
 }

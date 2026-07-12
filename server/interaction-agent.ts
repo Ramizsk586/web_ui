@@ -36,7 +36,7 @@ Rules:
 const BOOP_TOOLS = [
   {
     name: "recall_memory",
-    description: "Search saved memory for relevant context.",
+    description: "Search saved memory for relevant context. Returns matched memories along with their unique ID, tier, and segment.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -62,6 +62,34 @@ const BOOP_TOOLS = [
     },
   },
   {
+    name: "update_memory",
+    description: "Update the content, tier, or segment of an existing memory by its ID.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        memoryId: { type: "string", description: "The unique ID of the memory to update (e.g. mem_xxx)." },
+        content: { type: "string", description: "The new updated fact content." },
+        tier: { type: "string", enum: ["short", "long", "permanent"] },
+        segment: {
+          type: "string",
+          enum: ["identity", "preference", "correction", "relationship", "project", "knowledge", "context"],
+        },
+      },
+      required: ["memoryId"],
+    },
+  },
+  {
+    name: "delete_memory",
+    description: "Delete an existing memory by its ID.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        memoryId: { type: "string", description: "The unique ID of the memory to delete (e.g. mem_xxx)." },
+      },
+      required: ["memoryId"],
+    },
+  },
+  {
     name: "spawn_agent",
     description: "Delegate a task that needs tools, research, or execution.",
     input_schema: {
@@ -69,7 +97,11 @@ const BOOP_TOOLS = [
       properties: {
         name: { type: "string" },
         task: { type: "string" },
-        integrations: { type: "array", items: { type: "string" } },
+        integrations: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of integrations to spawn the agent with. Choose from the available integrations listed in the system prompt."
+        },
       },
       required: ["name", "task"],
     },
@@ -84,7 +116,11 @@ const BOOP_TOOLS = [
         task: { type: "string" },
         schedule: { type: "string" },
         timezone: { type: "string" },
-        integrations: { type: "array", items: { type: "string" } },
+        integrations: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of integrations to spawn the agent with. Choose from the available integrations listed in the system prompt."
+        },
       },
       required: ["name", "task", "schedule"],
     },
@@ -109,7 +145,7 @@ async function executeTool(
       }
       return {
         result: memories
-          .map((m: any) => `[${m.tier}/${m.segment}] ${m.content}`)
+          .map((m: any) => `[ID: ${m.memoryId}] [${m.tier}/${m.segment}] ${m.content}`)
           .join("\n"),
       };
     }
@@ -124,6 +160,23 @@ async function executeTool(
         source: "interaction-agent",
       });
       return { result: `Memory saved (${memoryId}).` };
+    }
+
+    case "update_memory": {
+      await convex.mutation(api.memory.update, {
+        memoryId: String(toolInput.memoryId),
+        content: toolInput.content ? String(toolInput.content) : undefined,
+        tier: toolInput.tier,
+        segment: toolInput.segment,
+      });
+      return { result: `Memory ${toolInput.memoryId} updated.` };
+    }
+
+    case "delete_memory": {
+      await convex.mutation(api.memory.remove, {
+        memoryId: String(toolInput.memoryId),
+      });
+      return { result: `Memory ${toolInput.memoryId} deleted.` };
     }
 
     case "spawn_agent": {

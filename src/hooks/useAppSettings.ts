@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { safeGetItem } from '../utils/storageUtils';
 import { DEFAULT_SERVER_URL, DEFAULT_MCP_URL, DEFAULT_API_KEY, CLOUD_PROVIDERS, PROVIDER_TO_ENV_KEY } from '../constants';
 import { fetchModelsDevCatalog, getModelsForProviderId } from '../services/modelsDevService';
@@ -68,7 +68,7 @@ export function useAppSettings({
     try {
       const saved = localStorage.getItem('lumina_user_profile');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch (e) { }
     return {
       name: 'User',
       avatar: '',
@@ -84,14 +84,14 @@ export function useAppSettings({
       if (userProfile.name && userProfile.name.trim() !== '' && userProfile.name !== 'User') {
         localStorage.setItem('lumina_profile_created', 'true');
       }
-    } catch (e) {}
+    } catch (e) { }
   }, [userProfile]);
 
   const [projectFolders, setProjectFolders] = useState<{ id: string; name: string }[]>(() => {
     try {
       const saved = localStorage.getItem('lumina_project_folders');
       if (saved) return JSON.parse(saved);
-    } catch (e) {}
+    } catch (e) { }
     return [
       { id: '1', name: 'UI Components' },
       { id: '2', name: 'Analysis' },
@@ -101,7 +101,7 @@ export function useAppSettings({
   useEffect(() => {
     try {
       localStorage.setItem('lumina_project_folders', JSON.stringify(projectFolders));
-    } catch (e) {}
+    } catch (e) { }
   }, [projectFolders]);
 
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
@@ -119,7 +119,7 @@ export function useAppSettings({
       } else {
         localStorage.removeItem('lumina_active_project_id');
       }
-    } catch (e) {}
+    } catch (e) { }
   }, [activeProjectId]);
 
   const [showLogin, setShowLogin] = useState(() => {
@@ -173,7 +173,7 @@ export function useAppSettings({
     try {
       localStorage.setItem('lumina_user_profile', JSON.stringify(updatedProfile));
       localStorage.setItem('lumina_profile_created', 'true');
-    } catch (err) {}
+    } catch (err) { }
     setShowLogin(false);
   };
 
@@ -193,7 +193,7 @@ export function useAppSettings({
     return localStorage.getItem('lumina_use_local_models') === 'true';
   });
   const modelSelectorMode: 'drawer' = 'drawer';
-  const setModelSelectorMode = () => {};
+  const setModelSelectorMode = () => { };
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'ai' | 'mcp' | 'bridge' | 'sources' | 'search' | 'persona' | 'profile' | 'theme' | 'lumina_tools' | 'llama_cpp' | 'models' | 'rag' | 'skills' | 'anthropic'>('general');
   const [activePlusSubMenu, setActivePlusSubMenu] = useState<'main' | 'mcp' | 'tools' | 'lumina_tools' | 'project' | 'skills' | 'style'>('main');
@@ -217,7 +217,7 @@ export function useAppSettings({
           systemPrompt: parsed.systemPrompt || 'You are a helpful, precise, and highly capable AI assistant.'
         };
       }
-    } catch (e) {}
+    } catch (e) { }
     return {
       name: 'Lumina',
       role: 'Modern Intelligence',
@@ -230,7 +230,7 @@ export function useAppSettings({
   useEffect(() => {
     try {
       localStorage.setItem('lumina_persona', JSON.stringify(persona));
-    } catch (e) {}
+    } catch (e) { }
   }, [persona]);
   const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', 'https://openprovider.mimika.in/v1'));
   const [apiKey, setApiKey] = useState('');
@@ -252,7 +252,7 @@ export function useAppSettings({
       if (isVerified && savedUrl === currentUrl && savedProv === currentProv) {
         return 'success';
       }
-    } catch {}
+    } catch { }
     return 'idle';
   });
 
@@ -268,7 +268,7 @@ export function useAppSettings({
       if (isVerified && savedSearchProvider === currentSearchProvider && savedTavilyKey === currentTavilyKey && savedSerpKey === currentSerpKey) {
         return 'success';
       }
-    } catch {}
+    } catch { }
     return 'idle';
   });
 
@@ -282,7 +282,7 @@ export function useAppSettings({
       } else if (localStorage.getItem('lumina_ai_verified') === 'true') {
         setAiVerificationState('success');
       }
-    } catch {}
+    } catch { }
   }, [apiKey, serverUrl, selectedProvider]);
 
   useEffect(() => {
@@ -296,7 +296,7 @@ export function useAppSettings({
       } else if (localStorage.getItem('lumina_search_verified') === 'true') {
         setSearchVerificationState('success');
       }
-    } catch {}
+    } catch { }
   }, [searchProvider, tavilyApiKey, serpApiKey]);
 
   const [isAiSaved, setIsAiSaved] = useState(false);
@@ -312,6 +312,7 @@ export function useAppSettings({
     }
   });
   const [editingAiProfileId, setEditingAiProfileId] = useState<string | null>(null);
+  const localDetectionDoneRef = useRef(false);
 
   const applyActiveProviderModels = useCallback((profiles: AiProviderProfile[]) => {
     const profileModels = profiles.flatMap(profile =>
@@ -368,12 +369,79 @@ export function useAppSettings({
     syncProfilesToBackend(nextProfiles);
   }, [applyActiveProviderModels, syncProfilesToBackend]);
 
+  // Auto-detect local Ollama and LM Studio instances on startup
   useEffect(() => {
-    applyActiveProviderModels(aiProviderProfiles);
-    if (aiProviderProfiles.length > 0) {
-      syncProfilesToBackend(aiProviderProfiles);
-    }
-  }, [aiProviderProfiles, applyActiveProviderModels, syncProfilesToBackend]);
+    const detectLocalProviders = async () => {
+      const localProviders = [
+        { id: 'ollama_local', label: 'Ollama Local', endpoint: 'http://127.0.0.1:11434/v1', providerKey: 'ollama_local' },
+        { id: 'lm_studio', label: 'LM Studio', endpoint: 'http://127.0.0.1:1234/v1', providerKey: 'lm_studio' },
+      ];
+
+      for (const local of localProviders) {
+        try {
+          const response = await fetch(`${local.endpoint}/models`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(3000),
+          });
+          if (!response.ok) continue;
+
+          const data = await response.json();
+          const modelsArr = data.data || data.models || [];
+          if (!Array.isArray(modelsArr) || modelsArr.length === 0) continue;
+
+          const fetchedModels = modelsArr.map((m: any) => ({
+            id: m.id,
+            name: m.display_name || m.id,
+            color: 'text-blue-500',
+          }));
+
+          const now = Date.now();
+          const existingProfile = aiProviderProfiles.find(p => p.id === local.id);
+
+          if (existingProfile) {
+            // Update existing profile with fresh models
+            const updatedProfile: AiProviderProfile = {
+              ...existingProfile,
+              models: fetchedModels,
+              selectedModelIds: fetchedModels.map(m => m.id),
+              updatedAt: now,
+              verifiedAt: now,
+              active: true,
+            };
+            const nextProfiles = aiProviderProfiles.map(p =>
+              p.id === local.id ? updatedProfile : p
+            );
+            persistAiProviderProfiles(nextProfiles);
+          } else {
+            // Create new profile
+            const newProfile: AiProviderProfile = {
+              id: local.id,
+              name: local.label,
+              provider: local.providerKey,
+              endpoint: local.endpoint,
+              apiKey: '',
+              models: fetchedModels,
+              selectedModelIds: fetchedModels.map(m => m.id),
+              active: true,
+              accentColor: local.id === 'ollama_local' ? '#10b981' : '#06b6d4',
+              verifiedAt: now,
+              updatedAt: now,
+            };
+            persistAiProviderProfiles([newProfile, ...aiProviderProfiles]);
+          }
+        } catch {
+          // Provider not running - silently skip
+        }
+      }
+    };
+
+    // Run detection once on mount with a small delay to let the app initialize
+    const timer = setTimeout(() => {
+      detectLocalProviders();
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []); // Intentionally empty - run once on mount
 
   const getProfileDisplayName = useCallback((providerId: string, endpoint: string) => {
     const providerLabel = CLOUD_PROVIDERS.find(p => p.id === providerId)?.label || providerId || 'Custom';
@@ -498,14 +566,14 @@ export function useAppSettings({
                 fetchedModels.push({ id: dm.id, name: dm.name, color: 'text-purple-500' });
               }
             }
-          } catch {}
+          } catch { }
           saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
           try {
             localStorage.setItem('lumina_ai_verified', 'true');
             localStorage.setItem('lumina_verified_server_url', serverUrl);
             localStorage.setItem('lumina_verified_provider', selectedProvider);
-          } catch {}
+          } catch { }
         } else {
           setAiVerificationState('error');
           setTimeout(() => setAiVerificationState('idle'), 3000);
@@ -523,7 +591,7 @@ export function useAppSettings({
           method: 'GET',
           headers
         });
-        
+
         if (response.ok) {
           const data = await response.json();
           const modelsArr = data.data || data.models || [];
@@ -543,14 +611,14 @@ export function useAppSettings({
                 fetchedModels.push({ id: dm.id, name: dm.name, color: 'text-purple-500' });
               }
             }
-          } catch {}
+          } catch { }
           saveVerifiedAiProfile(fetchedModels);
           setAiVerificationState('success');
           try {
             localStorage.setItem('lumina_ai_verified', 'true');
             localStorage.setItem('lumina_verified_server_url', serverUrl);
             localStorage.setItem('lumina_verified_provider', selectedProvider);
-          } catch {}
+          } catch { }
         } else {
           setAiVerificationState('error');
           setTimeout(() => setAiVerificationState('idle'), 3000);
@@ -816,7 +884,7 @@ export function useAppSettings({
             fetchedModels.push({ id: dm.id, name: dm.name, color: 'text-purple-500' });
           }
         }
-      } catch {}
+      } catch { }
       saveVerifiedAiProfile(fetchedModels, {
         profileId: profile.id,
         provider: profile.provider,
@@ -897,7 +965,7 @@ export function useAppSettings({
           localStorage.setItem('lumina_verified_search_provider', searchProvider);
           localStorage.setItem('lumina_verified_tavily_key', tavilyApiKey);
           localStorage.setItem('lumina_verified_serp_key', serpApiKey);
-        } catch {}
+        } catch { }
       } else {
         setSearchVerificationState('error');
         setTimeout(() => setSearchVerificationState('idle'), 3000);

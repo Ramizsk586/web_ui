@@ -208,8 +208,8 @@ export function setupLlmRoutes(app: express.Express) {
           { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', endpoint: 'https://api.anthropic.com' },
         ]);
       }
-      
-      const models = profiles.flatMap((profile: any) => 
+
+      const models = profiles.flatMap((profile: any) =>
         (profile.models || []).map((model: any) => ({
           id: model.id,
           name: model.name,
@@ -227,7 +227,7 @@ export function setupLlmRoutes(app: express.Express) {
   // Chat completion endpoint using app's configured providers
   app.post("/api/llm/chat", async (req, res) => {
     const { model, messages, tools, stream, modelId } = req.body;
-    
+
     if (!messages) {
       return res.status(400).json({ error: "messages are required" });
     }
@@ -302,10 +302,10 @@ export function setupLlmRoutes(app: express.Express) {
 
       if (stream) {
         // Handle streaming response
-        const response = await axios.post(fullUrl, body, { 
-          headers, 
+        const response = await axios.post(fullUrl, body, {
+          headers,
           timeout: 120000,
-          responseType: 'stream' 
+          responseType: 'stream'
         });
 
         response.data.on('data', (chunk: Buffer) => {
@@ -338,7 +338,7 @@ export function setupLlmRoutes(app: express.Express) {
     try {
       const profiles = getLlmConfig();
       const models: any[] = [];
-      
+
       if (profiles && Array.isArray(profiles)) {
         for (const profile of profiles) {
           for (const model of profile.models || []) {
@@ -353,7 +353,7 @@ export function setupLlmRoutes(app: express.Express) {
           }
         }
       }
-      
+
       // Add fallback models
       if (models.length === 0) {
         models.push(
@@ -361,7 +361,7 @@ export function setupLlmRoutes(app: express.Express) {
           { id: 'claude-sonnet-4-20250514', object: 'model', created: Date.now() / 1000, owned_by: 'anthropic' }
         );
       }
-      
+
       res.json({ object: 'list', data: models });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -372,7 +372,7 @@ export function setupLlmRoutes(app: express.Express) {
   app.get("/v1/models/:model_id", async (req, res) => {
     const { model_id } = req.params;
     const profiles = getLlmConfig();
-    
+
     if (profiles && Array.isArray(profiles)) {
       for (const profile of profiles) {
         const model = (profile.models || []).find((m: any) => m.id === model_id);
@@ -388,7 +388,7 @@ export function setupLlmRoutes(app: express.Express) {
         }
       }
     }
-    
+
     res.json({
       id: model_id,
       object: 'model',
@@ -430,7 +430,25 @@ export function setupLlmRoutes(app: express.Express) {
     }
 
     const config = getAnthropicConfig();
-    const mapping = tier ? config[tier] : null;
+    let mapping = tier ? config[tier] : null;
+
+    // Fallback to Llama Bridge if the tier is not explicitly mapped
+    if (!mapping) {
+      try {
+        const settingsPath = path.join(process.cwd(), '.lumina', 'bridge_settings.json');
+        if (fs.existsSync(settingsPath)) {
+          const data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+          if (data.bridgeUrl) {
+            mapping = {
+              modelId: requestedModel || 'gpt-4o-mini',
+              endpoint: data.bridgeUrl,
+              apiKey: data.apiKey || '',
+              provider: 'llama-bridge'
+            };
+          }
+        }
+      } catch { }
+    }
 
     let useDirectForward = false;
     let targetUrl = "https://api.anthropic.com/v1/messages";
@@ -443,7 +461,8 @@ export function setupLlmRoutes(app: express.Express) {
         mapping.provider === "opencode" ||
         mapping.endpoint?.includes("opencode.ai") ||
         mapping.provider === "freemodel_claude" ||
-        mapping.endpoint?.includes("cc.freemodel.dev")
+        mapping.endpoint?.includes("cc.freemodel.dev") ||
+        mapping.provider === "llama-bridge"
       ) {
         useDirectForward = true;
         const cleanEndpoint = mapping.endpoint.replace(/\/+$/, "");
@@ -464,7 +483,7 @@ export function setupLlmRoutes(app: express.Express) {
       const headers: Record<string, string> = {
         'content-type': 'application/json',
       };
-      
+
       const anthKey = apiKey || req.headers['x-api-key'] || req.headers['authorization'];
       if (anthKey) {
         let keyStr = String(anthKey).replace(/^Bearer\s+/i, '');
@@ -489,7 +508,7 @@ export function setupLlmRoutes(app: express.Express) {
 
         if (isStream) {
           const response = await axios.post(targetUrl, req.body, { headers, timeout: 120000, responseType: 'stream' });
-          
+
           response.data.on('data', (chunk: Buffer) => res.write(chunk));
           response.data.on('end', () => {
             const latency = Math.round(performance.now() - startTime);
@@ -566,7 +585,11 @@ export function setupLlmRoutes(app: express.Express) {
     // OpenAI Compatible Forwarding
     const openaiPayload = anthropicToOpenAIRequest(req.body, mapping.modelId);
     const targetEndpoint = mapping.endpoint.replace(/\/+$/, "");
-    const fullUrl = `${targetEndpoint}/chat/completions`;
+    const hasV1 = targetEndpoint.endsWith('/v1') || targetEndpoint.includes('/v1/');
+    const cleanEndpoint = (mapping.provider === 'llama-bridge' && !hasV1)
+      ? `${targetEndpoint}/v1`
+      : targetEndpoint;
+    const fullUrl = `${cleanEndpoint}/chat/completions`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     let mappingApiKey = mapping.apiKey;
     if (targetEndpoint.includes('kimchi.dev') || mapping.provider === 'kimchi') {
@@ -587,7 +610,7 @@ export function setupLlmRoutes(app: express.Express) {
         res.setHeader('Connection', 'keep-alive');
 
         const response = await axios.post(fullUrl, openaiPayload, { headers, timeout: 120000, responseType: 'stream' });
-        
+
         const streamState = createInitialStreamState();
         let buffer = '';
 
@@ -598,7 +621,7 @@ export function setupLlmRoutes(app: express.Express) {
             const line = buffer.substring(0, boundary).trim();
             buffer = buffer.substring(boundary + 1);
             boundary = buffer.indexOf('\n');
-            
+
             if (line.startsWith('data:')) {
               const dataStr = line.substring(5).trim();
               if (dataStr === '[DONE]') {
@@ -704,7 +727,7 @@ export function setupLlmRoutes(app: express.Express) {
   // Chat completions
   app.post("/v1/chat/completions", async (req, res) => {
     const { model, messages, tools, stream, temperature, max_tokens, ...otherParams } = req.body;
-    
+
     if (!messages) {
       return res.status(400).json({ error: 'messages are required' });
     }
@@ -767,7 +790,7 @@ export function setupLlmRoutes(app: express.Express) {
         messages,
         stream: isStream,
       };
-      
+
       if (temperature !== undefined) body.temperature = temperature;
       if (max_tokens !== undefined) body.max_tokens = max_tokens;
       if (tools && tools.length > 0) {
@@ -801,7 +824,7 @@ export function setupLlmRoutes(app: express.Express) {
   // Text completions
   app.post("/v1/completions", async (req, res) => {
     const { model, prompt, stream, temperature, max_tokens, ...otherParams } = req.body;
-    
+
     if (!prompt) {
       return res.status(400).json({ error: 'prompt is required' });
     }
@@ -859,7 +882,7 @@ export function setupLlmRoutes(app: express.Express) {
   // Embeddings
   app.post("/v1/embeddings", async (req, res) => {
     const { model, input } = req.body;
-    
+
     if (!input) {
       return res.status(400).json({ error: 'input is required' });
     }
@@ -937,7 +960,7 @@ export function setupLlmRoutes(app: express.Express) {
     const provider = req.body.provider;
     const apiKey = req.body.apiKey;
     const baseUrl = req.body.baseUrl || req.body.endpoint;
-    
+
     try {
       let modelsList: any[] = [];
       const resolvedProvider = provider || (
@@ -960,7 +983,7 @@ export function setupLlmRoutes(app: express.Express) {
           headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
           timeout: 10000
         });
-        
+
         const data = response.data;
         const modelsArr = data.data || data.models || [];
         if (Array.isArray(modelsArr)) {
@@ -1005,7 +1028,7 @@ export function setupLlmRoutes(app: express.Express) {
       if (typeof resultData === 'string') {
         try {
           resultData = JSON.parse(resultData);
-        } catch {}
+        } catch { }
       }
       res.json({ success: true, message: 'Provider API connection verified successfully.', result: resultData });
     } catch (e: any) {
@@ -1013,6 +1036,42 @@ export function setupLlmRoutes(app: express.Express) {
       const detail = getUpstreamErrorDetail(e);
       res.status(getUpstreamErrorStatus(e)).json({ error: 'Verification failed', detail });
     }
+  });
+
+  // Auto-detect local providers (Ollama, LM Studio) and return available models
+  app.get("/api/provider/detect-local", async (req, res) => {
+    const localProviders = [
+      { id: 'ollama_local', name: 'Ollama Local', endpoint: 'http://127.0.0.1:11434/v1' },
+      { id: 'lm_studio', name: 'LM Studio', endpoint: 'http://127.0.0.1:1234/v1' },
+    ];
+
+    const results: Array<{ id: string; name: string; endpoint: string; available: boolean; models: Array<{ id: string; name: string }> }> = [];
+
+    for (const provider of localProviders) {
+      try {
+        const response = await axios.get(`${provider.endpoint}/models`, { timeout: 3000 });
+        if (response.status === 200) {
+          const data = response.data;
+          const modelsArr = data.data || data.models || [];
+          const models = Array.isArray(modelsArr)
+            ? modelsArr.map((m: any) => ({ id: m.id, name: m.display_name || m.id }))
+            : [];
+          results.push({
+            id: provider.id,
+            name: provider.name,
+            endpoint: provider.endpoint,
+            available: models.length > 0,
+            models,
+          });
+        } else {
+          results.push({ id: provider.id, name: provider.name, endpoint: provider.endpoint, available: false, models: [] });
+        }
+      } catch {
+        results.push({ id: provider.id, name: provider.name, endpoint: provider.endpoint, available: false, models: [] });
+      }
+    }
+
+    res.json({ success: true, providers: results });
   });
 
   // Simple in-memory cache for models.dev with 5-minute TTL
@@ -1064,7 +1123,7 @@ export function setupLlmRoutes(app: express.Express) {
       let content = '';
       try {
         content = fs.readFileSync(envPath, 'utf8');
-      } catch {}
+      } catch { }
       const lines = content.split('\n');
       let found = false;
       const newLines = lines.map((line: string) => {
@@ -1110,18 +1169,52 @@ export function setupLlmRoutes(app: express.Express) {
 
   // Custom proxy to bridge agent chat loops
   app.post("/api/bridge/chat", async (req, res) => {
-    const { bridgeUrl, bridgeApiKey, bridgeModel, messages } = req.body;
+    const {
+      bridgeUrl,
+      apiKey,
+      bridgeApiKey,
+      model,
+      bridgeModel,
+      messages,
+      tools,
+      tool_choice,
+      stream,
+      temperature,
+      max_tokens
+    } = req.body;
     if (!bridgeUrl) return res.status(400).json({ error: "Bridge URL required" });
     if (!messages) return res.status(400).json({ error: "Messages required" });
 
+    const effectiveKey = apiKey || bridgeApiKey;
+    const effectiveModel = model || bridgeModel || 'gpt-4o-mini';
+
+    // Persist bridge settings to disk so background/execution agents can use them
+    try {
+      const settingsPath = path.join(process.cwd(), '.lumina', 'bridge_settings.json');
+      const settingsDir = path.dirname(settingsPath);
+      if (!fs.existsSync(settingsDir)) {
+        fs.mkdirSync(settingsDir, { recursive: true });
+      }
+      fs.writeFileSync(settingsPath, JSON.stringify({ bridgeUrl, apiKey: effectiveKey }, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Failed to write bridge settings to disk:', err);
+    }
+
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (bridgeApiKey) headers['Authorization'] = `Bearer ${bridgeApiKey}`;
+    if (effectiveKey) headers['Authorization'] = `Bearer ${effectiveKey}`;
+
+    const requestBody: Record<string, any> = {
+      model: effectiveModel,
+      messages
+    };
+    if (tools !== undefined) requestBody.tools = tools;
+    if (tool_choice !== undefined) requestBody.tool_choice = tool_choice;
+    if (stream !== undefined) requestBody.stream = stream;
+    if (temperature !== undefined) requestBody.temperature = temperature;
+    if (max_tokens !== undefined) requestBody.max_tokens = max_tokens;
 
     try {
-      const response = await axios.post(`${bridgeUrl}/v1/chat/completions`, {
-        model: bridgeModel || 'gpt-4o-mini',
-        messages
-      }, { headers, timeout: 30000 });
+      const response = await axios.post(`${bridgeUrl.replace(/\/+$/, '')}/v1/chat/completions`, requestBody, { headers, timeout: 60000 });
       res.json(response.data);
     } catch (e: any) {
       await parseStreamError(e);
@@ -1130,22 +1223,83 @@ export function setupLlmRoutes(app: express.Express) {
     }
   });
 
+  // Fetch available models from Llama Bridge
+  app.get("/api/bridge/models", async (req, res) => {
+    const rawUrl = (req.headers['x-bridge-url'] as string) || '';
+    const rawKey = (req.headers['x-api-key'] as string) || '';
+    if (!rawUrl) return res.status(400).json({ error: "Bridge URL required" });
+
+    const bridgeUrl = rawUrl.replace(/\/+$/, '');
+    const headers: Record<string, string> = {};
+    if (rawKey) headers['Authorization'] = `Bearer ${rawKey}`;
+
+    try {
+      const response = await axios.get(`${bridgeUrl}/v1/models`, { headers, timeout: 10000 });
+      res.json(response.data);
+    } catch (e: any) {
+      const detail = getUpstreamErrorDetail(e);
+      res.status(getUpstreamErrorStatus(e)).json({ error: 'Failed to fetch models from bridge', detail });
+    }
+  });
+
+  // Fetch tools from Llama Bridge
+  app.post("/api/bridge/tools", async (req, res) => {
+    const { bridgeUrl, apiKey } = req.body;
+    if (!bridgeUrl) return res.status(400).json({ error: "Bridge URL required" });
+
+    const cleanUrl = bridgeUrl.replace(/\/+$/, '');
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    try {
+      try {
+        const response = await axios.get(`${cleanUrl}/v1/tools`, { headers, timeout: 8000 });
+        return res.json(response.data);
+      } catch (err1) {
+        // fallback to /api/tools
+        const response = await axios.get(`${cleanUrl}/api/tools`, { headers, timeout: 8000 });
+        return res.json(response.data);
+      }
+    } catch (e: any) {
+      const detail = getUpstreamErrorDetail(e);
+      res.status(getUpstreamErrorStatus(e)).json({ error: 'Failed to fetch tools from bridge', detail });
+    }
+  });
+
+  // Verify Llama Bridge health
+  app.get("/api/bridge/health", async (req, res) => {
+    const rawUrl = (req.headers['x-bridge-url'] as string) || '';
+    const rawKey = (req.headers['x-api-key'] as string) || '';
+    if (!rawUrl) return res.status(400).json({ error: "Bridge URL required" });
+
+    const bridgeUrl = rawUrl.replace(/\/+$/, '');
+    const headers: Record<string, string> = {};
+    if (rawKey) headers['Authorization'] = `Bearer ${rawKey}`;
+
+    try {
+      const response = await axios.get(`${bridgeUrl}/health`, { headers, timeout: 5000 });
+      res.status(response.status).json(response.data || { ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: 'Llama Bridge unreachable', detail: e.message });
+    }
+  });
+
   // Proxy: connect to a remote MCP server
   app.post("/api/mcp/connect", async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: "URL required" });
-    
+
     try {
       const response = await axios.post(url, {
         jsonrpc: '2.0',
         method: 'tools/list',
         params: {},
         id: 1
-      }, { 
+      }, {
         timeout: 8000,
         headers: { 'Content-Type': 'application/json' }
       });
-      
+
       const tools = response.data?.result?.tools || [];
     } catch (e: any) {
       res.status(502).json({ error: 'Could not connect to MCP server', detail: e.message });
@@ -1157,7 +1311,7 @@ export function setupLlmRoutes(app: express.Express) {
     // RAG Context Injection
     let finalSystemPrompt = req.body.systemPrompt || '';
     const { ragConfig, messages } = req.body;
-    
+
     if (ragConfig && ragConfig.enabled && Array.isArray(ragConfig.activeDocumentIds) && ragConfig.activeDocumentIds.length > 0) {
       try {
         const lastMsg = messages[messages.length - 1];
@@ -1170,7 +1324,7 @@ export function setupLlmRoutes(app: express.Express) {
             userQuery = textPart?.text || '';
           }
         }
-        
+
         if (userQuery) {
           const matchedChunks = await ragBackend.retrieve(userQuery, 5, ragConfig.activeDocumentIds);
           if (matchedChunks && matchedChunks.length > 0) {
@@ -1184,7 +1338,7 @@ Source Document: ${docName}
 ${m.content}
 --- END OF FRAGMENT ---`;
             }).join('\n\n');
-            
+
             const ragInstruction = `Answer the user's question using the provided DOCUMENT CONTEXT whenever possible. 
 If information exists in these uploaded documents, prioritize those documents over general model knowledge.
 Always cite the source document name and reference (page/section) when using information from it. In your markdown response, cite it elegantly like "[Source: DocumentName.pdf (Page X)]".
@@ -1192,8 +1346,8 @@ If the answer is not found in the documents, state that clearly rather than hall
 
 DOCUMENT CONTEXT:
 ${contextStr}`;
-            
-            finalSystemPrompt = finalSystemPrompt 
+
+            finalSystemPrompt = finalSystemPrompt
               ? `${finalSystemPrompt}\n\n${ragInstruction}`
               : ragInstruction;
           }
@@ -1241,10 +1395,10 @@ ${contextStr}`;
     apiKey = resolveApiKeyFromEnv(provider, apiKey);
 
     console.log('[Chat API] Received - provider:', provider, 'baseUrl:', baseUrl, 'model:', model);
-    
+
     if (!config || !config.baseUrl) {
       const modelLower = (model || '').toLowerCase();
-      
+
       // Google Gemini models
       if (modelLower.includes('gemini')) {
         provider = 'google-gemini';

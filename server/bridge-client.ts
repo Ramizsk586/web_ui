@@ -13,6 +13,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import fs from 'fs';
+import path from 'path';
 
 // ── Environment ───────────────────────────────────────────────────────────────
 
@@ -32,14 +34,17 @@ export const DEFAULT_AGENT_MODEL = process.env.LUMINA_AGENT_MODEL ?? 'claude-3-5
 export function configureBridgeEnvironment(): void {
   const port = process.env.LUMINA_PORT ?? process.env.PORT ?? '3000';
 
-  process.env.ANTHROPIC_BASE_URL = process.env.LLAMA_BRIDGE_URL
-    ? (process.env.LLAMA_BRIDGE_URL.includes('/v1') ? process.env.LLAMA_BRIDGE_URL : `${process.env.LLAMA_BRIDGE_URL}/v1`)
-    : `http://127.0.0.1:${port}/v1`;
+  // Always point ANTHROPIC_BASE_URL to Lumina's local proxy so that requests
+  // for all three models (haiku, sonnet, opus) are intercepted and mapped
+  // according to the user's settings.
+  process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${port}/v1`;
+  process.env.ANTHROPIC_AUTH_TOKEN = 'lumina-proxy';
 
-  process.env.ANTHROPIC_AUTH_TOKEN = process.env.LLAMA_BRIDGE_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? 'lumina-proxy';
-  process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = process.env.LLAMA_BRIDGE_MODEL ?? 'claude-3-haiku-20240307';
-  process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = process.env.LLAMA_BRIDGE_MODEL ?? 'claude-3-5-sonnet-20241022';
-  process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = process.env.LLAMA_BRIDGE_MODEL ?? 'claude-3-opus-20240229';
+  // Force the default model names to be the standard Claude ones so the proxy
+  // can identify the requested model tier (haiku, sonnet, opus).
+  process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'claude-3-haiku-20240307';
+  process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'claude-3-5-sonnet-20241022';
+  process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'claude-3-opus-20240229';
   process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
 }
 

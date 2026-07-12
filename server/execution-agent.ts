@@ -8,6 +8,7 @@ import { deliverToTelegram } from "./telegram-delivery.js";
 import { broadcast } from "./broadcast.js";
 import { z } from "zod";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { getActiveSlugsCache, buildComposioMcpServer } from "./composio.js";
 
 export interface ExecutionAgentOptions {
   agentId: string;
@@ -60,6 +61,30 @@ Your role:
 `;
 
 const BLOCKED_COMMANDS = ["rm ", "rmdir", "git push", "git reset", "del ", "curl -x", "wget "];
+
+function extractAccounts(input: unknown): string[] {
+  if (!input || typeof input !== "object") return [];
+  const accounts = new Set<string>();
+  const collect = (v: unknown) => {
+    if (typeof v === "string" && v.trim()) accounts.add(v.trim());
+  };
+  const obj = input as Record<string, unknown>;
+  collect(obj.account);
+  collect(obj.connectedAccountId);
+  collect(obj.connected_account_id);
+  if (Array.isArray(obj.accounts)) obj.accounts.forEach(collect);
+  if (Array.isArray(obj.tools)) {
+    for (const t of obj.tools) {
+      if (t && typeof t === "object") {
+        const tt = t as Record<string, unknown>;
+        collect(tt.account);
+        collect(tt.connectedAccountId);
+        collect(tt.connected_account_id);
+      }
+    }
+  }
+  return [...accounts];
+}
 
 type ClaudeAgentSdk = {
   query: typeof import("@anthropic-ai/claude-agent-sdk").query;
@@ -296,8 +321,19 @@ export async function runExecutionAgent(opts: ExecutionAgentOptions): Promise<st
     "lumina-core-tools": await createLuminaCoreMcp(),
   };
 
+  // Dynamically load any active Composio integrations
+  for (const integration of opts.integrations) {
+    try {
+      console.log(`[agent] Spawning dynamic Composio MCP server for toolkit: ${integration}`);
+      mcpServers[integration] = await buildComposioMcpServer(integration);
+    } catch (err: any) {
+      console.error(`[agent] Failed to load integration "${integration}":`, err.message || err);
+    }
+  }
+
   const allowedTools = [
     "mcp__lumina-core-tools__*",
+    ...Object.keys(mcpServers).flatMap((n) => [`mcp__${n}__*`]),
   ];
 
   let buffer = "";
@@ -334,13 +370,15 @@ export async function runExecutionAgent(opts: ExecutionAgentOptions): Promise<st
               content: block.text,
             });
           } else if (block.type === "tool_use") {
+            const accounts = extractAccounts(block.input);
             await convex.mutation(api.agents.addLog, {
               agentId: opts.agentId,
               logType: "tool_use",
               toolName: block.name,
+              ...(accounts.length ? { accounts } : {}),
               content: JSON.stringify(block.input).slice(0, 2000),
             });
-            broadcast("agent_tool", { agentId: opts.agentId, toolName: block.name });
+            broadcast("agent_tool", { agentId: opts.agentId, toolName: block.name, accounts });
           }
         }
       } else if (msg.type === "user") {
@@ -497,5 +535,11 @@ export async function retryAgent(agentId: string): Promise<SpawnResult | null> {
 }
 
 export function availableIntegrations(): string[] {
-  return ["filesystem", "shell", "web"];
+  const base = ["filesystem", "shell", "web"];
+  try {
+    const active = getActiveSlugsCache();
+    return [...base, ...active];
+  } catch {
+    return base;
+  }
 }
