@@ -577,7 +577,7 @@ const getWorkspaceSummary = (workspaceRoot?: string): string => {
         return 'Empty workspace directory';
       }
       const lines = items.map(name => {
-        if (name === '.git' || name === 'node_modules' || name === '.lumina' || name === '.lumina_opencode') return null;
+        if (name === '.git' || name === 'node_modules' || name === '.lumina' || name === '.limina') return null;
         const full = path.join(resolved, name);
         try {
           const isDir = fs.statSync(full).isDirectory();
