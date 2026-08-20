@@ -7,14 +7,11 @@ import {
   useAgents,
   useSidebar,
   useLuminaTools,
-  useComposioTools,
   useInputState,
   useWorkspace,
   useUIState,
-  useCoderMode,
   useAskAi,
-  useRightPanel,
-  useLuminaConvex
+  useRightPanel
 } from './hooks';
 
 function StartupSplash({ isVisible, onClickStart }: { isVisible: boolean; onClickStart?: () => void }) {
@@ -349,32 +346,12 @@ export default function App() {
   // 7. Lumina Tools Hook
   const luminaTools = useLuminaTools();
 
-  // 7b. Composio Tools Hook
-  const composioToolsData = useComposioTools();
-
-  // 7c. Lumina Convex Hook (agents, memory, automations, events)
-  const luminaConvex = useLuminaConvex();
-
   // 8. Workspace Hook
   const workspace = useWorkspace({
     isCoderMode: false,
     showToast
   });
 
-  // 9. Coder Mode Hook
-  const coderMode = useCoderMode({
-    currentChatId,
-    chats,
-    setChats,
-    isSidebarOpen: sidebar.isSidebarOpen,
-    setIsSidebarOpen: sidebar.setIsSidebarOpen,
-    handleStartBuilding: (chatId, messageId, todos) => {
-      if ((window as any).triggerStartBuilding) {
-        (window as any).triggerStartBuilding(chatId, messageId, todos);
-      }
-    },
-    isTyping: inputState.isTyping
-  });
 
   // 10. Right Panel Hook
   const rightPanel = useRightPanel({
@@ -452,7 +429,7 @@ export default function App() {
       return id;
     },
     currentChatId,
-    isCoderMode: coderMode.isCoderMode,
+    isCoderMode: false,
     handleStartBuilding: (chatId, messageId, todos) => {
       if ((window as any).triggerStartBuilding) {
         (window as any).triggerStartBuilding(chatId, messageId, todos);
@@ -483,6 +460,7 @@ export default function App() {
           opacity: isBooting ? 0 : 1,
           transition: 'opacity 280ms ease',
           minHeight: '100vh',
+          backgroundColor: 'var(--theme-bg, #09090b)',
         }}
       >
         <AppContent
@@ -494,7 +472,6 @@ export default function App() {
           agents={agents}
           sidebar={sidebarWithModifiedToggle}
           luminaTools={luminaTools}
-          composioTools={composioToolsData}
           inputState={inputState}
           workspace={workspace}
           uiState={{
@@ -503,7 +480,6 @@ export default function App() {
             showToast,
             setToasts
           }}
-          coderMode={coderMode}
           askAi={askAi}
           rightPanel={rightPanel}
           smartPopup={smartPopup}
@@ -514,7 +490,6 @@ export default function App() {
           setSelectedModel={setSelectedModel}
           activeModelId={activeModelId}
           sendMessageRef={sendMessageRef}
-          luminaConvex={luminaConvex}
           onboardingInitialStep={onboardingInitialStep}
           onboardingAutoBypass={onboardingAutoBypass}
         />

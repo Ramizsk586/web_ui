@@ -101,7 +101,6 @@ import { MessageItem } from './components/Chat/MessageItem';
 
 import { Agent } from './agents/types';
 import { AgentSidebarSection } from './components/Agents/AgentSidebarSection';
-import { AgentCreationModal } from './components/Agents/AgentCreationModal';
 import { AgentChatView } from './components/Agents/AgentChatView';
 import { LocalModelConfigModal } from './components/LocalModelConfigModal';
 
@@ -112,16 +111,12 @@ import { OnboardingModal } from './components/OnboardingModal';
 const VideoTranscriptStudio = React.lazy(() => import('./components/VideoTranscriptStudio').then(module => ({ default: module.VideoTranscriptStudio })));
 import { SettingsModal } from './components/SettingsModal';
 const ProjectsPage = React.lazy(() => import('./components/ProjectsPage').then(module => ({ default: module.ProjectsPage })));
-const AgentsPage = React.lazy(() => import('./components/AgentsPage').then(module => ({ default: module.AgentsPage })));
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 
-const LuminaAgentPanel = React.lazy(() => import('./components/LuminaAgentPanel').then(module => ({ default: module.LuminaAgentPanel })));
-const LuminaMemoryPanel = React.lazy(() => import('./components/LuminaAgentPanel').then(module => ({ default: module.LuminaMemoryPanel })));
 
 const RAGPanel = React.lazy(() => import('./components/RAGPanel').then(module => ({ default: module.RAGPanel })));
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
 import TranscriptionOptionsModal from './components/TranscriptionOptionsModal';
-import CoderWorkspaceView from './components/Coder/CoderWorkspaceView';
 
 const renderAppModelLogo = (_fullName: string, _modelId: string, fallback: React.ReactNode) => {
   return fallback;
@@ -136,11 +131,11 @@ interface AppContentProps {
   agents: any;
   sidebar: any;
   luminaTools: any;
-  composioTools: any;
+  composioTools?: any;
   inputState: any;
   workspace: any;
   uiState: any;
-  coderMode: any;
+  coderMode?: any;
   askAi: any;
   sendMessageRef: React.MutableRefObject<((content: string) => void) | undefined>;
   rightPanel: any;
@@ -281,12 +276,15 @@ export default function AppContent({
     luminaTools, setLuminaTools
   } = luminaToolsData;
 
-  const {
-    composioTools, setComposioTools,
-    composioConnections, setComposioConnections,
-    composioEnabled, setComposioEnabled,
-    fetchComposioStatus, toggleComposioTool, toggleAllToolsForToolkit
-  } = composioToolsData;
+  const composioTools: any[] = [];
+  const setComposioTools = () => {};
+  const composioConnections: any[] = [];
+  const setComposioConnections = () => {};
+  const composioEnabled = false;
+  const setComposioEnabled = () => {};
+  const fetchComposioStatus = () => {};
+  const toggleComposioTool = () => {};
+  const toggleAllToolsForToolkit = () => {};
 
   const {
     input, setInput,
@@ -370,9 +368,10 @@ export default function AppContent({
   } = uiState;
 
   const [showProjectsPage, setShowProjectsPage] = useState(false);
-  const [showAgentsPage, setShowAgentsPage] = useState(false);
-  const [isLuminaAgentOpen, setIsLuminaAgentOpen] = useState(false);
-  const [isLuminaMemoryOpen, setIsLuminaMemoryOpen] = useState(false);
+  const isLuminaAgentOpen = false;
+  const setIsLuminaAgentOpen = () => {};
+  const isLuminaMemoryOpen = false;
+  const setIsLuminaMemoryOpen = () => {};
   
   const [selectedProjectForChats, setSelectedProjectForChats] = useState<any | null>(null);
   const [selectedAgentForChats, setSelectedAgentForChats] = useState<any | null>(null);
@@ -566,18 +565,26 @@ export default function AppContent({
     }
   }, [input]);
 
-  const {
-    isCoderMode, setIsCoderMode,
-    isCoderWorkspacePanelOpen, setIsCoderWorkspacePanelOpen,
-    activeCommandType, setActiveCommandType,
-    activeCommandQuery, setActiveCommandQuery,
-    coderTodos, setCoderTodos,
-    isGeneratingTodos, setIsGeneratingTodos,
-    showTodoPanel, setShowTodoPanel,
-    todoCollapsed, setTodoCollapsed,
-    orchestrationState, setOrchestrationState,
-    orchestrationCollapsed, setOrchestrationCollapsed
-  } = coderMode;
+  const isCoderMode = false;
+  const setIsCoderMode = (_val?: any) => {};
+  const isCoderWorkspacePanelOpen = false;
+  const setIsCoderWorkspacePanelOpen = (_val?: any) => {};
+  const activeCommandType = null;
+  const setActiveCommandType = (_val?: any) => {};
+  const activeCommandQuery = '';
+  const setActiveCommandQuery = (_val?: any) => {};
+  const coderTodos: any[] = [];
+  const setCoderTodos = (_val?: any) => {};
+  const isGeneratingTodos = false;
+  const setIsGeneratingTodos = (_val?: any) => {};
+  const showTodoPanel = false;
+  const setShowTodoPanel = (_val?: any) => {};
+  const todoCollapsed = false;
+  const setTodoCollapsed = (_val?: any) => {};
+  const orchestrationState = { isActive: false, awaitingUserConfirmation: false };
+  const setOrchestrationState = (_val?: any) => {};
+  const orchestrationCollapsed = false;
+  const setOrchestrationCollapsed = (_val?: any) => {};
 
   const {
     askAiQuestions,
@@ -2150,39 +2157,25 @@ const startCoderPreview = useCallback(async () => {
               className="fixed inset-y-0 left-0 w-72 bg-[var(--theme-sidebar)] border-r border-[var(--theme-sidebar-border)] z-[101] md:hidden flex flex-col p-4 shadow-2xl text-[var(--theme-primary)]"
             >
               <SidebarContent
-                showAgentsPage={showAgentsPage}
                 showProjectsPage={showProjectsPage}
                 chats={chats} 
                 currentChatId={currentChatId} 
                 setCurrentChatId={(id) => {
                   handleSelectChat(id);
-                  setActiveAgent(null); setShowAgentsPage(false);
+                  setActiveAgent(null);
                   setIsMobileMenuOpen(false);
                 }} 
                 createNewChat={(projId) => {
-                  createNewChat(projId); setShowAgentsPage(false);
+                  createNewChat(projId);
                   setShowProjectsPage(false);
                 }} 
                 setChats={setChats}
                 onSelect={() => setIsMobileMenuOpen(false)}
-                onOpenAgentsPage={() => {
-                  setShowAgentsPage(prev => {
-                    if (prev) return false;
-                    setShowProjectsPage(false);
-                    setIsSettingsOpen(false);
-                    setIsRagPanelOpen(false);
-                    setShowAgentCreation(false);
-                    setIsMobileMenuOpen(false);
-                    return true;
-                  });
-                }}
                 onOpenProjectsPage={() => {
                   const nextShowProjects = !showProjectsPage;
                   if (nextShowProjects) {
-                    setShowAgentsPage(false);
                     setIsSettingsOpen(false);
                     setIsRagPanelOpen(false);
-                    setShowAgentCreation(false);
                   }
                   setShowProjectsPage(nextShowProjects);
                   setIsMobileMenuOpen(false);
@@ -2191,7 +2184,6 @@ const startCoderPreview = useCallback(async () => {
                   if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any);
                   const nextSettingsOpen = !isSettingsOpen;
                   if (nextSettingsOpen) {
-                    setShowAgentsPage(false);
                     setShowProjectsPage(false);
                   }
                   setIsSettingsOpen(nextSettingsOpen);
@@ -2244,7 +2236,6 @@ const startCoderPreview = useCallback(async () => {
         <div className="h-full flex flex-col p-4 shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
           {/* DESKTOP SIDEBAR MOUNT POINT */}
           <SidebarContent
-            showAgentsPage={showAgentsPage}
             showProjectsPage={showProjectsPage}
             chats={chats} 
             currentChatId={currentChatId} 
@@ -2260,10 +2251,8 @@ const startCoderPreview = useCallback(async () => {
             onOpenProjectsPage={() => {
               const nextShowProjects = !showProjectsPage;
               if (nextShowProjects) {
-                setShowAgentsPage(false);
                 setIsSettingsOpen(false);
                 setIsRagPanelOpen(false);
-                setShowAgentCreation(false);
               }
               setShowProjectsPage(nextShowProjects);
             }}
@@ -2271,25 +2260,9 @@ const startCoderPreview = useCallback(async () => {
               if (tab && typeof tab === 'string') setActiveSettingsTab(tab as any); 
               const nextSettingsOpen = !isSettingsOpen;
               if (nextSettingsOpen) {
-                setShowAgentsPage(false);
                 setShowProjectsPage(false);
               }
               setIsSettingsOpen(nextSettingsOpen); 
-            }}
-            agents={agents}
-            activeAgentId={activeAgent?.id || null}
-            setActiveAgent={setActiveAgent}
-            onOpenProjectChats={(project) => setSelectedProjectForChats(project)}
-            onOpenAgentChats={(agent) => setSelectedAgentForChats(agent)}
-            onOpenAgentsPage={() => {
-              setShowAgentsPage(prev => {
-                if (prev) return false;
-                setShowProjectsPage(false);
-                setIsSettingsOpen(false);
-                setIsRagPanelOpen(false);
-                setShowAgentCreation(false);
-                return true;
-              });
             }}
             userProfile={userProfile}
             setUserProfile={setUserProfile}
@@ -2533,7 +2506,6 @@ const startCoderPreview = useCallback(async () => {
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen((prev: boolean) => !prev); setIsHeaderMenuOpen(false); } },
                         { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
-                        { id: 'lumina_agent', label: 'Lumina Agent', icon: <Bot size={16} className="text-emerald-500" />, onClick: () => { setIsLuminaMemoryOpen(false); setIsLuminaAgentOpen(true); setIsHeaderMenuOpen(false); } },
                         
                       ].map((item) => (
                         <button
@@ -2563,161 +2535,7 @@ const startCoderPreview = useCallback(async () => {
           </header>
         )}
 
-        {isCoderMode && !isSettingsOpen && !isRagPanelOpen && !showAgentCreation ? (
-          <CoderWorkspaceView
-            isCoderLeftPanelOpen={isCoderLeftPanelOpen}
-            setIsCoderLeftPanelOpen={setIsCoderLeftPanelOpen}
-            workspaceRefreshKey={workspaceRefreshKey}
-            triggerWorkspaceRefresh={triggerWorkspaceRefresh}
-            showToast={showToast}
-            coderWorkspacePath={coderWorkspacePath}
-            setCoderWorkspacePath={setCoderWorkspacePath}
-            setRightPreviewSubpath={setRightPreviewSubpath}
-            orchestrationState={orchestrationState}
-            isSidebarOpen={isSidebarOpen}
-            setIsSidebarOpen={setIsSidebarOpen}
-            chats={chats}
-            setChats={setChats}
-            currentChatId={currentChatId}
-            handleClearChat={handleClearChat}
-            isWhiteboardOpen={isWhiteboardOpen}
-            setIsWhiteboardOpen={setIsWhiteboardOpen}
-            isCoderRightPanelOpen={isCoderRightPanelOpen}
-            setIsCoderRightPanelOpen={setIsCoderRightPanelOpen}
-            messages={messages}
-            markdownComponents={markdownComponents}
-            userProfile={userProfile}
-            persona={persona}
-            handleSetActiveArtifact={handleSetActiveArtifact}
-            handleSetCanvasView={handleSetCanvasView}
-            handleUpdateTodoPlan={handleUpdateTodoPlan}
-            handleStartBuildingBtn={(messageId) => handleStartBuilding(currentChatId || '', messageId, [])}
-            wikiResults={wikiResults}
-            handleSend={handleSend}
-            renderChatBox={renderChatBox}
-            rightViewportMode={rightViewportMode}
-            setRightViewportMode={setRightViewportMode}
-            projectFramework={projectFramework}
-            projectType={projectType}
-            iframeKey={iframeKey}
-            setIframeKey={setIframeKey}
-            devServerUrl={devServerUrl}
-            setDevServerUrl={setDevServerUrl}
-            rightIframeRef={rightIframeRef}
-            isRightPreviewStarting={isRightPreviewStarting}
-            rightPreviewLogs={rightPreviewLogs}
-            rightPreviewError={rightPreviewError}
-            rightIsGridEnabled={rightIsGridEnabled}
-            setRightIsGridEnabled={setRightIsGridEnabled}
-            rightIsInspectMode={rightIsInspectMode}
-            setRightIsInspectMode={setRightIsInspectMode}
-            startCoderPreview={startCoderPreview}
-            activeModelId={activeModelId}
-            activeModelList={activeModelList}
-            availableModels={availableModels}
-            handleModelSelect={handleModelSelect}
-            modelSelectorMode={modelSelectorMode}
-            setIsModelDrawerOpen={setIsModelDrawerOpen}
-            activeAssistantMode={activeAssistantMode}
-            setActiveAssistantMode={setActiveAssistantMode}
-            showTodoPanel={showTodoPanel}
-            setShowTodoPanel={setShowTodoPanel}
-            coderTodos={coderTodos}
-            todoCollapsed={todoCollapsed}
-            setTodoCollapsed={setTodoCollapsed}
-            createNewChat={(projId, isCoder, isResearch, agentId) => {
-              createNewChat(projId, isCoder, isResearch, agentId);
-            }}
-            onSelectChat={(chatId) => {
-              setCurrentChatId(chatId);
-            }}
-            input={input}
-            setInput={setInput}
-            inputRef={inputRef}
-            handleKeyDown={handleKeyDown}
-            adjustTextareaHeight={adjustTextareaHeight}
-            isTyping={isTyping}
-            abortControllerRef={abortControllerRef}
-            isVoiceListening={isVoiceListening}
-            startVoiceDictation={startVoiceDictation}
-            stopVoiceDictation={stopVoiceDictation}
-            attachedFiles={attachedFiles}
-            setAttachedFiles={setAttachedFiles}
-            handleFileAttach={handleFileAttach}
-            localElementAttachments={localElementAttachments}
-            setLocalElementAttachments={setLocalElementAttachments}
-            setSelectedModalAttachment={setSelectedModalAttachment}
-            coderPermissionMode={coderPermissionMode}
-            setCoderPermissionMode={setCoderPermissionMode}
-            floatingEditFile={workspace.floatingEditFile}
-            setFloatingEditFile={setFloatingEditFile}
-            onExitCoderMode={() => {
-              setIsCoderMode(false);
-              createNewChat(null, false);
-            }}
-          />) : (
-          <>
-            {showAgentCreation ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
-              >
-                <AgentCreationModal
-                  isOpen={showAgentCreation}
-                  onClose={() => {
-                    setShowAgentCreation(false);
-                    setEditingAgent(null);
-                  }}
-                  onAgentCreated={handleAgentCreated}
-                  onAgentUpdated={(id, patch) => {
-                    handleUpdateAgent(id, patch);
-                    setShowAgentCreation(false);
-                    setEditingAgent(null);
-                  }}
-                  editAgent={editingAgent}
-                  isPanel={true}
-                />
-              </motion.div>
-            ) : showAgentsPage ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
-              >
-                <React.Suspense fallback={
-                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
-                    <span>Loading agents...</span>
-                  </div>
-                }>
-                  <AgentsPage
-                  agents={agents}
-                  activeAgentId={activeAgent?.id || null}
-                  onSelectAgent={(agent) => {
-                    handleSelectAgent(agent);
-                    setShowAgentsPage(false);
-                  }}
-                  onDeleteAgent={handleDeleteAgent}
-                  onEditAgent={(agent) => {
-                    setEditingAgent(agent);
-                    setShowAgentCreation(true);
-                  }}
-                  onCreateAgent={() => {
-                    setEditingAgent(null);
-                    setShowAgentCreation(true);
-                  }}
-                  onClose={() => setShowAgentsPage(false)}
-                  showToast={showToast}
-                  onOpenAgentChats={(agent) => setSelectedAgentForChats(agent)}
-                />
-                </React.Suspense>
-              </motion.div>
-            ) : showProjectsPage ? (
+            {showProjectsPage ? (
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -2852,81 +2670,6 @@ const startCoderPreview = useCallback(async () => {
                     onClose={() => setIsRagPanelOpen(false)}
                   />
                 </React.Suspense>
-              </motion.div>
-            ) : isLuminaAgentOpen ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
-              >
-                <React.Suspense fallback={
-                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
-                    <span>Loading Agent Dashboard...</span>
-                  </div>
-                }>
-                  <LuminaAgentPanel
-                    onClose={() => setIsLuminaAgentOpen(false)}
-                    agents={agents}
-                    orchestrationState={orchestrationState}
-                    onOpenAgentsPage={() => {
-                      setIsLuminaAgentOpen(false);
-                      setShowAgentsPage(true);
-                    }}
-                    convex={luminaConvex}
-                    isSidebarOpen={isSidebarOpen}
-                    onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-                  />
-                </React.Suspense>
-              </motion.div>
-            ) : isLuminaMemoryOpen ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-bg)]"
-              >
-                <React.Suspense fallback={
-                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
-                    <span>Loading Memory Console...</span>
-                  </div>
-                }>
-                  <LuminaMemoryPanel
-                    onClose={() => setIsLuminaMemoryOpen(false)}
-                    agents={agents}
-                    convex={luminaConvex}
-                    isSidebarOpen={isSidebarOpen}
-                    onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-                  />
-                </React.Suspense>
-              </motion.div>
-            ) : false ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
-              >
-                <AgentCreationModal
-                  isOpen={showAgentCreation}
-                  onClose={() => {
-                    setShowAgentCreation(false);
-                    setEditingAgent(null);
-                  }}
-                  onAgentCreated={handleAgentCreated}
-                  onAgentUpdated={(id, patch) => {
-                    handleUpdateAgent(id, patch);
-                    setShowAgentCreation(false);
-                    setEditingAgent(null);
-                  }}
-                  editAgent={editingAgent}
-                  isPanel={true}
-                />
               </motion.div>
             ) : (
               <>
@@ -3099,9 +2842,7 @@ const startCoderPreview = useCallback(async () => {
             </div>
           </>
         )}
-      </>
-    )}
-            </div>
+      </div>
 
             {/* Right Split Column for Live Preview / Canvas */}
             {!isCoderMode && isCanvasOpen && (
@@ -3576,7 +3317,6 @@ const startCoderPreview = useCallback(async () => {
           if (setActiveProjectId) {
             setActiveProjectId(null);
           }
-          setShowAgentsPage(false);
           setSelectedAgentForChats(null);
           showToast(`Opened "${selectedAgentForChats.name}" session.`);
         }}
@@ -3595,7 +3335,6 @@ const startCoderPreview = useCallback(async () => {
           if (setActiveProjectId) {
             setActiveProjectId(null);
           }
-          setShowAgentsPage(false);
           setSelectedAgentForChats(null);
           showToast(`Created new assistant chat.`);
         }}

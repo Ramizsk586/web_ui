@@ -51,8 +51,6 @@ interface SidebarProps {
   isSidebarOpen?: boolean;
   setIsSidebarOpen?: (open: boolean) => void;
   onOpenProjectsPage?: () => void;
-  onOpenAgentsPage?: () => void;
-  showAgentsPage?: boolean;
   showProjectsPage?: boolean;
   agents?: any[];
   activeAgentId?: string | null;
@@ -79,8 +77,6 @@ export const SidebarContent = ({
   isSidebarOpen,
   setIsSidebarOpen,
   onOpenProjectsPage,
-  onOpenAgentsPage,
-  showAgentsPage = false,
   showProjectsPage = false,
   agents = [],
   activeAgentId,
@@ -258,34 +254,6 @@ export const SidebarContent = ({
 
       <div className="flex-1 overflow-y-auto space-y-4 custom-scrollbar">
 
-        {/* AI Agents Hub Category */}
-        <div className="space-y-2">
-          <button
-            id="agents-hub-category-header"
-            onClick={() => {
-              if (onOpenAgentsPage) {
-                onOpenAgentsPage();
-              }
-              if (onSelect) {
-                onSelect();
-              }
-            }}
-            className={`w-full flex items-center justify-between text-xs font-semibold px-2.5 py-2 transition-all cursor-pointer rounded-xl border text-left animate-focus-target ${
-              showAgentsPage 
-                ? 'text-violet-600 bg-violet-100/40 dark:bg-zinc-800/60 border-violet-200 dark:border-zinc-750 shadow-md' 
-                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-300 dark:hover:text-zinc-350 bg-transparent border-transparent shadow-none hover:bg-gray-100/10 dark:hover:bg-zinc-800/10'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Bot size={14} className="text-zinc-400 group-hover:text-violet-500 transition-colors shrink-0" />
-              <span>AI Agents Hub</span>
-            </div>
-            {agents.length > 0 && (
-              <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-200 dark:bg-zinc-800/40 text-gray-500 dark:text-zinc-400 border border-gray-100 dark:border-zinc-700/30 rounded-full leading-none shrink-0">
-                {agents.length}
-              </span>
-            )}
-          </button>
 
           {/* Active Agent Sandbox Section */}
           {activeAgentId && agents.find(a => a.id === activeAgentId) && (
@@ -371,7 +339,6 @@ export const SidebarContent = ({
               </div>
             </div>
           )}
-        </div>
 
         {/* Projects Category */}
         <div className="space-y-2">
@@ -393,13 +360,8 @@ export const SidebarContent = ({
           >
             <div className="flex items-center gap-2">
               <Folder size={14} className="text-zinc-400 group-hover:text-amber-500 transition-colors shrink-0" />
-              <span>Projects Workspace</span>
+              <span>Workspace</span>
             </div>
-            {projectFolders.length > 0 && (
-              <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-200 dark:bg-zinc-800/40 text-gray-500 dark:text-zinc-400 border border-gray-100 dark:border-zinc-700/30 rounded-full leading-none shrink-0">
-                {projectFolders.length}
-              </span>
-            )}
           </button>
 
           {/* Active Project Workspace Sandbox Section */}

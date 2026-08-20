@@ -7,7 +7,7 @@ export interface UseAskAiProps {
   callLlamaBridge: (messagesPrompt: any[], tools: any[], signal?: AbortSignal) => Promise<any>;
   createNewChat: (projId?: string | null, isCoder?: boolean, isResearch?: boolean, agentId?: string | null) => string;
   currentChatId: string | null;
-  isCoderMode: boolean;
+  isCoderMode?: boolean;
   handleStartBuilding: (chatId: string, messageId: string, todos: any[]) => void;
   showToast: (msg: string) => void;
   setChats: React.Dispatch<React.SetStateAction<Chat[]>>;
@@ -179,7 +179,7 @@ export function useAskAi({
 
     let targetChatId = currentChatId;
     if (!targetChatId) {
-      targetChatId = createNewChat(null, isCoderMode);
+      targetChatId = createNewChat(null, false);
     }
 
     const userMessage: Message = {

@@ -76,7 +76,7 @@ export interface ChatBoxPanelProps {
   setComposioTools: React.Dispatch<React.SetStateAction<any[]>>;
   composioConnections: any[];
   composioEnabled: boolean;
-  fetchComposioStatus: () => Promise<void>;
+  fetchComposioStatus: () => void | Promise<void>;
   toggleComposioTool: (toolId: string) => void;
   toggleAllToolsForToolkit: (slug: string, enabled: boolean) => void;
   showTodoPanel: boolean;
@@ -2078,13 +2078,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                             label: "Bridge Tools",
                             icon: <Wrench size={16} />,
                             hasArrow: true,
-                          },
-                          {
-                            id: "composio",
-                            label: "Composio",
-                            icon: <Puzzle size={16} />,
-                            hasArrow: true,
-                            isSelected: composioEnabled && composioTools.some((t: any) => t.enabled),
                           },
                         ].map((item, idx) =>
                           item.type === "separator" ? (

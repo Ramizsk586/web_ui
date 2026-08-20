@@ -1,47 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use std::time::Duration;
 use tauri::{
     menu::{MenuBuilder, MenuEvent},
     Emitter, Manager, PhysicalPosition, WebviewWindow,
 };
-
-// ── Embedded loading HTML ──────────────────────────────────────────────
-const LOADING_HTML: &str = r#"<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><title>Lumina</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#09090b;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;user-select:none}
-.logo{width:56px;height:56px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);border-radius:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(59,130,246,0.25);margin-bottom:24px}
-.spinner{width:20px;height:20px;border:2px solid rgba(255,255,255,0.06);border-top-color:#3b82f6;border-radius:50%;animation:spin .7s linear infinite;margin-bottom:24px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.title{color:#fafafa;font-size:20px;font-weight:600;margin-bottom:4px;letter-spacing:.2px}
-#status{color:#52525b;font-size:12px;min-height:18px;transition:color .2s}
-.logbox{margin-top:20px;width:min(620px,calc(100vw - 44px));height:230px;padding:14px 14px 12px;border-radius:16px;background:linear-gradient(180deg,rgba(24,24,27,0.96),rgba(15,15,18,0.94));border:1px solid rgba(96,165,250,0.14);box-shadow:0 18px 50px rgba(0,0,0,0.28),inset 0 1px 0 rgba(255,255,255,0.04);overflow:hidden;display:flex;flex-direction:column}
-.logheader{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
-.loglabel{color:#7c8aa5;font-size:10px;font-weight:700;letter-spacing:.24em;text-transform:uppercase}
-.loghint{color:#525f7a;font-size:10px}
-#logs{flex:1;overflow:auto;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);color:#c7d2e4;font-size:11.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;user-select:text;cursor:text}
-#logs::-webkit-scrollbar{width:10px}
-#logs::-webkit-scrollbar-track{background:transparent}
-#logs::-webkit-scrollbar-thumb{background:linear-gradient(180deg,rgba(96,165,250,0.55),rgba(139,92,246,0.5));border-radius:999px;border:2px solid rgba(15,15,18,0.9)}
-#logs::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,rgba(96,165,250,0.78),rgba(139,92,246,0.72))}
-#logs{scrollbar-color:rgba(96,165,250,0.65) rgba(0,0,0,0);scrollbar-width:thin}
-</style></head><body>
-<div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" width="28" height="28"><path d="M12 2L2 7v10c0 5.55 3.84 9.74 9 11 5.16-1.26 9-5.45 9-11V7l-10-5z"/><path d="M12 8v4l3 3" stroke-width="1.8"/></svg></div>
-<div class="spinner"></div>
-<div class="title">Lumina</div>
-<div id="status">Starting server...</div>
-<div class="logbox">
-  <div class="logheader">
-    <div class="loglabel">Server Logs</div>
-    <div class="loghint">Selectable and copyable</div>
-  </div>
-  <div id="logs">Waiting for hidden server logs...</div>
-</div>
-</body></html>"#;
 
 // ── Managed state ──────────────────────────────────────────────────────
 struct ServerProcess(Mutex<Option<Child>>);
@@ -435,78 +398,6 @@ fn start_server_process_with_error(app: &tauri::AppHandle) -> Result<Child, Stri
         .map_err(|err| err.to_string())
 }
 
-fn wait_for_server(timeout_secs: u64) -> bool {
-    let start = std::time::Instant::now();
-    let url = "http://localhost:3000/api/health";
-
-    while start.elapsed() < Duration::from_secs(timeout_secs) {
-        if let Ok(resp) = reqwest::blocking::get(url) {
-            if resp.status().is_success() {
-                return true;
-            }
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-    false
-}
-
-fn server_log_dir(app: &tauri::AppHandle, fallback: &PathBuf) -> PathBuf {
-    app.path()
-        .app_log_dir()
-        .or_else(|_| app.path().app_data_dir())
-        .unwrap_or_else(|_| fallback.clone())
-}
-
-fn read_tail(path: &PathBuf, max_lines: usize) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let lines: Vec<&str> = content.lines().collect();
-    let start = lines.len().saturating_sub(max_lines);
-    let tail = lines[start..].join("\n").trim().to_string();
-    if tail.is_empty() { None } else { Some(tail) }
-}
-
-fn latest_server_log_snippet(app: &tauri::AppHandle, fallback: &PathBuf) -> Option<String> {
-    let log_dir = server_log_dir(app, fallback);
-    let stderr_path = log_dir.join("lumina-server.stderr.log");
-    let stdout_path = log_dir.join("lumina-server.stdout.log");
-
-    read_tail(&stderr_path, 10)
-        .or_else(|| read_tail(&stdout_path, 10))
-}
-
-fn navigate_to_loading(window: &tauri::WebviewWindow) {
-    let encoded = urlencoding::encode(LOADING_HTML);
-    let url = format!("data:text/html;charset=utf-8,{}", encoded);
-    let _ = window.navigate(url.parse().unwrap());
-}
-
-fn update_loading_status(window: &tauri::WebviewWindow, status: &str, is_error: bool) {
-    let escaped = status
-        .replace('\\', "\\\\")
-        .replace('\'', "\\'")
-        .replace('\n', "\\n")
-        .replace('\r', "");
-    let color = if is_error { "#f87171" } else { "#52525b" };
-    let script = format!(
-        "(() => {{ const el = document.getElementById('status'); if (el) {{ el.textContent = '{}'; el.style.color = '{}'; }} }})()",
-        escaped, color
-    );
-    let _ = window.eval(&script);
-}
-
-fn update_loading_logs(window: &tauri::WebviewWindow, logs: &str) {
-    let escaped = logs
-        .replace('\\', "\\\\")
-        .replace('\'', "\\'")
-        .replace('\n', "\\n")
-        .replace('\r', "");
-    let script = format!(
-        "(() => {{ const el = document.getElementById('logs'); if (el) {{ el.textContent = '{}'; }} }})()",
-        escaped
-    );
-    let _ = window.eval(&script);
-}
-
 fn context_menu_script() -> &'static str {
     r#"
 (() => {
@@ -572,7 +463,6 @@ pub fn run() {
             app.manage(WindowZoom(Mutex::new(0.7)));
 
             if let Some(window) = app.get_webview_window("main") {
-                navigate_to_loading(&window);
                 set_window_zoom(&window, 0.7);
                 install_context_menu_bridge(&window);
                 window.on_menu_event(|window, event| {
@@ -585,61 +475,10 @@ pub fn run() {
             let handle = app.handle().clone();
 
             tauri::async_runtime::spawn(async move {
-                let log_fallback_dir = handle
-                    .path()
-                    .app_data_dir()
-                    .unwrap_or_else(|_| PathBuf::from("."));
-
                 if cfg!(not(debug_assertions)) {
-                    if let Some(window) = handle.get_webview_window("main") {
-                        update_loading_status(&window, "Starting bundled server...", false);
+                    if let Ok(child) = start_server_process_with_error(&handle) {
+                        handle.manage(ServerProcess(Mutex::new(Some(child))));
                     }
-
-                    match start_server_process_with_error(&handle) {
-                        Ok(child) => {
-                            handle.manage(ServerProcess(Mutex::new(Some(child))));
-                        }
-                        Err(err) => {
-                            if let Some(window) = handle.get_webview_window("main") {
-                                update_loading_status(
-                                    &window,
-                                    &format!("Server failed to start: {}", err),
-                                    true,
-                                );
-                            }
-                            return;
-                        }
-                    }
-                }
-
-                if let Some(window) = handle.get_webview_window("main") {
-                    update_loading_status(&window, "Waiting for server on http://localhost:3000...", false);
-                }
-
-                let log_handle = handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    for _ in 0..120 {
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        if let Some(window) = log_handle.get_webview_window("main") {
-                            if let Some(logs) = latest_server_log_snippet(&log_handle, &log_fallback_dir) {
-                                update_loading_logs(&window, &logs);
-                            }
-                        }
-                    }
-                });
-
-                let ready = tokio::task::spawn_blocking(|| wait_for_server(60)).await;
-
-                if let Ok(true) = ready {
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.navigate("http://localhost:3000".parse().unwrap());
-                    }
-                } else if let Some(window) = handle.get_webview_window("main") {
-                    update_loading_status(
-                        &window,
-                        "Server did not respond on port 3000. Restart Lumina or reinstall the app if this keeps happening.",
-                        true,
-                    );
                 }
             });
 

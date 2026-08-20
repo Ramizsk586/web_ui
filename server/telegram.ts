@@ -12,8 +12,6 @@
 
 import { handleUserMessage } from './interaction-agent.js';
 import { deliverToTelegram, sendTypingAction } from './telegram-delivery.js';
-import { getConvexClient } from './convex-client.js';
-import { api } from '../convex/_generated/api.js';
 
 function getBotToken(): string {
   return process.env.TELEGRAM_BOT_TOKEN ?? '';
@@ -113,21 +111,9 @@ async function processUpdate(update: any): Promise<void> {
   }
 
   const conversationId = `telegram:${chatId}`;
-  const convex = getConvexClient();
-
   const directReply = hardcodedReply(text);
   if (directReply) {
-    await convex.mutation(api.messages.send, {
-      conversationId,
-      role: "user",
-      content: text,
-    });
     await deliverToTelegram(chatId, directReply);
-    await convex.mutation(api.messages.send, {
-      conversationId,
-      role: "assistant",
-      content: directReply,
-    });
     console.log(`[Telegram] -> telegram hardcoded reply (${directReply.length} chars)`);
     return;
   }

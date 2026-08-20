@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="background-color: #09090b;">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,6 +13,21 @@
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon.svg" />
 
+    <style>
+      html, body {
+        background-color: #09090b !important;
+        color: #fafafa !important;
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        overflow: hidden;
+      }
+      #root {
+        background-color: #09090b !important;
+        min-height: 100vh;
+      }
+    </style>
+
     <!-- Preconnect to critical origins for faster font loading -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,8 +38,8 @@
       rel="stylesheet"
     />
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="background-color: #09090b;">
+    <div id="root" style="background-color: #09090b;"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

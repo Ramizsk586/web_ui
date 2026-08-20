@@ -92,10 +92,7 @@ export function useAppSettings({
       const saved = localStorage.getItem('lumina_project_folders');
       if (saved) return JSON.parse(saved);
     } catch (e) { }
-    return [
-      { id: '1', name: 'UI Components' },
-      { id: '2', name: 'Analysis' },
-    ];
+    return [];
   });
 
   useEffect(() => {

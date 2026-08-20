@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface UseWorkspaceProps {
-  isCoderMode: boolean;
+  isCoderMode?: boolean;
   showToast: (msg: string) => void;
 }
 
-export function useWorkspace({ isCoderMode, showToast }: UseWorkspaceProps) {
+export function useWorkspace({ isCoderMode = false, showToast }: UseWorkspaceProps) {
   const [isCoderLeftPanelOpen, setIsCoderLeftPanelOpen] = useState(true);
   const [coderWorkspacePath, setCoderWorkspacePathState] = useState(() => {
     try {

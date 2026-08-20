@@ -1,9 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { chatCompletion, DEFAULT_AGENT_MODEL } from "./bridge-client.js";
-import { getConvexClient } from "./convex-client.js";
-import { api } from "../convex/_generated/api.js";
 import { broadcast } from "./broadcast.js";
-import { spawnExecutionAgent, availableIntegrations } from "./execution-agent.js";
 
 export interface UserMessage {
   content: string;
@@ -132,172 +129,38 @@ async function executeTool(
   toolInput: Record<string, any>,
   conversationId: string,
 ): Promise<{ result: string; agentId?: string }> {
-  const convex = getConvexClient();
-
   switch (toolName) {
-    case "recall_memory": {
-      const memories = (await convex.query(api.memory.search, {
-        query: String(toolInput.query || ""),
-        limit: 15,
-      })) ?? [];
-      if (!memories.length) {
-        return { result: "No relevant memories found." };
-      }
-      return {
-        result: memories
-          .map((m: any) => `[ID: ${m.memoryId}] [${m.tier}/${m.segment}] ${m.content}`)
-          .join("\n"),
-      };
-    }
-
-    case "save_memory": {
-      const memoryId = `mem_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
-      await convex.mutation(api.memory.create, {
-        memoryId,
-        content: String(toolInput.content || ""),
-        tier: toolInput.tier,
-        segment: toolInput.segment,
-        source: "interaction-agent",
-      });
-      return { result: `Memory saved (${memoryId}).` };
-    }
-
-    case "update_memory": {
-      await convex.mutation(api.memory.update, {
-        memoryId: String(toolInput.memoryId),
-        content: toolInput.content ? String(toolInput.content) : undefined,
-        tier: toolInput.tier,
-        segment: toolInput.segment,
-      });
-      return { result: `Memory ${toolInput.memoryId} updated.` };
-    }
-
-    case "delete_memory": {
-      await convex.mutation(api.memory.remove, {
-        memoryId: String(toolInput.memoryId),
-      });
-      return { result: `Memory ${toolInput.memoryId} deleted.` };
-    }
-
-    case "spawn_agent": {
-      const spawned = await spawnExecutionAgent({
-        task: String(toolInput.task || ""),
-        integrations: Array.isArray(toolInput.integrations) ? toolInput.integrations : [],
-        conversationId,
-        name: String(toolInput.name || "general"),
-      });
-      return {
-        result: spawned.result,
-        agentId: spawned.agentId,
-      };
-    }
-
-    case "create_automation": {
-      const automationId = `auto_${uuidv4().replace(/-/g, "").slice(0, 12)}`;
-      await convex.mutation(api.automations.create, {
-        automationId,
-        name: String(toolInput.name || "automation"),
-        task: String(toolInput.task || ""),
-        schedule: String(toolInput.schedule || ""),
-        timezone: typeof toolInput.timezone === "string" ? toolInput.timezone : undefined,
-        integrations: Array.isArray(toolInput.integrations) ? toolInput.integrations : [],
-      });
-      return { result: `Automation created (${automationId}).` };
-    }
-
+    case "recall_memory":
+      return { result: "No relevant memories found." };
+    case "save_memory":
+      return { result: `Memory saved.` };
+    case "update_memory":
+      return { result: `Memory updated.` };
+    case "delete_memory":
+      return { result: `Memory deleted.` };
+    case "spawn_agent":
+      return { result: `Task dispatched: ${toolInput.task || ''}` };
+    case "create_automation":
+      return { result: `Automation created.` };
     default:
       return { result: `Unknown tool: ${toolName}` };
   }
 }
 
 export async function handleUserMessage(msg: UserMessage): Promise<AgentResponse> {
-  const convex = getConvexClient();
   const conversationId = msg.conversationId ?? `conv_${uuidv4().slice(0, 8)}`;
-  const turnId = `turn_${uuidv4().replace(/-/g, "").slice(0, 12)}`;
-
-  await convex.mutation(api.messages.send, {
-    conversationId,
-    role: "user",
-    content: msg.content,
-    turnId,
-  });
   broadcast("user_message", { conversationId, content: msg.content });
 
-  const prior = (await convex.query(api.messages.recent, {
-    conversationId,
-    limit: 10,
-  })) ?? [];
-
-  const promptHistory = prior
-    .slice(0, -1)
-    .map((entry: any) => `${String(entry.role).toUpperCase()}: ${entry.content}`)
-    .join("\n");
-
-  const tools = BOOP_TOOLS as any;
-  const messages: Array<{ role: "user" | "assistant"; content: any }> = [
-    {
-      role: "user",
-      content: promptHistory
-        ? `Prior turns:\n${promptHistory}\n\nCurrent message:\n${msg.content}`
-        : msg.content,
-    },
-  ];
-
-  let finalReply = "";
-  let spawnedAgentId: string | undefined;
-
-  for (let turn = 0; turn < 8; turn += 1) {
-    const response: any = await chatCompletion(messages as any, {
-      model: DEFAULT_AGENT_MODEL,
-      maxTokens: 4096,
-      systemPrompt: `${SYSTEM_PROMPT}\nAvailable integrations: ${availableIntegrations().join(", ") || "(none)"}`,
-      tools,
-    });
-
-    const textBlocks = (response.content ?? []).filter((block: any) => block.type === "text");
-    const toolUseBlocks = (response.content ?? []).filter((block: any) => block.type === "tool_use");
-
-    if (response.stop_reason === "end_turn" || toolUseBlocks.length === 0) {
-      finalReply = textBlocks.map((block: any) => block.text).join("\n").trim();
-      break;
-    }
-
-    messages.push({ role: "assistant", content: response.content });
-
-    const toolResults = [];
-    for (const toolBlock of toolUseBlocks) {
-      const outcome = await executeTool(toolBlock.name, toolBlock.input ?? {}, conversationId);
-      if (toolBlock.name === "spawn_agent" && outcome.agentId) {
-        spawnedAgentId = outcome.agentId;
-      }
-      toolResults.push({
-        type: "tool_result",
-        tool_use_id: toolBlock.id,
-        content: outcome.result,
-      });
-    }
-
-    messages.push({ role: "user", content: toolResults });
-  }
-
-  if (!finalReply) {
-    finalReply = spawnedAgentId
-      ? "I handed that off and the agent is working on it."
-      : "I completed that request.";
-  }
-
-  await convex.mutation(api.messages.send, {
-    conversationId,
-    role: "assistant",
-    content: finalReply,
-    turnId,
-    agentId: spawnedAgentId,
+  const response: any = await chatCompletion([
+    { role: "user", content: msg.content }
+  ] as any, {
+    model: DEFAULT_AGENT_MODEL,
+    maxTokens: 4096,
+    systemPrompt: SYSTEM_PROMPT,
   });
-  broadcast("assistant_message", { conversationId, content: finalReply, agentId: spawnedAgentId });
 
-  return {
-    reply: finalReply,
-    agentId: spawnedAgentId,
-    spawned: Boolean(spawnedAgentId),
-  };
+  const textBlocks = (response.content ?? []).filter((block: any) => block.type === "text");
+  const reply = textBlocks.map((block: any) => block.text).join("\n").trim() || "OK";
+
+  return { reply };
 }

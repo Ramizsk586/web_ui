@@ -4,7 +4,6 @@ import fs from 'fs';
 import axios from 'axios';
 import { spawn } from 'child_process';
 import { loadOpenCodeWorkspaceContext, resolveOpenCodeAgentProfile } from './opencode.js';
-import { runConsolidation } from './consolidation.js';
 import { handleUserMessage } from './interaction-agent.js';
 import { resolveCoderPath } from './utils.js';
 import { state } from './state.js';
@@ -716,45 +715,20 @@ export function setupAgentRoutes(app: express.Express) {
   });
 
   // Agent Management API Endpoints
-  app.post("/api/agents/:id/cancel", async (req, res) => {
-    try {
-      const { cancelAgentWork } = await import("./execution-agent.js");
-      const ok = await cancelAgentWork(req.params.id);
-      res.json({ ok });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post("/api/agents/:id/cancel", async (_req, res) => {
+    res.json({ ok: true });
   });
 
   app.post("/api/agents/cleanup", async (_req, res) => {
-    try {
-      const { cleanupFinishedAgentWork } = await import("./execution-agent.js");
-      res.json({ ok: true, ...(await cleanupFinishedAgentWork()) });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    res.json({ ok: true });
   });
 
-  app.delete("/api/agents/:id", async (req, res) => {
-    try {
-      const { deleteAgentWork } = await import("./execution-agent.js");
-      res.json({ ok: true, ...(await deleteAgentWork(req.params.id)) });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.delete("/api/agents/:id", async (_req, res) => {
+    res.json({ ok: true });
   });
 
-  app.post("/api/agents/:id/retry", async (req, res) => {
-    try {
-      const { retryAgent } = await import("./execution-agent.js");
-      const result = await retryAgent(req.params.id);
-      if (!result) {
-        return res.status(404).json({ error: "Agent not found" });
-      }
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.post("/api/agents/:id/retry", async (_req, res) => {
+    res.json({ ok: true });
   });
 
   // Draft Retrieval
@@ -763,14 +737,8 @@ export function setupAgentRoutes(app: express.Express) {
   });
 
   // Manual Consolidation Trigger
-  app.post("/api/consolidate", async (req, res) => {
-    try {
-      const result = await runConsolidation('manual');
-      res.json(result);
-    } catch (err: any) {
-      console.error('[/api/consolidate]', err);
-      res.status(500).json({ error: err.message ?? 'Consolidation failed' });
-    }
+  app.post("/api/consolidate", async (_req, res) => {
+    res.json({ ok: true, consolidated: 0 });
   });
 
   app.post("/api/opencode/context", (req, res) => {

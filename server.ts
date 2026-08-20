@@ -16,11 +16,7 @@ import { setupProxyRoutes } from "./server/proxy_routes.js";
 import { setupLlamaRoutes } from "./server/llama.js";
 import { setupRagRoutes } from "./server/rag_routes.js";
 import { setupSkillRoutes } from "./server/skill_routes.js";
-import { createMemoryRouter } from "./server/memory_routes.js";
 import { preloadLocalModel } from "./server/embeddings.js";
-import { startCleanupLoop } from "./server/clean.js";
-import { startConsolidationLoop } from "./server/consolidation.js";
-import { startAutomationLoop } from "./server/automations.js";
 import { startTelegram } from "./server/telegram.js";
 
 dotenv.config();
@@ -63,7 +59,6 @@ async function startServer() {
   setupLlamaRoutes(app);
   setupRagRoutes(app);
   await setupSkillRoutes(app);
-  app.use("/api/memory", createMemoryRouter());
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "lumina-agent" });
@@ -93,9 +88,6 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Lumina server ready at http://127.0.0.1:${PORT}`);
-    startCleanupLoop();
-    startConsolidationLoop();
-    startAutomationLoop();
     startTelegram();
     preloadLocalModel();
   });
