@@ -627,7 +627,7 @@ async function ensureRustAgentRunning(params: {
   console.log('🤖 Starting Rust Agent server via "cargo run"...');
   
   // Set up env variables
-  const env: Record<string, string> = { ...process.env };
+  const env: NodeJS.ProcessEnv = { ...process.env };
   const { provider, model, apiKey, baseUrl } = params;
 
   if (provider === 'openai' || provider === 'openprovider' || provider === 'opencode' || provider === 'groq' || provider === 'mistral' || provider === 'google' || provider === 'anthropic') {

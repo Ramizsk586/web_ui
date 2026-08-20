@@ -4034,7 +4034,7 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     searchProvider,
                     signal
                   });
-                  setActiveScrapingJobs(prev => { const c = new Set(prev); c.add(tc.id); return c; });
+                  setActiveScrapingJobs((prev: Set<string>) => { const c = new Set(prev); c.add(tc.id); return c; });
                   showToast(`Fetching: ${scrapeTarget.resolvedUrl.substring(0, 30)}...`);
                   const scrapeResult = await scrapeUrl({
                     url: scrapeTarget.resolvedUrl,
@@ -4047,8 +4047,8 @@ Available tools: spawn_orchestrator, spawn_analyzer, spawn_coder, spawn_debugger
                     requestedUrl: scrapeTarget.requestedUrl,
                     url: (scrapeResult as any).url || scrapeTarget.resolvedUrl
                   };
-                  setScrapingResults(prev => { const c = new Map(prev); c.set(tc.id, normalizedScrapeResult); return c; });
-                  setActiveScrapingJobs(prev => { const c = new Set(prev); c.delete(tc.id); return c; });
+                  setScrapingResults((prev: Map<string, any>) => { const c = new Map(prev); c.set(tc.id, normalizedScrapeResult); return c; });
+                  setActiveScrapingJobs((prev: Set<string>) => { const c = new Set(prev); c.delete(tc.id); return c; });
                   if (normalizedScrapeResult.error) {
                     resultValue = { error: normalizedScrapeResult.error };
                   } else {

@@ -100,8 +100,9 @@ export const list = query({
   },
   handler: async (ctx, args) => {
     if (args.status) {
+      const status = args.status;
       return await ctx.db.query("executionAgents")
-        .withIndex("by_status", (q) => q.eq("status", args.status))
+        .withIndex("by_status", (q) => q.eq("status", status))
         .order("desc").take(args.limit ?? 50);
     }
     return await ctx.db.query("executionAgents").order("desc").take(args.limit ?? 50);

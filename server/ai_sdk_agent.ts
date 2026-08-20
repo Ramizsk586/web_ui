@@ -1,4 +1,4 @@
-import { getModel, Type } from '@earendil-works/pi-ai';
+import { getModel, Type, streamSimple } from '@earendil-works/pi-ai/compat';
 import { Agent, type ThinkingLevel } from '@earendil-works/pi-agent-core';
 import { streamText, tool } from 'ai';
 import { z } from 'zod';
@@ -1123,6 +1123,7 @@ async function runPiAgentLoop(params: AgentLoopParams & { provider: string; mode
       thinkingLevel: normalizeThinkingLevel(thinkingLevel),
       tools: createPiWorkspaceTools(workspaceRoot) as any
     },
+    streamFn: streamSimple,
     getApiKey: () => apiKey
   });
 

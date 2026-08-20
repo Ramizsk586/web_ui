@@ -128,12 +128,12 @@ export function useCoderMode({
     // Only auto-advance if we are NOT in Coder Mode (which relies on real tool-call transitions)
     if (!isCoderMode) {
       const interval = setInterval(() => {
-        setCoderTodos(prev => {
-          const currentProgressIdx = prev.findIndex(t => t.status === 'in_progress');
+        setCoderTodos((prev: { id: string; text?: string; content?: string; status: string }[]) => {
+          const currentProgressIdx = prev.findIndex((t: any) => t.status === 'in_progress');
           if (currentProgressIdx === -1) {
-            const firstPendingIdx = prev.findIndex(t => t.status === 'pending');
+            const firstPendingIdx = prev.findIndex((t: any) => t.status === 'pending');
             if (firstPendingIdx !== -1) {
-              return prev.map((item, idx) => {
+              return prev.map((item: any, idx: number) => {
                 if (idx === firstPendingIdx) return { ...item, status: 'in_progress' };
                 return item;
               });
@@ -141,7 +141,7 @@ export function useCoderMode({
             return prev;
           }
 
-          return prev.map((item, idx) => {
+          return prev.map((item: any, idx: number) => {
             if (idx === currentProgressIdx) return { ...item, status: 'complete' };
             if (idx === currentProgressIdx + 1) return { ...item, status: 'in_progress' };
             return item;
