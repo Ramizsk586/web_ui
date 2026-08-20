@@ -10,7 +10,6 @@ import {
   createInitialStreamState
 } from './anthropicConverter.js';
 import { dispatchChatCompletion, parseStreamError, getUpstreamErrorDetail, getUpstreamErrorStatus } from './providers/index.js';
-import { ragBackend } from './rag_routes.js';
 
 
 const PROVIDER_ENV_KEYS: Record<string, string> = {
@@ -1308,54 +1307,8 @@ export function setupLlmRoutes(app: express.Express) {
 
   // AI Chat Completion Proxy
   app.post("/api/chat", async (req, res) => {
-    // RAG Context Injection
     let finalSystemPrompt = req.body.systemPrompt || '';
-    const { ragConfig, messages } = req.body;
-
-    if (ragConfig && ragConfig.enabled && Array.isArray(ragConfig.activeDocumentIds) && ragConfig.activeDocumentIds.length > 0) {
-      try {
-        const lastMsg = messages[messages.length - 1];
-        let userQuery = '';
-        if (lastMsg && lastMsg.role === 'user') {
-          if (typeof lastMsg.content === 'string') {
-            userQuery = lastMsg.content;
-          } else if (Array.isArray(lastMsg.content)) {
-            const textPart = lastMsg.content.find((c: any) => c.type === 'text');
-            userQuery = textPart?.text || '';
-          }
-        }
-
-        if (userQuery) {
-          const matchedChunks = await ragBackend.retrieve(userQuery, 5, ragConfig.activeDocumentIds);
-          if (matchedChunks && matchedChunks.length > 0) {
-            const allDocs = ragBackend.getDocuments();
-            const contextStr = matchedChunks.map(m => {
-              const doc = allDocs.find(d => d.id === m.documentId);
-              const docName = doc ? doc.fileName : 'Unknown Document';
-              return `--- START OF FRAGMENT ---
-Source Document: ${docName}
-
-${m.content}
---- END OF FRAGMENT ---`;
-            }).join('\n\n');
-
-            const ragInstruction = `Answer the user's question using the provided DOCUMENT CONTEXT whenever possible. 
-If information exists in these uploaded documents, prioritize those documents over general model knowledge.
-Always cite the source document name and reference (page/section) when using information from it. In your markdown response, cite it elegantly like "[Source: DocumentName.pdf (Page X)]".
-If the answer is not found in the documents, state that clearly rather than hallucinating.
-
-DOCUMENT CONTEXT:
-${contextStr}`;
-
-            finalSystemPrompt = finalSystemPrompt
-              ? `${finalSystemPrompt}\n\n${ragInstruction}`
-              : ragInstruction;
-          }
-        }
-      } catch (err: any) {
-        console.error("RAG Context Injection error:", err);
-      }
-    }
+    const { messages } = req.body;
 
     const { model, config, tools, stream = true } = req.body;
     if (!messages || !Array.isArray(messages) || messages.length === 0) {

@@ -43,7 +43,6 @@ import {
   GraduationCap,
   Workflow
 } from "lucide-react";
-import { DocumentSelector } from "./DocumentSelectorModal";
 import { WRITING_STYLES, SKILLS, SUPPORTED_VOICE_LANGUAGES } from "../constants";
 import { CoderPermissionMode, PendingCommandPermission } from "../types";
 import { permissionModeLabel } from "../utils/permissionUtils";
@@ -2878,15 +2877,6 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
             handleFileAttach(Array.from(e.target.files || []));
             e.target.value = "";
           }}
-        />
-
-        <DocumentSelector
-          isOpen={isRagSelectorOpen}
-          onClose={() => setIsRagSelectorOpen(false)}
-          selectedDocIds={selectedDocIds}
-          onSelectionChange={handleSelectionChange}
-          ragEnabled={ragEnabled}
-          onToggleRag={handleToggleRag}
         />
       </div>
     </div>

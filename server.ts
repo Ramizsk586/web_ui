@@ -14,7 +14,6 @@ import { setupIntegrationRoutes } from "./server/integration_routes.js";
 import { setupToolRoutes } from "./server/tool_routes.js";
 import { setupProxyRoutes } from "./server/proxy_routes.js";
 import { setupLlamaRoutes } from "./server/llama.js";
-import { setupRagRoutes } from "./server/rag_routes.js";
 import { setupSkillRoutes } from "./server/skill_routes.js";
 import { preloadLocalModel } from "./server/embeddings.js";
 import { startTelegram } from "./server/telegram.js";
@@ -57,7 +56,6 @@ async function startServer() {
   setupToolRoutes(app);
   setupProxyRoutes(app);
   setupLlamaRoutes(app);
-  setupRagRoutes(app);
   await setupSkillRoutes(app);
 
   app.get("/health", (_req, res) => {

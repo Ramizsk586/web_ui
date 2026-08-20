@@ -114,7 +114,6 @@ const ProjectsPage = React.lazy(() => import('./components/ProjectsPage').then(m
 import { ImageLightbox, VideoPlayerPopup, UrlAttachmentModal, TranscriptModal, ElementAnalysisModal } from './components/InteractiveModals';
 
 
-const RAGPanel = React.lazy(() => import('./components/RAGPanel').then(module => ({ default: module.RAGPanel })));
 import { useMarkdownComponents } from './components/Chat/MarkdownComponents';
 import TranscriptionOptionsModal from './components/TranscriptionOptionsModal';
 
@@ -669,7 +668,8 @@ export default function AppContent({
   const [pendingCommandPermission, setPendingCommandPermission] = useState<PendingCommandPermission | null>(null);
   const [permissionAuditLog, setPermissionAuditLog] = useState<any[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isRagPanelOpen, setIsRagPanelOpen] = useState(false);
+  const isRagPanelOpen = false;
+  const setIsRagPanelOpen = (_val?: any) => {};
   const [isModelDrawerOpen, setIsModelDrawerOpen] = useState(false);
 
   // Local model manual config state
@@ -2348,7 +2348,7 @@ const startCoderPreview = useCallback(async () => {
           </header>
         )}
 
-        {!isCoderMode && !isLuminaAgentOpen && !isLuminaMemoryOpen && !isSettingsOpen && !isRagPanelOpen && (
+        {!isCoderMode && !isLuminaAgentOpen && !isLuminaMemoryOpen && !isSettingsOpen && (
           <header className={`h-14 border-b border-[var(--theme-border)]/40 flex items-center justify-between px-4 md:px-6 bg-[var(--theme-bg)]/80 backdrop-blur-md transition-all duration-300 ease-in-out ${
             autoHideTopBar 
               ? 'absolute top-0 left-0 right-0 z-[160] transform -translate-y-[48px] hover:translate-y-0 opacity-0 hover:opacity-100 hover:shadow-lg' 
@@ -2482,31 +2482,8 @@ const startCoderPreview = useCallback(async () => {
                       className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-zinc-900 border border-gray-100 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[160] p-1.5"
                     >
                       {[
-                        { id: 'coder_mode', label: isCoderMode ? 'Turn off Coder Mode' : 'Turn on Coder Mode', icon: <Code size={16} className={isCoderMode ? 'text-teal-500' : ''} />, onClick: () => { 
-                          const nextState = !isCoderMode;
-                          setIsCoderMode(nextState);
-                          if (nextState) {
-                            setIsSidebarOpen(false);
-                          }
-                          createNewChat(null, nextState);
-                          if (false) {
-                            setChats((prev: Chat[]) => prev.map((chat: Chat) => {
-                              if (chat.id === currentChatId) {
-                                return {
-                                  ...chat,
-                                  isCoderMode: nextState,
-                                  updatedAt: new Date()
-                                };
-                              }
-                              return chat;
-                            }));
-                          }
-                          setIsHeaderMenuOpen(false);
-                        } },
                         { id: 'settings', label: 'Settings', icon: <Settings size={16} />, onClick: () => { setIsSettingsOpen((prev: boolean) => !prev); setIsHeaderMenuOpen(false); } },
-                        { id: 'rag_kb', label: 'RAG Knowledge Base', icon: <Database size={16} />, onClick: () => { setIsRagPanelOpen(true); setIsHeaderMenuOpen(false); } },
                         { id: 'mcp', label: 'Bridge Tools', icon: <HardDrive size={16} className={isMcpConnected ? 'text-blue-500' : ''} />, onClick: () => { if (isSettingsOpen && activeSettingsTab === 'mcp') { setIsSettingsOpen(false); } else { setActiveSettingsTab('mcp'); setIsSettingsOpen(true); } setIsHeaderMenuOpen(false); } },
-                        
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -2519,14 +2496,6 @@ const startCoderPreview = useCallback(async () => {
                           </div>
                         </button>
                       ))}
-                      <div className="my-1.5 border-t border-gray-100 dark:border-white/5" />
-                      <button
-                        onClick={() => { setActiveSettingsTab('general'); setIsSettingsOpen(true); setIsHeaderMenuOpen(false); }} style={{ display: 'none' }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-gray-605 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5 hover:text-black dark:hover:text-white transition-colors"
-                      >
-                        <Palette size={16} />
-                        Themes
-                      </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -2651,25 +2620,6 @@ const startCoderPreview = useCallback(async () => {
                   activeModelId={activeModelId}
                   setActiveModelId={setActiveModelId}
                 />
-              </motion.div>
-            ) : isRagPanelOpen ? (
-              <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 12 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
-                className="flex-1 flex overflow-hidden relative w-full h-full bg-[var(--theme-surface)]"
-              >
-                <React.Suspense fallback={
-                  <div className="flex-1 flex flex-col items-center justify-center h-full text-xs text-[#7F7469] gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-[#D97756]" />
-                    <span>Loading Document RAG...</span>
-                  </div>
-                }>
-                  <RAGPanel
-                    onClose={() => setIsRagPanelOpen(false)}
-                  />
-                </React.Suspense>
               </motion.div>
             ) : (
               <>
