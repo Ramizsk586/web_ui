@@ -290,7 +290,7 @@ export function setupProxyRoutes(app: express.Express) {
     }
   });
 
-  app.get('/preview-static/*', (req, res) => {
+  app.get('/preview-static/{*path}', (req, res) => {
     const subpath = req.path.replace(/^\/preview-static\//, '');
     const resolved = path.resolve(state.activePreviewRoot, subpath);
     if (resolved !== state.activePreviewRoot && !resolved.startsWith(state.activePreviewRoot + path.sep)) {
@@ -330,7 +330,7 @@ export function setupProxyRoutes(app: express.Express) {
   });
 
   // Live Compiler/Transpiler Sandbox Interceptor for React / JSX / TSX and JS
-  app.get('/coder-preview/*', (req, res, next) => {
+  app.get('/coder-preview/{*path}', (req, res, next) => {
     const subpath = req.path.replace(/^\/coder-preview\//, '');
     if (!subpath) {
       return next();

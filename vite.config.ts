@@ -64,8 +64,7 @@ export default defineConfig(({mode}) => {
               return 'vendor-libs';
             }
           },
-          // Compact output
-          compact: true,
+
           // Consistent chunk naming
           entryFileNames: isProd ? 'assets/[name]-[hash].js' : 'assets/[name].js',
           chunkFileNames: isProd ? 'assets/[name]-[hash].js' : 'assets/[name].js',
@@ -82,22 +81,18 @@ export default defineConfig(({mode}) => {
     css: {
       transformer: 'lightningcss',
     },
-    esbuild: {
+    oxc: {
       target: webviewTarget,
       // Drop debugger statements in production
       drop: isProd ? ['debugger', 'console'] : [],
       // Tree shaking
       legalComments: 'none',
     },
-    optimizeDeps: {
-      esbuildOptions: {
-        target: webviewTarget,
-      },
-    },
+
 
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
       },
     },
     server: {
