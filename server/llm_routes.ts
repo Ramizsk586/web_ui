@@ -1006,15 +1006,38 @@ export function setupLlmRoutes(app: express.Express) {
     const model = req.body.model;
 
     const defaults = PROVIDER_DEFAULTS[provider] || PROVIDER_DEFAULTS['custom'];
-    const resolvedBaseUrl = baseUrl || defaults.endpoint;
+    const rawBaseUrl = baseUrl || defaults.endpoint;
+    const cleanBaseUrl = rawBaseUrl ? rawBaseUrl.replace(/\/+$/, '') : 'https://api.openai.com/v1';
     const testModel = model || defaults.testModel;
 
+    // Strategy 1: Fast check via GET /models endpoint (works for OmniRoute, LM Studio, Ollama, OpenAI, etc.)
+    try {
+      const modelsUrl = cleanBaseUrl.endsWith('/models') ? cleanBaseUrl : `${cleanBaseUrl}/models`;
+      const modelsRes = await axios.get(modelsUrl, {
+        headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
+        timeout: 6000
+      });
+      if (modelsRes.status >= 200 && modelsRes.status < 300) {
+        const rawData = modelsRes.data;
+        const modelsArr = rawData.data || rawData.models || (Array.isArray(rawData) ? rawData : []);
+        console.log(`[Verify] Successfully verified provider ${provider} (${cleanBaseUrl}) via /models endpoint.`);
+        return res.json({
+          success: true,
+          message: 'Provider API connection verified successfully via /models endpoint.',
+          models: Array.isArray(modelsArr) ? modelsArr : []
+        });
+      }
+    } catch (modelsErr: any) {
+      console.log(`[Verify] GET /models check skipped or failed (${modelsErr.message}), trying chat completion test...`);
+    }
+
+    // Strategy 2: Fallback to lightweight Chat Completion test
     try {
       const mockRes = createMockResponse();
       const testResult = await dispatchChatCompletion(req, mockRes, {
         provider,
         apiKey,
-        baseUrl: resolvedBaseUrl,
+        baseUrl: cleanBaseUrl,
         model: testModel,
         messages: [{ role: 'user', content: 'Ping' }],
         apiMessages: [{ role: 'user', content: 'Ping' }],
@@ -1033,7 +1056,9 @@ export function setupLlmRoutes(app: express.Express) {
     } catch (e: any) {
       await parseStreamError(e);
       const detail = getUpstreamErrorDetail(e);
-      res.status(getUpstreamErrorStatus(e)).json({ error: 'Verification failed', detail });
+      const status = getUpstreamErrorStatus(e);
+      console.error(`[Verify] Verification failed (${status}):`, detail || e.message);
+      res.status(status || 400).json({ error: 'Verification failed', detail: detail || e.message || 'Unknown network error' });
     }
   });
 

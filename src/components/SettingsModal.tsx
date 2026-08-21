@@ -93,6 +93,8 @@ interface SettingsModalProps {
   setServerUrl: (url: string) => void;
   apiKey: string;
   setApiKey: (key: string) => void;
+  verificationModel?: string;
+  setVerificationModel?: (model: string) => void;
   aiVerificationState: 'idle' | 'verifying' | 'success' | 'error';
   handleVerifyAI: () => void;
   handleSaveAI: () => void;
@@ -375,6 +377,8 @@ export function SettingsModal({
   setServerUrl,
   apiKey,
   setApiKey,
+  verificationModel = '',
+  setVerificationModel = () => {},
   aiVerificationState,
   handleVerifyAI,
   handleSaveAI,
@@ -2057,7 +2061,6 @@ export function SettingsModal({
               { id: 'search', label: 'Search', icon: <Search size={16} /> },
               { id: 'theme', label: 'Theme', icon: <Palette size={16} /> },
               { id: 'persona', label: 'Persona', icon: <User size={16} /> },
-              { id: 'agents', label: 'Agents', icon: <Bot size={16} /> },
               { id: 'lumina_tools', label: 'Lumina Tools', icon: <Hammer size={16} /> },
               { id: 'bridge', label: 'Llama Bridge', icon: <Terminal size={16} /> },
               { id: 'mcp', label: 'MCP Tools', icon: <HardDrive size={16} /> },
@@ -2332,7 +2335,12 @@ export function SettingsModal({
                       <input 
                         type="text" 
                         value={serverUrl}
-                        onChange={(e) => { setServerUrl(e.target.value); handleProviderSelect('custom'); }}
+                        onChange={(e) => { 
+                          setServerUrl(e.target.value); 
+                          if (selectedProvider !== 'custom') {
+                            handleProviderSelect('custom');
+                          }
+                        }}
                         placeholder="http://localhost:8080/v1"
                         className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                       />
@@ -2344,6 +2352,19 @@ export function SettingsModal({
                         value={apiKey}
                         onChange={(e) => { setApiKey(e.target.value); }}
                         placeholder={selectedProvider === 'custom' ? 'Enter your API key' : `Enter your ${CLOUD_PROVIDERS.find(p=>p.id===selectedProvider)?.label} API key`}
+                        className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-medium text-gray-500">Verification Model (Optional)</label>
+                        <span className="text-[10px] text-gray-400">Custom model ID for ping test</span>
+                      </div>
+                      <input 
+                        type="text" 
+                        value={verificationModel}
+                        onChange={(e) => setVerificationModel(e.target.value)}
+                        placeholder="e.g. gpt-4o-mini, llama-3.3-70b-instruct, or custom model"
                         className="w-full h-11 px-4 text-sm bg-gray-50 dark:bg-zinc-950 border border-gray-100 dark:border-white/5 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                       />
                     </div>
@@ -4313,271 +4334,7 @@ export function SettingsModal({
               <AnthropicProxyPanel availableModels={availableModels} aiProviderProfiles={aiProviderProfiles} />
             )}
 
-            {activeSettingsTab === 'agents' && (
-              <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8 text-left font-sans">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Configure Subagents</h3>
-                  <p className="text-xs text-gray-500 mb-6">
-                    Configure system prompts, tools, and LLM models for specialized agents spawned during workspace orchestration.
-                  </p>
 
-                  <div className="space-y-4">
-                    {DEFAULT_AGENTS.map((agent) => {
-                      const cfg = subagentConfigs[agent.id] || { modelId: 'openprovider/auto-free', runtime: 'default', systemPrompt: agent.prompt, tools: [...agent.tools] };
-                      const isEditing = editingPromptAgent === agent.id;
-                      return (
-                        <div 
-                          key={agent.id}
-                          className="p-4 rounded-xl border transition-all bg-gray-50/50 dark:bg-zinc-950/20 border-gray-200 dark:border-white/5 flex flex-col gap-4"
-                        >
-                          <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                            <div className="flex-1 space-y-1.5">
-                              <div className="flex items-center gap-2">
-                                <Bot size={14} className="text-[#D97756]" />
-                                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">{agent.name}</span>
-                              </div>
-                              <p className="text-[11px] text-zinc-500 max-w-lg leading-relaxed">
-                                {agent.role}
-                              </p>
-                            </div>
-                            <div className="shrink-0 flex flex-col gap-2 min-w-[220px]">
-
-                              <div className="flex flex-col gap-1.5 relative">
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Provider</label>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenDropdown(
-                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'provider'
-                                        ? null
-                                        : { agentId: agent.id, type: 'provider' }
-                                    );
-                                  }}
-                                  className="flex items-center justify-between w-full h-8 px-3 text-[11px] bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-gray-200/90 dark:hover:bg-zinc-700/90 border border-gray-200 dark:border-zinc-700/60 rounded-full transition-all text-gray-700 dark:text-gray-200 cursor-pointer select-none font-bold shadow-sm outline-none"
-                                >
-                                  <span className="truncate">
-                                    {cfg.providerProfileId
-                                      ? aiProviderProfiles.find((p) => p.id === cfg.providerProfileId)?.name || cfg.providerProfileId
-                                      : 'Default (Auto Free)'}
-                                  </span>
-                                  <ChevronDown
-                                    size={11}
-                                    className={`text-gray-400 shrink-0 transition-transform duration-150 ${
-                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'provider' ? 'rotate-180' : ''
-                                    }`}
-                                  />
-                                </button>
-                                {openDropdown?.agentId === agent.id && openDropdown?.type === 'provider' && (
-                                  <>
-                                    <div 
-                                      className="fixed inset-0 z-40" 
-                                      onClick={() => setOpenDropdown(null)} 
-                                    />
-                                    <div className="absolute top-[100%] left-0 mt-1 w-full rounded-xl border border-gray-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-900 shadow-xl py-1 max-h-48 overflow-y-auto custom-scrollbar z-50">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          handleAgentProviderChange(agent.id, null);
-                                          setOpenDropdown(null);
-                                        }}
-                                        className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
-                                          !cfg.providerProfileId ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
-                                        }`}
-                                      >
-                                        Default (Auto Free)
-                                      </button>
-                                      {(aiProviderProfiles || []).filter(p => p.active).map(p => (
-                                        <button
-                                          key={p.id}
-                                          type="button"
-                                          onClick={() => {
-                                            handleAgentProviderChange(agent.id, p.id);
-                                            setOpenDropdown(null);
-                                          }}
-                                          className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
-                                            cfg.providerProfileId === p.id ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
-                                          }`}
-                                        >
-                                          {p.name}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                              <div className="flex flex-col gap-1.5 relative">
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Model</label>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenDropdown(
-                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'model'
-                                        ? null
-                                        : { agentId: agent.id, type: 'model' }
-                                    );
-                                  }}
-                                  className="flex items-center justify-between w-full h-8 px-3 text-[11px] bg-gray-150/80 dark:bg-zinc-800/85 hover:bg-gray-200/90 dark:hover:bg-zinc-700/90 border border-gray-200 dark:border-zinc-700/60 rounded-full transition-all text-gray-700 dark:text-gray-200 cursor-pointer select-none font-bold shadow-sm outline-none"
-                                >
-                                  <span className="truncate">
-                                    {cfg.modelId === 'openprovider/auto-free' ? 'OpenProvider Auto Free' : cfg.modelId.split('/').pop() || cfg.modelId}
-                                  </span>
-                                  <ChevronDown
-                                    size={11}
-                                    className={`text-gray-400 shrink-0 transition-transform duration-150 ${
-                                      openDropdown?.agentId === agent.id && openDropdown?.type === 'model' ? 'rotate-180' : ''
-                                    }`}
-                                  />
-                                </button>
-                                {openDropdown?.agentId === agent.id && openDropdown?.type === 'model' && (
-                                  <>
-                                    <div 
-                                      className="fixed inset-0 z-40" 
-                                      onClick={() => setOpenDropdown(null)} 
-                                    />
-                                    <div className="absolute top-[100%] left-0 mt-1 w-full rounded-xl border border-gray-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-900 shadow-xl py-1 max-h-48 overflow-y-auto custom-scrollbar z-50">
-                                      {cfg.providerProfileId ? (
-                                        (() => {
-                                          const profile = aiProviderProfiles.find(p => p.id === cfg.providerProfileId);
-                                          const models = profile ? profile.models.filter(m => profile.selectedModelIds.includes(m.id)) : [];
-                                          return models.length > 0 ? (
-                                            models.map(m => (
-                                              <button
-                                                key={m.id}
-                                                type="button"
-                                                onClick={() => {
-                                                  handleAgentModelChange(agent.id, m.id, profile?.id);
-                                                  setOpenDropdown(null);
-                                                }}
-                                                className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
-                                                  cfg.modelId === m.id ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
-                                                }`}
-                                              >
-                                                {m.name || m.id}
-                                              </button>
-                                            ))
-                                          ) : (
-                                            <button
-                                              key={cfg.modelId}
-                                              type="button"
-                                              onClick={() => setOpenDropdown(null)}
-                                              className="w-full text-left px-3 py-1.5 text-[11px] text-gray-400 font-medium"
-                                            >
-                                              {cfg.modelId}
-                                            </button>
-                                          );
-                                        })()
-                                      ) : (
-                                        <>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              handleAgentModelChange(agent.id, 'openprovider/auto-free', undefined);
-                                              setOpenDropdown(null);
-                                            }}
-                                            className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
-                                              cfg.modelId === 'openprovider/auto-free' ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
-                                            }`}
-                                          >
-                                            OpenProvider Auto Free
-                                          </button>
-                                          {(availableModels || []).filter((m: any) => m.id !== 'openprovider/auto-free').map((m: any) => (
-                                            <button
-                                              key={m.id}
-                                              type="button"
-                                              onClick={() => {
-                                                handleAgentModelChange(agent.id, m.id, m.providerProfileId);
-                                                setOpenDropdown(null);
-                                              }}
-                                              className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors ${
-                                                cfg.modelId === m.id ? 'font-bold text-blue-500 bg-blue-500/5' : 'text-gray-700 dark:text-gray-300'
-                                              }`}
-                                            >
-                                              {m.name || m.id}
-                                            </button>
-                                          ))}
-                                        </>
-                                      )}
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Tools */}
-                          <div>
-                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Tools</label>
-                            <div className="flex flex-wrap gap-1.5">
-                              {ALL_AVAILABLE_TOOLS.map((t) => {
-                                const isActive = cfg.tools.includes(t);
-                                return (
-                                  <button
-                                    key={t}
-                                    onClick={() => handleAgentToolToggle(agent.id, t)}
-                                    className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono select-none transition-all cursor-pointer ${
-                                      isActive
-                                        ? 'bg-zinc-800 text-zinc-200 border border-zinc-600/50'
-                                        : 'bg-zinc-900/40 text-zinc-500 border border-zinc-800/30 hover:text-zinc-400 hover:border-zinc-700/50'
-                                    }`}
-                                  >
-                                    {isActive ? <ToggleRight size={10} className="inline mr-0.5 text-emerald-400" /> : <ToggleLeft size={10} className="inline mr-0.5" />}
-                                    {t}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          {/* System Prompt */}
-                          <div className="text-[10px]">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-bold text-gray-500 uppercase tracking-widest">System Prompt</span>
-                              {!isEditing && (
-                                <button
-                                  onClick={() => handleStartEditPrompt(agent.id, cfg.systemPrompt)}
-                                  className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800/60 border border-zinc-700/30 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/60 transition-all cursor-pointer"
-                                >
-                                  <Edit3 size={10} />
-                                  <span>Edit</span>
-                                </button>
-                              )}
-                            </div>
-                            {isEditing ? (
-                              <div className="space-y-2">
-                                <textarea
-                                  value={promptDraft}
-                                  onChange={(e) => setPromptDraft(e.target.value)}
-                                  className="w-full h-28 p-2.5 rounded-lg bg-zinc-950/45 border border-zinc-700/50 font-mono text-[10px] leading-relaxed text-zinc-300 outline-none focus:ring-1 focus:ring-blue-500 resize-y"
-                                />
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => handleSavePrompt(agent.id)}
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600/80 hover:bg-emerald-600 text-white text-[10px] transition-all cursor-pointer"
-                                  >
-                                    <Save size={10} />
-                                    Save
-                                  </button>
-                                  <button
-                                    onClick={handleCancelEditPrompt}
-                                    className="px-2.5 py-1 rounded-md bg-zinc-800/60 hover:bg-zinc-700/60 text-zinc-400 text-[10px] transition-all cursor-pointer"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="p-2.5 rounded-lg bg-zinc-950/45 border border-zinc-800/50 font-mono text-[9px] leading-relaxed select-text whitespace-pre-wrap text-zinc-400 max-h-20 overflow-y-auto">
-                                {cfg.systemPrompt}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </motion.div>
-            )}
           </div>
         </div>
       </motion.div>

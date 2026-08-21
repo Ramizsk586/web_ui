@@ -20,7 +20,7 @@ interface OnboardingModalProps {
   autoBypass?: boolean;
 }
 
-type StepId = 'profile' | 'telegram' | 'composio' | 'convex';
+type StepId = 'profile' | 'telegram';
 
 interface TelegramConfig {
   botToken: string;
@@ -30,7 +30,7 @@ interface TelegramConfig {
 }
 
 const TELEGRAM_STORAGE_KEY = 'lumina_telegram_config';
-const steps: StepId[] = ['profile', 'telegram', 'composio', 'convex'];
+const steps: StepId[] = ['profile', 'telegram'];
 
 const stepMeta: Record<StepId, { title: string; subtitle: string; icon: React.ReactNode }> = {
   profile: {
@@ -42,16 +42,6 @@ const stepMeta: Record<StepId, { title: string; subtitle: string; icon: React.Re
     title: 'Telegram Bot Setup',
     subtitle: 'Optionally connect a Telegram bot and define which users can access it.',
     icon: <MessageCircle size={28} className="!text-[#09090b]" />
-  },
-  composio: {
-    title: 'Composio API',
-    subtitle: 'Optionally add your Composio API key so Lumina can connect external tools.',
-    icon: <PlugZap size={28} className="!text-[#09090b]" />
-  },
-  convex: {
-    title: 'Convex Environment',
-    subtitle: 'Run the guided setup to connect your Convex backend automatically.',
-    icon: <Database size={28} className="!text-[#09090b]" />
   }
 };
 
@@ -276,13 +266,7 @@ export function OnboardingModal({ onComplete, initialStep, autoBypass = true }: 
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
   }, []);
 
-  // Reset Convex polling when leaving/entering convex step
-  useEffect(() => {
-    if (currentStep !== 'convex' && pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-  }, [currentStep]);
+
 
   const finishOnboarding = () => {
     const ageNum = parseInt(loginAge, 10) || 25;
@@ -476,10 +460,8 @@ export function OnboardingModal({ onComplete, initialStep, autoBypass = true }: 
 
     try {
       setIsSavingEnv(true);
-      if (currentStep === 'telegram')  await saveTelegramConfig();
-      if (currentStep === 'composio')  await saveComposioKey();
-      if (currentStep === 'convex') {
-        await saveConvexConfig();
+      if (currentStep === 'telegram') {
+        await saveTelegramConfig();
         finishOnboarding();
         return;
       }
@@ -497,16 +479,11 @@ export function OnboardingModal({ onComplete, initialStep, autoBypass = true }: 
     try {
       setIsSavingEnv(true);
 
-      if (currentStep === 'telegram' && !hasSavedTelegram) {
-        // No saved config — write blanks
-        localStorage.setItem(TELEGRAM_STORAGE_KEY, JSON.stringify({ botToken: '', allowlist: [], webhookUrl: '', isConnected: false }));
-        await writeEnvLocal({ TELEGRAM_BOT_TOKEN: '', TELEGRAM_ALLOWLIST: '' });
-      }
-      if (currentStep === 'composio' && !hasSavedComposio) {
-        localStorage.setItem('COMPOSIO_API_KEY', '');
-        await writeEnvLocal({ COMPOSIO_API_KEY: '' });
-      }
-      if (currentStep === 'convex') {
+      if (currentStep === 'telegram') {
+        if (!hasSavedTelegram) {
+          localStorage.setItem(TELEGRAM_STORAGE_KEY, JSON.stringify({ botToken: '', allowlist: [], webhookUrl: '', isConnected: false }));
+          await writeEnvLocal({ TELEGRAM_BOT_TOKEN: '', TELEGRAM_ALLOWLIST: '' });
+        }
         finishOnboarding();
         return;
       }
@@ -754,50 +731,6 @@ export function OnboardingModal({ onComplete, initialStep, autoBypass = true }: 
                 </>
               )}
 
-              {/* ── Composio step ── */}
-              {currentStep === 'composio' && (
-                <>
-                  {hasSavedComposio && !composioApiKey && (
-                    <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                      <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
-                      <p className="text-xs text-zinc-300">Composio API key already saved. Leave empty and press <strong>Continue</strong> to keep it.</p>
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    <label htmlFor="composio-key-input" className="text-xs font-semibold text-zinc-400 uppercase tracking-widest pl-1">Composio API Key</label>
-                    <div className="relative flex items-center">
-                      <input
-                        id="composio-key-input"
-                        type="password"
-                        value={composioApiKey}
-                        onChange={e => { setComposioApiKey(e.target.value); setComposioStatus('idle'); setComposioBypass(false); }}
-                        placeholder={hasSavedComposio ? '(saved — paste new key to replace)' : 'Get a key from app.composio.dev'}
-                        className="w-full h-12 px-4 pr-10 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 rounded-xl text-sm outline-none transition-all focus:ring-4 focus:ring-zinc-800/40 text-white placeholder-zinc-500"
-                      />
-                      <span className="absolute right-3"><ComposioStatusIcon /></span>
-                    </div>
-                    {composioStatus === 'ok' && (
-                      <p className="text-xs text-emerald-400 pl-1 flex items-center gap-1"><Check size={12} /> API key verified successfully.</p>
-                    )}
-                    {composioStatus === 'error' && (
-                      <p className="text-xs text-rose-400 pl-1">{composioError}</p>
-                    )}
-                  </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 text-emerald-400"><Check size={16} /></div>
-                      <div>
-                        <p className="text-sm text-zinc-200">The key will be verified when you click <strong>Continue</strong>.</p>
-                        <p className="text-xs text-zinc-500 mt-1">Saved as <code>COMPOSIO_API_KEY</code> in <code>.env.local</code>.</p>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* ── Convex step ── */}
-              {currentStep === 'convex' && <ConvexWizardUI />}
-
               {/* Error text */}
               {errorText && (
                 <div className="flex items-start gap-2 text-xs text-rose-400 font-medium pl-1">
@@ -827,9 +760,7 @@ export function OnboardingModal({ onComplete, initialStep, autoBypass = true }: 
                     className="h-11 px-4 bg-transparent border border-zinc-800 hover:border-zinc-700 transition-all rounded-xl text-sm font-medium flex items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200"
                   >
                     <SkipForward size={16} />
-                    {(currentStep === 'telegram' && hasSavedTelegram) ||
-                     (currentStep === 'composio' && hasSavedComposio) ||
-                     (currentStep === 'convex'   && hasSavedConvex)
+                    {currentStep === 'telegram' && hasSavedTelegram
                       ? 'Keep Saved & Skip'
                       : 'Skip'}
                   </button>

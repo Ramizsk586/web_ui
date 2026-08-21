@@ -8,7 +8,6 @@ import { WebSocketServer } from "ws";
 
 import { addClient } from "./server/broadcast.js";
 import { setupLlmRoutes } from "./server/llm_routes.js";
-import { setupAgentRoutes } from "./server/agent_routes.js";
 import { setupFsGitRoutes } from "./server/fs_git_routes.js";
 import { setupIntegrationRoutes } from "./server/integration_routes.js";
 import { setupToolRoutes } from "./server/tool_routes.js";
@@ -50,7 +49,6 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   setupLlmRoutes(app);
-  setupAgentRoutes(app);
   setupFsGitRoutes(app);
   await setupIntegrationRoutes(app);
   setupToolRoutes(app);

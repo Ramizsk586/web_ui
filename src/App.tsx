@@ -4,7 +4,6 @@ import AppContent from './AppContent';
 import {
   useAppSettings,
   useLlamaBridge,
-  useAgents,
   useSidebar,
   useLuminaTools,
   useInputState,
@@ -336,9 +335,7 @@ export default function App() {
   const { chats, setChats, currentChatId, setCurrentChatId } = uiState;
 
   // 5. Agents Hook
-  const agents = useAgents({
-    setCurrentChatId
-  });
+  const agents = {};
 
   // 6. Sidebar Hook
   const sidebar = useSidebar();
@@ -367,7 +364,7 @@ export default function App() {
   const sendMessageRef = useRef<((content: string) => void) | undefined>(undefined);
   const bootTimerRef = useRef<number | null>(null);
   const fadeTimerRef = useRef<number | null>(null);
-  const [onboardingInitialStep, setOnboardingInitialStep] = useState<'profile' | 'telegram' | 'composio' | 'convex'>('profile');
+  const [onboardingInitialStep, setOnboardingInitialStep] = useState<'profile' | 'telegram'>('profile');
   const [onboardingAutoBypass, setOnboardingAutoBypass] = useState(true);
 
   useEffect(() => {

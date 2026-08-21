@@ -14,7 +14,8 @@ import {
   FileText,
   Type as TypeIcon,
   Code,
-  Wrench
+  Wrench,
+  Network
 } from 'lucide-react';
 import { Skill } from '../types';
 
@@ -39,6 +40,7 @@ export const PROVIDER_TO_ENV_KEY: Record<string, string> = {
   copilot: 'COPILOT_API_KEY',
   kimchi: 'KIMCHI_API_KEY',
   cline: 'CLINE_API_KEY',
+  omniroute: 'OMNIROUTE_API_KEY',
   openprovider: 'AI_API_KEY',
   custom: 'AI_API_KEY',
   'openai-compatible': 'AI_API_KEY',
@@ -94,6 +96,7 @@ export const CLOUD_PROVIDERS = [
   { id: 'zed', label: 'Zed AI', endpoint: 'https://api.zed.dev/v1', key: '', icon: React.createElement(Sparkles, { size: 13 }) },
   { id: 'copilot', label: 'GitHub Copilot', endpoint: 'https://api.githubcopilot.com', key: '', icon: React.createElement(Code, { size: 13 }) },
   { id: 'cline', label: 'Cline', endpoint: 'https://api.cline.bot/api/v1', key: '', icon: React.createElement(Terminal, { size: 13 }) },
+  { id: 'omniroute', label: 'OmniRoute', endpoint: 'http://localhost:20128/v1', key: '', icon: React.createElement(Network, { size: 13 }) },
 ];
 
 export const WRITING_STYLES = [

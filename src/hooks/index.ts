@@ -3,7 +3,6 @@ export * from './useRightPanel';
 export * from './useSmartPopupPosition';
 export * from './useAppSettings';
 export * from './useLlamaBridge';
-export * from './useAgents';
 export * from './useSidebar';
 export * from './useLuminaTools';
 export * from './useInputState';

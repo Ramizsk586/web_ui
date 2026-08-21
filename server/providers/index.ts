@@ -103,6 +103,7 @@ export async function dispatchChatCompletion(
     case 'custom':
       return handleCustom(req, res, options);
 
+    case 'omniroute':
     case 'openai':
     case 'openai-compatible':
     default:

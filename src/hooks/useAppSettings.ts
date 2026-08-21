@@ -231,6 +231,7 @@ export function useAppSettings({
   }, [persona]);
   const [serverUrl, setServerUrl] = useState(() => safeGetItem('lumina_server_url', 'https://openprovider.mimika.in/v1'));
   const [apiKey, setApiKey] = useState('');
+  const [verificationModel, setVerificationModel] = useState(() => safeGetItem('lumina_verification_model', ''));
   const [mcpUrl, setMcpUrl] = useState(() => safeGetItem('lumina_mcp_url', DEFAULT_MCP_URL));
   const [mcpKey, setMcpKey] = useState(() => safeGetItem('lumina_mcp_key', ''));
 
@@ -457,7 +458,9 @@ export function useAppSettings({
       setServerUrl(p.endpoint);
     }
     if (providerId === 'custom') {
-      setServerUrl(DEFAULT_SERVER_URL);
+      if (!serverUrl) {
+        setServerUrl(DEFAULT_SERVER_URL);
+      }
     }
     if (providerId === 'openprovider') {
       setSelectedModel('openprovider/auto-free');
@@ -500,6 +503,7 @@ export function useAppSettings({
     }
     localStorage.setItem('lumina_server_url', serverUrl);
     localStorage.setItem('lumina_provider', selectedProvider);
+    localStorage.setItem('lumina_verification_model', verificationModel);
 
     // Auto-create/activate both profiles for FreeModel when saved
     if (selectedProvider === 'freemodel_openai' || selectedProvider === 'freemodel_claude') {
@@ -526,7 +530,8 @@ export function useAppSettings({
           body: JSON.stringify({
             endpoint: serverUrl,
             apiKey: apiKey,
-            provider: selectedProvider
+            provider: selectedProvider,
+            model: verificationModel.trim() || undefined
           })
         });
 
@@ -1007,6 +1012,7 @@ export function useAppSettings({
     persona, setPersona,
     serverUrl, setServerUrl,
     apiKey, setApiKey,
+    verificationModel, setVerificationModel,
     mcpUrl, setMcpUrl,
     mcpKey, setMcpKey,
     searchProvider, setSearchProvider,

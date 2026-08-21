@@ -2493,29 +2493,6 @@ ${JSON.stringify(parsed.memories, null, 2)}`
       let activeTools = buildActiveTools();
       if (effectiveCoderMode) {
         activeTools.push(
-          ...[
-            { name: 'spawn_orchestrator', desc: 'Spawn the Orchestrator agent to coordinate execution, plan subtasks, and assign work for a project.' },
-            { name: 'spawn_analyzer', desc: 'Spawn the Analyzer agent to research codebase, trace dependencies, and locate functions. Does not write code.' },
-            { name: 'spawn_coder', desc: 'Spawn the Coder agent to implement features, refactor, and edit workspace files.' },
-            { name: 'spawn_debugger', desc: 'Spawn the Debugger agent to diagnose failures, run compiler checks, and verify fixes.' },
-            { name: 'spawn_reviewer', desc: 'Spawn the Reviewer agent to perform static analysis, review code, and check styles.' },
-          ].map(agent => ({
-            type: 'function' as const,
-            function: {
-              name: agent.name,
-              description: agent.desc,
-              parameters: {
-                type: 'object',
-                properties: {
-                  task: {
-                    type: 'string',
-                    description: 'The specific task instruction for the agent. Be very precise, detailed, and clear about the context.'
-                  }
-                },
-                required: ['task']
-              }
-            }
-          })),
           {
             type: 'function',
             function: {

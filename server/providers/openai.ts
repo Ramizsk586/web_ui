@@ -40,6 +40,9 @@ export async function handleOpenAI(
     requestBody.tool_choice = 'auto';
   }
 
+  const cleanBase = baseUrl ? baseUrl.replace(/\/+$/, '') : 'https://api.openai.com/v1';
+  const targetUrl = cleanBase.endsWith('/chat/completions') ? cleanBase : `${cleanBase}/chat/completions`;
+
   if (stream === false) {
     let response;
     let lastError: any;
@@ -47,7 +50,7 @@ export async function handleOpenAI(
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         response = await axios.post(
-          `${baseUrl}/chat/completions`,
+          targetUrl,
           requestBody,
           {
             headers: {
@@ -81,7 +84,7 @@ export async function handleOpenAI(
         delete retryBody.tool_choice;
         try {
           response = await axios.post(
-            `${baseUrl}/chat/completions`,
+            targetUrl,
             retryBody,
             {
               headers: {
@@ -115,7 +118,7 @@ export async function handleOpenAI(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       response = await axios.post(
-        `${baseUrl}/chat/completions`,
+        targetUrl,
         requestBody,
         {
           headers: {

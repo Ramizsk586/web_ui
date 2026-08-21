@@ -146,7 +146,7 @@ interface AppContentProps {
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>;
   activeModelId: string;
   luminaConvex?: any;
-  onboardingInitialStep?: 'profile' | 'telegram' | 'composio' | 'convex';
+  onboardingInitialStep?: 'profile' | 'telegram';
   onboardingAutoBypass?: boolean;
 }
 
@@ -204,6 +204,7 @@ export default function AppContent({
     persona, setPersona,
     serverUrl, setServerUrl,
     apiKey, setApiKey,
+    verificationModel, setVerificationModel,
     mcpUrl, setMcpUrl,
     mcpKey, setMcpKey,
     searchProvider, setSearchProvider,
@@ -2568,6 +2569,8 @@ const startCoderPreview = useCallback(async () => {
                   setServerUrl={setServerUrl}
                   apiKey={apiKey}
                   setApiKey={setApiKey}
+                  verificationModel={verificationModel}
+                  setVerificationModel={setVerificationModel}
                   aiVerificationState={aiVerificationState}
                   handleVerifyAI={handleVerifyAI}
                   handleSaveAI={handleSaveAI}

@@ -84,6 +84,7 @@ const PROVIDER_ID_ALIASES: Record<string, string[]> = {
   ollama_cloud: ['ollama'],
   ollama_local: ['ollama'],
   lm_studio: ['lmstudio'],
+  omniroute: ['omniroute', 'openai'],
   custom: [],
 };
 
