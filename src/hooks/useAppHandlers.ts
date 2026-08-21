@@ -1800,10 +1800,10 @@ ${JSON.stringify(parsed.memories, null, 2)}`
           }
         }
 
-        // 2. Catch up think content (thinking delta)
+        // 2. Catch up think content (thinking delta) - smooth readable pace
         if (displayedThinkContent.length < targetThinkContent.length) {
           const diff = targetThinkContent.length - displayedThinkContent.length;
-          const charsToAdd = diff > 100 ? Math.ceil(diff / 5) : (diff > 20 ? Math.ceil(diff / 10) : 1);
+          const charsToAdd = diff > 300 ? Math.ceil(diff / 25) : (diff > 80 ? Math.ceil(diff / 35) : (diff > 15 ? 2 : 1));
           displayedThinkContent += targetThinkContent.slice(displayedThinkContent.length, displayedThinkContent.length + charsToAdd);
           thinkContentChanged = true;
         }

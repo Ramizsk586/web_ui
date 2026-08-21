@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Hammer, Search, Cpu, Sparkles, Workflow, Cable, Activity, Database, TerminalSquare, Brain, Lightbulb, Zap } from 'lucide-react';
+import { BrainSvgIcon } from './BrainSvgIcon';
 
 interface RealtimePipelineAnimationProps {
   statusLabel?: string;
@@ -399,59 +400,47 @@ export const ThinkingAnimation = ({
   size?: 'sm' | 'md' | 'lg';
 }) => {
   const sizeClasses = {
-    sm: { container: 'w-6 h-6', icon: 12, dots: 'w-1 h-1', gap: 1 },
-    md: { container: 'w-8 h-8', icon: 16, dots: 'w-1.5 h-1.5', gap: 1.5 },
-    lg: { container: 'w-10 h-10', icon: 20, dots: 'w-2 h-2', gap: 2 }
+    sm: { icon: 15, dots: 'w-1 h-1' },
+    md: { icon: 18, dots: 'w-1.5 h-1.5' },
+    lg: { icon: 22, dots: 'w-2 h-2' }
   };
   
   const sizes = sizeClasses[size];
   
   return (
-    <div className="flex items-center gap-3 select-none">
-      {/* Main thinking orb */}
-      <div className={`relative flex items-center justify-center ${sizes.container}`}>
-        {/* Calm glow circle */}
-        <motion.div
-          animate={{ opacity: [0.4, 0.7, 0.4] }}
-          transition={{ repeat: Infinity, duration: 2.5, ease: 'easeInOut' }}
-          className="absolute inset-0 rounded-full bg-blue-400/20 shadow-[0_0_12px_rgba(96,165,250,0.4)]"
-        />
-
-        {/* Central dot */}
-        <motion.div
-          animate={{ scale: [1, 1.05, 1] }}
-          transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
-          className="relative z-10 flex items-center justify-center"
-        >
-          <div className="w-2 h-2 bg-blue-400 rounded-full shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
-        </motion.div>
-      </div>
+    <div className="flex items-center gap-2 select-none">
+      {/* Simple Plain Brain Icon */}
+      <motion.div
+        animate={{ opacity: [0.5, 1, 0.5] }}
+        transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+        className="flex items-center justify-center shrink-0"
+      >
+        <BrainSvgIcon size={sizes.icon} className="text-zinc-400 shrink-0" />
+      </motion.div>
       
-      {/* Label and streaming dots */}
-      <div className="flex flex-col items-start gap-0.5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-violet-300 dark:text-violet-400">
-            {label}
-          </span>
-          {/* Animated streaming dots */}
-          <div className="flex gap-0.5">
-            {[0, 1, 2].map((i) => (
-              <motion.div
-                key={i}
-                animate={{ 
-                  opacity: [0.3, 1, 0.3],
-                  scale: [0.7, 1, 0.7]
-                }}
-                transition={{ 
-                  repeat: Infinity, 
-                  duration: 1.2, 
-                  delay: i * 0.2,
-                  ease: 'easeInOut' 
-                }}
-                className={`${sizes.dots} rounded-full bg-violet-400 shadow-[0_0_6px_rgba(139,92,246,0.8)]`}
-              />
-            ))}
-          </div>
+      {/* Label and simple streaming dots */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-400">
+          {label}
+        </span>
+        {/* Plain animated streaming dots */}
+        <div className="flex gap-1 items-center">
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              animate={{ 
+                opacity: [0.3, 1, 0.3],
+                y: [0, -1.5, 0]
+              }}
+              transition={{ 
+                repeat: Infinity, 
+                duration: 1.2, 
+                delay: i * 0.18,
+                ease: 'easeInOut' 
+              }}
+              className={`${sizes.dots} rounded-full bg-zinc-400`}
+            />
+          ))}
         </div>
       </div>
     </div>

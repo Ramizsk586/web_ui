@@ -2789,7 +2789,7 @@ const startCoderPreview = useCallback(async () => {
               <div className={`mx-auto relative flex flex-col gap-2 transition-all duration-300 w-full ${chatColumnWidthClass}`}>
                 {renderChatBox(messages.length === 0)}
                 <div className="text-center">
-                  <span className="text-[10px] text-zinc-500/80 font-medium tracking-tight">Claude is AI and can make mistakes. Please double-check responses.</span>
+                  <span className="text-[10px] text-zinc-500/80 font-medium tracking-tight">{persona?.name || 'Lumina'} can make mistakes. Please double-check responses.</span>
                 </div>
               </div>
             </div>

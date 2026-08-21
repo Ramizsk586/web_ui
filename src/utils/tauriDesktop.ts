@@ -63,21 +63,8 @@ export const getCurrentTauriWindow = (): TauriWindowApi | null => {
 };
 
 export const safeConfirm = (message: string): boolean => {
-  try {
-    if (typeof document !== 'undefined') {
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
-      const nativeConfirm = iframe.contentWindow?.confirm;
-      if (nativeConfirm) {
-        const result = nativeConfirm(message);
-        document.body.removeChild(iframe);
-        return result;
-      }
-      document.body.removeChild(iframe);
-    }
-  } catch (e) {
-    console.warn('Failed to use native iframe confirm, falling back to window.confirm:', e);
+  if (typeof window !== 'undefined' && window.confirm) {
+    return window.confirm(message);
   }
-  return window.confirm(message);
+  return true;
 };

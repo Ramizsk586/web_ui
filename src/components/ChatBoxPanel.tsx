@@ -33,6 +33,7 @@ import {
   Shield,
   Hand,
   ShieldCheck,
+  Folder,
   Database,
   LayoutGrid,
   Settings,
@@ -47,6 +48,7 @@ import { WRITING_STYLES, SKILLS, SUPPORTED_VOICE_LANGUAGES } from "../constants"
 import { CoderPermissionMode, PendingCommandPermission } from "../types";
 import { permissionModeLabel } from "../utils/permissionUtils";
 import { useSmartPopupPosition } from "../hooks/useSmartPopupPosition";
+import { invokeTauri, isTauriDesktop } from "../utils/tauriDesktop";
 
 const renderAppModelLogo = (_fullName: string, _modelId: string, fallback: React.ReactNode) => {
   return fallback;
@@ -356,6 +358,51 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
       return [];
     }
   });
+
+  const [selectedFolderName, setSelectedFolderName] = React.useState<string>(() => {
+    try {
+      return localStorage.getItem('lumina_selected_folder_name') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const handlePickFolder = async () => {
+    if (isTauriDesktop()) {
+      try {
+        const folderPath = await invokeTauri<string | null>('open_folder_dialog');
+        if (folderPath) {
+          const folderName = folderPath.split(/[/\\]/).filter(Boolean).pop() || folderPath;
+          setSelectedFolderName(folderName);
+          localStorage.setItem('lumina_selected_folder_name', folderName);
+          localStorage.setItem('lumina_selected_folder_path', folderPath);
+          setRagEnabled(true);
+          localStorage.setItem('lumina_rag_enabled', 'true');
+          showToast(`Selected folder: ${folderName}`);
+        }
+      } catch (error) {
+        console.error('Failed to open folder dialog:', error);
+      }
+    } else {
+      const input = document.createElement('input');
+      input.type = 'file';
+      (input as any).webkitdirectory = true;
+      (input as any).directory = true;
+      input.onchange = (e: any) => {
+        const files = e.target.files;
+        if (files && files.length > 0) {
+          const relativePath = files[0].webkitRelativePath || files[0].name;
+          const folderName = relativePath.split('/')[0] || 'Folder';
+          setSelectedFolderName(folderName);
+          localStorage.setItem('lumina_selected_folder_name', folderName);
+          setRagEnabled(true);
+          localStorage.setItem('lumina_rag_enabled', 'true');
+          showToast(`Selected folder: ${folderName}`);
+        }
+      };
+      input.click();
+    }
+  };
 
   const handleToggleRag = (enabled: boolean) => {
     setRagEnabled(enabled);
@@ -2049,8 +2096,10 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                         {[
                           {
                             id: "rag_docs",
-                            label: `RAG Context (${selectedDocIds.length} active)`,
-                            icon: <Database size={16} />,
+                            label: selectedFolderName
+                              ? `${selectedFolderName} (${selectedDocIds.length} active)`
+                              : `Folder (${selectedDocIds.length} active)`,
+                            icon: <Folder size={16} />,
                             isSelected: ragEnabled,
                           },
                           {
@@ -2090,7 +2139,8 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                               onClick={() => {
                                 switch (item.id) {
                                   case "rag_docs":
-                                    handleToggleRag(!ragEnabled);
+                                    handlePickFolder();
+                                    setIsGridMenuOpen(false);
                                     break;
                                   case "skills":
                                     setActiveGridSubMenu("skills");
@@ -2126,10 +2176,10 @@ const ChatBoxPanelBase: React.FC<ChatBoxPanelProps> = ({
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setIsGridMenuOpen(false);
-                                      setIsRagSelectorOpen(true);
+                                      handlePickFolder();
                                     }}
                                     className="p-1 rounded-lg hover:bg-[var(--theme-hover-bg)] text-[var(--theme-secondary)] hover:text-[var(--theme-primary)] transition-colors cursor-pointer flex items-center justify-center opacity-60 hover:opacity-100"
-                                    title="Configure documents"
+                                    title="Choose folder from device"
                                   >
                                     <Settings size={14} />
                                   </button>

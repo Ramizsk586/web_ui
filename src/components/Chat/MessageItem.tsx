@@ -33,6 +33,7 @@ import { SearchResultsUI } from './SearchResultsUI';
 import { CanvasBlock } from './CanvasBlock';
 import { ArtifactCard } from './ArtifactCard';
 import { ThinkingAnimation } from '../ui/Animations';
+import { BrainSvgIcon } from '../ui/BrainSvgIcon';
 
 
 const getDisplayFileName = (filePath?: string) => {
@@ -553,6 +554,14 @@ const AnimatedDiffPreview = ({ node }: { node: ToolCallNode }) => {
 
 const CoderThinkingBlock = ({ content, isStreaming = false }: { content: string; isStreaming?: boolean }) => {
   const clean = content.replace(/^<think>/i, '').replace(/<\/think>$/i, '').trim();
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isStreaming && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [clean, isStreaming]);
+
   if (!clean) return null;
 
   return (
@@ -562,7 +571,7 @@ const CoderThinkingBlock = ({ content, isStreaming = false }: { content: string;
           animate={isStreaming ? { opacity: [0.5, 1, 0.5] } : {}}
           transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
         >
-          <Sparkles size={14} className="text-zinc-500" />
+          <BrainSvgIcon size={16} className="text-zinc-400 shrink-0" />
         </motion.div>
         <span className="text-[13px] font-mono tracking-wide">
           {isStreaming ? 'Thinking...' : 'Thought'}
@@ -581,11 +590,14 @@ const CoderThinkingBlock = ({ content, isStreaming = false }: { content: string;
         )}
       </div>
       <div className="border-l-2 border-zinc-700/60 pl-4 ml-1">
-        <div className="text-[14px] leading-[1.85] text-zinc-400 whitespace-pre-wrap break-words font-mono">
+        <div 
+          ref={scrollRef}
+          className="text-[14px] leading-[1.85] text-zinc-400 whitespace-pre-wrap break-words font-mono max-h-60 overflow-y-auto custom-scrollbar pr-2"
+        >
           <SlowStreamText
             text={clean}
             isStreaming={isStreaming}
-            charsPerTick={isStreaming ? 4 : 999}
+            charsPerTick={isStreaming ? 2 : 999}
           />
           {isStreaming && (
             <motion.span
@@ -778,6 +790,13 @@ function MessageItemComponent({
   const [feedback, setFeedback] = useState<'like' | 'dislike' | null>(null);
   const [isThinkingPanelCollapsed, setIsThinkingPanelCollapsed] = useState(false);
   const [thinkingElapsedMs, setThinkingElapsedMs] = useState(0);
+  const thinkContentScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if ((message.isThinking || message.isStreaming) && thinkContentScrollRef.current) {
+      thinkContentScrollRef.current.scrollTop = thinkContentScrollRef.current.scrollHeight;
+    }
+  }, [message.thinkContent, message.isThinking, message.isStreaming]);
 
   useEffect(() => {
     setIsPlayingSpeech(globalSpeechController.getActiveId() === message.id);
@@ -1476,22 +1495,8 @@ function MessageItemComponent({
             />
           )}
           {!isCoderMode && message.thinking && !message.thinkContent && !message.isThinking && (
-            <div className="px-1 w-full max-w-full overflow-hidden">
-              <div className="flex items-center gap-2 text-[12px] text-zinc-300 font-medium mb-3 w-fit max-w-full">
-                <span>Processing request</span>
-              </div>
-              <div className="border-l border-zinc-600/70 pl-4 ml-1 max-w-full">
-                <div className="text-[13px] leading-7 text-zinc-400 whitespace-pre-wrap break-words">
-                  {message.thinking}
-                </div>
-              </div>
-              <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-400">
-                <span className="relative flex h-3 w-3 shrink-0">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400/40 animate-ping" />
-                  <span className="relative inline-flex h-3 w-3 rounded-full bg-indigo-400" />
-                </span>
-                <span>Working...</span>
-              </div>
+            <div className="px-1 py-1 w-full max-w-full overflow-hidden">
+              <ThinkingAnimation size="sm" label="Thinking" />
             </div>
           )}
           {isCoderMode && message.thinkContent && (
@@ -1504,7 +1509,7 @@ function MessageItemComponent({
                 onClick={() => setIsThinkingPanelCollapsed(!isThinkingPanelCollapsed)}
                 className="group flex items-center gap-2.5 text-[13px] text-zinc-200 font-medium cursor-pointer mb-3 w-fit max-w-full transition-colors hover:text-white"
               >
-                <Sparkles size={11} className="text-blue-400 shrink-0" />
+                <BrainSvgIcon size={16} className="text-zinc-400 group-hover:text-zinc-200 shrink-0 transition-colors" />
                 <span>
                   {message.isThinking
                     ? `Thought for ${Math.max(1, Math.round(thinkingElapsedMs / 1000))} seconds`
@@ -1526,7 +1531,10 @@ function MessageItemComponent({
                   >
                     <div className="w-full max-w-full">
                       <div className="border-l border-zinc-700/80 pl-4 ml-1 max-w-full">
-                        <div className="text-[13px] leading-8 text-zinc-300 whitespace-pre-wrap break-words">
+                        <div 
+                          ref={thinkContentScrollRef}
+                          className="text-[13px] leading-7 text-zinc-300 whitespace-pre-wrap break-words max-h-60 overflow-y-auto custom-scrollbar pr-2"
+                        >
                           {message.thinkContent}
                         </div>
                       </div>
